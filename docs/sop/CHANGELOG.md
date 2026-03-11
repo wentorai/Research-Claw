@@ -57,6 +57,15 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
   - openclaw_setup_and_config.plan.md (superseded by research-claw/docs/06)
 - [2026-03-11] [Infra] [Claude] Pulled openclaw to latest (5 new commits: agent tool policy, plugin subagent runtime, device token rotate)
 
+### 2026-03-11 — Audit Pass 2 (version refs + deep consistency)
+
+- [2026-03-11] [Infra] [User+Claude] Updated OpenClaw commit hash 144c1b80→62d5df28d in 00, 02, 03e (4 occurrences)
+- [2026-03-11] [Infra] [User+Claude] Updated 02 tool count "18 tools"→"24 tools, 46 RPC methods"
+- [2026-03-11] [Infra] [User+Claude] Updated 00 MEMORY.md char count 516→964
+- [2026-03-11] [Infra] [User+Claude] Added OpenClaw plugin HTTP scope enforcement note to S3 SOP
+- [2026-03-11] [Infra] [Claude] Fixed 04 bootstrap budget table: all 8 file sizes updated to actual values (14,841→24,951 total chars)
+- [2026-03-11] [Infra] [Claude] Fixed 03f cross-reference counts: lit RPC 18→26, task RPC 8→10, ws RPC 6→7
+
 ---
 
 ## Pending Work
