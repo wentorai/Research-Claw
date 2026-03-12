@@ -91,6 +91,35 @@ Research-Claw is an AI-powered academic research assistant that runs entirely on
 | **Port offset from upstream** | 28789 (Research-Claw) vs 18789 (OpenClaw default) — both can run simultaneously |
 | **Browser-configured** | No config file editing needed; all settings via Setup Wizard at first launch |
 
+### Security Model
+
+Research-Claw uses four layers of defense-in-depth. The first three are hard constraints enforced in code:
+
+```
+┌──────────────────────────────────────────────┐
+│  L1  Network Isolation                       │
+│      loopback only · no remote port exposed  │
+│      no telemetry · no cloud callbacks       │
+├──────────────────────────────────────────────┤
+│  L2  Workspace Sandbox                       │
+│      native write/edit tools denied by config│
+│      plugin writes = path-validated only     │
+│      native read = unrestricted (papers/code)│
+├──────────────────────────────────────────────┤
+│  L3  Exec Guard  (before_tool_call hook)     │
+│      block: rm -rf / · dd of=/dev/ · fork   │
+│      allow: python · git · npm · single rm  │
+├──────────────────────────────────────────────┤
+│  L4  Git Versioning                          │
+│      auto-commit all workspace changes       │
+│      local only · no push · full rollback    │
+├──────────────────────────────────────────────┤
+│  L+  Prompt-level Protocol  (soft)           │
+│      SOUL.md: no fabricated citations/data   │
+│      AGENTS.md: irreversible ops need HiL    │
+└──────────────────────────────────────────────┘
+```
+
 ---
 
 ## Getting Started
