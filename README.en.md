@@ -253,16 +253,23 @@ After install, your browser opens `http://127.0.0.1:28789`. Follow the **Setup W
 
 ### Docker (Windows recommended)
 
-No WSL2 or Node.js required — just [Docker Desktop](https://www.docker.com/products/docker-desktop/):
+No WSL2 or Node.js required — just [Docker Desktop](https://www.docker.com/products/docker-desktop/). Also works on macOS / Linux.
+
+**Option A: Build locally** (recommended for China mainland users)
 
 ```bash
-# Pull image
+git clone https://github.com/wentorai/Research-Claw.git
+cd Research-Claw
+docker compose up -d --build
+```
+
+> The Dockerfile uses Chinese mirrors (TUNA apt + npmmirror) by default. If you need a proxy for GitHub, uncomment the `HTTP_PROXY` lines in `docker-compose.yml`.
+
+**Option B: Pull pre-built image** (fast outside China)
+
+```bash
 docker pull ghcr.io/wentorai/research-claw:latest
 
-# Start with docker compose
-docker compose up -d
-
-# Or single command:
 docker run -d --name research-claw \
   -p 28789:28789 \
   -v rc-config:/app/config \
@@ -274,6 +281,8 @@ docker run -d --name research-claw \
 Visit `http://127.0.0.1:28789` → Setup Wizard → enter your API key.
 
 > **Persistence**: database, config, and workspace are stored in named volumes — data survives container restarts and removal.
+>
+> **Proxy**: If your LLM API (e.g. OpenAI) requires a proxy, uncomment the `environment` section in `docker-compose.yml` and set your proxy address (`host.docker.internal` routes to the host machine).
 
 ### Commands
 

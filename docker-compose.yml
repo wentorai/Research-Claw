@@ -3,13 +3,22 @@ version: '3.8'
 services:
   research-claw:
     image: research-claw:latest
-    build: .
+    build:
+      context: .
+      # 构建时代理（如果你的网络需要翻墙拉 GitHub 依赖，取消注释）
+      # args:
+      #   HTTP_PROXY: http://host.docker.internal:7890
+      #   HTTPS_PROXY: http://host.docker.internal:7890
     ports:
       - "28789:28789"
     volumes:
       - rc-config:/app/config          # API key + gateway config
       - rc-data:/root/.research-claw   # SQLite database
       - rc-workspace:/app/workspace    # User workspace files
+    # 运行时代理（如果你的 LLM API 需要代理，取消注释）
+    # environment:
+    #   - HTTP_PROXY=http://host.docker.internal:7890
+    #   - HTTPS_PROXY=http://host.docker.internal:7890
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:28789/healthz || exit 1"]

@@ -253,16 +253,39 @@ pnpm start
 
 ### Docker 部署（Windows 推荐）
 
-Windows 用户推荐用 Docker Desktop，无需安装 WSL2 或 Node.js：
+Windows 用户推荐用 Docker Desktop，无需安装 WSL2 或 Node.js。macOS / Linux 同样适用。
+
+#### 1. 配置 Docker 镜像加速（大陆必做）
+
+Docker Hub 在大陆被墙，需要先配置镜像加速器。打开 Docker Desktop → Settings → Docker Engine，添加：
+
+```json
+{
+  "registry-mirrors": [
+    "https://docker.1panel.live",
+    "https://docker.xuanyuan.me"
+  ]
+}
+```
+
+> 公共加速器随时可能失效。如果拉取超时，搜索「Docker 镜像加速 2026」获取最新可用地址，或使用云厂商提供的加速器（阿里云、腾讯云控制台申请）。
+
+#### 2. 本地构建并启动
 
 ```bash
-# 拉取镜像
+git clone https://github.com/wentorai/Research-Claw.git
+cd Research-Claw
+docker compose up -d --build
+```
+
+> Dockerfile 已内置清华 apt 源 + npmmirror，构建过程无需翻墙。
+> 如果 `git clone` 也超时，可在 `docker-compose.yml` 中取消注释 `HTTP_PROXY` 行并填入你的代理地址。
+
+#### 3. 直接拉取预构建镜像（海外用户或有加速器时）
+
+```bash
 docker pull ghcr.io/wentorai/research-claw:latest
 
-# 启动
-docker compose up -d
-
-# 或一行命令：
 docker run -d --name research-claw \
   -p 28789:28789 \
   -v rc-config:/app/config \
@@ -271,9 +294,13 @@ docker run -d --name research-claw \
   ghcr.io/wentorai/research-claw:latest
 ```
 
-浏览器访问 `http://127.0.0.1:28789` → Setup Wizard → 填入 API Key，即可使用。
+#### 4. 配置 & 使用
+
+浏览器访问 `http://127.0.0.1:28789` → **Setup Wizard** → 填入 API Key → 开始使用。
 
 > **数据持久化**：数据库、配置、工作区均挂载在具名 volume，容器删除后数据不丢失。
+>
+> **代理设置**：如果你的 LLM API（如 OpenAI）需要代理访问，取消 `docker-compose.yml` 中 `environment` 部分的注释，填入 `http://host.docker.internal:7890`（Docker 容器访问宿主机代理的标准地址）。
 
 ### 常用命令
 
