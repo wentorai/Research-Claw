@@ -1,229 +1,202 @@
-# Research-Claw Windows 安装指南
+# Windows 安装指南
 
-Research-Claw (科研龙虾) 目前暂不提供 Windows 一键安装脚本。
-请按照以下步骤手动安装。全程约需 10-15 分钟。
-
-> 推荐方案: 如果你使用 Windows 11, 建议通过 **WSL2 (Ubuntu)** 安装,
-> 然后直接使用 Linux 一键安装脚本。参见本文末尾 [WSL2 安装](#wsl2-安装推荐) 章节。
+科研龙虾提供两种 Windows 安装方式。推荐 Docker Desktop，零配置开发环境。
 
 ---
 
-## 前置条件
+## 方式一：Docker Desktop（推荐）
 
-| 软件 | 最低版本 | 下载地址 |
-|------|----------|----------|
-| Node.js | 22.12+ | https://nodejs.org/ (选 LTS) |
-| pnpm | 9.0+ | 安装 Node.js 后运行 `npm install -g pnpm` |
-| Git | 任意 | https://git-scm.com/download/win |
-| Visual Studio Build Tools | 2019+ | 见下方说明 |
+无需安装 Node.js、pnpm 或 WSL2，开箱即用。
 
-### 安装 Visual Studio Build Tools
+### 1. 安装 Docker Desktop
 
-Research-Claw 依赖的 `better-sqlite3` 模块需要 C++ 编译环境。
+下载 [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)，安装后重启。
 
-**方法 A — 自动安装 (推荐)**
+> Docker Desktop 会自动在后台启用 WSL2 作为引擎，你不需要手动配置 WSL。
 
-打开 **管理员 PowerShell**, 运行:
+### 2. 配置镜像加速（大陆必做）
 
-```powershell
-npm install -g windows-build-tools
+Docker Hub 在大陆无法直接访问。打开 Docker Desktop → **Settings → Docker Engine**，在 JSON 配置中添加：
+
+```json
+{
+  "registry-mirrors": [
+    "https://docker.1panel.live",
+    "https://docker.xuanyuan.me"
+  ]
+}
 ```
 
-**方法 B — 手动安装**
+点击 **Apply & Restart**。
 
-1. 下载 [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-2. 安装时勾选 **"Desktop development with C++"** 工作负载
-3. 确保包含 **MSVC v143** 和 **Windows SDK**
+> 公共加速器随时可能失效。如果拉取超时，搜索「Docker 镜像加速 2026」获取最新可用地址，或使用阿里云 / 腾讯云控制台申请专属加速器。
 
----
+### 3. 克隆并启动
 
-## 安装步骤
-
-### 第 1 步: 验证环境
-
-打开 **PowerShell** 或 **命令提示符**, 运行:
+打开 PowerShell 或 Windows Terminal：
 
 ```powershell
-node -v    # 应显示 v22.x.x 或更高
-pnpm -v    # 应显示 9.x.x 或更高
-git -v     # 应显示 git version x.x.x
+git clone https://github.com/wentorai/Research-Claw.git
+cd Research-Claw
+docker compose up -d --build
 ```
 
-### 第 2 步: 克隆仓库
+首次构建约 5-10 分钟（Dockerfile 已内置清华 apt 源 + npmmirror，构建过程不需要翻墙）。
+
+> **如果 `git clone` 也超时**：编辑 `docker-compose.yml`，取消注释 `build.args` 中的 `HTTP_PROXY` 和 `HTTPS_PROXY`，填入你的代理地址（如 `http://host.docker.internal:7890`）。
+
+### 4. 使用
+
+浏览器打开 `http://127.0.0.1:28789`，在 **Setup Wizard** 中填入 API Key，即可使用。
+
+> **数据持久化**：数据库、配置、工作区存储在 Docker 具名 volume 中，即使容器删除数据也不丢失。
+
+### Docker 常用操作
 
 ```powershell
-cd ~
-git clone https://github.com/wentorai/research-claw.git
-cd research-claw
-```
-
-### 第 3 步: 安装依赖
-
-```powershell
-pnpm install
-```
-
-> 此过程会编译 `better-sqlite3` 等原生模块, 如果报错请检查 Build Tools 是否正确安装。
-
-### 第 4 步: 创建配置文件
-
-```powershell
-copy config\openclaw.example.json config\openclaw.json
-```
-
-### 第 5 步: 构建 Dashboard 和插件
-
-```powershell
-pnpm build
-```
-
-### 第 6 步: 安装 Research-Plugins
-
-```powershell
-npx openclaw plugins install @wentorai/research-plugins
-```
-
-### 第 7 步: 配置 API Key
-
-```powershell
-pnpm setup
-```
-
-按照提示选择 API 服务商 (Anthropic Claude / OpenAI) 并输入 API Key。
-
-如需配置代理 (国内用户), 按提示输入代理地址, 如 `http://127.0.0.1:7890`。
-
-### 第 8 步: 启动
-
-```powershell
-pnpm start
-```
-
-启动后在浏览器中打开: **http://127.0.0.1:28789**
-
----
-
-## 日常使用
-
-```powershell
-# 启动 Research-Claw
-cd ~/research-claw
-pnpm start
-
-# 开发模式 (前端热更新)
-pnpm dev
-
-# 健康检查
-pnpm health
-
-# 备份数据库
-pnpm backup
-
-# 更新到最新版
-git pull && pnpm install && pnpm build
+docker compose up -d          # 启动（后台）
+docker compose down            # 停止
+docker compose up -d --build   # 重新构建并启动（更新代码后）
+docker compose logs -f         # 查看日志
 ```
 
 ---
 
-## 常见问题
+## 方式二：WSL2 手动安装
 
-### `better-sqlite3` 编译失败
+适合需要直接接触源码或进行开发调试的用户。
 
-```
-Error: Could not find any Visual Studio installation to use
-```
+### 1. 安装 WSL2
 
-**解决:** 安装 Visual Studio Build Tools, 或运行:
+以**管理员身份**打开 PowerShell：
 
 ```powershell
-npm config set msvs_version 2022
-pnpm install
-```
-
-### `node-gyp` 找不到 Python
-
-```
-Error: Can't find Python executable
-```
-
-**解决:**
-
-```powershell
-# 安装 Python 3
-winget install Python.Python.3.12
-
-# 告知 node-gyp Python 位置
-npm config set python python3
-```
-
-### PowerShell 执行策略错误
-
-```
-File cannot be loaded because running scripts is disabled
-```
-
-**解决:** 以管理员身份运行:
-
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-### 端口被占用
-
-```
-Error: listen EADDRINUSE :::28789
-```
-
-**解决:**
-
-```powershell
-# 查找占用端口的进程
-netstat -ano | findstr :28789
-
-# 终止该进程 (PID 替换为实际值)
-taskkill /PID <PID> /F
-
-# 或使用 --force 强制启动
-pnpm start -- --force
-```
-
----
-
-## WSL2 安装 (推荐)
-
-如果你使用 Windows 10/11, 强烈推荐通过 WSL2 安装, 体验与 Linux 完全一致:
-
-### 1. 启用 WSL2
-
-```powershell
-# 管理员 PowerShell
 wsl --install -d Ubuntu
 ```
 
-重启后设置用户名和密码。
+安装完成后**重启电脑**，再次打开 Ubuntu 终端，设置用户名和密码。
 
-### 2. 一键安装
+> 已安装 WSL2 的用户运行 `wsl --update` 确保版本最新。
 
-在 WSL2 Ubuntu 终端中运行:
+### 2. 开启 systemd
+
+科研龙虾的部分后台功能（如定时任务、雷达扫描）依赖 systemd。在 Ubuntu 终端中检查：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wentorai/research-claw/main/scripts/install.sh | bash
+cat /etc/wsl.conf
 ```
 
-### 3. 访问 Dashboard
+如果没有 `[boot]` 段或缺少 `systemd=true`，执行：
 
-在 Windows 浏览器中打开: **http://127.0.0.1:28789**
+```bash
+echo -e "[boot]\nsystemd=true" | sudo tee /etc/wsl.conf
+```
 
-WSL2 的端口会自动转发到 Windows 宿主机。
+然后在 **PowerShell** 中重启 WSL：
+
+```powershell
+wsl --shutdown
+```
+
+重新打开 Ubuntu 终端。
+
+### 3. 安装 Node.js 22 + pnpm
+
+```bash
+# 安装 fnm（Fast Node Manager）
+curl -fsSL https://fnm.vercel.app/install | bash
+source ~/.bashrc
+
+# 安装 Node.js 22
+fnm install 22
+fnm use 22
+node -v  # 确认输出 v22.x.x
+
+# 安装 pnpm
+npm install -g pnpm@9.15.0
+```
+
+### 4. 安装系统依赖
+
+```bash
+sudo apt update && sudo apt install -y git curl python3 make g++
+```
+
+> `python3 / make / g++` 是编译 `better-sqlite3` 原生模块所需的工具链。
+
+### 5. 克隆并构建
+
+```bash
+git clone https://github.com/wentorai/Research-Claw.git ~/research-claw
+cd ~/research-claw
+pnpm install && pnpm build
+cp config/openclaw.example.json config/openclaw.json
+```
+
+> **大陆用户加速**：如果 npm 依赖下载缓慢，先执行 `npm config set registry https://registry.npmmirror.com`，再运行 `pnpm install`。
+
+### 6. 启动
+
+```bash
+cd ~/research-claw && pnpm start
+```
+
+浏览器打开 `http://127.0.0.1:28789`，在 **Setup Wizard** 中填入 API Key。
+
+> 所有配置通过浏览器完成，无需手动编辑配置文件。
+
+### 7. 后续启动与更新
+
+```bash
+# 日常启动
+cd ~/research-claw && pnpm start
+
+# 更新到最新版
+cd ~/research-claw && git pull && pnpm install && pnpm build && pnpm start
+```
 
 ---
 
-## 卸载
+## 代理设置
 
-```powershell
-# 删除安装目录
-Remove-Item -Recurse -Force ~/research-claw
+如果你的网络环境需要代理才能访问 LLM API（如 OpenAI），请按你使用的方式配置：
 
-# 可选: 删除本地数据
-Remove-Item -Recurse -Force ~/.research-claw
+### Docker
+
+编辑 `docker-compose.yml`，取消注释 `environment` 部分：
+
+```yaml
+environment:
+  - HTTP_PROXY=http://host.docker.internal:7890
+  - HTTPS_PROXY=http://host.docker.internal:7890
 ```
+
+`host.docker.internal` 是 Docker 容器访问宿主机的标准地址。
+
+### WSL2
+
+在 `~/.bashrc` 末尾添加：
+
+```bash
+export HTTP_PROXY=http://127.0.0.1:7890
+export HTTPS_PROXY=http://127.0.0.1:7890
+```
+
+> WSL2 中 `127.0.0.1` 默认映射到 Windows 宿主机（从 Windows 11 22H2 开始）。如果你使用较旧版本的 Windows，可能需要使用 Windows 主机的实际局域网 IP。
+
+---
+
+## FAQ
+
+**Q: Docker 和 WSL2 应该选哪个？**
+Docker Desktop 更简单，一条命令启动，不需要管理 Node.js 版本和依赖。WSL2 手动安装适合需要修改源码或进行插件开发的用户。
+
+**Q: 安装后文件在哪？**
+- Docker：数据在 Docker volume 中（`docker volume ls` 查看），通过 `http://127.0.0.1:28789` 界面操作。
+- WSL2：`~/research-claw`（即 Ubuntu 中的 `/home/<你的用户名>/research-claw`）。
+
+**Q: WSL2 中启动后 Windows 浏览器能访问吗？**
+可以。WSL2 的网络默认与 Windows 共享，`http://127.0.0.1:28789` 在 Windows 浏览器中直接可用。
+
+**Q: 如何在 Windows 文件管理器中打开 WSL2 文件？**
+地址栏输入 `\\wsl$\Ubuntu\home\<你的用户名>\research-claw`。

@@ -35,7 +35,7 @@ The researchers who will define the next century shouldn't be spending this one 
 
 Research-Claw runs entirely on your local machine. It reads papers so you don't have to skim. It monitors arXiv while you sleep. It drafts methodology sections, designs experiments, manages citations, generates figures, and writes in your voice — not its own.
 
-**Your papers, notes, and research data never leave your device. No account required. Works offline. No cloud services to trust.**
+**Your papers, notes, and research data stay on your machine. The only external dependency is the LLM API you choose.**
 
 ---
 
@@ -188,7 +188,7 @@ One command to install **487 academic skills** covering the full research workfl
 |:--|:--|
 | **Satellite, not fork** | OpenClaw as npm dependency — upstream upgrades are absorbed cleanly; coupling surface is ~20 lines of pnpm patch |
 | **4-tier coupling** | L0 filesystem → L1 plugin SDK → L2 WS RPC → L3 patch; each tier is independently replaceable |
-| **Local-first** | SQLite + WAL mode, no database server, fully functional offline |
+| **Local-first** | SQLite + WAL mode, no database server; all data stays local, only external dependency is the LLM API |
 | **Skills over raw prompts** | 487 SKILL.md files encode domain knowledge structurally; installable/removable per research field |
 | **Port offset from upstream** | 28789 (Research-Claw) vs 18789 (OpenClaw default) — both can run simultaneously |
 | **Browser-configured** | No config file editing; all settings via Setup Wizard at first launch |
@@ -246,6 +246,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 git clone https://github.com/wentorai/Research-Claw.git
 cd Research-Claw
 pnpm install && pnpm build
+cp config/openclaw.example.json config/openclaw.json
 pnpm start
 ```
 

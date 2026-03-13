@@ -35,7 +35,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 
 科研龙虾完全运行在你的本机。它替你精读论文，在你入睡时盯着 arXiv，帮你起草方法论、设计实验、管理引文、生成图表，用你的口吻写作——而不是它的。
 
-**你的论文库、笔记、实验数据，全部在你自己的机器上。**
+**你的论文库、笔记、实验数据，全部存在你自己的机器上。唯一的外部依赖是你选择的大模型 API。**
 
 ---
 
@@ -188,7 +188,7 @@ openclaw plugins install @wentorai/research-plugins
 |:--|:--|
 | **Satellite 而非 Fork** | OpenClaw 作为 npm 依赖引入，上游可随时升级，耦合面控制在 ~20 行 pnpm patch |
 | **4 层耦合，从外到内** | L0 文件系统 → L1 插件 SDK → L2 WS RPC → L3 patch，每层独立，可单独替换 |
-| **本地优先** | SQLite + WAL 模式，无需数据库服务，断网可完整运行 |
+| **本地优先** | SQLite + WAL 模式，无需数据库服务；数据全在本地，唯一外部依赖是 LLM API |
 | **技能 > 裸提示词** | 487 个 SKILL.md 结构化封装学术场景，可按研究方向安装/卸载 |
 | **端口与上游错开** | 28789（科研龙虾）vs 18789（OpenClaw 默认），两者可并存 |
 | **浏览器配置一切** | 无需编辑配置文件，所有设置通过 Setup Wizard 在浏览器完成 |
@@ -246,6 +246,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 git clone https://github.com/wentorai/Research-Claw.git
 cd Research-Claw
 pnpm install && pnpm build
+cp config/openclaw.example.json config/openclaw.json
 pnpm start
 ```
 
