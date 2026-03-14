@@ -235,6 +235,13 @@ else
   ok "Cloned"
 fi
 
+# --- Disable Corepack strict mode ---
+# Node 22+ enables Corepack by default. If a parent directory (e.g. ~/) has a
+# package.json with "packageManager": "yarn@...", Corepack blocks pnpm with
+# "This project is configured to use yarn" and causes "Invalid package.json".
+export COREPACK_ENABLE_STRICT=0
+export COREPACK_ENABLE_AUTO_PIN=0
+
 # --- Force git HTTPS (prevent SSH clone failures for git+ dependencies) ---
 # @whiskeysockets/baileys references libsignal-node via git+https URL;
 # some environments convert this to SSH (git@github.com:...) which fails
