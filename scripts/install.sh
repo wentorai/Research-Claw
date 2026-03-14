@@ -59,10 +59,43 @@ case "$OS" in
 esac
 info "Platform: $OS / $(uname -m)"
 
+# --- Linux package helper (supports apt, dnf, yum, pacman, apk) ---
+pkg_install() {
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq "$@"
+  elif command -v dnf &>/dev/null; then
+    sudo dnf install -y -q "$@"
+  elif command -v yum &>/dev/null; then
+    sudo yum install -y -q "$@"
+  elif command -v pacman &>/dev/null; then
+    sudo pacman -Sy --noconfirm "$@"
+  elif command -v apk &>/dev/null; then
+    sudo apk add --no-cache "$@"
+  else
+    warn "No supported package manager found. Install manually: $*"
+    return 1
+  fi
+}
+
+# Map package names per distro (build tools for native modules)
+build_pkg_names() {
+  if command -v apt-get &>/dev/null; then
+    echo "build-essential python3"
+  elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+    echo "gcc-c++ make python3"
+  elif command -v pacman &>/dev/null; then
+    echo "base-devel python"
+  elif command -v apk &>/dev/null; then
+    echo "build-base python3"
+  else
+    echo "gcc g++ make python3"
+  fi
+}
+
 # --- [2/8] Git ---
 if ! command -v git &>/dev/null; then
   if [ "$RC_OS" = linux ]; then
-    sudo apt-get update -qq && sudo apt-get install -y -qq git
+    pkg_install git
   else
     die "git not found. Run: xcode-select --install"
   fi
@@ -84,14 +117,17 @@ if [ "$RC_OS" = mac ]; then
     warn "Install via: brew install python3  OR  xcode-select --install"
   fi
 else
-  # Linux: build-essential + python3 + unzip (required by fnm installer) + curl
-  LINUX_PKGS=""
-  command -v make &>/dev/null && command -v g++ &>/dev/null || LINUX_PKGS="build-essential python3"
-  command -v unzip &>/dev/null || LINUX_PKGS="$LINUX_PKGS unzip"
-  command -v curl &>/dev/null || LINUX_PKGS="$LINUX_PKGS curl"
-  if [ -n "$LINUX_PKGS" ]; then
-    info "Installing system dependencies: $LINUX_PKGS"
-    sudo apt-get update -qq && sudo apt-get install -y -qq $LINUX_PKGS
+  # Linux: build tools + python3 + unzip (required by fnm installer) + curl
+  NEED_PKGS=""
+  if ! (command -v make &>/dev/null && command -v g++ &>/dev/null); then
+    NEED_PKGS="$(build_pkg_names)"
+  fi
+  command -v unzip &>/dev/null || NEED_PKGS="$NEED_PKGS unzip"
+  command -v curl &>/dev/null || NEED_PKGS="$NEED_PKGS curl"
+  if [ -n "$NEED_PKGS" ]; then
+    info "Installing system dependencies: $NEED_PKGS"
+    # shellcheck disable=SC2086
+    pkg_install $NEED_PKGS
   fi
 fi
 
@@ -109,13 +145,26 @@ install_node_fnm() {
   eval "$(fnm env --shell bash 2>/dev/null || true)"
   fnm install "$NODE_MIN" --progress=never && fnm use "$NODE_MIN" && fnm default "$NODE_MIN"
 
-  # Persist to shell profile
+  # Persist to shell profile (create if none exist)
+  local FNM_SNIPPET
+  FNM_SNIPPET="$(printf '\n# fnm (added by Research-Claw)\nexport PATH="$HOME/.local/share/fnm:$PATH"\neval "$(fnm env --use-on-cd --shell bash)"\n')"
+  local PROFILE_WRITTEN=false
   for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
     if [ -f "$p" ] && ! grep -q 'fnm env' "$p" 2>/dev/null; then
-      printf '\n# fnm (added by Research-Claw)\nexport PATH="$HOME/.local/share/fnm:$PATH"\neval "$(fnm env --use-on-cd --shell bash)"\n' >> "$p"
+      printf '%s' "$FNM_SNIPPET" >> "$p"
+      PROFILE_WRITTEN=true
       break
     fi
   done
+  if ! $PROFILE_WRITTEN; then
+    # No existing profile — create one for the user's current shell
+    local SHELL_RC="$HOME/.bashrc"
+    case "$(basename "${SHELL:-/bin/bash}")" in
+      zsh) SHELL_RC="$HOME/.zshrc" ;;
+    esac
+    printf '%s' "$FNM_SNIPPET" >> "$SHELL_RC"
+    info "Created $SHELL_RC with fnm configuration"
+  fi
 }
 
 install_node_nvm() {
@@ -256,7 +305,12 @@ if ls $SQLITE_NODE &>/dev/null; then
   # Fallback: check for node binary next to openclaw command
   if [ "$GW_NODE" = "node" ] && command -v openclaw &>/dev/null; then
     OC_PATH="$(command -v openclaw)"
-    if [ -L "$OC_PATH" ]; then OC_PATH="$(readlink -f "$OC_PATH")"; fi
+    # Portable symlink resolution (readlink -f unavailable on macOS < 12.3)
+    while [ -L "$OC_PATH" ]; do
+      LINK_DIR="$(dirname "$OC_PATH")"
+      OC_PATH="$(readlink "$OC_PATH")"
+      case "$OC_PATH" in /*) ;; *) OC_PATH="$LINK_DIR/$OC_PATH" ;; esac
+    done
     OC_DIR="$(dirname "$OC_PATH")"
     if [ -x "$OC_DIR/node" ]; then
       GW_NODE="$OC_DIR/node"
@@ -404,7 +458,12 @@ export OPENCLAW_CONFIG_PATH=./config/openclaw.json
 # Sync RC settings → ~/.openclaw/openclaw.json so `openclaw gateway --force` also works.
 "$GW_NODE" scripts/sync-global-config.cjs 2>/dev/null || true
 
+CRASH_COUNT=0
+MAX_CRASHES=10
+
 while true; do
+  START_TS=$(date +%s)
+
   PATH="$GW_NODE_DIR:$PATH" \
     "$GW_NODE" ./node_modules/openclaw/dist/entry.js \
     gateway run --allow-unconfigured --auth none --port "$PORT" --force
@@ -415,6 +474,22 @@ while true; do
     exit 0
   fi
 
-  printf "  ${C}▸${N} Gateway exited (code $CODE) — restarting in 1s...\n"
-  sleep 1
+  # If gateway ran > 30s, it was a normal config-change restart — reset crash counter
+  ELAPSED=$(( $(date +%s) - START_TS ))
+  if [ "$ELAPSED" -gt 30 ]; then
+    CRASH_COUNT=0
+  else
+    CRASH_COUNT=$((CRASH_COUNT + 1))
+  fi
+
+  if [ "$CRASH_COUNT" -ge "$MAX_CRASHES" ]; then
+    printf "\n  ${R}  ✗ Gateway crashed %s times in quick succession. Stopping.${N}\n" "$MAX_CRASHES"
+    printf "  ${D}Check logs above for errors. Report: ${ISSUES_URL}${N}\n"
+    exit 1
+  fi
+
+  # Backoff: 1s, 2s, 3s, 4s, 5s (cap)
+  BACKOFF=$((CRASH_COUNT > 5 ? 5 : (CRASH_COUNT > 0 ? CRASH_COUNT : 1)))
+  printf "  ${C}▸${N} Gateway exited (code $CODE) — restarting in ${BACKOFF}s...\n"
+  sleep "$BACKOFF"
 done
