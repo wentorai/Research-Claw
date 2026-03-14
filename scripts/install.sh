@@ -244,6 +244,40 @@ export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf"
 export GIT_CONFIG_VALUE_0="git@github.com:"
 
+# --- Detect gateway Node (early — needed for ABI rebuild, plugin install, gateway launch) ---
+# OpenClaw re-execs under conda "openclaw" env's Node at runtime, regardless of which
+# node launches entry.js. So we MUST compile native modules for that Node, not system node.
+# Priority: 1) conda openclaw env Node  2) node next to openclaw binary  3) system node
+GW_NODE="node"
+if command -v conda &>/dev/null; then
+  CONDA_OC_PREFIX="$(conda env list 2>/dev/null | grep "^openclaw " | awk '{print $NF}')"
+  if [ -n "$CONDA_OC_PREFIX" ] && [ -x "$CONDA_OC_PREFIX/bin/node" ]; then
+    GW_NODE="$CONDA_OC_PREFIX/bin/node"
+  fi
+fi
+if [ "$GW_NODE" = "node" ] && command -v openclaw &>/dev/null; then
+  OC_PATH="$(command -v openclaw)"
+  while [ -L "$OC_PATH" ]; do
+    LINK_DIR="$(dirname "$OC_PATH")"
+    OC_PATH="$(readlink "$OC_PATH")"
+    case "$OC_PATH" in /*) ;; *) OC_PATH="$LINK_DIR/$OC_PATH" ;; esac
+  done
+  OC_DIR="$(dirname "$OC_PATH")"
+  if [ -x "$OC_DIR/node" ]; then
+    GW_NODE="$OC_DIR/node"
+  fi
+fi
+# Resolve to absolute path so dirname works correctly for PATH injection
+if [ "$GW_NODE" = "node" ]; then
+  GW_NODE="$(command -v node)"
+fi
+GW_NODE_DIR="$(dirname "$GW_NODE")"
+SYSTEM_NODE_V="$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+GW_NODE_V="$("$GW_NODE" -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+if [ "$GW_NODE" != "$(command -v node)" ]; then
+  info "Gateway Node: $("$GW_NODE" -v) (conda openclaw)"
+fi
+
 # --- [6/8] Install + build ---
 info "Installing dependencies..."
 if ! (pnpm install --frozen-lockfile 2>/dev/null || pnpm install); then
@@ -258,26 +292,33 @@ if [ ! -f config/openclaw.json ]; then
   fi
 else
   # Clean stale references from older config versions (preserves user's API keys/model)
+  # Cleans BOTH project config AND global config
   node -e "
-    const fs = require('fs');
-    const f = 'config/openclaw.json';
-    let c = JSON.parse(fs.readFileSync(f, 'utf8'));
-    let changed = false;
-    // Remove node_modules plugin paths (v0.2.0 legacy — plugins now in ~/.openclaw/extensions/)
-    if (c.plugins?.load?.paths) {
-      const before = c.plugins.load.paths.length;
-      c.plugins.load.paths = c.plugins.load.paths.filter(p => !p.includes('node_modules'));
-      if (c.plugins.load.paths.length !== before) changed = true;
+    const fs = require('fs'), path = require('path');
+    const files = ['config/openclaw.json'];
+    const global_cfg = path.join(process.env.HOME || '', '.openclaw', 'openclaw.json');
+    if (fs.existsSync(global_cfg)) files.push(global_cfg);
+    let anyChanged = false;
+    for (const f of files) {
+      try {
+        let c = JSON.parse(fs.readFileSync(f, 'utf8'));
+        let changed = false;
+        if (c.plugins?.load?.paths) {
+          const before = c.plugins.load.paths.length;
+          c.plugins.load.paths = c.plugins.load.paths.filter(p => !p.includes('node_modules'));
+          if (c.plugins.load.paths.length !== before) changed = true;
+        }
+        if (c.plugins?.entries?.['wentor-connect']) {
+          try { fs.accessSync('extensions/wentor-connect/dist'); }
+          catch { delete c.plugins.entries['wentor-connect']; changed = true; }
+        }
+        if (changed) {
+          fs.writeFileSync(f, JSON.stringify(c, null, 2) + '\n');
+          anyChanged = true;
+        }
+      } catch {}
     }
-    // Remove stale wentor-connect entry if extension not built
-    if (c.plugins?.entries?.['wentor-connect']) {
-      try { fs.accessSync('extensions/wentor-connect/dist'); }
-      catch { delete c.plugins.entries['wentor-connect']; changed = true; }
-    }
-    if (changed) {
-      fs.writeFileSync(f, JSON.stringify(c, null, 2) + '\n');
-      console.log('  [config] Cleaned stale plugin references');
-    }
+    if (anyChanged) console.log('  [config] Cleaned stale plugin references');
   " 2>/dev/null || true
 fi
 
@@ -307,61 +348,43 @@ fi
 
 # --- [7/8] Rebuild native modules if ABI mismatch ---
 # better-sqlite3 is a C++ addon compiled against a specific Node ABI.
-# The gateway may run under a different Node (e.g. conda) than system node,
-# so we detect the actual Node that openclaw uses and rebuild with THAT one.
+# pnpm install compiles with system Node, but OpenClaw re-execs under conda Node.
+# We MUST rebuild for the gateway's actual runtime Node ($GW_NODE, detected above).
 SQLITE_NODE="node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+
+rebuild_native() {
+  info "Rebuilding native modules for $("$GW_NODE" -v) (gateway Node)..."
+  local SQLITE_PKG="$1"
+  local GW_NPM_ROOT GW_NODEGYP REBUILD_OK=false
+  GW_NPM_ROOT="$("$GW_NODE" -e "console.log(require('child_process').execSync('npm root -g', {env:{...process.env,PATH:process.env.PATH}}).toString().trim())" 2>/dev/null || echo "")"
+  GW_NODEGYP=""
+  if [ -n "$GW_NPM_ROOT" ] && [ -f "$GW_NPM_ROOT/npm/node_modules/node-gyp/bin/node-gyp.js" ]; then
+    GW_NODEGYP="$GW_NPM_ROOT/npm/node_modules/node-gyp/bin/node-gyp.js"
+  fi
+  if [ -n "$GW_NODEGYP" ]; then
+    (cd "$SQLITE_PKG" && PATH="$GW_NODE_DIR:$PATH" "$GW_NODE" "$GW_NODEGYP" rebuild &>/dev/null) && REBUILD_OK=true
+  else
+    (cd "$SQLITE_PKG" && PATH="$GW_NODE_DIR:$PATH" npx --yes node-gyp rebuild &>/dev/null) && REBUILD_OK=true
+  fi
+  if $REBUILD_OK; then
+    ok "Native modules rebuilt for $("$GW_NODE" -v)"
+  else
+    warn "Native module rebuild failed. The gateway may still work if openclaw uses its own Node."
+  fi
+}
+
 if ls $SQLITE_NODE &>/dev/null; then
   # Resolve the better-sqlite3 package directory (absolute path for pnpm compatibility)
   # Path: .../better-sqlite3/build/Release/better_sqlite3.node → 3 levels up
   SQLITE_PKG="$(cd "$(dirname "$(dirname "$(dirname "$(ls $SQLITE_NODE | head -1)")")")" && pwd)"
 
-  # Detect which Node the gateway actually uses.
-  # The openclaw CLI activates conda env "openclaw" which has its own Node.
-  # Priority: 1) conda openclaw env Node  2) node next to openclaw binary  3) system node
-  GW_NODE="node"
-  # Check conda openclaw environment first (most reliable method)
-  if command -v conda &>/dev/null; then
-    CONDA_OC_PREFIX="$(conda env list 2>/dev/null | grep "^openclaw " | awk '{print $NF}')"
-    if [ -n "$CONDA_OC_PREFIX" ] && [ -x "$CONDA_OC_PREFIX/bin/node" ]; then
-      GW_NODE="$CONDA_OC_PREFIX/bin/node"
-    fi
-  fi
-  # Fallback: check for node binary next to openclaw command
-  if [ "$GW_NODE" = "node" ] && command -v openclaw &>/dev/null; then
-    OC_PATH="$(command -v openclaw)"
-    # Portable symlink resolution (readlink -f unavailable on macOS < 12.3)
-    while [ -L "$OC_PATH" ]; do
-      LINK_DIR="$(dirname "$OC_PATH")"
-      OC_PATH="$(readlink "$OC_PATH")"
-      case "$OC_PATH" in /*) ;; *) OC_PATH="$LINK_DIR/$OC_PATH" ;; esac
-    done
-    OC_DIR="$(dirname "$OC_PATH")"
-    if [ -x "$OC_DIR/node" ]; then
-      GW_NODE="$OC_DIR/node"
-    fi
-  fi
-
-  # Test ABI compatibility using absolute path (pnpm strict mode won't resolve bare specifiers)
-  if ! "$GW_NODE" -e "require('$SQLITE_PKG')" 2>/dev/null; then
-    info "Rebuilding native modules for $("$GW_NODE" -v) (gateway Node)..."
-    GW_NPM_ROOT="$("$GW_NODE" -e "console.log(require('child_process').execSync('npm root -g', {env:{...process.env,PATH:process.env.PATH}}).toString().trim())" 2>/dev/null || echo "")"
-    GW_NODEGYP=""
-    if [ -n "$GW_NPM_ROOT" ] && [ -f "$GW_NPM_ROOT/npm/node_modules/node-gyp/bin/node-gyp.js" ]; then
-      GW_NODEGYP="$GW_NPM_ROOT/npm/node_modules/node-gyp/bin/node-gyp.js"
-    fi
-    REBUILD_OK=false
-    # Ensure the gateway's Node is first in PATH during rebuild
-    GW_NODE_DIR="$(dirname "$GW_NODE")"
-    if [ -n "$GW_NODEGYP" ]; then
-      (cd "$SQLITE_PKG" && PATH="$GW_NODE_DIR:$PATH" "$GW_NODE" "$GW_NODEGYP" rebuild &>/dev/null) && REBUILD_OK=true
-    else
-      (cd "$SQLITE_PKG" && PATH="$GW_NODE_DIR:$PATH" npx --yes node-gyp rebuild &>/dev/null) && REBUILD_OK=true
-    fi
-    if $REBUILD_OK; then
-      ok "Native modules rebuilt"
-    else
-      warn "Native module rebuild failed. The gateway may still work if openclaw uses its own Node."
-    fi
+  # If gateway Node differs from system Node (e.g. conda v22 vs Homebrew v23),
+  # pnpm compiled for system Node → MUST rebuild for gateway Node.
+  # The ABI require() check alone is unreliable because OpenClaw re-execs under conda.
+  if [ "$SYSTEM_NODE_V" != "$GW_NODE_V" ]; then
+    rebuild_native "$SQLITE_PKG"
+  elif ! "$GW_NODE" -e "require('$SQLITE_PKG')" 2>/dev/null; then
+    rebuild_native "$SQLITE_PKG"
   else
     ok "Native modules ABI compatible"
   fi
@@ -371,6 +394,11 @@ else
   pnpm rebuild 2>&1 | tail -3 || true
   if ls $SQLITE_NODE &>/dev/null; then
     ok "Native modules compiled"
+    # Still may need rebuild for gateway Node
+    if [ "$SYSTEM_NODE_V" != "$GW_NODE_V" ]; then
+      SQLITE_PKG="$(cd "$(dirname "$(dirname "$(dirname "$(ls $SQLITE_NODE | head -1)")")")" && pwd)"
+      rebuild_native "$SQLITE_PKG"
+    fi
   else
     warn "better-sqlite3 compilation failed. The gateway may not start."
     if [ "$RC_OS" = mac ]; then
@@ -383,7 +411,7 @@ fi
 # --- [8/8] Register research-plugins (skills + agent tools) ---
 # Installed via OpenClaw's plugin system (npm pack → ~/.openclaw/extensions/).
 # NOT loaded from node_modules — avoids pnpm hardlink rejection.
-OPENCLAW="node ./node_modules/openclaw/dist/entry.js"
+OPENCLAW="$GW_NODE ./node_modules/openclaw/dist/entry.js"
 PLUGIN_DIR="$HOME/.openclaw/extensions/research-plugins"
 info "Installing research-plugins..."
 if [ -d "$PLUGIN_DIR" ]; then
@@ -470,10 +498,7 @@ set +e
 
 cd "$INSTALL_DIR"
 
-# Use the same Node that the ABI rebuild targeted (conda openclaw → system fallback).
-# This ensures better-sqlite3 ABI matches at runtime.
-GW_NODE="${GW_NODE:-node}"
-GW_NODE_DIR="$(dirname "$GW_NODE")"
+# GW_NODE and GW_NODE_DIR already resolved at [6/8] (conda openclaw → system fallback).
 
 # Always use project config — contains RC plugin paths, tool whitelist, dashboard root.
 # install.sh already created config/openclaw.json from template at step [6/8].
