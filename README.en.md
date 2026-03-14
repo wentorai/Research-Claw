@@ -11,7 +11,7 @@ You define the question. Research-Claw runs the lab. 24/7 on your machine. Every
 [![Version](https://img.shields.io/badge/version-v0.3.0-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![Platform](https://img.shields.io/badge/platform-macOS_%7C_Linux_%7C_Windows-lightgrey?style=flat-square)](#)
+[![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
 [![Skills](https://img.shields.io/badge/skills-431-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
 
 [🌐 wentor.ai](https://wentor.ai) · [🇨🇳 中文](README.md) · [📖 Docs](docs/00-reference-map.md) · [🪲 Issues](https://github.com/wentorai/Research-Claw/issues)
@@ -123,7 +123,7 @@ We built a purpose-designed Dashboard for academic workflows — the most comple
 | **Radar** | Keyword / author / journal tracking · Automation tasks · IM push |
 | **Settings** | Setup Wizard · All config in the browser, no file editing needed |
 
-Tech: React 18 + Vite 6 + Ant Design 5 + Zustand 5 · Bilingual EN/ZH-CN (245 i18n keys) · 318+ unit tests · TypeScript zero errors · Responsive desktop / tablet / overlay layout.
+Tech: React 18 + Vite 6 + Ant Design 5 + Zustand 5 · Bilingual EN/ZH-CN (245 i18n keys) · 1029 unit tests · TypeScript zero errors · Responsive desktop / tablet / overlay layout.
 
 ---
 

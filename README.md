@@ -11,7 +11,7 @@
 [![Version](https://img.shields.io/badge/version-v0.3.0-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![Platform](https://img.shields.io/badge/platform-macOS_%7C_Linux_%7C_Windows-lightgrey?style=flat-square)](#)
+[![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
 [![Skills](https://img.shields.io/badge/skills-431-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
 
 [🌐 wentor.ai](https://wentor.ai) · [🇬🇧 English](README.en.md) · [📖 文档](docs/00-reference-map.md) · [🪲 问题反馈](https://github.com/wentorai/Research-Claw/issues)
@@ -128,7 +128,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 | **雷达** | 追踪关键词 / 学者 / 期刊 · 自动化任务配置 · IM 推送 |
 | **设置** | Setup Wizard · 所有配置在浏览器完成，无需编辑文件 |
 
-技术规格：React 18 + Vite 6 + Ant Design 5 + Zustand 5，中英双语（245 i18n keys），318+ 单元测试，TypeScript 零报错，响应式支持桌面 / 平板 / 浮窗三种模式。
+技术规格：React 18 + Vite 6 + Ant Design 5 + Zustand 5，中英双语（245 i18n keys），1029 单元测试，TypeScript 零报错，响应式支持桌面 / 平板 / 浮窗三种模式。
 
 ---
 
