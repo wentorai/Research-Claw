@@ -299,40 +299,37 @@ docker compose up -d --build
 
 #### 3. 配置 Docker 镜像加速（大陆必做）
 
-GHCR / Docker Hub 在大陆被墙，需要先配置镜像加速器。打开 Docker Desktop → Settings → Docker Engine，添加：
+GHCR（`ghcr.io`）在大陆无法直接访问。有两种方案：
 
-```json
-{
-  "registry-mirrors": [
-    "https://docker.1panel.live",
-    "https://docker.xuanyuan.me"
-  ]
-}
-```
+**方案 A：使用代理**（推荐）
 
-> 公共加速器随时可能失效。如果拉取超时，搜索「Docker 镜像加速 2026」获取最新可用地址，或使用云厂商提供的加速器（阿里云、腾讯云控制台申请）。
+在 Docker Desktop → Settings → Resources → Proxies 中配置 HTTP/HTTPS 代理。
+
+**方案 B：使用方式 2 本地构建**
+
+完全绕过 GHCR，从源码在本地构建镜像。Dockerfile 已内置清华 apt 源 + npmmirror。
+
+> `registry-mirrors` 仅对 Docker Hub 生效，无法加速 GHCR。
 
 #### 4. 配置 & 使用
 
-启动后查看日志获取 Dashboard 地址（含 token）：
+启动后直接打开 Dashboard：
 
-```bash
-docker logs research-claw
-# 找到: [research-claw] Open dashboard: http://127.0.0.1:28789/?token=xxx
+```
+http://127.0.0.1:28789/?token=research-claw
 ```
 
-浏览器打开该链接 → **Setup Wizard** → 填入 API Key → 开始使用。
+进入 **Setup Wizard** → 填入 API Key → 开始使用。
 
 > **Token 认证**：Docker 模式使用 token 认证（`--auth token`），因为容器内无法完成本地安装默认的浏览器设备认证流程。
-> - **docker run**：不设环境变量时，每次启动自动生成随机 token，通过 `docker logs` 查看。
-> - **docker compose**：`docker-compose.yml` 中默认 token 为 `research-claw`，直接访问 `http://127.0.0.1:28789/?token=research-claw`。
+> - **默认 token**：`research-claw`。docker run 和 docker compose 均使用此默认值，直接访问 `http://127.0.0.1:28789/?token=research-claw`。
 > - **自定义 token**：设置环境变量 `OPENCLAW_GATEWAY_TOKEN=your-token`（docker run 用 `-e`，compose 在 `environment` 中修改）。
 >
 > **安全说明**：配置文件中的 `dangerouslyDisableDeviceAuth: true` 是 Docker 部署的必要设置——容器网络桥接非 loopback，无法通过设备配对认证。`allowedOrigins` 限制仅允许 `127.0.0.1` 和 `localhost` 访问 Dashboard，端口默认仅映射到 `127.0.0.1:28789`（不对外暴露）。
 
 > **数据持久化**：数据库、配置、工作区均挂载在具名 volume（`rc-config`、`rc-data`、`rc-workspace`），容器删除后数据不丢失。
 >
-> **代理设置**：如果你的 LLM API（如 OpenAI）需要代理访问，取消 `docker-compose.yml` 中 `environment` 部分的注释，填入 `http://host.docker.internal:7890`（Docker 容器访问宿主机代理的标准地址）。
+> **代理设置**：如果你的 LLM API（如 OpenAI）需要代理访问，取消 `docker-compose.yml` 中 `environment` 下 `HTTP_PROXY` / `HTTPS_PROXY` 行的注释，填入 `http://host.docker.internal:7890`（Docker 容器访问宿主机代理的标准地址）。
 
 ### 常用命令
 
