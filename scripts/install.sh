@@ -512,6 +512,16 @@ cd "$INSTALL_DIR"
 
 # GW_NODE and GW_NODE_DIR already resolved at [6/8] (conda openclaw → system fallback).
 
+# --- Final ABI safety net ---
+# Catches edge cases missed by [7/8]: Node upgraded since last pnpm install,
+# pnpm skipped recompilation ("Already up to date"), stale .node binary.
+if ls $SQLITE_NODE &>/dev/null; then
+  SQLITE_PKG="$(cd "$(dirname "$(dirname "$(dirname "$(ls $SQLITE_NODE | head -1)")")")" && pwd)"
+  if ! "$GW_NODE" -e "require('$SQLITE_PKG')" 2>/dev/null; then
+    rebuild_native "$SQLITE_PKG"
+  fi
+fi
+
 # Always use project config — contains RC plugin paths, tool whitelist, dashboard root.
 # install.sh already created config/openclaw.json from template at step [6/8].
 export OPENCLAW_CONFIG_PATH=./config/openclaw.json
