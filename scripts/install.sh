@@ -178,11 +178,18 @@ install_node_nvm() {
   nvm install "$NODE_MIN" && nvm use "$NODE_MIN" && nvm alias default "$NODE_MIN"
 }
 
+NODE_MAX=24  # Node 25+ is Current (not LTS); native modules (better-sqlite3) may not compile
+
 ensure_node() {
   # Check current Node version
   if command -v node &>/dev/null; then
     NODE_V="$(node -v | sed 's/^v//' | cut -d. -f1)"
     if [ "$NODE_V" -ge "$NODE_MIN" ] 2>/dev/null; then
+      if [ "$NODE_V" -gt "$NODE_MAX" ] 2>/dev/null; then
+        warn "Node.js $(node -v) detected — native modules may not compile on Node $((NODE_MAX + 1))+."
+        warn "If the gateway fails to start, downgrade to Node 22 LTS:"
+        warn "  fnm install 22 && fnm use 22 && fnm default 22"
+      fi
       ok "Node.js $(node -v)"
       return 0
     fi
@@ -213,7 +220,7 @@ ensure_node
 # --- [4/8 cont.] pnpm ---
 if ! command -v pnpm &>/dev/null; then
   info "Installing pnpm..."
-  npm install -g "pnpm@$PNPM_VERSION" 2>/dev/null || true
+  npm install -g "pnpm@$PNPM_VERSION" &>/dev/null || true
 fi
 if ! command -v pnpm &>/dev/null; then
   die "pnpm installation failed. Install manually: npm install -g pnpm@$PNPM_VERSION"
