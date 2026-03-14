@@ -18,6 +18,17 @@ import type { ChatStreamEvent } from './gateway/types';
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ?? 'ws://127.0.0.1:28789';
 
+/** Read gateway token from URL ?token=xxx or localStorage fallback */
+function getGatewayToken(): string | undefined {
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get('token');
+  if (urlToken) {
+    localStorage.setItem('rc-gateway-token', urlToken);
+    return urlToken;
+  }
+  return localStorage.getItem('rc-gateway-token') ?? undefined;
+}
+
 const BP_MOBILE = 1024;
 const BP_TABLET = 1440;
 
@@ -78,7 +89,7 @@ export default function App() {
 
   // Always connect to gateway on mount
   useEffect(() => {
-    connect(GATEWAY_URL);
+    connect(GATEWAY_URL, getGatewayToken());
   }, [connect]);
 
   // Boot timeout: if still pending after 10s and not connected, show unreachable
@@ -199,7 +210,7 @@ export default function App() {
             title={t('boot.gatewayUnreachable')}
             subTitle={t('boot.gatewayHint')}
             extra={
-              <Button type="primary" onClick={() => { setBootState('pending'); connect(GATEWAY_URL); }}>
+              <Button type="primary" onClick={() => { setBootState('pending'); connect(GATEWAY_URL, getGatewayToken()); }}>
                 {t('boot.retryConnect')}
               </Button>
             }

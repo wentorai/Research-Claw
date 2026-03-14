@@ -11,6 +11,8 @@ services:
       #   HTTPS_PROXY: http://host.docker.internal:7890
     ports:
       - "28789:28789"
+    environment:
+      - OPENCLAW_GATEWAY_TOKEN=research-claw
     volumes:
       - rc-config:/app/config          # API key + gateway config
       - rc-data:/root/.research-claw   # SQLite database

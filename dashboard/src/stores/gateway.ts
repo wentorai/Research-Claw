@@ -10,7 +10,7 @@ interface GatewayState {
   assistantName: string;
   connId: string | null;
 
-  connect: (url: string) => void;
+  connect: (url: string, token?: string) => void;
   disconnect: () => void;
   setServerInfo: (hello: HelloOk) => void;
 }
@@ -22,7 +22,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
   assistantName: 'Research-Claw',
   connId: null,
 
-  connect: (url: string) => {
+  connect: (url: string, token?: string) => {
     const existing = get().client;
     if (existing) {
       existing.disconnect();
@@ -30,6 +30,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
 
     const client = new GatewayClient({
       url,
+      token,
       clientName: 'research-claw-dashboard',
       clientVersion: '0.3.0',
       platform: 'browser',
