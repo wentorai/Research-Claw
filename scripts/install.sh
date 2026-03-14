@@ -218,7 +218,7 @@ fi
 if ! command -v pnpm &>/dev/null; then
   die "pnpm installation failed. Install manually: npm install -g pnpm@$PNPM_VERSION"
 fi
-ok "pnpm $(pnpm -v 2>/dev/null)"
+ok "pnpm $(pnpm -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
 
 # --- Disable Corepack strict mode ---
 # Node 22+ enables Corepack by default. If a parent directory (e.g. ~/) has a
@@ -417,7 +417,7 @@ ensure_native_modules || true
 # --- [8/8] Register research-plugins (skills + agent tools) ---
 # Installed via OpenClaw's plugin system (npm pack → ~/.openclaw/extensions/).
 # NOT loaded from node_modules — avoids pnpm hardlink rejection.
-OPENCLAW="$GW_NODE ./node_modules/openclaw/dist/entry.js"
+run_openclaw() { "$GW_NODE" ./node_modules/openclaw/dist/entry.js "$@"; }
 PLUGIN_DIR="$HOME/.openclaw/extensions/research-plugins"
 info "Installing research-plugins..."
 if [ -d "$PLUGIN_DIR" ]; then
@@ -425,7 +425,7 @@ if [ -d "$PLUGIN_DIR" ]; then
   CURRENT_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
   cp -r "$PLUGIN_DIR" "${PLUGIN_DIR}.bak" 2>/dev/null || true
   rm -rf "$PLUGIN_DIR"
-  if $OPENCLAW plugins install @wentorai/research-plugins &>/dev/null; then
+  if run_openclaw plugins install @wentorai/research-plugins &>/dev/null; then
     rm -rf "${PLUGIN_DIR}.bak"
     NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
     if [ "$CURRENT_VER" = "$NEW_VER" ]; then
@@ -445,7 +445,7 @@ if [ -d "$PLUGIN_DIR" ]; then
   fi
 else
   # Fresh install
-  if $OPENCLAW plugins install @wentorai/research-plugins &>/dev/null; then
+  if run_openclaw plugins install @wentorai/research-plugins &>/dev/null; then
     NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
     ok "Research-plugins v${NEW_VER} (431 skills, 13 tools)"
   else
