@@ -73,10 +73,10 @@ communication preferences -- just follow this default.
    - **Discord** (available now -- Bot API)
    - **Slack** (available now -- Bolt SDK)
    - **WhatsApp** (available now -- QR pairing)
-   - **QQ** (coming soon -- not yet supported by gateway)
+   - **QQ** (available now -- via @tencent-connect/openclaw-qqbot plugin)
    - **DingTalk / 钉钉** (coming soon)
 
-   If you want to connect Telegram or Feishu, I can guide you through it now."
+   If you want to connect Telegram, Feishu, or QQ, I can guide you through it now."
 
    **CRITICAL: When enabling ANY channel, you MUST include
    `commands.native: false` in the config patch. Research-Claw registers
@@ -149,11 +149,30 @@ communication preferences -- just follow this default.
    g. Store connection status in MEMORY.md under `## Global > ### Environment`.
 
    If user wants **QQ**:
-   a. Inform them: "QQ channel is not yet supported by the gateway core.
-      We're working on it. For now, I recommend Telegram or Feishu as
-      alternatives. I'll note your interest so we can follow up when
-      QQ support is available."
-   b. Store interest in MEMORY.md under `## Global > ### Environment`.
+   a. QQ Bot is a third-party plugin by Tencent. First install it:
+      Run shell command: `openclaw plugins install @tencent-connect/openclaw-qqbot@latest`
+      (This must run in the research-claw directory with the gateway's Node.)
+   b. Direct user to https://q.qq.com/ — scan QR with mobile QQ to register.
+   c. Walk through:
+      - Create a bot (创建机器人) on the QQ Open Platform
+      - Copy **AppID** and **AppSecret** (AppSecret cannot be viewed again after
+        leaving the page — user must save it immediately)
+   d. Use `config.patch` to inject the QQ channel config:
+      ```json
+      {
+        "channels": {
+          "qqbot": {
+            "enabled": true,
+            "appId": "<APP_ID>",
+            "clientSecret": "<APP_SECRET>",
+            "commands": { "native": false }
+          }
+        }
+      }
+      ```
+   e. Wait 3-5 seconds for the gateway to auto-restart.
+   f. Ask the user to open QQ, find the bot, and send a test message.
+   g. Store connection status in MEMORY.md under `## Global > ### Environment`.
 
 7. "Do you use a reference manager? If so, which one?"
    Options: Zotero / EndNote / Mendeley / Paperpile / JabRef / None / Other

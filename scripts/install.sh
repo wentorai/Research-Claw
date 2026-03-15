@@ -399,6 +399,19 @@ else
             changed = true;
           }
         }
+        // Ensure ALL channels have commands.native=false — RC registers 529 commands
+        // which exceeds every IM channel's command menu limit (~80 for Telegram).
+        // Iterates all existing channels so future QQ/Feishu/Discord are covered too.
+        if (c.channels) {
+          for (const [name, ch] of Object.entries(c.channels)) {
+            if (name === 'defaults' || typeof ch !== 'object' || ch === null) continue;
+            if (!ch.commands) ch.commands = {};
+            if (ch.commands.native !== false) {
+              ch.commands.native = false;
+              changed = true;
+            }
+          }
+        }
         if (changed) {
           fs.writeFileSync(f, JSON.stringify(c, null, 2) + '\n');
           anyChanged = true;
@@ -592,6 +605,10 @@ done) &
 
 STOP=false
 trap 'STOP=true' INT TERM
+# Clear ERR trap before restart loop — macOS ships bash 3.2 where set +e
+# does NOT prevent ERR trap from firing. Without this, a non-zero gateway
+# exit kills the entire script instead of entering the restart loop.
+trap - ERR
 set +e
 
 cd "$INSTALL_DIR"
