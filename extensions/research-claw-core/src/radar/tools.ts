@@ -237,6 +237,11 @@ export function createRadarTools(db: Database): ToolDefinition[] {
           lines.push('\nAll sources failed. Check your network connection or try again later.');
         }
 
+        if (totalPapers > 0) {
+          lines.push('\nTip: Save these results with workspace_save("outputs/radar/scan-YYYY-MM-DD.md", ...) for future reference.');
+          lines.push('Use library_add_paper or library_batch_add to add interesting papers to your library.');
+        }
+
         return {
           content: [{ type: 'text', text: lines.join('\n') }],
           details: { results },

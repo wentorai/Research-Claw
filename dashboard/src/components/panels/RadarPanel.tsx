@@ -463,13 +463,23 @@ export default function RadarPanel() {
 
   const [scanning, setScanning] = useState(false);
   const [scanResults, setScanResults] = useState<ScanResultItem[] | null>(null);
+  const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [expandedPresetId, setExpandedPresetId] = useState<string | null>(null);
 
-  // Load radar config + cron presets when gateway connects
+  // Load radar config + cron presets + cached scan results when gateway connects
   useEffect(() => {
     if (connState === 'connected') {
       loadConfig();
       loadPresets();
+      // Load cached scan results so panel isn't empty on open
+      client?.request<{ results: ScanResultItem[] | null; scanned_at: string | null }>('rc.radar.lastScan', {})
+        .then((cached) => {
+          if (cached?.results && cached.results.length > 0 && !scanResults) {
+            setScanResults(cached.results);
+            setLastScanAt(cached.scanned_at);
+          }
+        })
+        .catch(() => { /* non-fatal */ });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connState]);
@@ -510,6 +520,7 @@ export default function RadarPanel() {
     try {
       const result = await client.request<{ results: ScanResultItem[] }>('rc.radar.scan', {});
       setScanResults(result.results);
+      setLastScanAt(new Date().toISOString());
     } catch (err) {
       console.error('[RadarPanel] scan failed:', err);
     } finally {
@@ -614,7 +625,11 @@ export default function RadarPanel() {
       {/* ── Section 3: Recent Discoveries ───────────────────────────────── */}
       <div style={{ padding: '8px 16px', flex: 1 }}>
         <SectionHeader
-          title={t('radar.section.recentDiscoveries')}
+          title={
+            lastScanAt
+              ? `${t('radar.section.recentDiscoveries')} · ${relativeTime(lastScanAt, locale)}`
+              : t('radar.section.recentDiscoveries')
+          }
           tokens={tokens}
           extra={
             <Button

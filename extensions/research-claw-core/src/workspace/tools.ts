@@ -1,8 +1,8 @@
 /**
- * workspace/tools — 6 Agent Tool Registrations
+ * workspace/tools — 7 Agent Tool Registrations
  *
  * Registers workspace_save, workspace_read, workspace_list, workspace_diff,
- * workspace_history, and workspace_restore as OpenClaw agent tools.
+ * workspace_history, workspace_restore, and workspace_move as OpenClaw agent tools.
  *
  * All tools delegate to WorkspaceService (no direct DB or Git access).
  * Uses plain JSON Schema objects for parameter definitions.
@@ -417,6 +417,55 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
         return ok(
           `Restored ${result.path} from ${result.restored_from}`,
           { path: result.path, restored_from: result.restored_from, new_commit: result.new_commit },
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // -----------------------------------------------------------------------
+  // 7. workspace_move
+  // -----------------------------------------------------------------------
+  tools.push({
+    name: 'workspace_move',
+    description:
+      'Move or rename a file or directory within the research workspace. ' +
+      'Automatically commits the change to Git. Both paths are relative to the workspace root.',
+    parameters: {
+      type: 'object',
+      required: ['from', 'to'],
+      properties: {
+        from: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 512,
+          description: 'Source path relative to workspace root (e.g. "outputs/drafts/old-name.md")',
+        },
+        to: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 512,
+          description: 'Destination path relative to workspace root (e.g. "outputs/drafts/new-name.md")',
+        },
+      },
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>) {
+      try {
+        if (typeof params.from !== 'string' || !params.from.trim()) {
+          return fail('from is required and must be a non-empty string');
+        }
+        if (typeof params.to !== 'string' || !params.to.trim()) {
+          return fail('to is required and must be a non-empty string');
+        }
+        const fromPath = params.from.trim();
+        const toPath = params.to.trim();
+
+        const result = await service.move(fromPath, toPath);
+
+        return ok(
+          `Moved "${fromPath}" → "${toPath}" (committed: ${result.committed})`,
+          { from: result.from, to: result.to, committed: result.committed },
         );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));

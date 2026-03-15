@@ -5,9 +5,9 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 30 agent tools (12 literature + 9 task + 6 workspace + 3 radar)
- *   - 57 WS RPC methods + 1 HTTP route = 58 interface methods
- *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 9 rc.ws.* + 3 rc.radar.* = 58 WS; POST /rc/upload = 1 HTTP)
+ *   - 31 agent tools (12 literature + 9 task + 7 workspace + 3 radar)
+ *   - 61 WS RPC methods + 1 HTTP route = 62 interface methods
+ *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 11 rc.ws.* + 4 rc.radar.* = 61 WS; POST /rc/upload = 1 HTTP)
  *   - 7 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call, gateway_start)
  *   - 1 service (research-claw-db lifecycle)
  */
@@ -153,7 +153,7 @@ const plugin: PluginDefinition = {
       },
     });
 
-    // ── 4. Register tools (28 total) ─────────────────────────────────
+    // ── 4. Register tools (31 total) ─────────────────────────────────
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
     }
@@ -167,7 +167,7 @@ const plugin: PluginDefinition = {
       api.registerTool(tool);
     }
 
-    // ── 5. Register RPC methods (49 total) ───────────────────────────
+    // ── 5. Register RPC methods (60 WS total) ────────────────────────
     // Rate limiting not needed: local satellite, no network exposure (ws://127.0.0.1:28789 only)
     //
     // Bridge: our RPC handlers use a simple (params) => result signature,
@@ -330,8 +330,12 @@ const plugin: PluginDefinition = {
           }
         }
 
-        // Cron schedule management guidance
-        lines.push('[Research-Claw] To change cron schedules, use cron_update_schedule(preset_id, schedule). Do NOT use native cron tools.');
+        // Cron schedule management guidance — only inject when presets exist
+        const presets = taskService.cronPresetsList();
+        const activePresets = presets.filter((p: { enabled: boolean }) => p.enabled);
+        if (activePresets.length > 0) {
+          lines.push(`[Research-Claw] ${activePresets.length} active cron preset(s). To change schedules, use cron_update_schedule(preset_id, schedule). Do NOT use native cron tools.`);
+        }
 
         return { prependContext: lines.join('\n') };
       } catch {
@@ -566,7 +570,7 @@ const plugin: PluginDefinition = {
       }
     });
 
-    api.logger.info('Research-Claw Core registered (30 tools, 57 WS RPC + 1 HTTP = 58 interfaces, 7 hooks)');
+    api.logger.info('Research-Claw Core registered (31 tools, 61 WS RPC + 1 HTTP = 62 interfaces, 7 hooks)');
   },
 };
 

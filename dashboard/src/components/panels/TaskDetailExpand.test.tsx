@@ -201,6 +201,35 @@ describe('TaskDetailExpand', () => {
     expect(screen.queryByTestId('task-detail-related-paper')).toBeNull();
   });
 
+  it('renders related file when linked', () => {
+    render(
+      <TaskDetailExpand
+        detail={makeDetail({ related_file_path: 'outputs/drafts/chapter-3.md' })}
+        loading={false}
+        tokens={tokens}
+        onClose={mockOnClose}
+        onAskAgent={mockOnAskAgent}
+      />,
+    );
+
+    expect(screen.getByTestId('task-detail-related-file')).toBeTruthy();
+    expect(screen.getByText('outputs/drafts/chapter-3.md')).toBeTruthy();
+  });
+
+  it('does not render related file section when not linked', () => {
+    render(
+      <TaskDetailExpand
+        detail={makeDetail({ related_file_path: null })}
+        loading={false}
+        tokens={tokens}
+        onClose={mockOnClose}
+        onAskAgent={mockOnAskAgent}
+      />,
+    );
+
+    expect(screen.queryByTestId('task-detail-related-file')).toBeNull();
+  });
+
   it('renders subtasks when present', () => {
     const subtasks = [
       {

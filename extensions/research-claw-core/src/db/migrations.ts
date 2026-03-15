@@ -83,6 +83,14 @@ const MIGRATIONS: readonly Migration[] = [
     name: 'add_cron_state_schedule',
     sql: `ALTER TABLE rc_cron_state ADD COLUMN schedule TEXT;`,
   },
+  {
+    version: 6,
+    name: 'add_radar_scan_cache',
+    sql: [
+      `ALTER TABLE rc_radar_config ADD COLUMN last_scan_at TEXT;`,
+      `ALTER TABLE rc_radar_config ADD COLUMN last_scan_results TEXT;`,
+    ].join('\n'),
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────

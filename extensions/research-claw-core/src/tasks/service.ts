@@ -150,7 +150,7 @@ const PRESET_DEFINITIONS: Omit<CronPreset, 'enabled' | 'last_run_at' | 'next_run
   {
     id: 'weekly_report',
     name: 'Weekly Report',
-    description: 'Generate a weekly research progress report: papers read, tasks completed, key findings, and next week goals. Saved to workspace.',
+    description: 'Generate a weekly research progress report: papers read, tasks completed, key findings, and next week goals. Save with workspace_save("outputs/reports/weekly-report-YYYY-MM-DD.md").',
     schedule: '0 17 * * 5',
   },
 ];

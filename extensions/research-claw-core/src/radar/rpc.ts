@@ -1,10 +1,11 @@
 /**
  * Radar tracking config — RPC methods
  *
- * 3 methods:
+ * 4 methods:
  *   - rc.radar.config.get  → returns { keywords, authors, journals, sources }
  *   - rc.radar.config.set  → persists tracking config
- *   - rc.radar.scan        → scan sources for new papers
+ *   - rc.radar.scan        → scan sources for new papers (persists results to DB)
+ *   - rc.radar.lastScan    → returns cached results from last scan (no network)
  */
 
 import type { Database } from 'better-sqlite3';
@@ -68,7 +69,50 @@ function setConfig(db: Database, config: Partial<RadarConfig>): RadarConfig {
   return merged;
 }
 
+// ── Scan result cache helpers ────────────────────────────────────────
+
+function persistScanResults(db: Database, results: unknown[]): void {
+  try {
+    db.prepare(`
+      UPDATE rc_radar_config
+      SET last_scan_results = ?, last_scan_at = datetime('now')
+      WHERE id = 'default'
+    `).run(JSON.stringify(results));
+  } catch {
+    // Non-fatal — cache write failure shouldn't break scan
+  }
+}
+
+function getCachedScan(db: Database): { results: unknown[]; scanned_at: string | null } | null {
+  try {
+    const row = db.prepare(
+      'SELECT last_scan_results, last_scan_at FROM rc_radar_config WHERE id = ?',
+    ).get('default') as { last_scan_results: string | null; last_scan_at: string | null } | undefined;
+
+    if (!row?.last_scan_results) return null;
+
+    return {
+      results: JSON.parse(row.last_scan_results),
+      scanned_at: row.last_scan_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── Inline migration for existing DBs ────────────────────────────────
+
+function ensureCacheColumns(db: Database): void {
+  try { db.exec('ALTER TABLE rc_radar_config ADD COLUMN last_scan_at TEXT'); } catch { /* exists */ }
+  try { db.exec('ALTER TABLE rc_radar_config ADD COLUMN last_scan_results TEXT'); } catch { /* exists */ }
+}
+
+// ── RPC registration ─────────────────────────────────────────────────
+
 export function registerRadarRpc(registerMethod: RegisterMethod, db: Database): void {
+  // Ensure cache columns exist (idempotent for existing DBs)
+  ensureCacheColumns(db);
+
   // ── rc.radar.config.get ──────────────────────────────────────────
   registerMethod('rc.radar.config.get', (_params: Record<string, unknown>) => {
     return getConfig(db);
@@ -85,11 +129,28 @@ export function registerRadarRpc(registerMethod: RegisterMethod, db: Database): 
   });
 
   // ── rc.radar.scan ─────────────────────────────────────────────────
+  // Scans external sources (arXiv, Semantic Scholar) and persists results
+  // to rc_radar_config.last_scan_results for offline access via lastScan.
   registerMethod('rc.radar.scan', async (params: Record<string, unknown>) => {
     const options: ScanOptions = {};
     if (Array.isArray(params.keywords)) options.keywords = params.keywords.map(String);
     if (Array.isArray(params.sources)) options.sources = params.sources.map(String);
     if (typeof params.max_results === 'number') options.max_results = Math.min(params.max_results, 50);
-    return { results: await radarScan(db, options) };
+
+    const results = await radarScan(db, options);
+
+    // Persist results for next panel open (non-blocking, non-fatal)
+    persistScanResults(db, results);
+
+    return { results };
+  });
+
+  // ── rc.radar.lastScan ─────────────────────────────────────────────
+  // Returns the last cached scan results without triggering a new scan.
+  // Used by the dashboard to populate "Recent Discoveries" on panel open.
+  registerMethod('rc.radar.lastScan', (_params: Record<string, unknown>) => {
+    const cached = getCachedScan(db);
+    if (!cached) return { results: null, scanned_at: null };
+    return { results: cached.results, scanned_at: cached.scanned_at };
   });
 }

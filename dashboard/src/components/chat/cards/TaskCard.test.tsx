@@ -64,6 +64,16 @@ describe('TaskCard', () => {
     expect(screen.getByText('Attention Is All You Need')).toBeInTheDocument();
   });
 
+  it('renders related file path when provided', () => {
+    render(<TaskCard {...fullTask} related_file_path="outputs/drafts/review.md" />);
+    expect(screen.getByText('outputs/drafts/review.md')).toBeInTheDocument();
+  });
+
+  it('does not render related file when not provided', () => {
+    render(<TaskCard {...fullTask} />);
+    expect(screen.queryByText('card.task.relatedFile')).not.toBeInTheDocument();
+  });
+
   it('handles missing optional fields gracefully', () => {
     const minimal: TaskCardType = {
       type: 'task_card',
