@@ -448,6 +448,7 @@ function SectionHeader({
 
 export default function RadarPanel() {
   const { t, i18n } = useTranslation();
+  const { message } = App.useApp();
   const configTheme = useConfigStore((s) => s.theme);
   const tokens = useMemo(() => getThemeTokens(configTheme), [configTheme]);
   const send = useChatStore((s) => s.send);
@@ -516,18 +517,26 @@ export default function RadarPanel() {
 
   const handleRefresh = useCallback(async () => {
     if (!client?.isConnected) return;
+    if (!hasTrackingItems) {
+      message.info(t('radar.configureFirst', { defaultValue: 'Configure keywords or authors first — ask the agent to set up your radar.' }));
+      return;
+    }
     setScanning(true);
     setScanResults(null);
     try {
-      const result = await client.request<{ results: ScanResultItem[] }>('rc.radar.scan', {});
-      setScanResults(result.results);
+      const result = await client.request<{ results: ScanResultItem[]; errors?: string[] }>('rc.radar.scan', {});
+      if (result.errors && result.errors.length > 0 && (!result.results || result.results.length === 0)) {
+        message.warning(result.errors[0]);
+      } else {
+        setScanResults(result.results);
+      }
       setLastScanAt(new Date().toISOString());
     } catch (err) {
       console.error('[RadarPanel] scan failed:', err);
     } finally {
       setScanning(false);
     }
-  }, [client]);
+  }, [client, hasTrackingItems, t, message]);
 
   const handleEditViaChat = () => {
     send('Configure my research radar. I want to track:');
