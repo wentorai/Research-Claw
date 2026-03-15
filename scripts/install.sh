@@ -111,7 +111,7 @@ if [ "$RC_OS" = mac ]; then
     sudo rm -rf /Library/Developer/CommandLineTools 2>/dev/null || true
     sudo xcode-select --reset 2>/dev/null || true
     # Method 1: softwareupdate (non-interactive, works in curl|bash, more reliable on macOS 26+)
-    CLT_PKG="$(softwareupdate --list 2>&1 | grep -o 'Command Line Tools for Xcode[^"]*' | head -1 || true)"
+    CLT_PKG="$(softwareupdate --list 2>&1 | awk -F': ' '/Command Line Tools for Xcode/{print $2; exit}' | xargs || true)"
     if [ -n "$CLT_PKG" ]; then
       info "Downloading $CLT_PKG (this may take a few minutes)..."
       softwareupdate --install "$CLT_PKG" --agree-to-license 2>&1 | tail -3 || true
@@ -314,13 +314,20 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   git merge --abort 2>/dev/null || true
   git reset --hard HEAD 2>/dev/null || true
   if ! (git pull --rebase --autostash 2>/dev/null || git pull); then
-    die "git pull failed. Check your network connection or try: cd $INSTALL_DIR && git pull"
+    warn "git pull failed. Possible causes:"
+    warn "  - Network issue (try again later)"
+    warn "  - VPN/proxy interference (try disabling VPN or switching to direct connection)"
+    die "Update failed. Try manually: cd $INSTALL_DIR && git pull"
   fi
   ok "Updated"
 else
   info "Cloning to $INSTALL_DIR ..."
   if ! git clone --depth 1 "$REPO" "$INSTALL_DIR" 2>&1; then
-    die "Failed to clone repository. Check your network connection and try again."
+    warn "Failed to clone repository. Possible causes:"
+    warn "  - Network issue (GitHub unreachable)"
+    warn "  - VPN/proxy interference (try disabling VPN virtual adapter mode)"
+    warn "  - Firewall blocking GitHub"
+    die "Clone failed. Check your network and try again."
   fi
   cd "$INSTALL_DIR"
   ok "Cloned"
