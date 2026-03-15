@@ -137,7 +137,16 @@ install_node_fnm() {
   info "Installing Node.js $NODE_MIN via fnm..."
   if ! command -v fnm &>/dev/null; then
     local tmp; tmp="$(mktemp)"
-    curl -fsSL https://fnm.vercel.app/install -o "$tmp"
+    if ! curl -fsSL https://fnm.vercel.app/install -o "$tmp" 2>/dev/null; then
+      rm -f "$tmp"
+      warn "Failed to download fnm (fnm.vercel.app may be blocked)."
+      warn "Install Node.js $NODE_MIN manually, then re-run this script:"
+      if [ "$RC_OS" = mac ]; then
+        warn "  brew install node@$NODE_MIN"
+      fi
+      warn "Or set a proxy:  export HTTPS_PROXY=http://127.0.0.1:7890"
+      return 1
+    fi
     bash "$tmp" --install-dir "$HOME/.local/share/fnm" --skip-shell
     rm -f "$tmp"
     export PATH="$HOME/.local/share/fnm:$PATH"
@@ -206,7 +215,16 @@ ensure_node() {
 
   # Verify installation
   if ! command -v node &>/dev/null; then
-    die "Node.js installation failed. Install Node.js $NODE_MIN+ manually: https://nodejs.org"
+    warn "Node.js installation failed. This is usually a network issue (fnm.vercel.app blocked)."
+    warn "Install Node.js $NODE_MIN manually, then re-run this script:"
+    if [ "$RC_OS" = mac ]; then
+      warn "  brew install node@$NODE_MIN    # macOS (Homebrew)"
+    else
+      warn "  curl -fsSL https://deb.nodesource.com/setup_${NODE_MIN}.x | sudo -E bash -"
+      warn "  sudo apt-get install -y nodejs"
+    fi
+    warn "Or set a proxy:  export HTTPS_PROXY=http://127.0.0.1:7890"
+    die "Node.js $NODE_MIN+ is required but not found."
   fi
   NODE_V="$(node -v | sed 's/^v//' | cut -d. -f1)"
   if [ "$NODE_V" -lt "$NODE_MIN" ] 2>/dev/null; then
