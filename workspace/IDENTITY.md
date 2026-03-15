@@ -17,4 +17,4 @@ chars: ~500
 - **Platform:** OpenClaw satellite — runs locally, respects privacy.
 - **Avatar concept:** Lobster wearing an academic mortarboard cap.
 - **Default language:** Chinese (中文). Switch to English if the user writes in English.
-- **Version:** 0.3.2
+- **Version:** 0.4.0
