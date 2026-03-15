@@ -5,9 +5,14 @@
  * so that ProviderCapabilities (tool schema mode, thinking signatures, etc.)
  * and the automatic imageModel fallback logic work correctly.
  *
- * Sources:
+ * Sources (synced against OC v2026.3.12 — 2026-03-15):
  *   - openclaw/src/agents/provider-capabilities.ts (provider keys)
  *   - openclaw/src/agents/models-config.providers.static.ts (models & baseUrls)
+ *   - openclaw/src/agents/doubao-models.ts (Volcengine/Doubao models)
+ *   - openclaw/src/agents/byteplus-models.ts (BytePlus ARK models)
+ *   - openclaw/src/agents/volc-models.shared.ts (shared coding models)
+ *   - openclaw/src/agents/synthetic-models.ts (Synthetic 21 models)
+ *   - openclaw/src/agents/together-models.ts (Together AI 8 models)
  *   - openclaw/src/commands/auth-choice-options.ts (onboard choices)
  *   - openclaw/src/commands/onboard-auth.models.ts (model catalogs)
  */
@@ -73,10 +78,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'google',
     label: 'Google Gemini',
-    baseUrl: 'https://generativelanguage.googleapis.com',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     api: 'google-generative-ai',
     models: [
       { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', reasoning: true, input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 65_536 },
+      { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite', input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 65_536 },
       { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', reasoning: true, input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 65_536 },
       { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', reasoning: true, input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 65_536 },
     ],
@@ -93,9 +99,22 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'glm-5', name: 'GLM-5', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
       { id: 'glm-4.7', name: 'GLM-4.7', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
       { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.7-flashx', name: 'GLM-4.7 FlashX', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
       { id: 'glm-4.6v', name: 'GLM-4.6V (Vision)', input: ['text', 'image'], contextWindow: 8_192, maxTokens: 4_096 },
     ],
     urlPattern: /bigmodel\.cn|api\.z\.ai/i,
+  },
+  {
+    id: 'zai-coding',
+    label: 'Z.AI Coding / 智谱 Coding',
+    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    api: 'openai-completions',
+    models: [
+      { id: 'glm-5', name: 'GLM-5 Coding', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.7', name: 'GLM-4.7 Coding', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash Coding', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+    ],
+    urlPattern: /bigmodel\.cn\/api\/coding|z\.ai\/api\/coding/i,
   },
   {
     id: 'moonshot',
@@ -127,7 +146,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
     ],
-    urlPattern: /minimax\.io/i,
+    urlPattern: /minimax\.(io|com)/i,
   },
   {
     id: 'volcengine',
@@ -136,10 +155,27 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     api: 'openai-completions',
     models: [
       { id: 'doubao-seed-1-8-251228', name: 'Doubao Seed 1.8', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 4_096 },
+      { id: 'doubao-seed-code-preview-251028', name: 'Doubao Seed Code Preview', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 4_096 },
       { id: 'kimi-k2-5-260127', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 4_096 },
       { id: 'glm-4-7-251222', name: 'GLM 4.7', input: ['text', 'image'], contextWindow: 200_000, maxTokens: 4_096 },
+      { id: 'deepseek-v3-2-251201', name: 'DeepSeek V3.2', input: ['text', 'image'], contextWindow: 128_000, maxTokens: 4_096 },
     ],
-    urlPattern: /volces\.com/i,
+    urlPattern: /volces\.com\/api\/v3/i,
+  },
+  {
+    id: 'volcengine-plan',
+    label: 'Volcengine Coding / 豆包 Coding',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+    api: 'openai-completions',
+    models: [
+      { id: 'ark-code-latest', name: 'Ark Coding Plan', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+      { id: 'doubao-seed-code', name: 'Doubao Seed Code', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+      { id: 'glm-4.7', name: 'GLM 4.7 Coding', input: ['text'], contextWindow: 200_000, maxTokens: 4_096 },
+      { id: 'kimi-k2-thinking', name: 'Kimi K2 Thinking', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+      { id: 'kimi-k2.5', name: 'Kimi K2.5 Coding', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+      { id: 'doubao-seed-code-preview-251028', name: 'Doubao Seed Code Preview', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+    ],
+    urlPattern: /volces\.com\/api\/coding/i,
   },
   {
     id: 'byteplus',
@@ -151,7 +187,21 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'kimi-k2-5-260127', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 4_096 },
       { id: 'glm-4-7-251222', name: 'GLM 4.7', input: ['text', 'image'], contextWindow: 200_000, maxTokens: 4_096 },
     ],
-    urlPattern: /bytepluses\.com/i,
+    urlPattern: /bytepluses\.com\/api\/v3/i,
+  },
+  {
+    id: 'byteplus-plan',
+    label: 'BytePlus Coding',
+    baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/coding/v3',
+    api: 'openai-completions',
+    models: [
+      { id: 'ark-code-latest', name: 'Ark Coding Plan', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+      { id: 'doubao-seed-code', name: 'Doubao Seed Code', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+      { id: 'glm-4.7', name: 'GLM 4.7 Coding', input: ['text'], contextWindow: 200_000, maxTokens: 4_096 },
+      { id: 'kimi-k2-thinking', name: 'Kimi K2 Thinking', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+      { id: 'kimi-k2.5', name: 'Kimi K2.5 Coding', input: ['text'], contextWindow: 256_000, maxTokens: 4_096 },
+    ],
+    urlPattern: /bytepluses\.com\/api\/coding/i,
   },
   {
     id: 'qianfan',
@@ -173,8 +223,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'qwen3.5-plus', name: 'Qwen 3.5 Plus', input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 65_536 },
       { id: 'qwen3-coder-plus', name: 'Qwen 3 Coder Plus', input: ['text'], contextWindow: 1_000_000, maxTokens: 65_536 },
       { id: 'qwen3-coder-next', name: 'Qwen 3 Coder Next', input: ['text'], contextWindow: 262_144, maxTokens: 65_536 },
+      { id: 'qwen3-max-2026-01-23', name: 'Qwen 3 Max', input: ['text'], contextWindow: 262_144, maxTokens: 65_536 },
       { id: 'kimi-k2.5', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 262_144, maxTokens: 32_768 },
       { id: 'glm-5', name: 'GLM-5', input: ['text'], contextWindow: 202_752, maxTokens: 16_384 },
+      { id: 'glm-4.7', name: 'GLM-4.7', input: ['text'], contextWindow: 202_752, maxTokens: 16_384 },
+      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', input: ['text'], contextWindow: 1_000_000, maxTokens: 65_536 },
     ],
     urlPattern: /dashscope\.aliyuncs\.com/i,
   },
@@ -188,6 +241,17 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     ],
     urlPattern: /xiaomimimo\.com/i,
   },
+  {
+    id: 'qwen-portal',
+    label: 'Qwen Portal / 通义千问',
+    baseUrl: 'https://portal.qwen.ai/v1',
+    api: 'openai-completions',
+    models: [
+      { id: 'coder-model', name: 'Qwen Coder', input: ['text'], contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'vision-model', name: 'Qwen Vision', input: ['text', 'image'], contextWindow: 128_000, maxTokens: 8_192 },
+    ],
+    urlPattern: /portal\.qwen\.ai/i,
+  },
 
   // ── Tier 3: International providers ──
   {
@@ -195,7 +259,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     api: 'openai-completions',
-    models: [],
+    models: [
+      { id: 'auto', name: 'OpenRouter Auto', input: ['text', 'image'], contextWindow: 200_000, maxTokens: 8_192 },
+    ],
     urlPattern: /openrouter\.ai/i,
   },
   {
@@ -225,9 +291,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     api: 'openai-completions',
     models: [
       { id: 'moonshotai/Kimi-K2.5', name: 'Kimi K2.5', reasoning: true, input: ['text', 'image'], contextWindow: 262_144, maxTokens: 32_768 },
+      { id: 'zai-org/GLM-4.7', name: 'GLM 4.7 FP8', input: ['text'], contextWindow: 202_752, maxTokens: 8_192 },
       { id: 'deepseek-ai/DeepSeek-R1', name: 'DeepSeek R1', reasoning: true, input: ['text'], contextWindow: 131_072, maxTokens: 8_192 },
       { id: 'deepseek-ai/DeepSeek-V3.1', name: 'DeepSeek V3.1', input: ['text'], contextWindow: 131_072, maxTokens: 8_192 },
+      { id: 'moonshotai/Kimi-K2-Instruct-0905', name: 'Kimi K2 Instruct', input: ['text'], contextWindow: 262_144, maxTokens: 8_192 },
       { id: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', name: 'Llama 4 Maverick', input: ['text', 'image'], contextWindow: 20_000_000, maxTokens: 32_768 },
+      { id: 'meta-llama/Llama-4-Scout-17B-16E-Instruct', name: 'Llama 4 Scout', input: ['text', 'image'], contextWindow: 10_000_000, maxTokens: 32_768 },
+      { id: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', name: 'Llama 3.3 70B Turbo', input: ['text'], contextWindow: 131_072, maxTokens: 8_192 },
     ],
     urlPattern: /together\.xyz/i,
   },
@@ -252,6 +322,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     models: [
       { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Llama 3.1 Nemotron 70B', input: ['text'], contextWindow: 131_072, maxTokens: 4_096 },
       { id: 'meta/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B', input: ['text'], contextWindow: 131_072, maxTokens: 4_096 },
+      { id: 'nvidia/mistral-nemo-minitron-8b-8k-instruct', name: 'Mistral NeMo Minitron 8B', input: ['text'], contextWindow: 8_192, maxTokens: 2_048 },
     ],
     urlPattern: /nvidia\.com/i,
   },
@@ -274,7 +345,25 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     models: [
       { id: 'hf:MiniMaxAI/MiniMax-M2.5', name: 'MiniMax M2.5', input: ['text'], contextWindow: 192_000, maxTokens: 65_536 },
       { id: 'hf:moonshotai/Kimi-K2.5', name: 'Kimi K2.5', reasoning: true, input: ['text', 'image'], contextWindow: 256_000, maxTokens: 8_192 },
+      { id: 'hf:moonshotai/Kimi-K2-Thinking', name: 'Kimi K2 Thinking', reasoning: true, input: ['text'], contextWindow: 256_000, maxTokens: 8_192 },
       { id: 'hf:zai-org/GLM-5', name: 'GLM-5', reasoning: true, input: ['text', 'image'], contextWindow: 256_000, maxTokens: 128_000 },
+      { id: 'hf:zai-org/GLM-4.7', name: 'GLM-4.7', input: ['text'], contextWindow: 198_000, maxTokens: 128_000 },
+      { id: 'hf:zai-org/GLM-4.6', name: 'GLM-4.6', input: ['text'], contextWindow: 198_000, maxTokens: 128_000 },
+      { id: 'hf:zai-org/GLM-4.5', name: 'GLM-4.5', input: ['text'], contextWindow: 128_000, maxTokens: 128_000 },
+      { id: 'hf:deepseek-ai/DeepSeek-V3.2', name: 'DeepSeek V3.2', input: ['text'], contextWindow: 159_000, maxTokens: 8_192 },
+      { id: 'hf:deepseek-ai/DeepSeek-V3.1', name: 'DeepSeek V3.1', input: ['text'], contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'hf:deepseek-ai/DeepSeek-V3.1-Terminus', name: 'DeepSeek V3.1 Terminus', input: ['text'], contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'hf:deepseek-ai/DeepSeek-V3', name: 'DeepSeek V3', input: ['text'], contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'hf:deepseek-ai/DeepSeek-V3-0324', name: 'DeepSeek V3 0324', input: ['text'], contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'hf:deepseek-ai/DeepSeek-R1-0528', name: 'DeepSeek R1 0528', input: ['text'], contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'hf:Qwen/Qwen3-Coder-480B-A35B-Instruct', name: 'Qwen3 Coder 480B', input: ['text'], contextWindow: 256_000, maxTokens: 8_192 },
+      { id: 'hf:Qwen/Qwen3-235B-A22B-Thinking-2507', name: 'Qwen3 235B Thinking', reasoning: true, input: ['text'], contextWindow: 256_000, maxTokens: 8_192 },
+      { id: 'hf:Qwen/Qwen3-235B-A22B-Instruct-2507', name: 'Qwen3 235B Instruct', input: ['text'], contextWindow: 256_000, maxTokens: 8_192 },
+      { id: 'hf:Qwen/Qwen3-VL-235B-A22B-Instruct', name: 'Qwen3 VL 235B (Vision)', input: ['text', 'image'], contextWindow: 250_000, maxTokens: 8_192 },
+      { id: 'hf:openai/gpt-oss-120b', name: 'GPT OSS 120B', input: ['text'], contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'hf:moonshotai/Kimi-K2-Instruct-0905', name: 'Kimi K2 Instruct', input: ['text'], contextWindow: 256_000, maxTokens: 8_192 },
+      { id: 'hf:meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', name: 'Llama 4 Maverick', input: ['text', 'image'], contextWindow: 524_000, maxTokens: 8_192 },
+      { id: 'hf:meta-llama/Llama-3.3-70B-Instruct', name: 'Llama 3.3 70B', input: ['text'], contextWindow: 128_000, maxTokens: 8_192 },
     ],
     urlPattern: /synthetic\.new/i,
   },
@@ -287,6 +376,14 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'kilo/auto', name: 'Kilo Auto', reasoning: true, input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 128_000 },
     ],
     urlPattern: /kilo\.ai/i,
+  },
+  {
+    id: 'litellm',
+    label: 'LiteLLM Gateway',
+    baseUrl: 'http://127.0.0.1:4000/v1',
+    api: 'openai-completions',
+    models: [],
+    urlPattern: /litellm|:4000\/v1/i,
   },
 
   // ── Tier 4: Self-hosted / local ──
