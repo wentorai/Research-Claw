@@ -189,19 +189,24 @@ install_node_fnm() {
   local PROFILE_WRITTEN=false
   for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
     if [ -f "$p" ] && ! grep -q 'fnm env' "$p" 2>/dev/null; then
-      printf '%s' "$FNM_SNIPPET" >> "$p"
-      PROFILE_WRITTEN=true
-      break
+      if printf '%s' "$FNM_SNIPPET" >> "$p" 2>/dev/null; then
+        PROFILE_WRITTEN=true
+        break
+      fi
     fi
   done
   if ! $PROFILE_WRITTEN; then
-    # No existing profile — create one for the user's current shell
+    # No existing profile or all read-only — try creating for the user's shell
     local SHELL_RC="$HOME/.bashrc"
     case "$(basename "${SHELL:-/bin/bash}")" in
       zsh) SHELL_RC="$HOME/.zshrc" ;;
     esac
-    printf '%s' "$FNM_SNIPPET" >> "$SHELL_RC"
-    info "Created $SHELL_RC with fnm configuration"
+    if ! printf '%s' "$FNM_SNIPPET" >> "$SHELL_RC" 2>/dev/null; then
+      warn "Could not write to $SHELL_RC (permission denied). fnm works for this session"
+      warn "but won't persist. Fix with: chmod u+w $SHELL_RC"
+    else
+      info "Created $SHELL_RC with fnm configuration"
+    fi
   fi
 }
 
