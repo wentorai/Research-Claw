@@ -184,6 +184,17 @@ CREATE TABLE IF NOT EXISTS rc_agent_notifications (
   read       INTEGER NOT NULL DEFAULT 0
 );`;
 
+const RC_CRON_STATE = `
+CREATE TABLE IF NOT EXISTS rc_cron_state (
+  preset_id      TEXT PRIMARY KEY,
+  enabled        INTEGER NOT NULL DEFAULT 0,
+  config         TEXT NOT NULL DEFAULT '{}',
+  last_run_at    TEXT,
+  next_run_at    TEXT,
+  gateway_job_id TEXT,
+  schedule       TEXT
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -201,6 +212,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   RC_ACTIVITY_LOG,
   RC_RADAR_CONFIG,
   RC_AGENT_NOTIFICATIONS,
+  RC_CRON_STATE,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
