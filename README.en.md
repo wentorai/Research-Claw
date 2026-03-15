@@ -277,7 +277,7 @@ No need to clone — one command to run (replace ^ with \ if you are using MacOS
 docker pull ghcr.io/wentorai/research-claw:latest
 
 docker run -d --name research-claw ^
-  -p 28789:28789 ^
+  -p 127.0.0.1:28789:28789 ^
   -v rc-config:/app/config ^
   -v rc-data:/root/.research-claw ^
   -v rc-workspace:/app/workspace ^
@@ -329,6 +329,34 @@ Go to **Setup Wizard** → enter your API key → start using.
 > **Persistence**: database, config, and workspace are stored in named volumes (`rc-config`, `rc-data`, `rc-workspace`) — data survives container restarts and removal.
 >
 > **Proxy**: If your LLM API (e.g. OpenAI) requires a proxy, uncomment the `HTTP_PROXY` / `HTTPS_PROXY` lines under `environment` in `docker-compose.yml` and set to `http://host.docker.internal:7890` (standard Docker-to-host address).
+
+#### 5. Can't connect?
+
+If the page is blank or shows a connection error:
+
+**① Verify the port is reachable** (run on the host machine, use PowerShell on Windows):
+
+```bash
+curl http://127.0.0.1:28789/healthz
+```
+
+If it returns `{"ok":true,"status":"live"}`, the gateway is running — go to step ②.
+If it fails (connection refused / timeout), Docker port forwarding is broken — restart Docker Desktop and retry.
+
+**② Use `127.0.0.1`, not `localhost`**
+
+```
+http://127.0.0.1:28789/?token=research-claw
+```
+
+> On Windows, `localhost` may resolve to IPv6 (`::1`) while Docker only binds IPv4 (`0.0.0.0`). Using `127.0.0.1` forces IPv4 and avoids this issue.
+
+**③ Still not working?**
+
+- Check if Windows Defender Firewall is blocking port 28789
+- Confirm Docker Desktop shows **Running** (not Paused / Stopping)
+- Verify the container is green in Docker Desktop → Containers
+- Try `docker restart research-claw` then reload the page
 
 ### Commands
 

@@ -52,8 +52,16 @@ docker compose up -d --build
 
 ### 4. 使用
 
-浏览器打开 `http://127.0.0.1:28789`，在 **Setup Wizard** 中填入 API Key，即可使用。
+浏览器打开：
 
+```
+http://127.0.0.1:28789/?token=research-claw
+```
+
+在 **Setup Wizard** 中填入 API Key，即可使用。
+
+> **Token 认证**：Docker 模式使用 token 认证。默认 token 为 `research-claw`，可通过 `-e OPENCLAW_GATEWAY_TOKEN=your-token` 自定义。
+>
 > **数据持久化**：数据库、配置、工作区存储在 Docker 具名 volume 中，即使容器删除数据也不丢失。
 
 ### Docker 常用操作
@@ -341,6 +349,9 @@ Environment=HTTPS_PROXY=http://127.0.0.1:7890
 ---
 
 ## FAQ
+
+**Q: Docker 启动后浏览器打不开 Dashboard？**
+先在 PowerShell 中运行 `curl http://127.0.0.1:28789/healthz`。如果返回 `{"ok":true,"status":"live"}`，说明 gateway 正常，用 `http://127.0.0.1:28789/?token=research-claw` 访问（注意用 `127.0.0.1`，不要用 `localhost`——Windows 上 `localhost` 可能解析到 IPv6 而 Docker 只绑定了 IPv4）。如果 curl 也报错，重启 Docker Desktop 再试。
 
 **Q: Docker 和 WSL2 应该选哪个？**
 Docker Desktop 更简单，一条命令启动，不需要管理 Node.js 版本和依赖。WSL2 适合需要修改源码或进行插件开发的用户。

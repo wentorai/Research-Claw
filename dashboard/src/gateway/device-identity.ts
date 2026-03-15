@@ -131,8 +131,15 @@ let cached: DeviceIdentity | null = null;
  * The Ed25519 key pair is persisted in localStorage so the device ID
  * survives page reloads and browser restarts.
  */
-export async function getDeviceIdentity(): Promise<DeviceIdentity> {
+export async function getDeviceIdentity(): Promise<DeviceIdentity | null> {
   if (cached) return cached;
+
+  // Web Crypto API is only available in secure contexts (HTTPS, localhost, 127.0.0.1).
+  // When accessing the Dashboard via a LAN IP over HTTP, crypto.subtle is undefined.
+  // In this case, return null so the client can fall back to token-only auth.
+  if (!globalThis.crypto?.subtle) {
+    return null;
+  }
 
   // Try to restore an existing identity
   try {

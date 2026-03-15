@@ -277,7 +277,7 @@ Windows 用户推荐用 Docker Desktop，无需安装 WSL2 或 Node.js。macOS /
 docker pull ghcr.io/wentorai/research-claw:latest
 
 docker run -d --name research-claw ^
-  -p 28789:28789 ^
+  -p 127.0.0.1:28789:28789 ^
   -v rc-config:/app/config ^
   -v rc-data:/root/.research-claw ^
   -v rc-workspace:/app/workspace ^
@@ -330,6 +330,34 @@ http://127.0.0.1:28789/?token=research-claw
 > **数据持久化**：数据库、配置、工作区均挂载在具名 volume（`rc-config`、`rc-data`、`rc-workspace`），容器删除后数据不丢失。
 >
 > **代理设置**：如果你的 LLM API（如 OpenAI）需要代理访问，取消 `docker-compose.yml` 中 `environment` 下 `HTTP_PROXY` / `HTTPS_PROXY` 行的注释，填入 `http://host.docker.internal:7890`（Docker 容器访问宿主机代理的标准地址）。
+
+#### 5. 连接不上？
+
+如果浏览器打开后页面空白或提示无法连接：
+
+**① 验证端口是否可达**（在宿主机终端执行，Windows 用 PowerShell）：
+
+```bash
+curl http://127.0.0.1:28789/healthz
+```
+
+返回 `{"ok":true,"status":"live"}` 说明 gateway 正常运行且端口可达，跳到步骤 ②。
+如果报错（连接被拒绝 / 超时），说明 Docker 端口转发异常——重启 Docker Desktop 后重试。
+
+**② 使用 `127.0.0.1`，不要用 `localhost`**
+
+```
+http://127.0.0.1:28789/?token=research-claw
+```
+
+> Windows 上 `localhost` 可能解析到 IPv6 (`::1`)，而 Docker 容器仅绑定 IPv4 (`0.0.0.0`)，导致连接失败。`127.0.0.1` 强制使用 IPv4，避免此问题。
+
+**③ 仍然不行？**
+
+- 检查 Windows Defender 防火墙是否阻断了 28789 端口
+- 确认 Docker Desktop 状态栏显示 **Running**（非 Paused / Stopping）
+- 在 Docker Desktop → Containers 中确认容器状态为绿色
+- 尝试 `docker restart research-claw` 后再访问
 
 ### 常用命令
 

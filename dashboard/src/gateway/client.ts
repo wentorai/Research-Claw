@@ -198,12 +198,21 @@ export class GatewayClient {
     const challengePayload = frame.payload as { nonce?: string; ts?: number } | undefined;
     const nonce = challengePayload?.nonce ?? '';
 
-    // Obtain (or generate) a stable Ed25519 device identity
+    // Obtain (or generate) a stable Ed25519 device identity.
+    // Returns null in insecure contexts (HTTP on non-localhost) where crypto.subtle
+    // is unavailable. In that case, fall back to token-only auth if a token exists.
     let identity;
     try {
       identity = await getDeviceIdentity();
     } catch (e) {
-      console.error('[GatewayClient] Device identity generation failed:', e);
+      console.warn('[GatewayClient] Device identity generation failed:', e);
+      identity = null;
+    }
+
+    // No device identity AND no token → cannot authenticate at all
+    if (!identity && !this.opts.token) {
+      console.error('[GatewayClient] No device identity and no token — cannot authenticate. '
+        + 'Access via https:// or http://localhost to enable device auth, or provide a token.');
       this.reconnector.cancel();
       this.ws?.close(1000, 'device identity unavailable');
       this.setState('disconnected');
@@ -221,28 +230,41 @@ export class GatewayClient {
     const token = this.opts.token ?? '';
     const platform = this.opts.platform ?? 'browser';
 
-    // Build v3 signature payload
-    const sigPayload = buildV3Payload({
-      deviceId: identity.deviceId,
-      clientId,
-      clientMode,
-      role,
-      scopes,
-      signedAt,
-      token,
-      nonce,
-      platform,
-      deviceFamily: '',
-    });
+    // Build device auth fields only when identity is available
+    let deviceField: Record<string, unknown> | undefined;
+    if (identity) {
+      const sigPayload = buildV3Payload({
+        deviceId: identity.deviceId,
+        clientId,
+        clientMode,
+        role,
+        scopes,
+        signedAt,
+        token,
+        nonce,
+        platform,
+        deviceFamily: '',
+      });
 
-    let signature: string;
-    try {
-      signature = await identity.sign(sigPayload);
-    } catch {
-      this.reconnector.cancel();
-      this.ws?.close(1000, 'device signature failed');
-      this.setState('disconnected');
-      return;
+      let signature: string;
+      try {
+        signature = await identity.sign(sigPayload);
+      } catch {
+        this.reconnector.cancel();
+        this.ws?.close(1000, 'device signature failed');
+        this.setState('disconnected');
+        return;
+      }
+
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+      deviceField = {
+        id: identity.deviceId,
+        publicKey: identity.publicKey,
+        signature,
+        signedAt,
+        nonce,
+      };
     }
 
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
@@ -265,13 +287,7 @@ export class GatewayClient {
         role,
         scopes,
         ...(token ? { auth: { token } } : {}),
-        device: {
-          id: identity.deviceId,
-          publicKey: identity.publicKey,
-          signature,
-          signedAt,
-          nonce,
-        },
+        ...(deviceField ? { device: deviceField } : {}),
       },
     };
 
