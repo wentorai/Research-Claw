@@ -93,6 +93,26 @@ function merge(target, source) {
   return result;
 }
 
+// --- Fix channels: ensure commands.native=false for all existing channels ---
+// RC registers 529 commands, which exceeds every IM channel's command menu limit.
+// Without this, Telegram (and others) enter a BOT_COMMANDS_TOO_MUCH retry loop
+// that blocks message processing for 15+ minutes.
+let projectChanged = false;
+if (project.channels) {
+  for (const [name, ch] of Object.entries(project.channels)) {
+    if (name === 'defaults' || typeof ch !== 'object' || ch === null) continue;
+    if (!ch.commands) ch.commands = {};
+    if (ch.commands.native !== false) {
+      ch.commands.native = false;
+      projectChanged = true;
+    }
+  }
+  if (projectChanged) {
+    fs.writeFileSync(PROJECT_CONFIG, JSON.stringify(project, null, 2) + '\n');
+    console.log('[sync] Fixed channels.*.commands.native=false in project config');
+  }
+}
+
 // --- Build RC overlay with absolute paths ---
 const overlay = JSON.parse(JSON.stringify(project)); // deep clone
 
