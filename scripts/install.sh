@@ -552,8 +552,8 @@ printf "  ${B}Location:${N}   $INSTALL_DIR\n"
 printf "  ${B}Start:${N}      cd $INSTALL_DIR && pnpm serve\n"
 printf "  ${B}Plugins:${N}    cd $INSTALL_DIR && npx openclaw plugins install <name>\n"
 printf "  ${B}Update:${N}     curl -fsSL https://wentor.ai/install.sh | bash\n\n"
-printf "  ${Y}NOTE:${N} The gateway log may show port ${D}28791${N} (browser automation).\n"
-printf "        ${B}Ignore it${N} — your Dashboard is always at ${C}http://127.0.0.1:$PORT${N}\n\n"
+printf "  ${Y}TIP:${N}  Use ${B}Chrome${N} or ${B}Edge${N} for the best experience.\n"
+printf "        Safari may have compatibility issues with the Dashboard.\n\n"
 printf "  ${B}Need help?${N} ${D}${ISSUES_URL}${N}\n\n"
 
 if [ "${SKIP_START:-0}" = "1" ]; then
