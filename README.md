@@ -273,7 +273,9 @@ irm https://wentor.ai/docker-install.ps1 | iex
 > 脚本自动完成：检测 Docker → 停止/删除旧容器 → 拉取最新镜像 → 启动 → 打开浏览器。
 > 重复运行即可更新到最新版本，数据不丢失（持久化在 Docker named volumes 中）。
 
-安装完成后浏览器自动打开 `http://127.0.0.1:28789`，在 **Setup Wizard** 中配置 API Key，无需编辑任何配置文件。
+安装完成后浏览器自动打开 Dashboard，在 **Setup Wizard** 中配置 API Key，无需编辑任何配置文件。
+
+> 源码安装访问 `http://127.0.0.1:28789`（自动设备认证）。Docker 安装访问 `http://127.0.0.1:28789/?token=research-claw`（脚本会自动打开正确地址）。
 
 <details>
 <summary><b>手动安装 / 大陆网络 / 故障排查</b></summary>
@@ -309,11 +311,18 @@ docker compose up -d --build
 
 #### Docker 详细说明
 
-> **Token 认证**：Docker 模式使用 token 认证。默认 token 为 `research-claw`，直接访问 `http://127.0.0.1:28789/?token=research-claw`。自定义：`docker run -e OPENCLAW_GATEWAY_TOKEN=your-token ...`
+> **Token 认证**：Docker 模式使用 token 认证（容器内无法完成浏览器设备配对）。默认 token 为 `research-claw`，访问 `http://127.0.0.1:28789/?token=research-claw`。如需自定义 token，先删除旧容器再手动启动：
+> ```bash
+> docker stop research-claw && docker rm research-claw
+> docker run -d --name research-claw -p 127.0.0.1:28789:28789 \
+>   -e OPENCLAW_GATEWAY_TOKEN=your-token \
+>   -v rc-config:/app/config -v rc-data:/root/.research-claw -v rc-workspace:/app/workspace \
+>   ghcr.io/wentorai/research-claw:latest
+> ```
 >
 > **数据持久化**：配置、数据库、工作区挂载在具名 volume（`rc-config`、`rc-data`、`rc-workspace`），容器删除后数据不丢失。
 >
-> **代理设置**：LLM API 需要代理时，在 `docker-compose.yml` 中取消 `HTTP_PROXY` / `HTTPS_PROXY` 注释，填入 `http://host.docker.internal:7890`。
+> **LLM API 代理**：如果你的 LLM API（如 OpenAI）需要代理访问，在 Docker Desktop → Settings → Resources → Proxies 中配置 HTTP/HTTPS 代理即可。本地构建用户也可在 `docker-compose.yml` 中取消 `HTTP_PROXY` / `HTTPS_PROXY` 注释。
 
 </details>
 
