@@ -339,7 +339,7 @@ describe('Sessions store edge cases', () => {
     expect(useSessionsStore.getState().sessions).toEqual([]);
   });
 
-  it('loadSessions with multiple sessions populates list', async () => {
+  it('loadSessions with multiple sessions populates list and injects main', async () => {
     const { useSessionsStore } = await import('../stores/sessions');
     const sessions = [
       { key: 's1', updatedAt: 1704067200 },
@@ -350,7 +350,9 @@ describe('Sessions store edge cases', () => {
 
     await useSessionsStore.getState().loadSessions();
 
-    expect(useSessionsStore.getState().sessions).toHaveLength(3);
+    // 3 server sessions + 1 injected main session
+    expect(useSessionsStore.getState().sessions).toHaveLength(4);
+    expect(useSessionsStore.getState().sessions[0].key).toBe('main');
     expect(useSessionsStore.getState().loading).toBe(false);
   });
 

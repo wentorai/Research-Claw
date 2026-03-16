@@ -753,46 +753,55 @@ describe('Sessions store RPC parity (sessions.*)', () => {
       expect(labeledSession.displayName).toBe('Literature Review Sprint');
     });
 
-    it('handles empty sessions response', async () => {
+    it('handles empty sessions response by injecting main session', async () => {
+      // Even when gateway returns no sessions, the main session is always injected
       mockGatewayClient.request.mockResolvedValueOnce(SESSIONS_LIST_EMPTY_RESPONSE);
 
       await useSessionsStore.getState().loadSessions();
 
-      expect(useSessionsStore.getState().sessions).toEqual([]);
+      expect(useSessionsStore.getState().sessions).toEqual([{ key: 'main' }]);
       expect(useSessionsStore.getState().loading).toBe(false);
     });
 
-    it('handles missing sessions key in response', async () => {
-      // Source: sessions.ts:73 — result.sessions ?? []
+    it('handles missing sessions key by injecting main session', async () => {
+      // Source: sessions.ts — result.sessions ?? [] + main session guarantee
       mockGatewayClient.request.mockResolvedValueOnce({});
 
       await useSessionsStore.getState().loadSessions();
 
-      expect(useSessionsStore.getState().sessions).toEqual([]);
+      expect(useSessionsStore.getState().sessions).toEqual([{ key: 'main' }]);
     });
   });
 
   describe('createSession', () => {
-    it('generates a project-prefixed key and adds placeholder', async () => {
-      // Source: sessions.ts:91-105 — key = `project-${uuid.slice(0,8)}`
-      // OpenClaw sessions are implicit — no RPC call needed for creation
+    it('generates a project-prefixed key with meaningful label and adds placeholder', async () => {
+      // Source: sessions.ts — key = `project-${uuid.slice(0,8)}`, label = "Session N"
+      // OpenClaw sessions are implicit — created on first chat.send with a new sessionKey.
+      // Label is persisted via sessions.patch so it survives refresh.
+      mockGatewayClient.request.mockResolvedValueOnce({});
 
       const key = await useSessionsStore.getState().createSession();
 
       expect(key).toMatch(/^project-[a-f0-9]{8}$/);
       expect(useSessionsStore.getState().sessions).toHaveLength(1);
       expect(useSessionsStore.getState().sessions[0].key).toBe(key);
+      expect(useSessionsStore.getState().sessions[0].label).toBe('Session 1');
       expect(useSessionsStore.getState().activeSessionKey).toBe(key);
 
       // Should switch chat store to new session
       expect(mockSetSessionKey).toHaveBeenCalledWith(key);
     });
 
-    it('does NOT call any gateway RPC for creation', async () => {
-      // OpenClaw sessions are implicit — created on first chat.send
-      await useSessionsStore.getState().createSession();
+    it('persists label via sessions.patch RPC', async () => {
+      // Label is fire-and-forget persisted to the gateway so it survives refresh
+      mockGatewayClient.request.mockResolvedValueOnce({});
 
-      expect(mockGatewayClient.request).not.toHaveBeenCalled();
+      const key = await useSessionsStore.getState().createSession();
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith('sessions.patch', {
+        key,
+        label: 'Session 1',
+      });
     });
   });
 

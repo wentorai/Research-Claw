@@ -83,7 +83,12 @@ export default function TopBar() {
       }}
     >
       {/* Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <a
+        href="https://wentor.ai/"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}
+      >
         <span style={{ fontSize: 18, lineHeight: 1 }}>{'\u{1F99E}'}</span>
         <span
           style={{
@@ -96,7 +101,7 @@ export default function TopBar() {
         >
           {t('app.name')}
         </span>
-      </div>
+      </a>
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />

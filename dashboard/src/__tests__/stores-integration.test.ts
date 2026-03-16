@@ -415,13 +415,14 @@ describe('Sessions store integration', () => {
     });
   });
 
-  it('loadSessions with empty response sets empty array', async () => {
+  it('loadSessions with empty response injects main session', async () => {
     const { useSessionsStore } = await import('../stores/sessions');
     mockGatewayClient.request.mockResolvedValueOnce({ sessions: [] });
 
     await useSessionsStore.getState().loadSessions();
 
-    expect(useSessionsStore.getState().sessions).toEqual([]);
+    // Main session is always guaranteed to be present
+    expect(useSessionsStore.getState().sessions).toEqual([{ key: 'main' }]);
     expect(useSessionsStore.getState().loading).toBe(false);
   });
 
@@ -432,8 +433,8 @@ describe('Sessions store integration', () => {
 
     await useSessionsStore.getState().loadSessions();
 
-    // The store uses `result.sessions ?? []` so null becomes []
-    expect(useSessionsStore.getState().sessions).toEqual([]);
+    // The store uses `result.sessions ?? []` so null becomes [], then main is injected
+    expect(useSessionsStore.getState().sessions).toEqual([{ key: 'main' }]);
   });
 
   it('createSession generates a valid UUID and sets it as active', async () => {

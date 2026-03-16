@@ -71,6 +71,11 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
         includeDerivedTitles: true,
       });
       const serverSessions = result.sessions ?? [];
+      // Ensure the main session is always present in the list
+      const hasMain = serverSessions.some((s) => isMain(s.key));
+      if (!hasMain) {
+        serverSessions.unshift({ key: MAIN_SESSION_KEY });
+      }
       set({ sessions: serverSessions, loading: false });
     } catch {
       set({ loading: false });
@@ -93,13 +98,30 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     // OpenClaw sessions are implicit — created on first chat.send with a new sessionKey.
     // Use a short readable key (not UUID) since OpenClaw prepends "agent:main:".
     const key = `project-${crypto.randomUUID().slice(0, 8)}`;
+
+    // Generate a meaningful default label: "Session N" with auto-incrementing number
+    const existing = get().sessions;
+    const usedNumbers = existing
+      .filter((s) => !isMain(s.key))
+      .map((s) => {
+        const m = (s.label || s.key).match(/(?:Session|项目)\s*(\d+)/);
+        return m ? parseInt(m[1], 10) : 0;
+      });
+    const nextNumber = Math.max(0, ...usedNumbers) + 1;
+    const label = `Session ${nextNumber}`;
+
     // Add placeholder to local list so it appears in the dropdown immediately
-    const placeholder: Session = { key };
+    const placeholder: Session = { key, label };
     set((s) => ({
       sessions: [placeholder, ...s.sessions],
       activeSessionKey: key,
     }));
     persistKey(key);
+    // Persist the label to the gateway so it survives refresh
+    const client = useGatewayStore.getState().client;
+    if (client?.isConnected) {
+      client.request('sessions.patch', { key, label })?.catch(() => {});
+    }
     // Switch chat store to new empty session
     useChatStore.getState().setSessionKey(key);
     return key;

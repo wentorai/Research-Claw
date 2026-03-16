@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { Button, Dropdown, Tooltip, Typography } from 'antd';
+import { Button, Dropdown, Tooltip, Typography, type MenuProps } from 'antd';
 import {
   BookOutlined,
   FolderOutlined,
@@ -93,7 +93,7 @@ export default function LeftNav() {
 
   // Build project switcher dropdown items
   const projectMenuItems = useMemo(() => {
-    const items: Array<{ key: string; label: React.ReactNode; onClick?: () => void }> = [];
+    const items: NonNullable<MenuProps['items']> = [];
 
     // Session items — sorted by updatedAt desc (server already does this)
     for (const session of sessions.slice(0, 15)) {
@@ -137,7 +137,7 @@ export default function LeftNav() {
 
     // Divider + "New Project"
     if (sessions.length > 0) {
-      items.push({ key: 'divider', label: <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} /> });
+      items.push({ key: 'divider', type: 'divider' });
     }
     items.push({
       key: 'new',
