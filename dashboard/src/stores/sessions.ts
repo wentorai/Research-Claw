@@ -72,11 +72,10 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
       });
       const serverSessions = result.sessions ?? [];
       // Ensure the main session is always present in the list
-      const hasMain = serverSessions.some((s) => isMain(s.key));
-      if (!hasMain) {
-        serverSessions.unshift({ key: MAIN_SESSION_KEY });
-      }
-      set({ sessions: serverSessions, loading: false });
+      const sessions = serverSessions.some((s) => isMain(s.key))
+        ? serverSessions
+        : [{ key: MAIN_SESSION_KEY }, ...serverSessions];
+      set({ sessions, loading: false });
     } catch {
       set({ loading: false });
     }
