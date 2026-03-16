@@ -74,6 +74,7 @@ export default function App() {
   const connect = useGatewayStore((s) => s.connect);
   const client = useGatewayStore((s) => s.client);
   const connState = useGatewayStore((s) => s.state);
+  const connectError = useGatewayStore((s) => s.connectError);
   const handleChatEvent = useChatStore((s) => s.handleChatEvent);
   const loadHistory = useChatStore((s) => s.loadHistory);
   const setAgentStatus = useUiStore((s) => s.setAgentStatus);
@@ -223,7 +224,9 @@ export default function App() {
             <Result
               status="error"
               title={t('boot.gatewayUnreachable')}
-              subTitle={t('boot.gatewayHint')}
+              subTitle={connectError
+                ? `${connectError.code}: ${connectError.message}`
+                : t('boot.gatewayHint')}
               extra={
                 <Button type="primary" onClick={() => { setBootState('pending'); connect(GATEWAY_URL, getGatewayToken()); }}>
                   {t('boot.retryConnect')}
@@ -244,7 +247,9 @@ export default function App() {
             <Result
               status="warning"
               title={t('boot.needsToken')}
-              subTitle={t('boot.needsTokenHint')}
+              subTitle={connectError
+                ? `${connectError.code}: ${connectError.message}`
+                : t('boot.needsTokenHint')}
               extra={
                 <Space.Compact style={{ width: 360 }}>
                   <Input.Password

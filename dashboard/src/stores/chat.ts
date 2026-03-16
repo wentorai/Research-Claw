@@ -12,6 +12,13 @@ import i18n from '../i18n';
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 
+/**
+ * Debounce timer for gap-triggered history reloads.
+ * Module-level to avoid polluting Zustand store serialization.
+ */
+let _gapDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const GAP_DEBOUNCE_MS = 500;
+
 function isSilentReply(text: string | undefined): boolean {
   return text !== undefined && SILENT_REPLY_PATTERN.test(text);
 }
@@ -122,6 +129,23 @@ function extractCardNotifications(text: string): void {
 }
 
 /**
+ * Strip leaked model control tokens from assistant text.
+ * Source: openclaw/src/agents/pi-embedded-utils.ts:49-60 (stripModelSpecialTokens)
+ *
+ * Models like GLM-5 and DeepSeek sometimes leak internal delimiters:
+ *   - ASCII pipes: <|assistant|>, <|tool_call_result_begin|>, <|end|>
+ *   - Full-width pipes: <｜begin▁of▁sentence｜> (U+FF5C, used by DeepSeek)
+ */
+const MODEL_SPECIAL_TOKEN_RE = /<[|｜][^|｜]*[|｜]>/g;
+
+function stripModelSpecialTokens(text: string): string {
+  if (!text) return text;
+  if (!MODEL_SPECIAL_TOKEN_RE.test(text)) return text;
+  MODEL_SPECIAL_TOKEN_RE.lastIndex = 0;
+  return text.replace(MODEL_SPECIAL_TOKEN_RE, ' ').replace(/  +/g, ' ').trim();
+}
+
+/**
  * Regex matching `<think>`, `<thinking>`, `<thought>`, `<antthinking>` tags and their content.
  * Source: openclaw/src/shared/text/reasoning-tags.ts:7 (THINKING_TAG_RE)
  * Source: openclaw/ui/src/ui/chat/message-extract.ts:66
@@ -163,10 +187,10 @@ function extractText(msg: ChatMessage): string {
     raw = '';
   }
 
-  // For assistant messages, strip thinking tags from text
-  // Source: message-extract.ts:10-11
+  // For assistant messages, strip thinking tags + model control tokens from text
+  // Source: message-extract.ts:10-11, pi-embedded-utils.ts:49-60
   if (msg.role === 'assistant') {
-    return stripThinkingTags(raw);
+    return stripModelSpecialTokens(stripThinkingTags(raw));
   }
 
   return raw;
@@ -182,12 +206,16 @@ interface ChatState {
   lastError: string | null;
   tokensIn: number;
   tokensOut: number;
+  /** Set when a seq gap is detected during streaming — cleared after deferred reload. */
+  _pendingGapReload: boolean;
 
   send: (text: string, attachments?: ChatAttachment[]) => Promise<void>;
   abort: () => void;
   loadHistory: () => Promise<void>;
   loadSessionUsage: () => Promise<void>;
   handleChatEvent: (event: ChatStreamEvent) => void;
+  /** Called by gateway onGap — debounced reload when idle, deferred when streaming. */
+  onGapDetected: () => void;
   setSessionKey: (key: string) => void;
   clearError: () => void;
   updateTokens: (input: number, output: number) => void;
@@ -203,6 +231,22 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   lastError: null,
   tokensIn: 0,
   tokensOut: 0,
+  _pendingGapReload: false,
+
+  onGapDetected: () => {
+    if (!get().streaming) {
+      // Idle: debounced reload — batches multiple rapid gaps into one RPC
+      if (_gapDebounceTimer) clearTimeout(_gapDebounceTimer);
+      _gapDebounceTimer = setTimeout(() => {
+        _gapDebounceTimer = null;
+        get().loadHistory();
+      }, GAP_DEBOUNCE_MS);
+    } else {
+      // Streaming: defer reload to avoid wiping streamText / causing duplication.
+      // The pending flag is consumed when streaming ends (final/aborted/error).
+      set({ _pendingGapReload: true });
+    }
+  },
 
   send: async (text: string, attachments?: ChatAttachment[]) => {
     const client = useGatewayStore.getState().client;
@@ -513,6 +557,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
           // Channel B: extract notifications from card types in assistant message
           extractCardNotifications(text);
+
+          // Deferred gap recovery: if a seq gap was detected during this streaming
+          // run, reload history now to fill in any missed messages from other runs.
+          // loadHistory() does a full REPLACE of messages[], so the finalMsg we just
+          // pushed is overwritten by gateway truth — no duplication.
+          if (get()._pendingGapReload) {
+            set({ _pendingGapReload: false });
+            get().loadHistory();
+          }
         } else {
           // Sub-agent, heartbeat, cron, or different run — append message.
           // If this was a server-initiated run that we were streaming (runId was null),
@@ -542,6 +595,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         } else {
           set({ streaming: false, streamText: null, runId: null });
         }
+        // Deferred gap recovery
+        if (get()._pendingGapReload) {
+          set({ _pendingGapReload: false });
+          get().loadHistory();
+        }
         break;
       }
 
@@ -552,6 +610,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           runId: null,
           lastError: event.errorMessage ?? 'Unknown streaming error',
         });
+        // Deferred gap recovery
+        if (get()._pendingGapReload) {
+          set({ _pendingGapReload: false });
+          get().loadHistory();
+        }
         break;
       }
     }

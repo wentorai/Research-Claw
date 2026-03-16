@@ -286,4 +286,53 @@ export const SEND_ATTACHMENT = {
   content: TINY_PNG_B64, // raw base64, NOT data URL
 };
 
+// ─── Model Control Token Leak Payloads ──────────────────────────
+// Source: openclaw/src/agents/pi-embedded-utils.strip-model-special-tokens.test.ts
+// Models like GLM-5 and DeepSeek leak internal delimiters into output.
+
+/** GLM-5 style: ASCII pipe delimiters */
+export const DELTA_WITH_CONTROL_TOKENS: ChatStreamEvent = {
+  runId: 'run-ctrl-001',
+  sessionKey: 'main',
+  state: 'delta',
+  message: {
+    role: 'assistant',
+    content: [{ type: 'text', text: '<|user|>Question<|assistant|>Here is the answer' }],
+  },
+};
+
+/** DeepSeek style: full-width pipe delimiters (U+FF5C) */
+export const DELTA_WITH_FULLWIDTH_TOKENS: ChatStreamEvent = {
+  runId: 'run-ctrl-002',
+  sessionKey: 'main',
+  state: 'delta',
+  message: {
+    role: 'assistant',
+    content: [{ type: 'text', text: '<｜begin▁of▁sentence｜>Hello there' }],
+  },
+};
+
+/** Final event with mixed control tokens */
+export const FINAL_WITH_CONTROL_TOKENS: ChatStreamEvent = {
+  runId: 'run-ctrl-001',
+  sessionKey: 'main',
+  state: 'final',
+  message: {
+    role: 'assistant',
+    content: [{ type: 'text', text: '<|assistant|>The paper discusses attention mechanisms.<|end|>' }],
+    timestamp: 1710400010000,
+  },
+};
+
+/** Normal text with angle brackets that should NOT be stripped */
+export const DELTA_WITH_NORMAL_ANGLES: ChatStreamEvent = {
+  runId: 'run-ctrl-003',
+  sessionKey: 'main',
+  state: 'delta',
+  message: {
+    role: 'assistant',
+    content: [{ type: 'text', text: 'a < b && c > d' }],
+  },
+};
+
 export { TINY_PNG_B64 };

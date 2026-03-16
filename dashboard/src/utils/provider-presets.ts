@@ -5,7 +5,10 @@
  * so that ProviderCapabilities (tool schema mode, thinking signatures, etc.)
  * and the automatic imageModel fallback logic work correctly.
  *
- * Sources (synced against OC v2026.3.12 — 2026-03-15):
+ * Sources (synced against OC v2026.3.12 — 2026-03-16):
+ *   - Added CN/Global endpoint variants for: Moonshot, Z.AI, MiniMax, Model Studio
+ *
+ * Original sources:
  *   - openclaw/src/agents/provider-capabilities.ts (provider keys)
  *   - openclaw/src/agents/models-config.providers.static.ts (models & baseUrls)
  *   - openclaw/src/agents/doubao-models.ts (Volcengine/Doubao models)
@@ -90,11 +93,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
 
   // ── Tier 2: Chinese providers ──
-  // NOTE: zai-coding MUST come before zai so detectPresetFromUrl() matches
-  // the more specific coding URL pattern before the broader standard pattern.
+  // NOTE: coding variants MUST come before standard variants so
+  // detectPresetFromUrl() matches the more specific coding URL first.
+  // Within each pair, CN comes before Global for the same reason.
   {
     id: 'zai-coding',
-    label: 'Z.AI Coding / 智谱 Coding',
+    label: 'Z.AI Coding / 智谱 Coding (国内)',
     baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
     api: 'openai-completions',
     models: [
@@ -102,11 +106,23 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'glm-4.7', name: 'GLM-4.7 Coding', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
       { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash Coding', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
     ],
-    urlPattern: /bigmodel\.cn\/api\/coding|z\.ai\/api\/coding/i,
+    urlPattern: /bigmodel\.cn\/api\/coding/i,
+  },
+  {
+    id: 'zai-coding-global',
+    label: 'Z.AI Coding (Global)',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    api: 'openai-completions',
+    models: [
+      { id: 'glm-5', name: 'GLM-5 Coding', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.7', name: 'GLM-4.7 Coding', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash Coding', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+    ],
+    urlPattern: /z\.ai\/api\/coding/i,
   },
   {
     id: 'zai',
-    label: 'Z.AI / 智谱',
+    label: 'Z.AI / 智谱 (国内)',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     api: 'openai-completions',
     models: [
@@ -116,17 +132,41 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'glm-4.7-flashx', name: 'GLM-4.7 FlashX', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
       { id: 'glm-4.6v', name: 'GLM-4.6V (Vision)', input: ['text', 'image'], contextWindow: 8_192, maxTokens: 4_096 },
     ],
-    urlPattern: /bigmodel\.cn|api\.z\.ai/i,
+    urlPattern: /bigmodel\.cn/i,
+  },
+  {
+    id: 'zai-global',
+    label: 'Z.AI (Global)',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    api: 'openai-completions',
+    models: [
+      { id: 'glm-5', name: 'GLM-5', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.7', name: 'GLM-4.7', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.7-flashx', name: 'GLM-4.7 FlashX', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'glm-4.6v', name: 'GLM-4.6V (Vision)', input: ['text', 'image'], contextWindow: 8_192, maxTokens: 4_096 },
+    ],
+    urlPattern: /api\.z\.ai/i,
+  },
+  {
+    id: 'moonshot-cn',
+    label: 'Moonshot / Kimi (国内)',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    api: 'openai-completions',
+    models: [
+      { id: 'kimi-k2.5', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 8_192 },
+    ],
+    urlPattern: /moonshot\.cn/i,
   },
   {
     id: 'moonshot',
-    label: 'Moonshot / Kimi',
+    label: 'Moonshot / Kimi (International)',
     baseUrl: 'https://api.moonshot.ai/v1',
     api: 'openai-completions',
     models: [
       { id: 'kimi-k2.5', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 8_192 },
     ],
-    urlPattern: /moonshot\.(ai|cn)/i,
+    urlPattern: /moonshot\.ai/i,
   },
   {
     id: 'kimi-coding',
@@ -140,7 +180,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
   {
     id: 'minimax',
-    label: 'MiniMax',
+    label: 'MiniMax (International)',
     baseUrl: 'https://api.minimax.io/anthropic',
     api: 'anthropic-messages',
     models: [
@@ -148,7 +188,19 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
     ],
-    urlPattern: /minimax\.(io|com)/i,
+    urlPattern: /minimax\.io/i,
+  },
+  {
+    id: 'minimax-cn',
+    label: 'MiniMax (国内)',
+    baseUrl: 'https://api.minimaxi.com/anthropic',
+    api: 'anthropic-messages',
+    models: [
+      { id: 'MiniMax-VL-01', name: 'MiniMax VL-01 (Vision)', input: ['text', 'image'], contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
+    ],
+    urlPattern: /minimaxi\.com/i,
   },
   {
     id: 'volcengine',
@@ -217,8 +269,25 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     urlPattern: /baidubce\.com/i,
   },
   {
+    id: 'modelstudio-cn',
+    label: 'Alibaba Model Studio / 阿里百炼 (国内)',
+    baseUrl: 'https://coding.dashscope.aliyuncs.com/v1',
+    api: 'openai-completions',
+    models: [
+      { id: 'qwen3.5-plus', name: 'Qwen 3.5 Plus', input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 65_536 },
+      { id: 'qwen3-coder-plus', name: 'Qwen 3 Coder Plus', input: ['text'], contextWindow: 1_000_000, maxTokens: 65_536 },
+      { id: 'qwen3-coder-next', name: 'Qwen 3 Coder Next', input: ['text'], contextWindow: 262_144, maxTokens: 65_536 },
+      { id: 'qwen3-max-2026-01-23', name: 'Qwen 3 Max', input: ['text'], contextWindow: 262_144, maxTokens: 65_536 },
+      { id: 'kimi-k2.5', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 262_144, maxTokens: 32_768 },
+      { id: 'glm-5', name: 'GLM-5', input: ['text'], contextWindow: 202_752, maxTokens: 16_384 },
+      { id: 'glm-4.7', name: 'GLM-4.7', input: ['text'], contextWindow: 202_752, maxTokens: 16_384 },
+      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', input: ['text'], contextWindow: 1_000_000, maxTokens: 65_536 },
+    ],
+    urlPattern: /coding\.dashscope\.aliyuncs\.com/i,
+  },
+  {
     id: 'modelstudio',
-    label: 'Alibaba Model Studio',
+    label: 'Alibaba Model Studio (International)',
     baseUrl: 'https://coding-intl.dashscope.aliyuncs.com/v1',
     api: 'openai-completions',
     models: [
@@ -231,7 +300,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'glm-4.7', name: 'GLM-4.7', input: ['text'], contextWindow: 202_752, maxTokens: 16_384 },
       { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', input: ['text'], contextWindow: 1_000_000, maxTokens: 65_536 },
     ],
-    urlPattern: /dashscope\.aliyuncs\.com/i,
+    urlPattern: /coding-intl\.dashscope\.aliyuncs\.com/i,
   },
   {
     id: 'xiaomi',

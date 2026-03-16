@@ -79,6 +79,19 @@ function stripUserMetaPrefix(raw: string): string {
 }
 
 /**
+ * Strip leaked model control tokens from assistant text.
+ * Source: openclaw/src/agents/pi-embedded-utils.ts:49-60 (stripModelSpecialTokens)
+ */
+const MODEL_SPECIAL_TOKEN_RE = /<[|｜][^|｜]*[|｜]>/g;
+
+function stripModelSpecialTokens(text: string): string {
+  if (!text) return text;
+  if (!MODEL_SPECIAL_TOKEN_RE.test(text)) return text;
+  MODEL_SPECIAL_TOKEN_RE.lastIndex = 0;
+  return text.replace(MODEL_SPECIAL_TOKEN_RE, ' ').replace(/  +/g, ' ').trim();
+}
+
+/**
  * Regex matching `<think>`, `<thinking>`, `<thought>`, `<antthinking>` tags and their content.
  * Source: openclaw/src/shared/text/reasoning-tags.ts:7 (THINKING_TAG_RE)
  * Source: openclaw/ui/src/ui/chat/message-extract.ts:66
@@ -238,7 +251,7 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
   // For user messages: strip meta prefix
   // For assistant messages: strip thinking tags from displayed text
   // Source: message-extract.ts:10-11 — if (role === "assistant") return stripThinkingTags(text);
-  const preText = isUser ? stripUserMetaPrefix(rawText) : stripThinkingTags(rawText);
+  const preText = isUser ? stripUserMetaPrefix(rawText) : stripModelSpecialTokens(stripThinkingTags(rawText));
 
   // Strip [rc-image:...] markers from display (images rendered separately)
   const text = stripImageMarkers(preText);

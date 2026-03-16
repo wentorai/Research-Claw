@@ -9,6 +9,8 @@ interface GatewayState {
   serverVersion: string | null;
   assistantName: string;
   connId: string | null;
+  /** Last connection error details for UI display */
+  connectError: { code: string; message: string } | null;
 
   connect: (url: string, token?: string) => void;
   disconnect: () => void;
@@ -21,6 +23,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
   serverVersion: null,
   assistantName: 'Research-Claw',
   connId: null,
+  connectError: null,
 
   connect: (url: string, token?: string) => {
     const existing = get().client;
@@ -35,7 +38,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       clientVersion: '0.4.1',
       platform: 'browser',
       onStateChange: (state: ConnectionState) => {
-        set({ state });
+        set({ state, ...(state === 'connected' ? { connectError: null } : {}) });
       },
       onHello: (hello: HelloOk) => {
         get().setServerInfo(hello);
@@ -48,9 +51,15 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // Global event handler — individual subscribers handle specifics
       },
       onGap: (expected: number, actual: number) => {
-        console.warn(`[Gateway] Event sequence gap: expected ${expected}, got ${actual}`);
+        console.warn(`[Gateway] Event sequence gap: expected ${expected}, got ${actual} — scheduling history sync`);
+        // Dynamic import breaks gateway ↔ chat circular dependency.
+        // Safe: onGap fires only after connect, when both stores are initialized.
+        void import('./chat').then(({ useChatStore }) => {
+          useChatStore.getState().onGapDetected();
+        });
       },
       onConnectError: (code: string, message: string) => {
+        set({ connectError: { code, message } });
         if (code === 'NOT_PAIRED' || code === 'UNAUTHORIZED' ||
             (code === 'INVALID_REQUEST' && message.includes('token'))) {
           useConfigStore.getState().setBootState('needs_token');
@@ -67,7 +76,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
     if (client) {
       client.disconnect();
     }
-    set({ client: null, state: 'disconnected', serverVersion: null, connId: null });
+    set({ client: null, state: 'disconnected', serverVersion: null, connId: null, connectError: null });
   },
 
   setServerInfo: (hello: HelloOk) => {

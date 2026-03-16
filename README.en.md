@@ -12,7 +12,7 @@ You define the question. Research-Claw runs the lab. 24/7 on your machine. Every
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
-[![Skills](https://img.shields.io/badge/skills-431-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
+[![Skills](https://img.shields.io/badge/skills-432-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
 
 [🌐 wentor.ai](https://wentor.ai) · [🇨🇳 中文](README.md) · [📖 Docs](docs/00-reference-map.md) · [🪲 Issues](https://github.com/wentorai/Research-Claw/issues)
 
@@ -142,7 +142,7 @@ Tech: React 18 + Vite 6 + Ant Design 5 + Zustand 5 · Bilingual EN/ZH-CN (245 i1
 
 ## Skills & Integrations
 
-Research-Claw comes with **431 academic skills** built-in (auto-configured during install — no manual setup needed), covering the full research workflow:
+Research-Claw comes with **432 academic skills** built-in (auto-configured during install — no manual setup needed), covering the full research workflow:
 
 | Category | Count | Capabilities |
 |:--|:--|:--|
@@ -189,7 +189,7 @@ Research-Claw comes with **431 academic skills** built-in (auto-configured durin
 │                              │                                      │
 │   L3  patches/               ▼                                      │
 │       ~20 lines · 7 files    @wentorai/research-plugins             │
-│                              431 skills · 13 tools · 150 MCP        │
+│                              432 skills · 13 tools · 150 MCP        │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -200,7 +200,7 @@ Research-Claw comes with **431 academic skills** built-in (auto-configured durin
 | **Satellite, not fork** | OpenClaw as bundled npm dependency (no separate install needed) — upstream upgrades are absorbed cleanly; coupling surface is ~20 lines of pnpm patch |
 | **4-tier coupling** | L0 filesystem → L1 plugin SDK → L2 WS RPC → L3 patch; each tier is independently replaceable |
 | **Local-first** | SQLite + WAL mode, no database server; all data stays local, only external dependency is the LLM API |
-| **Skills over raw prompts** | 431 SKILL.md files encode domain knowledge structurally; installable/removable per research field |
+| **Skills over raw prompts** | 432 SKILL.md files encode domain knowledge structurally; installable/removable per research field |
 | **Port offset from upstream** | 28789 (Research-Claw) vs 18789 (OpenClaw default) — both can run simultaneously |
 | **Browser-configured** | No config file editing; all settings via Setup Wizard at first launch |
 
