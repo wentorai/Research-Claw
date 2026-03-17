@@ -130,6 +130,40 @@ const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_rc_monitors_source_type ON rc_monitors(source_type);`,
     ].join('\n'),
   },
+  {
+    version: 9,
+    name: 'add_paper_academic_fields',
+    sql: [
+      // 11 new academic metadata columns
+      `ALTER TABLE rc_papers ADD COLUMN keywords TEXT DEFAULT '[]';`,
+      `ALTER TABLE rc_papers ADD COLUMN language TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN paper_type TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN volume TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN issue TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN pages TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN publisher TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN issn TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN isbn TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN discipline TEXT;`,
+      `ALTER TABLE rc_papers ADD COLUMN citation_count INTEGER;`,
+      // Indexes for new columns
+      `CREATE INDEX IF NOT EXISTS idx_rc_papers_language ON rc_papers(language);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_papers_paper_type ON rc_papers(paper_type);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_papers_discipline ON rc_papers(discipline);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_papers_isbn ON rc_papers(isbn);`,
+      // Rebuild FTS5 with keywords column (FTS5 does not support ALTER)
+      `DROP TABLE IF EXISTS rc_papers_fts;`,
+      `CREATE VIRTUAL TABLE rc_papers_fts USING fts5(title, authors, abstract, notes, keywords, content='rc_papers', content_rowid='rowid');`,
+      `DROP TRIGGER IF EXISTS rc_papers_fts_insert;`,
+      `CREATE TRIGGER rc_papers_fts_insert AFTER INSERT ON rc_papers BEGIN INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes, keywords) VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords); END;`,
+      `DROP TRIGGER IF EXISTS rc_papers_fts_update;`,
+      `CREATE TRIGGER rc_papers_fts_update AFTER UPDATE ON rc_papers BEGIN INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords) VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords); INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes, keywords) VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords); END;`,
+      `DROP TRIGGER IF EXISTS rc_papers_fts_delete;`,
+      `CREATE TRIGGER rc_papers_fts_delete BEFORE DELETE ON rc_papers BEGIN INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords) VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords); END;`,
+      // Rebuild FTS index to include existing data
+      `INSERT INTO rc_papers_fts(rc_papers_fts) VALUES('rebuild');`,
+    ].join('\n'),
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────

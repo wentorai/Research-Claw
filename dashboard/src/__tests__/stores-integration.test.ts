@@ -32,7 +32,7 @@ describe('Library store integration', () => {
       loading: false,
       total: 0,
       searchQuery: '',
-      activeTab: 'pending',
+      activeTab: 'inbox',
       filters: {},
     });
   });

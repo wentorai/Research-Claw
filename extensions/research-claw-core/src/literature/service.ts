@@ -1,12 +1,19 @@
 /**
  * Research-Claw Core — Literature Service
  *
- * Implements 26 RPC methods in the `rc.lit.*` namespace.
+ * Implements 33 RPC methods in the `rc.lit.*` namespace.
  * Uses better-sqlite3 synchronous API against the rc_papers schema.
  */
 
 import type BetterSqlite3 from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+
+// ── Validation constants ────────────────────────────────────────────────
+
+const VALID_PAPER_TYPES = new Set([
+  'journal_article', 'conference_paper', 'preprint', 'thesis',
+  'book', 'book_chapter', 'report', 'patent', 'dataset', 'other',
+]);
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 
@@ -26,6 +33,17 @@ export interface PaperInput {
   bibtex_key?: string;
   metadata?: Record<string, unknown>;
   tags?: string[];
+  keywords?: string[];
+  language?: string;
+  paper_type?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publisher?: string;
+  issn?: string;
+  isbn?: string;
+  discipline?: string;
+  citation_count?: number;
 }
 
 export interface PaperPatch {
@@ -45,6 +63,17 @@ export interface PaperPatch {
   notes?: string;
   bibtex_key?: string;
   metadata?: Record<string, unknown>;
+  keywords?: string[];
+  language?: string;
+  paper_type?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publisher?: string;
+  issn?: string;
+  isbn?: string;
+  discipline?: string;
+  citation_count?: number;
 }
 
 export interface Paper {
@@ -67,6 +96,17 @@ export interface Paper {
   notes: string | null;
   bibtex_key: string | null;
   metadata: Record<string, unknown>;
+  keywords: string[];
+  language: string | null;
+  paper_type: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  publisher: string | null;
+  issn: string | null;
+  isbn: string | null;
+  discipline: string | null;
+  citation_count: number | null;
   tags?: string[];
 }
 
@@ -171,6 +211,17 @@ interface PaperRow {
   notes: string | null;
   bibtex_key: string | null;
   metadata: string | null;
+  keywords: string | null;
+  language: string | null;
+  paper_type: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  publisher: string | null;
+  issn: string | null;
+  isbn: string | null;
+  discipline: string | null;
+  citation_count: number | null;
 }
 
 interface ReadingSessionRow {
@@ -259,6 +310,13 @@ function rowToPaper(row: PaperRow, tags?: string[]): Paper {
     metadata = {};
   }
 
+  let keywords: string[];
+  try {
+    keywords = row.keywords ? (JSON.parse(row.keywords) as string[]) : [];
+  } catch {
+    keywords = [];
+  }
+
   return {
     id: row.id,
     title: row.title,
@@ -279,6 +337,17 @@ function rowToPaper(row: PaperRow, tags?: string[]): Paper {
     notes: row.notes,
     bibtex_key: row.bibtex_key,
     metadata,
+    keywords,
+    language: row.language,
+    paper_type: row.paper_type,
+    volume: row.volume,
+    issue: row.issue,
+    pages: row.pages,
+    publisher: row.publisher,
+    issn: row.issn,
+    isbn: row.isbn,
+    discipline: row.discipline,
+    citation_count: row.citation_count,
     tags: tags ?? [],
   };
 }
@@ -441,15 +510,69 @@ function parseBibtex(content: string): BibtexEntry[] {
   return entries;
 }
 
+function escapeBibtex(s: string): string {
+  return s
+    .replace(/\\/g, '\\textbackslash{}')
+    .replace(/\{/g, '\\{')
+    .replace(/\}/g, '\\}')
+    .replace(/&/g, '\\&')
+    .replace(/#/g, '\\#')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_')
+    .replace(/\$/g, '\\$')
+    .replace(/~/g, '{\\textasciitilde}')
+    .replace(/\^/g, '{\\textasciicircum}');
+}
+
 function paperToBibtex(paper: Paper): string {
   const key = paper.bibtex_key || generateBibtexKey(paper.authors, paper.year, paper.title);
-  const type = paper.venue ? 'article' : 'misc';
+
+  // Map paper_type to correct BibTeX entry type
+  let type: string;
+  let venueKey: string;
+  switch (paper.paper_type) {
+    case 'journal_article':
+      type = 'article';
+      venueKey = 'journal';
+      break;
+    case 'conference_paper':
+      type = 'inproceedings';
+      venueKey = 'booktitle';
+      break;
+    case 'thesis':
+    case 'phd_thesis':
+      type = 'phdthesis';
+      venueKey = 'school';
+      break;
+    case 'masters_thesis':
+      type = 'mastersthesis';
+      venueKey = 'school';
+      break;
+    case 'book':
+      type = 'book';
+      venueKey = 'publisher';
+      break;
+    case 'book_chapter':
+      type = 'incollection';
+      venueKey = 'booktitle';
+      break;
+    default:
+      // Fallback: infer from venue presence
+      if (paper.venue) {
+        type = 'article';
+        venueKey = 'journal';
+      } else {
+        type = 'misc';
+        venueKey = 'howpublished';
+      }
+      break;
+  }
 
   const fields: string[] = [];
-  fields.push(`  title = {${paper.title}}`);
+  fields.push(`  title = {${escapeBibtex(paper.title)}}`);
 
   if (paper.authors.length > 0) {
-    fields.push(`  author = {${paper.authors.join(' and ')}}`);
+    fields.push(`  author = {${paper.authors.map(escapeBibtex).join(' and ')}}`);
   }
   if (paper.year != null) {
     fields.push(`  year = {${paper.year}}`);
@@ -461,16 +584,150 @@ function paperToBibtex(paper: Paper): string {
     fields.push(`  url = {${paper.url}}`);
   }
   if (paper.venue) {
-    fields.push(`  journal = {${paper.venue}}`);
+    fields.push(`  ${venueKey} = {${escapeBibtex(paper.venue)}}`);
+  }
+  if (paper.volume) {
+    fields.push(`  volume = {${escapeBibtex(paper.volume)}}`);
+  }
+  if (paper.issue) {
+    fields.push(`  number = {${escapeBibtex(paper.issue)}}`);
+  }
+  if (paper.pages) {
+    fields.push(`  pages = {${escapeBibtex(paper.pages)}}`);
+  }
+  if (paper.publisher) {
+    fields.push(`  publisher = {${escapeBibtex(paper.publisher)}}`);
+  }
+  if (paper.issn) {
+    fields.push(`  issn = {${paper.issn}}`);
+  }
+  if (paper.isbn) {
+    fields.push(`  isbn = {${paper.isbn}}`);
   }
   if (paper.arxiv_id) {
     fields.push(`  eprint = {${paper.arxiv_id}}`);
   }
   if (paper.abstract) {
-    fields.push(`  abstract = {${paper.abstract}}`);
+    fields.push(`  abstract = {${escapeBibtex(paper.abstract)}}`);
+  }
+  if (paper.keywords && paper.keywords.length > 0) {
+    fields.push(`  keywords = {${paper.keywords.map(escapeBibtex).join(', ')}}`);
   }
 
   return `@${type}{${key},\n${fields.join(',\n')}\n}`;
+}
+
+function paperToRIS(paper: Paper): string {
+  // Map paper_type to RIS TY tag
+  let ty: string;
+  switch (paper.paper_type) {
+    case 'journal_article':
+      ty = 'JOUR';
+      break;
+    case 'conference_paper':
+      ty = 'CONF';
+      break;
+    case 'book':
+      ty = 'BOOK';
+      break;
+    case 'book_chapter':
+      ty = 'CHAP';
+      break;
+    case 'thesis':
+    case 'phd_thesis':
+    case 'masters_thesis':
+      ty = 'THES';
+      break;
+    case 'preprint':
+      ty = 'UNPB';
+      break;
+    case 'report':
+      ty = 'RPRT';
+      break;
+    case 'patent':
+      ty = 'PAT';
+      break;
+    default:
+      ty = paper.venue ? 'JOUR' : 'GEN';
+      break;
+  }
+
+  const lines: string[] = [];
+  lines.push(`TY  - ${ty}`);
+
+  // Authors — one AU tag per author
+  for (const author of paper.authors) {
+    lines.push(`AU  - ${author}`);
+  }
+
+  lines.push(`TI  - ${paper.title}`);
+
+  // Venue: JO for journals, BT for books/conference proceedings
+  if (paper.venue) {
+    if (ty === 'JOUR') {
+      lines.push(`JO  - ${paper.venue}`);
+    } else {
+      lines.push(`BT  - ${paper.venue}`);
+    }
+  }
+
+  if (paper.volume) {
+    lines.push(`VL  - ${paper.volume}`);
+  }
+  if (paper.issue) {
+    lines.push(`IS  - ${paper.issue}`);
+  }
+
+  // Pages: split on dash for SP/EP
+  if (paper.pages) {
+    const pageParts = paper.pages.split(/[-–—]/);
+    if (pageParts.length >= 2) {
+      lines.push(`SP  - ${pageParts[0].trim()}`);
+      lines.push(`EP  - ${pageParts[1].trim()}`);
+    } else {
+      lines.push(`SP  - ${paper.pages.trim()}`);
+    }
+  }
+
+  if (paper.year != null) {
+    lines.push(`PY  - ${paper.year}`);
+  }
+  if (paper.doi) {
+    lines.push(`DO  - ${paper.doi}`);
+  }
+  if (paper.abstract) {
+    lines.push(`AB  - ${paper.abstract}`);
+  }
+
+  // Keywords — one KW tag per keyword
+  if (paper.keywords && paper.keywords.length > 0) {
+    for (const kw of paper.keywords) {
+      lines.push(`KW  - ${kw}`);
+    }
+  }
+
+  if (paper.url) {
+    lines.push(`UR  - ${paper.url}`);
+  }
+  if (paper.publisher) {
+    lines.push(`PB  - ${paper.publisher}`);
+  }
+
+  // SN for ISSN or ISBN
+  if (paper.issn) {
+    lines.push(`SN  - ${paper.issn}`);
+  } else if (paper.isbn) {
+    lines.push(`SN  - ${paper.isbn}`);
+  }
+
+  if (paper.language) {
+    lines.push(`LA  - ${paper.language}`);
+  }
+
+  lines.push('ER  - ');
+  lines.push('');
+
+  return lines.join('\n');
 }
 
 function normalizeTitleForComparison(title: string): string {
@@ -552,6 +809,11 @@ export class LiteratureService {
       }
     }
 
+    // Validate paper_type if provided
+    if (input.paper_type != null && !VALID_PAPER_TYPES.has(input.paper_type)) {
+      throw new Error(`Invalid paper_type: "${input.paper_type}". Must be one of: ${[...VALID_PAPER_TYPES].join(', ')}`);
+    }
+
     const id = crypto.randomUUID();
     const timestamp = now();
     const authors = input.authors ?? [];
@@ -562,8 +824,9 @@ export class LiteratureService {
       .prepare(
         `INSERT INTO rc_papers
          (id, title, authors, abstract, doi, url, arxiv_id, pdf_path, source, source_id,
-          venue, year, added_at, updated_at, read_status, rating, notes, bibtex_key, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', NULL, ?, ?, ?)`,
+          venue, year, added_at, updated_at, read_status, rating, notes, bibtex_key, metadata,
+          keywords, language, paper_type, volume, issue, pages, publisher, issn, isbn, discipline, citation_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -583,6 +846,17 @@ export class LiteratureService {
         input.notes ?? null,
         bibtexKey,
         metadata,
+        JSON.stringify(input.keywords ?? []),
+        input.language ?? null,
+        input.paper_type ?? null,
+        input.volume ?? null,
+        input.issue ?? null,
+        input.pages ?? null,
+        input.publisher ?? null,
+        input.issn ?? null,
+        input.isbn ?? null,
+        input.discipline ?? null,
+        input.citation_count ?? null,
       );
 
     if (input.tags && input.tags.length > 0) {
@@ -711,6 +985,11 @@ export class LiteratureService {
       throw new Error(`Paper not found: ${id}`);
     }
 
+    // Validate paper_type if provided
+    if (patch.paper_type != null && !VALID_PAPER_TYPES.has(patch.paper_type)) {
+      throw new Error(`Invalid paper_type: "${patch.paper_type}". Must be one of: ${[...VALID_PAPER_TYPES].join(', ')}`);
+    }
+
     const setClauses: string[] = [];
     const values: unknown[] = [];
 
@@ -729,6 +1008,16 @@ export class LiteratureService {
       ['rating', 'rating'],
       ['notes', 'notes'],
       ['bibtex_key', 'bibtex_key'],
+      ['language', 'language'],
+      ['paper_type', 'paper_type'],
+      ['volume', 'volume'],
+      ['issue', 'issue'],
+      ['pages', 'pages'],
+      ['publisher', 'publisher'],
+      ['issn', 'issn'],
+      ['isbn', 'isbn'],
+      ['discipline', 'discipline'],
+      ['citation_count', 'citation_count'],
     ];
 
     for (const [key, column] of simpleFields) {
@@ -746,6 +1035,11 @@ export class LiteratureService {
     if ('metadata' in patch) {
       setClauses.push('metadata = ?');
       values.push(patch.metadata ? JSON.stringify(patch.metadata) : '{}');
+    }
+
+    if ('keywords' in patch) {
+      setClauses.push('keywords = ?');
+      values.push(JSON.stringify(patch.keywords ?? []));
     }
 
     setClauses.push('updated_at = ?');
@@ -1434,6 +1728,18 @@ export class LiteratureService {
           const arxivId = f.eprint ?? f.arxivid ?? undefined;
           const venue = f.journal ?? f.booktitle ?? undefined;
 
+          const bibtexTypeMap: Record<string, string> = {
+            article: 'journal_article',
+            inproceedings: 'conference_paper',
+            conference: 'conference_paper',
+            phdthesis: 'thesis',
+            mastersthesis: 'thesis',
+            book: 'book',
+            incollection: 'book_chapter',
+            techreport: 'report',
+            misc: 'other',
+          };
+
           const knownFields = new Set([
             'author',
             'title',
@@ -1447,6 +1753,14 @@ export class LiteratureService {
             'abstract',
             'note',
             'notes',
+            'volume',
+            'number',
+            'pages',
+            'publisher',
+            'issn',
+            'isbn',
+            'keywords',
+            'language',
           ]);
           const extraMetadata: Record<string, string> = {};
           for (const [k, v] of Object.entries(f)) {
@@ -1470,6 +1784,15 @@ export class LiteratureService {
             bibtex_key: entry.citation_key || undefined,
             source: 'manual',
             notes: f.note ?? f.notes,
+            volume: f.volume || undefined,
+            issue: f.number || undefined,
+            pages: f.pages || undefined,
+            publisher: f.publisher || undefined,
+            issn: f.issn || undefined,
+            isbn: f.isbn || undefined,
+            keywords: f.keywords ? f.keywords.split(',').map((k: string) => k.trim()).filter(Boolean) : undefined,
+            language: f.language || undefined,
+            paper_type: bibtexTypeMap[entry.type.toLowerCase()] || undefined,
             metadata:
               Object.keys(extraMetadata).length > 0 ? extraMetadata : undefined,
           };
@@ -1553,6 +1876,59 @@ export class LiteratureService {
 
     const bibtex = papers.map((p) => paperToBibtex(p)).join('\n\n');
     return { bibtex, count: papers.length };
+  }
+
+  // ── 21b. exportRIS ─────────────────────────────────────────────────
+
+  exportRIS(opts: {
+    paperIds?: string[];
+    tag?: string;
+    collection?: string;
+    all?: boolean;
+  }): { ris: string; count: number } {
+    let papers: Paper[] = [];
+
+    if (opts.paperIds && opts.paperIds.length > 0) {
+      for (const id of opts.paperIds) {
+        const row = this.db
+          .prepare(`SELECT * FROM rc_papers WHERE id = ? AND ${NOT_DELETED}`)
+          .get(id) as PaperRow | undefined;
+        if (row) {
+          papers.push(rowToPaper(row, getTagsForPaper(this.db, row.id)));
+        }
+      }
+    } else if (opts.tag) {
+      const normalized = opts.tag.trim().toLowerCase();
+      const rows = this.db
+        .prepare(
+          `SELECT p.* FROM rc_papers p
+           JOIN rc_paper_tags pt ON pt.paper_id = p.id
+           JOIN rc_tags t ON t.id = pt.tag_id AND t.name = ?
+           WHERE ${NOT_DELETED}
+           ORDER BY p.added_at DESC`,
+        )
+        .all(normalized) as PaperRow[];
+      papers = rows.map((r) => rowToPaper(r, getTagsForPaper(this.db, r.id)));
+    } else if (opts.collection) {
+      const rows = this.db
+        .prepare(
+          `SELECT p.* FROM rc_papers p
+           JOIN rc_collection_papers cp ON cp.paper_id = p.id AND cp.collection_id = ?
+           WHERE ${NOT_DELETED}
+           ORDER BY cp.sort_order, cp.added_at`,
+        )
+        .all(opts.collection) as PaperRow[];
+      papers = rows.map((r) => rowToPaper(r, getTagsForPaper(this.db, r.id)));
+    } else if (opts.all) {
+      const rows = this.db
+        .prepare(`SELECT * FROM rc_papers WHERE ${NOT_DELETED} ORDER BY added_at DESC`)
+        .all() as PaperRow[];
+      papers = rows.map((r) => rowToPaper(r, getTagsForPaper(this.db, r.id)));
+    }
+
+    const risEntries = papers.map((p) => paperToRIS(p));
+    const ris = risEntries.join('\n');
+    return { ris, count: papers.length };
   }
 
   // ── 22. listCollections ─────────────────────────────────────────────

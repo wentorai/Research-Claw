@@ -25,7 +25,7 @@ function ok(text: string, details: unknown): unknown {
 
 // MIME extension → card mime_type mapping
 const EXT_MIME: Record<string, string> = {
-  md: 'text/markdown', txt: 'text/plain', tex: 'text/x-latex', bib: 'application/x-bibtex',
+  md: 'text/markdown', txt: 'text/plain', tex: 'text/x-latex', bib: 'application/x-bibtex', ris: 'application/x-research-info-systems',
   csv: 'text/csv', json: 'application/json', yaml: 'text/x-yaml', yml: 'text/x-yaml',
   py: 'text/x-python', r: 'text/x-r', jl: 'text/x-julia', m: 'text/x-matlab',
   js: 'text/javascript', ts: 'text/typescript',

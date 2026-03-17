@@ -34,7 +34,7 @@ describe('Library store filter combinations', () => {
       loading: false,
       total: 0,
       searchQuery: '',
-      activeTab: 'pending',
+      activeTab: 'inbox',
       filters: {},
     });
   });
@@ -173,9 +173,9 @@ describe('Library store filter combinations', () => {
 
   it('setActiveTab updates tab state', async () => {
     const { useLibraryStore } = await import('../stores/library');
-    expect(useLibraryStore.getState().activeTab).toBe('pending');
-    useLibraryStore.getState().setActiveTab('saved');
-    expect(useLibraryStore.getState().activeTab).toBe('saved');
+    expect(useLibraryStore.getState().activeTab).toBe('inbox');
+    useLibraryStore.getState().setActiveTab('starred');
+    expect(useLibraryStore.getState().activeTab).toBe('starred');
   });
 });
 

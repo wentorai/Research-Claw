@@ -136,7 +136,7 @@ function resetStores() {
     loading: false,
     total: 0,
     searchQuery: '',
-    activeTab: 'pending',
+    activeTab: 'inbox',
     filters: {},
   });
 
@@ -166,7 +166,7 @@ describe('GAP-3: Empty state copy — no drag/drop/upload mention', () => {
       tags: [],
       total: 0,
       searchQuery: '',
-      activeTab: 'pending',
+      activeTab: 'inbox',
       filters: {},
       loading: false,
     });
@@ -197,7 +197,7 @@ describe('GAP-3: Empty state copy — no drag/drop/upload mention', () => {
       papers: [paper],
       tags: [tag],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -278,7 +278,7 @@ describe('GAP-2: Multiple tags selected sends full tags array to store', () => {
       papers: [paper],
       tags,
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -316,7 +316,7 @@ describe('GAP-2: Multiple tags selected sends full tags array to store', () => {
       tags: [],
       total: 0,
       searchQuery: '',
-      activeTab: 'pending',
+      activeTab: 'inbox',
       filters: { tags: ['ml', 'cv'] },
     });
 
@@ -342,7 +342,7 @@ describe('GAP-2: Multiple tags selected sends full tags array to store', () => {
       papers: [paper],
       tags,
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -396,7 +396,7 @@ describe('GAP-4: Tag bar visibility and clear button', () => {
       papers: [paper1, paper2],
       tags: [tag],
       total: 2,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -431,7 +431,7 @@ describe('GAP-4: Tag bar visibility and clear button', () => {
       papers: [paper],
       tags: [tag],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     // Track when user clicks the tag (selectedTags changes from [] to ['ml'])
@@ -472,7 +472,7 @@ describe('GAP-4: Tag bar visibility and clear button', () => {
       papers: [paper],
       tags: [tag],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
       searchQuery: '',
       filters: { tags: ['delta'] },
     });
@@ -530,7 +530,7 @@ describe('GAP-4: Tag bar visibility and clear button', () => {
       papers: [paper],
       tags,
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({

@@ -5,9 +5,9 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 36 agent tools (12 literature + 10 task + 7 workspace + 3 radar + 4 monitor)
- *   - 73 WS RPC methods + 1 HTTP route = 74 interface methods
- *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 2 rc.heartbeat.* + 11 rc.ws.* + 4 rc.radar.* + 10 rc.monitor.* = 73 WS; POST /rc/upload = 1 HTTP)
+ *   - 41 agent tools (17 literature + 10 task + 7 workspace + 3 radar + 4 monitor)
+ *   - 80 WS RPC methods + 1 HTTP route = 81 interface methods
+ *     (33 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 2 rc.heartbeat.* + 11 rc.ws.* + 4 rc.radar.* + 10 rc.monitor.* = 80 WS; POST /rc/upload = 1 HTTP)
  *   - 8 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×2, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  */
@@ -166,7 +166,7 @@ const plugin: PluginDefinition = {
       },
     });
 
-    // ── 4. Register tools (31 total) ─────────────────────────────────
+    // ── 4. Register tools (36 total) ─────────────────────────────────
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
     }
@@ -183,7 +183,7 @@ const plugin: PluginDefinition = {
       api.registerTool(tool);
     }
 
-    // ── 5. Register RPC methods (60 WS total) ────────────────────────
+    // ── 5. Register RPC methods (68 WS total) ────────────────────────
     // Rate limiting not needed: local satellite, no network exposure (ws://127.0.0.1:28789 only)
     //
     // Bridge: our RPC handlers use a simple (params) => result signature,
@@ -210,7 +210,7 @@ const plugin: PluginDefinition = {
         }
       });
     };
-    registerLiteratureRpc(registerMethod, litService);   // 26 methods
+    registerLiteratureRpc(registerMethod, litService);   // 33 methods
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
     registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
     registerRadarRpc(registerMethod, dbManager.db);       // 4 methods (legacy, kept for backward compat)
@@ -725,7 +725,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (36 tools, 73 WS RPC + 1 HTTP = 74 interfaces, 8 hooks)');
+    api.logger.info('Research-Claw Core registered (41 tools, 80 WS RPC + 1 HTTP = 81 interfaces, 8 hooks)');
   },
 };
 

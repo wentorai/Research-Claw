@@ -78,7 +78,7 @@ describe('Library store RPC parity (rc.lit.*)', () => {
       loading: false,
       total: 0,
       searchQuery: '',
-      activeTab: 'pending',
+      activeTab: 'inbox',
       filters: {},
     });
   });

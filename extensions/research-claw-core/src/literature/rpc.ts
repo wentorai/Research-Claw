@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — Literature RPC Handlers
  *
- * 26 gateway RPC methods in the `rc.lit.*` namespace.
+ * 33 gateway RPC methods in the `rc.lit.*` namespace.
  * Each handler extracts params, calls the LiteratureService,
  * and responds via the gateway method callback.
  *
@@ -14,6 +14,9 @@
 
 import { type LiteratureService, type PaperInput, type PaperPatch, type PaperFilter } from './service.js';
 import type { RegisterMethod } from '../types.js';
+import { ZoteroBridge } from './zotero.js';
+import { EndNoteBridge } from './endnote.js';
+import { parseRIS } from './ris-parser.js';
 
 // ── Error codes ─────────────────────────────────────────────────────────
 
@@ -191,6 +194,17 @@ export function registerLiteratureRpc(registerMethod: RegisterMethod, service: L
         bibtex_key: optionalString(raw, 'bibtex_key'),
         metadata: raw.metadata as Record<string, unknown> | undefined,
         tags: optionalStringArray(raw, 'tags'),
+        keywords: optionalStringArray(raw, 'keywords'),
+        language: optionalString(raw, 'language'),
+        paper_type: optionalString(raw, 'paper_type'),
+        volume: optionalString(raw, 'volume'),
+        issue: optionalString(raw, 'issue'),
+        pages: optionalString(raw, 'pages'),
+        publisher: optionalString(raw, 'publisher'),
+        issn: optionalString(raw, 'issn'),
+        isbn: optionalString(raw, 'isbn'),
+        discipline: optionalString(raw, 'discipline'),
+        citation_count: optionalNumber(raw, 'citation_count'),
       };
       return service.add(input);
     } catch (err) {
@@ -222,6 +236,17 @@ export function registerLiteratureRpc(registerMethod: RegisterMethod, service: L
       if (raw.notes !== undefined) patch.notes = String(raw.notes);
       if (raw.bibtex_key !== undefined) patch.bibtex_key = String(raw.bibtex_key);
       if (raw.metadata !== undefined) patch.metadata = raw.metadata as Record<string, unknown>;
+      if (raw.keywords !== undefined) patch.keywords = optionalStringArray(raw, 'keywords');
+      if (raw.language !== undefined) patch.language = String(raw.language);
+      if (raw.paper_type !== undefined) patch.paper_type = String(raw.paper_type);
+      if (raw.volume !== undefined) patch.volume = String(raw.volume);
+      if (raw.issue !== undefined) patch.issue = String(raw.issue);
+      if (raw.pages !== undefined) patch.pages = String(raw.pages);
+      if (raw.publisher !== undefined) patch.publisher = String(raw.publisher);
+      if (raw.issn !== undefined) patch.issn = String(raw.issn);
+      if (raw.isbn !== undefined) patch.isbn = String(raw.isbn);
+      if (raw.discipline !== undefined) patch.discipline = String(raw.discipline);
+      if (raw.citation_count !== undefined) patch.citation_count = Number(raw.citation_count);
 
       return service.update(id, patch);
     } catch (err) {
@@ -446,6 +471,21 @@ export function registerLiteratureRpc(registerMethod: RegisterMethod, service: L
     }
   });
 
+  // ── 21b. rc.lit.export_ris ───────────────────────────────────────────
+
+  registerMethod('rc.lit.export_ris', async (params: Record<string, unknown>) => {
+    try {
+      return service.exportRIS({
+        paperIds: optionalStringArray(params, 'paper_ids'),
+        tag: optionalString(params, 'tag'),
+        collection: optionalString(params, 'collection'),
+        all: optionalBoolean(params, 'all'),
+      });
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
   // ── 22. rc.lit.collections.list ─────────────────────────────────────
 
   registerMethod('rc.lit.collections.list', async () => {
@@ -505,6 +545,96 @@ export function registerLiteratureRpc(registerMethod: RegisterMethod, service: L
       const noteId = requireString(params, 'note_id');
       service.deleteNote(noteId);
       return { ok: true };
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 27. rc.lit.zotero.detect ─────────────────────────────────────────
+  registerMethod('rc.lit.zotero.detect', async () => {
+    try {
+      return ZoteroBridge.detect();
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 28. rc.lit.zotero.stats ──────────────────────────────────────────
+  registerMethod('rc.lit.zotero.stats', async () => {
+    try {
+      const detect = ZoteroBridge.detect();
+      if (!detect.available || !detect.db_path) {
+        throw new Error('Zotero not found');
+      }
+      return ZoteroBridge.getStats(detect.db_path);
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 29. rc.lit.zotero.import ─────────────────────────────────────────
+  registerMethod('rc.lit.zotero.import', async (params: Record<string, unknown>) => {
+    try {
+      const detect = ZoteroBridge.detect();
+      if (!detect.available || !detect.db_path) {
+        throw new Error('Zotero not found');
+      }
+      return ZoteroBridge.importAll(detect.db_path, service, {
+        collection: optionalString(params, 'collection'),
+        limit: optionalNumber(params, 'limit'),
+      });
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 30. rc.lit.zotero.sync ──────────────────────────────────────────
+  registerMethod('rc.lit.zotero.sync', async (params: Record<string, unknown>) => {
+    try {
+      const detect = ZoteroBridge.detect();
+      if (!detect.available || !detect.db_path) {
+        throw new Error('Zotero not found');
+      }
+      const since = optionalString(params, 'since');
+      return ZoteroBridge.importAll(detect.db_path, service, { since });
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 31. rc.lit.endnote.detect ────────────────────────────────────────
+  registerMethod('rc.lit.endnote.detect', async () => {
+    try {
+      return EndNoteBridge.detect();
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 32. rc.lit.endnote.import ────────────────────────────────────────
+  registerMethod('rc.lit.endnote.import', async (params: Record<string, unknown>) => {
+    try {
+      const detect = EndNoteBridge.detect();
+      if (!detect.available || !detect.library_path) {
+        throw new Error('EndNote library not found');
+      }
+      return EndNoteBridge.importAll(detect.library_path, service, {
+        limit: optionalNumber(params, 'limit'),
+      });
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 33. rc.lit.import_ris ────────────────────────────────────────────
+  registerMethod('rc.lit.import_ris', async (params: Record<string, unknown>) => {
+    try {
+      const content = requireString(params, 'content');
+      const papers = parseRIS(content);
+      if (papers.length === 0) {
+        return { added: [], duplicates: [], errors: [] };
+      }
+      return service.batchAdd(papers);
     } catch (err) {
       throw classifyError(err);
     }

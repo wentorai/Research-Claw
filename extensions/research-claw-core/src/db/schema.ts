@@ -19,11 +19,11 @@
  *  12. rc_activity_log     — Event tracking / audit log
  *  13. rc_heartbeat_log    — Adaptive deadline escalation tracking
  *
- * FTS5: rc_papers_fts (title, authors, abstract, notes)
+ * FTS5: rc_papers_fts (title, authors, abstract, notes, keywords)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -54,7 +54,20 @@ CREATE TABLE IF NOT EXISTS rc_papers (
   rating          INTEGER CHECK(rating IS NULL OR (rating BETWEEN 1 AND 5)),
   notes           TEXT,
   bibtex_key      TEXT,
-  metadata        TEXT DEFAULT '{}'
+  metadata        TEXT DEFAULT '{}',
+  keywords        TEXT DEFAULT '[]',
+  language        TEXT,
+  paper_type      TEXT CHECK(paper_type IS NULL OR paper_type IN (
+                    'journal_article', 'conference_paper', 'preprint', 'thesis',
+                    'book', 'book_chapter', 'report', 'patent', 'dataset', 'other')),
+  volume          TEXT,
+  issue           TEXT,
+  pages           TEXT,
+  publisher       TEXT,
+  issn            TEXT,
+  isbn            TEXT,
+  discipline      TEXT,
+  citation_count  INTEGER
 );`;
 
 const RC_TAGS = `
@@ -262,6 +275,10 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_rc_papers_added_at     ON rc_papers(added_at);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_papers_source       ON rc_papers(source);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_papers_bibtex_key   ON rc_papers(bibtex_key);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_papers_language     ON rc_papers(language);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_papers_paper_type   ON rc_papers(paper_type);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_papers_discipline   ON rc_papers(discipline);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_papers_isbn         ON rc_papers(isbn);`,
 
   // rc_reading_sessions indexes
   `CREATE INDEX IF NOT EXISTS idx_rc_reading_sessions_paper   ON rc_reading_sessions(paper_id);`,
@@ -309,6 +326,7 @@ export const CREATE_FTS_SQL: readonly string[] = [
   authors,
   abstract,
   notes,
+  keywords,
   content='rc_papers',
   content_rowid='rowid'
 );`,
@@ -325,23 +343,23 @@ export const CREATE_TRIGGERS_SQL: readonly string[] = [
   `CREATE TRIGGER IF NOT EXISTS rc_papers_fts_insert
   AFTER INSERT ON rc_papers
 BEGIN
-  INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes)
-    VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes);
+  INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes, keywords)
+    VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords);
 END;`,
 
   `CREATE TRIGGER IF NOT EXISTS rc_papers_fts_update
   AFTER UPDATE ON rc_papers
 BEGIN
-  INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes)
-    VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes);
-  INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes)
-    VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes);
+  INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
+    VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords);
+  INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes, keywords)
+    VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords);
 END;`,
 
   `CREATE TRIGGER IF NOT EXISTS rc_papers_fts_delete
   BEFORE DELETE ON rc_papers
 BEGIN
-  INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes)
-    VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes);
+  INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
+    VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords);
 END;`,
 ];

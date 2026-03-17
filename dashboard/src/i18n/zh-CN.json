@@ -38,8 +38,11 @@
   },
   "library": {
     "title": "文献库",
-    "pending": "待审阅",
-    "saved": "已收藏",
+    "inbox": "收件箱",
+    "archive": "归档",
+    "starred": "收藏",
+    "movedToArchive": "已移至归档",
+    "undo": "撤销",
     "search": "搜索论文...",
     "addPaper": "添加论文",
     "readStatus": {
