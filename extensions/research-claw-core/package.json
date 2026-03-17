@@ -1,6 +1,6 @@
 {
   "name": "@research-claw/core",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Research-Claw core plugin — literature library, task system, workspace tracking",
   "type": "module",
   "main": "dist/index.js",

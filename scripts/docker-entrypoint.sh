@@ -5,7 +5,7 @@
 CONFIG_DIR=/app/config
 CONFIG_FILE=$CONFIG_DIR/openclaw.json
 CONFIG_VERSION_FILE=$CONFIG_DIR/.config-version
-IMAGE_VERSION="0.4.3"
+IMAGE_VERSION="0.5.0"
 
 # Seed or refresh config when image version changes
 mkdir -p "$CONFIG_DIR"
