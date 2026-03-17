@@ -5,9 +5,9 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 31 agent tools (12 literature + 9 task + 7 workspace + 3 radar)
- *   - 61 WS RPC methods + 1 HTTP route = 62 interface methods
- *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 11 rc.ws.* + 4 rc.radar.* = 61 WS; POST /rc/upload = 1 HTTP)
+ *   - 36 agent tools (17 literature + 9 task + 7 workspace + 3 radar)
+ *   - 68 WS RPC methods + 1 HTTP route = 69 interface methods
+ *     (33 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 11 rc.ws.* + 4 rc.radar.* = 68 WS; POST /rc/upload = 1 HTTP)
  *   - 7 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call, gateway_start)
  *   - 1 service (research-claw-db lifecycle)
  */
@@ -153,7 +153,7 @@ const plugin: PluginDefinition = {
       },
     });
 
-    // ── 4. Register tools (31 total) ─────────────────────────────────
+    // ── 4. Register tools (36 total) ─────────────────────────────────
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
     }
@@ -167,7 +167,7 @@ const plugin: PluginDefinition = {
       api.registerTool(tool);
     }
 
-    // ── 5. Register RPC methods (60 WS total) ────────────────────────
+    // ── 5. Register RPC methods (68 WS total) ────────────────────────
     // Rate limiting not needed: local satellite, no network exposure (ws://127.0.0.1:28789 only)
     //
     // Bridge: our RPC handlers use a simple (params) => result signature,
@@ -194,7 +194,7 @@ const plugin: PluginDefinition = {
         }
       });
     };
-    registerLiteratureRpc(registerMethod, litService);   // 26 methods
+    registerLiteratureRpc(registerMethod, litService);   // 33 methods
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
     registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
     registerRadarRpc(registerMethod, dbManager.db);       // 3 methods
@@ -570,7 +570,7 @@ const plugin: PluginDefinition = {
       }
     });
 
-    api.logger.info('Research-Claw Core registered (31 tools, 61 WS RPC + 1 HTTP = 62 interfaces, 7 hooks)');
+    api.logger.info('Research-Claw Core registered (36 tools, 68 WS RPC + 1 HTTP = 69 interfaces, 7 hooks)');
   },
 };
 

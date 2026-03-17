@@ -96,6 +96,7 @@ const MIME_MAP: Record<string, string> = {
   '.txt': 'text/plain',
   '.tex': 'text/x-latex',
   '.bib': 'application/x-bibtex',
+  '.ris': 'application/x-research-info-systems',
   '.csv': 'text/csv',
   '.tsv': 'text/tab-separated-values',
   '.xml': 'application/xml',
@@ -198,6 +199,7 @@ const TEXT_MIME_PREFIXES = [
 
 const TEXT_MIME_EXACT = new Set([
   'application/x-bibtex',
+  'application/x-research-info-systems',
   'application/x-ipynb+json',
   'text/x-yaml',
   'text/x-toml',

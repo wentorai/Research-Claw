@@ -79,6 +79,7 @@ interface PaperListItemProps {
 function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
   const { t } = useTranslation();
   const updatePaperStatus = useLibraryStore((s) => s.updatePaperStatus);
+  const activeTab = useLibraryStore((s) => s.activeTab);
   const ratePaper = useLibraryStore((s) => s.ratePaper);
   const deletePaper = useLibraryStore((s) => s.deletePaper);
   const send = useChatStore((s) => s.send);
@@ -146,7 +147,25 @@ function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
   const handleStatusClick = () => {
     const currentIndex = statusCycleOrder.indexOf(paper.read_status);
     const nextStatus = statusCycleOrder[(currentIndex + 1) % statusCycleOrder.length];
+    const prevStatus = paper.read_status;
     updatePaperStatus(paper.id, nextStatus);
+
+    // Show undo toast when paper leaves inbox
+    if (activeTab === 'inbox' && (nextStatus === 'read' || nextStatus === 'reviewed')) {
+      const key = `undo-${paper.id}`;
+      message.info({
+        key,
+        content: (
+          <span>
+            {t('library.movedToArchive')}{' '}
+            <a onClick={() => { updatePaperStatus(paper.id, prevStatus); message.destroy(key); }}>
+              {t('library.undo')}
+            </a>
+          </span>
+        ),
+        duration: 5,
+      });
+    }
   };
 
   const handleStarClick = () => {
@@ -325,20 +344,27 @@ export default function LibraryPanel() {
 
   // Filter papers by active tab
   const filteredPapers = useMemo(() => {
-    if (activeTab === 'pending') {
+    if (activeTab === 'inbox') {
       return papers.filter((p) => p.read_status === 'unread' || p.read_status === 'reading');
     }
-    // "saved" tab: show only starred (rated) papers
-    return papers.filter((p) => p.rating && p.rating > 0);
+    if (activeTab === 'archive') {
+      return papers.filter((p) => p.read_status === 'read' || p.read_status === 'reviewed');
+    }
+    return papers.filter((p) => p.rating != null && p.rating > 0); // starred
   }, [papers, activeTab]);
 
-  const pendingCount = useMemo(
+  const inboxCount = useMemo(
     () => papers.filter((p) => p.read_status === 'unread' || p.read_status === 'reading').length,
     [papers],
   );
 
-  const savedCount = useMemo(
-    () => papers.filter((p) => p.rating && p.rating > 0).length,
+  const archiveCount = useMemo(
+    () => papers.filter((p) => p.read_status === 'read' || p.read_status === 'reviewed').length,
+    [papers],
+  );
+
+  const starredCount = useMemo(
+    () => papers.filter((p) => p.rating != null && p.rating > 0).length,
     [papers],
   );
 
@@ -350,9 +376,11 @@ export default function LibraryPanel() {
     // which tags should be shown. This way the tag bar only shows tags
     // that belong to papers on the current tab.
     const tabPapers =
-      activeTab === 'pending'
+      activeTab === 'inbox'
         ? papers.filter((p) => p.read_status === 'unread' || p.read_status === 'reading')
-        : papers.filter((p) => p.rating && p.rating > 0);
+        : activeTab === 'archive'
+          ? papers.filter((p) => p.read_status === 'read' || p.read_status === 'reviewed')
+          : papers.filter((p) => p.rating != null && p.rating > 0);
     const tagSet = new Set<string>();
     for (const paper of tabPapers) {
       for (const tag of paper.tags ?? []) {
@@ -370,19 +398,7 @@ export default function LibraryPanel() {
 
   const hasActiveFilter = selectedTags.length > 0 || !!filters.read_status || !!filters.year;
 
-  // True empty state: no papers, no active filters
-  if (!loading && papers.length === 0 && !searchQuery && !hasActiveFilter) {
-    return (
-      <div style={{ padding: 24, textAlign: 'center', paddingTop: 60 }}>
-        <BookOutlined style={{ fontSize: 48, color: tokens.text.muted, opacity: 0.4 }} />
-        <div style={{ marginTop: 16, whiteSpace: 'pre-line' }}>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            {t('library.empty')}
-          </Text>
-        </div>
-      </div>
-    );
-  }
+  const isGlobalEmpty = !loading && papers.length === 0 && !searchQuery && !hasActiveFilter;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -390,10 +406,11 @@ export default function LibraryPanel() {
       <div style={{ padding: '8px 16px' }}>
         <Segmented
           value={activeTab}
-          onChange={(v) => setActiveTab(v as 'pending' | 'saved')}
+          onChange={(v) => setActiveTab(v as 'inbox' | 'archive' | 'starred')}
           options={[
-            { label: `${t('library.pending')} (${pendingCount})`, value: 'pending' },
-            { label: `${t('library.saved')} (${savedCount})`, value: 'saved' },
+            { label: `${t('library.inbox')} (${inboxCount})`, value: 'inbox' },
+            { label: `${t('library.archive')} (${archiveCount})`, value: 'archive' },
+            { label: `${t('library.starred')} (${starredCount})`, value: 'starred' },
           ]}
           block
           size="small"
@@ -469,7 +486,16 @@ export default function LibraryPanel() {
 
       {/* Paper list */}
       <div ref={listContainerRef} style={{ flex: 1, overflow: useVirtualScroll ? 'hidden' : 'auto' }}>
-        {filteredPapers.length === 0 && !loading ? (
+        {isGlobalEmpty ? (
+          <div style={{ padding: 24, textAlign: 'center', paddingTop: 60 }}>
+            <BookOutlined style={{ fontSize: 48, color: tokens.text.muted, opacity: 0.4 }} />
+            <div style={{ marginTop: 16, whiteSpace: 'pre-line' }}>
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                {t('library.empty')}
+              </Text>
+            </div>
+          </div>
+        ) : filteredPapers.length === 0 && !loading ? (
           <div style={{ padding: 24, textAlign: 'center', paddingTop: 40 }}>
             <BookOutlined style={{ fontSize: 36, color: tokens.text.muted, opacity: 0.3 }} />
             <div style={{ marginTop: 12 }}>

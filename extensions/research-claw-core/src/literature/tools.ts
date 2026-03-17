@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — Literature Tools
  *
- * 12 agent tools in the `library_*` namespace.
+ * 17 agent tools in the `library_*` namespace.
  * Each tool is registered via api.registerTool() with JSON Schema parameters
  * and an execute callback matching the OpenClaw ToolDefinition interface.
  */
@@ -12,6 +12,9 @@
 
 import { LiteratureService, type PaperInput, type PaperPatch } from './service.js';
 import type { ToolDefinition } from '../types.js';
+import { ZoteroBridge } from './zotero.js';
+import { EndNoteBridge } from './endnote.js';
+import { parseRIS } from './ris-parser.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -53,6 +56,17 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         url: { type: 'string', description: 'URL to the paper' },
         source: { type: 'string', description: 'Discovery source (e.g. arxiv, semantic_scholar)' },
         source_id: { type: 'string', description: 'Source-specific identifier' },
+        keywords: { type: 'array', items: { type: 'string' }, description: 'Paper keywords' },
+        language: { type: 'string', description: 'Paper language (e.g. en, zh, ja)' },
+        paper_type: { type: 'string', enum: ['journal_article', 'conference_paper', 'preprint', 'thesis', 'book', 'book_chapter', 'report', 'patent', 'dataset', 'other'], description: 'Paper type' },
+        volume: { type: 'string', description: 'Journal volume' },
+        issue: { type: 'string', description: 'Journal issue number' },
+        pages: { type: 'string', description: 'Page range (e.g. "1-15")' },
+        publisher: { type: 'string', description: 'Publisher name' },
+        issn: { type: 'string', description: 'Journal ISSN' },
+        isbn: { type: 'string', description: 'Book ISBN' },
+        discipline: { type: 'string', description: 'Academic discipline' },
+        citation_count: { type: 'number', description: 'Citation count' },
       },
       required: ['title'],
     },
@@ -79,6 +93,17 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
           url: typeof params.url === 'string' ? params.url : undefined,
           source: typeof params.source === 'string' ? params.source : undefined,
           source_id: typeof params.source_id === 'string' ? params.source_id : undefined,
+          keywords: Array.isArray(params.keywords) ? params.keywords.filter((k): k is string => typeof k === 'string') : undefined,
+          language: typeof params.language === 'string' ? params.language : undefined,
+          paper_type: typeof params.paper_type === 'string' ? params.paper_type : undefined,
+          volume: typeof params.volume === 'string' ? params.volume : undefined,
+          issue: typeof params.issue === 'string' ? params.issue : undefined,
+          pages: typeof params.pages === 'string' ? params.pages : undefined,
+          publisher: typeof params.publisher === 'string' ? params.publisher : undefined,
+          issn: typeof params.issn === 'string' ? params.issn : undefined,
+          isbn: typeof params.isbn === 'string' ? params.isbn : undefined,
+          discipline: typeof params.discipline === 'string' ? params.discipline : undefined,
+          citation_count: typeof params.citation_count === 'number' ? params.citation_count : undefined,
         };
         const paper = service.add(input);
         return ok(
@@ -154,6 +179,17 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         notes: { type: 'string', description: 'Personal notes' },
         bibtex_key: { type: 'string', description: 'BibTeX citation key' },
         metadata: { type: 'object', description: 'Additional metadata' },
+        keywords: { type: 'array', items: { type: 'string' }, description: 'Paper keywords' },
+        language: { type: 'string', description: 'Paper language (e.g. en, zh, ja)' },
+        paper_type: { type: 'string', enum: ['journal_article', 'conference_paper', 'preprint', 'thesis', 'book', 'book_chapter', 'report', 'patent', 'dataset', 'other'], description: 'Paper type' },
+        volume: { type: 'string', description: 'Journal volume' },
+        issue: { type: 'string', description: 'Journal issue number' },
+        pages: { type: 'string', description: 'Page range (e.g. "1-15")' },
+        publisher: { type: 'string', description: 'Publisher name' },
+        issn: { type: 'string', description: 'Journal ISSN' },
+        isbn: { type: 'string', description: 'Book ISBN' },
+        discipline: { type: 'string', description: 'Academic discipline' },
+        citation_count: { type: 'number', description: 'Citation count' },
       },
       required: ['id'],
     },
@@ -180,6 +216,17 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         if (params.notes !== undefined && typeof params.notes === 'string') patch.notes = params.notes;
         if (params.bibtex_key !== undefined && typeof params.bibtex_key === 'string') patch.bibtex_key = params.bibtex_key;
         if (params.metadata !== undefined && typeof params.metadata === 'object' && params.metadata !== null) patch.metadata = params.metadata as Record<string, unknown>;
+        if (params.keywords !== undefined && Array.isArray(params.keywords)) patch.keywords = params.keywords.filter((k): k is string => typeof k === 'string');
+        if (params.language !== undefined && typeof params.language === 'string') patch.language = params.language;
+        if (params.paper_type !== undefined && typeof params.paper_type === 'string') patch.paper_type = params.paper_type;
+        if (params.volume !== undefined && typeof params.volume === 'string') patch.volume = params.volume;
+        if (params.issue !== undefined && typeof params.issue === 'string') patch.issue = params.issue;
+        if (params.pages !== undefined && typeof params.pages === 'string') patch.pages = params.pages;
+        if (params.publisher !== undefined && typeof params.publisher === 'string') patch.publisher = params.publisher;
+        if (params.issn !== undefined && typeof params.issn === 'string') patch.issn = params.issn;
+        if (params.isbn !== undefined && typeof params.isbn === 'string') patch.isbn = params.isbn;
+        if (params.discipline !== undefined && typeof params.discipline === 'string') patch.discipline = params.discipline;
+        if (params.citation_count !== undefined && typeof params.citation_count === 'number') patch.citation_count = params.citation_count;
 
         const paper = service.update(id, patch);
         return ok(`Updated paper "${paper.title}" (id: ${paper.id})`, paper);
@@ -224,7 +271,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
   tools.push({
     name: 'library_export_bibtex',
     description:
-      'Export papers as BibTeX entries. Select by paper IDs, tag, collection, or export all.',
+      'Export papers as BibTeX or RIS entries. Select by paper IDs, tag, collection, or export all.',
     parameters: {
       type: 'object',
       properties: {
@@ -232,17 +279,20 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         tag: { type: 'string', description: 'Export all papers with this tag' },
         collection: { type: 'string', description: 'Export all papers in this collection ID' },
         all: { type: 'boolean', description: 'Export entire library' },
+        format: { type: 'string', enum: ['bibtex', 'ris'], description: 'Export format (default: bibtex)' },
       },
     },
     execute: async (_toolCallId: string, params: Record<string, unknown>) => {
       try {
-        const result = service.exportBibtex({
+        const exportOpts = {
           paperIds: Array.isArray(params.paper_ids) ? params.paper_ids.filter((id): id is string => typeof id === 'string') : undefined,
           tag: typeof params.tag === 'string' ? params.tag : undefined,
           collection: typeof params.collection === 'string' ? params.collection : undefined,
           all: typeof params.all === 'boolean' ? params.all : undefined,
-        });
-        return ok(`Exported ${result.count} paper(s) as BibTeX`, result);
+        };
+        const format = typeof params.format === 'string' ? params.format : 'bibtex';
+        const result = format === 'ris' ? service.exportRIS(exportOpts) : service.exportBibtex(exportOpts);
+        return ok(`Exported ${result.count} paper(s) as ${format === 'ris' ? 'RIS' : 'BibTeX'}`, result);
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -309,6 +359,17 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
               bibtex_key: { type: 'string' },
               metadata: { type: 'object' },
               tags: { type: 'array', items: { type: 'string' } },
+              keywords: { type: 'array', items: { type: 'string' } },
+              language: { type: 'string' },
+              paper_type: { type: 'string', enum: ['journal_article', 'conference_paper', 'preprint', 'thesis', 'book', 'book_chapter', 'report', 'patent', 'dataset', 'other'] },
+              volume: { type: 'string' },
+              issue: { type: 'string' },
+              pages: { type: 'string' },
+              publisher: { type: 'string' },
+              issn: { type: 'string' },
+              isbn: { type: 'string' },
+              discipline: { type: 'string' },
+              citation_count: { type: 'number' },
             },
             required: ['title'],
           },
@@ -340,6 +401,17 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
             source: typeof p.source === 'string' ? p.source : undefined,
             source_id: typeof p.source_id === 'string' ? p.source_id : undefined,
             metadata: typeof p.metadata === 'object' && p.metadata !== null ? p.metadata as Record<string, unknown> : undefined,
+            keywords: Array.isArray(p.keywords) ? p.keywords.filter((k): k is string => typeof k === 'string') : undefined,
+            language: typeof p.language === 'string' ? p.language : undefined,
+            paper_type: typeof p.paper_type === 'string' ? p.paper_type : undefined,
+            volume: typeof p.volume === 'string' ? p.volume : undefined,
+            issue: typeof p.issue === 'string' ? p.issue : undefined,
+            pages: typeof p.pages === 'string' ? p.pages : undefined,
+            publisher: typeof p.publisher === 'string' ? p.publisher : undefined,
+            issn: typeof p.issn === 'string' ? p.issn : undefined,
+            isbn: typeof p.isbn === 'string' ? p.isbn : undefined,
+            discipline: typeof p.discipline === 'string' ? p.discipline : undefined,
+            citation_count: typeof p.citation_count === 'number' ? p.citation_count : undefined,
           }));
         if (papers.length === 0) {
           return fail('no valid papers found — each paper must have a title string');
@@ -610,6 +682,145 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         return ok(
           `Citation graph for ${paperId}: ${nodes.length} node(s), ${edges.length} edge(s), depth ${depth}`,
           { center: paperId, depth, nodes, edges, direction },
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 13. library_zotero_detect ──────────────────────────────────────────
+  tools.push({
+    name: 'library_zotero_detect',
+    description: 'Detect if Zotero is installed locally. Returns library stats (paper count, collections, tags) and database path.',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      try {
+        const result = ZoteroBridge.detect();
+        if (!result.available) {
+          return ok('Zotero not found on this machine', result);
+        }
+        return ok(
+          `Zotero found: ${result.stats?.total_items ?? 0} items, ${result.stats?.total_collections ?? 0} collections`,
+          result,
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 14. library_zotero_import ──────────────────────────────────────────
+  tools.push({
+    name: 'library_zotero_import',
+    description:
+      'Import papers from the local Zotero library into Research-Claw. ' +
+      'Automatically deduplicates by DOI/arXiv ID. Optionally filter by collection name.',
+    parameters: {
+      type: 'object',
+      properties: {
+        collection: { type: 'string', description: 'Only import from this Zotero collection' },
+        limit: { type: 'number', description: 'Maximum papers to import (default: all)' },
+      },
+    },
+    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+      try {
+        const detect = ZoteroBridge.detect();
+        if (!detect.available || !detect.db_path) {
+          return fail('Zotero not found on this machine');
+        }
+        const result = ZoteroBridge.importAll(detect.db_path, service, {
+          collection: typeof params.collection === 'string' ? params.collection : undefined,
+          limit: typeof params.limit === 'number' ? params.limit : undefined,
+        });
+        return ok(
+          `Imported ${result.imported} paper(s) from Zotero (${result.duplicates} duplicates skipped)`,
+          result,
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 15. library_endnote_detect ─────────────────────────────────────────
+  tools.push({
+    name: 'library_endnote_detect',
+    description: 'Detect if an EndNote library (.enl file) exists locally. Returns library path, record count, and schema version.',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      try {
+        const result = EndNoteBridge.detect();
+        if (!result.available) {
+          return ok('No EndNote library found on this machine', result);
+        }
+        return ok(
+          `EndNote library found: ${result.record_count} records (schema v${result.schema_version})`,
+          result,
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 16. library_endnote_import ─────────────────────────────────────────
+  tools.push({
+    name: 'library_endnote_import',
+    description:
+      'Import papers from the local EndNote library (.enl file) into Research-Claw. ' +
+      'Automatically deduplicates by DOI.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Maximum papers to import (default: all)' },
+      },
+    },
+    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+      try {
+        const detect = EndNoteBridge.detect();
+        if (!detect.available || !detect.library_path) {
+          return fail('No EndNote library found on this machine');
+        }
+        const result = EndNoteBridge.importAll(detect.library_path, service, {
+          limit: typeof params.limit === 'number' ? params.limit : undefined,
+        });
+        return ok(
+          `Imported ${result.imported} paper(s) from EndNote (${result.duplicates} duplicates skipped)`,
+          result,
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 17. library_import_ris ──────────────────────────────────────────────
+  tools.push({
+    name: 'library_import_ris',
+    description:
+      'Import papers from RIS format content into the local library. ' +
+      'RIS is a universal format supported by EndNote, Mendeley, Zotero, and most reference managers.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ris_content: { type: 'string', description: 'RIS format content (one or more entries)' },
+      },
+      required: ['ris_content'],
+    },
+    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+      try {
+        if (typeof params.ris_content !== 'string' || !params.ris_content.trim()) {
+          return fail('ris_content is required and must be a non-empty string');
+        }
+        const papers = parseRIS(params.ris_content.trim());
+        if (papers.length === 0) {
+          return fail('No valid RIS entries found in the provided content');
+        }
+        const result = service.batchAdd(papers);
+        return ok(
+          `Imported ${result.added.length} paper(s) from RIS (${result.duplicates.length} duplicates skipped)`,
+          result,
         );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));

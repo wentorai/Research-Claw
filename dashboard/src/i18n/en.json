@@ -37,8 +37,11 @@
   },
   "library": {
     "title": "Literature Library",
-    "pending": "Pending Review",
-    "saved": "Saved",
+    "inbox": "Inbox",
+    "archive": "Archive",
+    "starred": "Starred",
+    "movedToArchive": "Moved to Archive",
+    "undo": "Undo",
     "search": "Search papers...",
     "addPaper": "Add Paper",
     "readStatus": {

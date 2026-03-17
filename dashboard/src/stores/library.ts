@@ -32,6 +32,17 @@ export interface Paper {
   notes: string | null;
   bibtex_key: string | null;
   metadata: Record<string, unknown>;
+  keywords?: string[];
+  language?: string | null;
+  paper_type?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  publisher?: string | null;
+  issn?: string | null;
+  isbn?: string | null;
+  discipline?: string | null;
+  citation_count?: number | null;
   tags?: string[];
   /** Dashboard-only field — not present in plugin response */
   is_own?: boolean;
@@ -62,13 +73,13 @@ interface LibraryState {
   loading: boolean;
   total: number;
   searchQuery: string;
-  activeTab: 'pending' | 'saved';
+  activeTab: 'inbox' | 'archive' | 'starred';
   filters: PaperFilter;
 
   loadPapers: (filter?: PaperFilter) => Promise<void>;
   loadTags: () => Promise<void>;
   setSearchQuery: (q: string) => void;
-  setActiveTab: (tab: 'pending' | 'saved') => void;
+  setActiveTab: (tab: 'inbox' | 'archive' | 'starred') => void;
   updatePaperStatus: (id: string, status: ReadStatus) => Promise<void>;
   ratePaper: (id: string, rating: number) => Promise<void>;
   setFilters: (filters: Partial<PaperFilter>) => void;
@@ -82,7 +93,7 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
   loading: false,
   total: 0,
   searchQuery: '',
-  activeTab: 'pending',
+  activeTab: 'inbox',
   filters: {},
 
   loadPapers: async (filter?: PaperFilter) => {
@@ -134,7 +145,7 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     set({ searchQuery: q });
   },
 
-  setActiveTab: (tab: 'pending' | 'saved') => {
+  setActiveTab: (tab: 'inbox' | 'archive' | 'starred') => {
     set({ activeTab: tab });
   },
 

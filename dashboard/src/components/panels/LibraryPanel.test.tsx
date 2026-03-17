@@ -37,7 +37,7 @@ describe('LibraryPanel', () => {
       loading: false,
       total: 0,
       searchQuery: '',
-      activeTab: 'pending',
+      activeTab: 'inbox',
       filters: {},
     });
     useConfigStore.setState({ theme: 'dark' });
@@ -107,8 +107,9 @@ describe('LibraryPanel', () => {
 
     render(<LibraryPanel />);
     // Check sub-tab labels exist
-    expect(screen.getByText(/library\.pending/)).toBeTruthy();
-    expect(screen.getByText(/library\.saved/)).toBeTruthy();
+    expect(screen.getByText(/library\.inbox/)).toBeTruthy();
+    expect(screen.getByText(/library\.archive/)).toBeTruthy();
+    expect(screen.getByText(/library\.starred/)).toBeTruthy();
   });
 
   it('renders search input', () => {

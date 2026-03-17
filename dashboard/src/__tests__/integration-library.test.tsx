@@ -145,7 +145,7 @@ function resetStores() {
     loading: false,
     total: 0,
     searchQuery: '',
-    activeTab: 'pending',
+    activeTab: 'inbox',
     filters: {},
   });
 
@@ -321,7 +321,7 @@ describe('Issue 2: Filtered empty state shows clear filter button', () => {
   }
 
   it('shows emptyFiltered text and clearFilter button when tag filter yields no results', async () => {
-    // Paper is "read" status. On the "pending" tab (unread|reading), filteredPapers = 0.
+    // Paper is "read" status. On the "inbox" tab (unread|reading), filteredPapers = 0.
     // papers.length > 0 so the top-level empty guard does NOT fire.
     const paper = makePaper({ id: 'p1', read_status: 'read', tags: ['physics'] });
     const tag = makeTag({ name: 'physics', paper_count: 1 });
@@ -330,7 +330,7 @@ describe('Issue 2: Filtered empty state shows clear filter button', () => {
       papers: [paper],
       tags: [tag],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     // Route all RPC calls to return our paper/tags data so mount effects don't wipe state
@@ -344,7 +344,7 @@ describe('Issue 2: Filtered empty state shows clear filter button', () => {
       render(<LibraryPanel />);
     });
 
-    // The "pending" tab filters to unread|reading only, so filteredPapers = []
+    // The "inbox" tab filters to unread|reading only, so filteredPapers = []
     // The emptyFiltered text should appear
     expect(screen.getByText('library.emptyFiltered')).toBeInTheDocument();
   });
@@ -359,7 +359,7 @@ describe('Issue 2: Filtered empty state shows clear filter button', () => {
       papers: [paper],
       tags: [tag],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
       searchQuery: '',
       filters: { tags: ['ml'] },
     });
@@ -404,7 +404,7 @@ describe('Issue 2: Filtered empty state shows clear filter button', () => {
       papers: [paper],
       tags: [tag],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
       searchQuery: '',
       filters: {},
     });
@@ -459,7 +459,7 @@ describe('Issue 2: Filtered empty state shows clear filter button', () => {
       papers: [paper],
       tags: [tag],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -492,7 +492,7 @@ describe('Issue 3: Empty state text does not mention PDF drag-and-drop', () => {
       tags: [],
       total: 0,
       searchQuery: '',
-      activeTab: 'pending',
+      activeTab: 'inbox',
       filters: {},
       loading: false,
     });

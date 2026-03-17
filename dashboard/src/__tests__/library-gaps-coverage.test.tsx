@@ -154,7 +154,7 @@ function resetStores() {
     loading: false,
     total: 0,
     searchQuery: '',
-    activeTab: 'pending',
+    activeTab: 'inbox',
     filters: {},
   });
 
@@ -461,7 +461,7 @@ describe('Component: tag bar renders tags with special characters', () => {
       papers: [paper],
       tags,
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -488,7 +488,7 @@ describe('Component: tag bar renders tags with special characters', () => {
       papers: [paper],
       tags,
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -530,7 +530,7 @@ describe('Component: PaperListItem renders tags', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -559,7 +559,7 @@ describe('Component: PaperListItem renders tags', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -588,7 +588,7 @@ describe('Component: PaperListItem renders tags', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -622,7 +622,7 @@ describe('Component: saved tab shows only starred papers', () => {
       papers: [unstarred, starred],
       tags: [],
       total: 2,
-      activeTab: 'saved',
+      activeTab: 'starred',
     });
 
     setupMethodRouter({
@@ -646,7 +646,7 @@ describe('Component: saved tab shows only starred papers', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'saved',
+      activeTab: 'starred',
     });
 
     setupMethodRouter({
@@ -669,7 +669,7 @@ describe('Component: saved tab shows only starred papers', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'saved',
+      activeTab: 'starred',
     });
 
     setupMethodRouter({
@@ -705,7 +705,7 @@ describe('Component: pending tab shows unread and reading papers', () => {
       papers,
       tags: [],
       total: 4,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -742,7 +742,7 @@ describe('Component: tab count labels', () => {
       papers,
       tags: [],
       total: 3,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -756,8 +756,8 @@ describe('Component: tab count labels', () => {
 
     // Pending = unread + reading = 2
     // Saved = rating > 0 = 2 (p2 rating=5, p3 rating=4)
-    expect(screen.getByText('library.pending (2)')).toBeInTheDocument();
-    expect(screen.getByText('library.saved (2)')).toBeInTheDocument();
+    expect(screen.getByText('library.inbox (2)')).toBeInTheDocument();
+    expect(screen.getByText('library.starred (2)')).toBeInTheDocument();
   });
 });
 
@@ -783,7 +783,7 @@ describe('Component: tag expand/collapse boundary', () => {
       papers: [paper],
       tags,
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -824,7 +824,7 @@ describe('Component: tag expand/collapse boundary', () => {
       papers: [paper],
       tags,
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -851,7 +851,7 @@ describe('Component: tag expand/collapse boundary', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -970,7 +970,7 @@ describe('Component: author display truncation', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -997,7 +997,7 @@ describe('Component: author display truncation', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -1020,13 +1020,13 @@ describe('Store: setActiveTab and setSearchQuery', () => {
   beforeEach(resetStores);
 
   it('setActiveTab switches between pending and saved', () => {
-    expect(useLibraryStore.getState().activeTab).toBe('pending');
+    expect(useLibraryStore.getState().activeTab).toBe('inbox');
 
-    useLibraryStore.getState().setActiveTab('saved');
-    expect(useLibraryStore.getState().activeTab).toBe('saved');
+    useLibraryStore.getState().setActiveTab('starred');
+    expect(useLibraryStore.getState().activeTab).toBe('starred');
 
-    useLibraryStore.getState().setActiveTab('pending');
-    expect(useLibraryStore.getState().activeTab).toBe('pending');
+    useLibraryStore.getState().setActiveTab('inbox');
+    expect(useLibraryStore.getState().activeTab).toBe('inbox');
   });
 
   it('setSearchQuery updates the search string', () => {
@@ -1050,7 +1050,7 @@ describe('Component: search input interaction', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -1089,7 +1089,7 @@ describe('Component: paper venue and year display', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -1115,7 +1115,7 @@ describe('Component: paper venue and year display', () => {
       papers: [paper],
       tags: [],
       total: 1,
-      activeTab: 'pending',
+      activeTab: 'inbox',
     });
 
     setupMethodRouter({
@@ -1142,8 +1142,8 @@ describe('i18n: library keys completeness', () => {
     const lib = (en.default ?? en).library;
 
     // All keys used in LibraryPanel
-    expect(lib.pending).toBeDefined();
-    expect(lib.saved).toBeDefined();
+    expect(lib.inbox).toBeDefined();
+    expect(lib.starred).toBeDefined();
     expect(lib.search).toBeDefined();
     expect(lib.empty).toBeDefined();
     expect(lib.emptyFiltered).toBeDefined();
@@ -1166,8 +1166,8 @@ describe('i18n: library keys completeness', () => {
     const zhCN = await import('../i18n/zh-CN.json');
     const lib = (zhCN.default ?? zhCN).library;
 
-    expect(lib.pending).toBeDefined();
-    expect(lib.saved).toBeDefined();
+    expect(lib.inbox).toBeDefined();
+    expect(lib.starred).toBeDefined();
     expect(lib.search).toBeDefined();
     expect(lib.empty).toBeDefined();
     expect(lib.emptyFiltered).toBeDefined();
