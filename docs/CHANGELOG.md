@@ -17,6 +17,19 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-03-17 — Task Module Enhancements (P0-P2)
+
+- [2026-03-17] [Modules] [Claude] feat: `task_delete` agent tool (#10) — destructive delete with pre-fetch title for confirmation
+- [2026-03-17] [Dashboard] [Claude] feat: priority dropdown in TaskRow — clickable color dot, 4-option Dropdown, stopPropagation
+- [2026-03-17] [Dashboard] [Claude] feat: Gantt chart modal (frappe-gantt) — lazy-loaded, Day/Week/Month, dark/light theme, priority-colored bars
+- [2026-03-17] [Dashboard] [Claude] refactor: extract PRIORITY_COLORS to `utils/task-constants.ts` (was duplicated in 4 files)
+- [2026-03-17] [Dashboard] [Claude] fix: add frappe-gantt base CSS import + silence Dart Sass 3.0 deprecation warnings
+- [2026-03-17] [Infra] [Claude] config: add `task_delete`, `task_link_file`, `cron_update_schedule` to `alsoAllow` (local only)
+- [2026-03-17] [Dashboard] [Claude] i18n: add `tasks.gantt.*` keys (7 keys × 2 locales)
+- [2026-03-17] [Infra] [Claude] Branch: `feat/task-module-enhancements` @ `163a1d9`, worktree `rc-agent-2/`
+- [2026-03-17] [Infra] [Claude] Tests: 55 files, 1069/1069 pass, tsc 0 errors (dashboard + plugin)
+- [2026-03-17] [Infra] [Sylvan] Manual E2E: P0 (delete), P1 (priority), P2 (Gantt) — all pass
+
 ### 2026-03-14 — Claude Memory System Restructuring
 
 - [2026-03-14] [Infra] [Claude] Restructured Claude Code memory system (MEMORY.md 251→124 lines, was truncating at 200)
