@@ -5,10 +5,10 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 31 agent tools (12 literature + 9 task + 7 workspace + 3 radar)
- *   - 61 WS RPC methods + 1 HTTP route = 62 interface methods
- *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 11 rc.ws.* + 4 rc.radar.* = 61 WS; POST /rc/upload = 1 HTTP)
- *   - 8 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call, gateway_start, agent:bootstrap)
+ *   - 31 agent tools (12 literature + 10 task + 7 workspace + 3 radar)
+ *   - 63 WS RPC methods + 1 HTTP route = 64 interface methods
+ *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 2 rc.heartbeat.* + 11 rc.ws.* + 4 rc.radar.* = 63 WS; POST /rc/upload = 1 HTTP)
+ *   - 8 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×2, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  */
 
@@ -24,6 +24,7 @@ import { registerLiteratureRpc } from './src/literature/rpc.js';
 import { TaskService } from './src/tasks/service.js';
 import { createTaskTools } from './src/tasks/tools.js';
 import { registerTaskRpc } from './src/tasks/rpc.js';
+import { HeartbeatService } from './src/tasks/heartbeat.js';
 import { WorkspaceService, type WorkspaceConfig } from './src/workspace/service.js';
 import { createWorkspaceTools } from './src/workspace/tools.js';
 import { registerWorkspaceRpc } from './src/workspace/rpc.js';
@@ -114,6 +115,7 @@ const plugin: PluginDefinition = {
     // ── 2. Initialize services ───────────────────────────────────────
     const litService = new LiteratureService(dbManager.db);
     const taskService = new TaskService(dbManager.db);
+    const heartbeatService = new HeartbeatService(dbManager.db);
 
     const wsConfig: WorkspaceConfig = {
       root: api.resolvePath(cfg.workspace?.root ?? 'workspace'),
@@ -204,6 +206,17 @@ const plugin: PluginDefinition = {
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
     registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
     registerRadarRpc(registerMethod, dbManager.db);       // 3 methods
+
+    // Heartbeat RPC (2 methods)
+    registerMethod('rc.heartbeat.status', () => {
+      return heartbeatService.getStatus();
+    });
+    registerMethod('rc.heartbeat.suppress', (params: Record<string, unknown>) => {
+      const taskId = params.task_id as string;
+      if (!taskId) throw new Error('task_id is required');
+      heartbeatService.suppress(taskId);
+      return { ok: true, task_id: taskId };
+    });
 
     // ── 6. Register HTTP route: POST /rc/upload ──────────────────────
     api.registerHttpRoute({
@@ -313,6 +326,23 @@ const plugin: PluginDefinition = {
           for (const t of upcoming.slice(0, 3)) {
             lines.push(`  - "${t.title}" (deadline: ${t.deadline})`);
           }
+        }
+
+        // Heartbeat tick: check and send notifications if due, then inject escalation status
+        try {
+          heartbeatService.tick((type, title, body) => {
+            taskService.sendNotification(type, title, body);
+          });
+          const hbStatus = heartbeatService.getStatus();
+          const urgent = hbStatus.filter((h) => h.current_tier === 'overdue' || h.current_tier === 'hourly' || h.current_tier === 'every_6h');
+          if (urgent.length > 0) {
+            lines.push(`[Research-Claw] Heartbeat ESCALATED: ${urgent.length} task(s) need attention`);
+            for (const h of urgent.slice(0, 5)) {
+              lines.push(`  - [${h.current_tier.toUpperCase()}] "${h.task_title}" (deadline: ${h.deadline})`);
+            }
+          }
+        } catch {
+          // Non-fatal
         }
 
         // Active task overview — gives the agent awareness of user's and its own todos
@@ -563,7 +593,59 @@ const plugin: PluginDefinition = {
       }
     });
 
-    // Hook 7: Verify DB integrity on gateway start
+    // Hook 7: Heartbeat lifecycle — react to task tool calls
+    //
+    // After task_create/update/complete/delete, update heartbeat tracking.
+    // Uses after_tool_call which fires only for plugin tools (our tools).
+    api.on('after_tool_call', (event: unknown) => {
+      const evt = event as {
+        toolName?: string;
+        params?: Record<string, unknown>;
+        result?: { details?: Record<string, unknown> };
+      };
+      if (!evt.toolName || !dbManager?.isOpen()) return;
+
+      try {
+        const details = evt.result?.details as Record<string, unknown> | undefined;
+
+        switch (evt.toolName) {
+          case 'task_create': {
+            // Register if task was created with a deadline
+            const taskId = details?.id as string | undefined;
+            const deadline = details?.deadline as string | undefined;
+            if (taskId && deadline) {
+              heartbeatService.register(taskId);
+            }
+            break;
+          }
+          case 'task_update': {
+            // Recalculate if deadline or status changed
+            const taskId = (evt.params?.id as string) ?? (details?.id as string);
+            if (!taskId) break;
+            const newStatus = details?.status as string | undefined;
+            if (newStatus === 'done' || newStatus === 'cancelled') {
+              heartbeatService.unregister(taskId);
+            } else {
+              heartbeatService.recalculate(taskId);
+            }
+            break;
+          }
+          case 'task_complete': {
+            const taskId = (evt.params?.id as string) ?? (details?.id as string);
+            if (taskId) heartbeatService.unregister(taskId);
+            break;
+          }
+          case 'task_delete': {
+            // CASCADE handles DB cleanup, but clear in-memory if needed
+            break;
+          }
+        }
+      } catch (err) {
+        api.logger.warn(`[Heartbeat] Post-tool hook error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }, { priority: 50 });
+
+    // Hook 8: Verify DB integrity + bootstrap heartbeat on gateway start
     api.on('gateway_start', () => {
       if (!dbManager?.isOpen()) return;
       try {
@@ -573,6 +655,16 @@ const plugin: PluginDefinition = {
         }
       } catch (err) {
         api.logger.error(`DB integrity check error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Bootstrap heartbeat: scan active deadline tasks and populate tracking
+      try {
+        const hbResult = heartbeatService.bootstrap();
+        if (hbResult.registered > 0 || hbResult.updated > 0) {
+          api.logger.info(`[Heartbeat] Bootstrap: ${hbResult.registered} registered, ${hbResult.updated} updated`);
+        }
+      } catch (err) {
+        api.logger.warn(`[Heartbeat] Bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
 
@@ -621,7 +713,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (31 tools, 61 WS RPC + 1 HTTP = 62 interfaces, 8 hooks)');
+    api.logger.info('Research-Claw Core registered (31 tools, 63 WS RPC + 1 HTTP = 64 interfaces, 8 hooks)');
   },
 };
 

@@ -137,9 +137,9 @@ const PRESET_DEFINITIONS: Omit<CronPreset, 'enabled' | 'last_run_at' | 'next_run
   },
   {
     id: 'deadline_reminders_daily',
-    name: 'Deadline Reminders Daily',
-    description: 'Send reminders for tasks with upcoming deadlines every morning.',
-    schedule: '0 9 * * *',
+    name: 'Deadline Reminders',
+    description: 'Adaptive deadline reminders — frequency escalates as deadlines approach (daily → twice daily → every 6h → hourly).',
+    schedule: '*/30 * * * *',
   },
   {
     id: 'group_meeting_prep',

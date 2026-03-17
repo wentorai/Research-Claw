@@ -148,6 +148,15 @@
       "agentPrompt": "Report on the current progress and completion status of task \"{{title}}\". Include: completed work, obstacles encountered, estimated remaining effort, and next-step recommendations.",
       "humanPrompt": "Based on the current progress and available information, please provide completion suggestions for task \"{{title}}\". Include: recommended next steps, resources that may be needed, and guidance on how to complete this task efficiently.",
       "mixedPrompt": "Report on the current status of task \"{{title}}\". How is the part I am responsible for progressing? What is the completion status of the part you are handling? What should each of us do next?"
+    },
+    "gantt": {
+      "title": "Gantt View",
+      "open": "Gantt View",
+      "noTasks": "No tasks with deadlines to display.",
+      "viewDay": "Day",
+      "viewWeek": "Week",
+      "viewMonth": "Month",
+      "taskCount": "{{count}} tasks"
     }
   },
   "workspace": {

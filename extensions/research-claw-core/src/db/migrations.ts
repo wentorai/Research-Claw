@@ -91,6 +91,18 @@ const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE rc_radar_config ADD COLUMN last_scan_results TEXT;`,
     ].join('\n'),
   },
+  {
+    version: 7,
+    name: 'add_heartbeat_log',
+    sql: `CREATE TABLE IF NOT EXISTS rc_heartbeat_log (
+  task_id       TEXT PRIMARY KEY REFERENCES rc_tasks(id) ON DELETE CASCADE,
+  current_tier  TEXT NOT NULL DEFAULT 'silent',
+  last_notified TEXT,
+  notify_count  INTEGER NOT NULL DEFAULT 0,
+  escalated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  suppressed    INTEGER NOT NULL DEFAULT 0
+);`,
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────

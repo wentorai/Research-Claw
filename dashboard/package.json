@@ -16,6 +16,7 @@
     "@types/react-window": "^2.0.0",
     "antd": "^5.23.0",
     "antd-style": "^3.7.0",
+    "frappe-gantt": "^0.6.1",
     "i18next": "^24.0.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
@@ -34,6 +35,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
     "happy-dom": "^16.0.0",
+    "sass-embedded": "^1.98.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"

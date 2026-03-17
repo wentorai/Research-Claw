@@ -6,6 +6,13 @@ import { resolve } from 'node:path';
 export default defineConfig({
   plugins: [react()],
   base: './',
+  css: {
+    preprocessorOptions: {
+      scss: {
+        silenceDeprecations: ['global-builtin', 'color-functions'],
+      },
+    },
+  },
   test: {
     environment: 'happy-dom',
   },

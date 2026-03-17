@@ -1,22 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Checkbox, Collapse, Input, Segmented, Switch, Tooltip, Typography } from 'antd';
-import { CheckSquareOutlined, RobotOutlined, SearchOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
+import { Button, Checkbox, Collapse, Dropdown, Input, Segmented, Switch, Tooltip, Typography } from 'antd';
+import { BarChartOutlined, CheckSquareOutlined, RobotOutlined, SearchOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useTasksStore, type Task, type TaskPriority, type TaskType, type TaskWithDetails } from '../../stores/tasks';
 import { useGatewayStore } from '../../stores/gateway';
 import { useChatStore } from '../../stores/chat';
 import { getThemeTokens } from '../../styles/theme';
 import { useConfigStore } from '../../stores/config';
+import { PRIORITY_COLORS } from '../../utils/task-constants';
 import TaskDetailExpand from './TaskDetailExpand';
 
-const { Text } = Typography;
+const GanttModal = React.lazy(() => import('./GanttModal'));
 
-const PRIORITY_COLORS: Record<TaskPriority, string> = {
-  urgent: '#EF4444',
-  high: '#F59E0B',
-  medium: '#3B82F6',
-  low: '#6B7280',
-};
+const { Text } = Typography;
 
 const TASK_TYPE_ICONS: Record<TaskType, typeof UserOutlined> = {
   human: UserOutlined,
@@ -55,10 +51,34 @@ function TaskRow({ task, tokens, perspective, isExpanded, onToggleExpand }: Task
   const { t } = useTranslation();
   const completeTask = useTasksStore((s) => s.completeTask);
   const reopenTask = useTasksStore((s) => s.reopenTask);
+  const updateTask = useTasksStore((s) => s.updateTask);
+  const loadTasks = useTasksStore((s) => s.loadTasks);
   const priorityColor = PRIORITY_COLORS[task.priority];
   const overdue = isOverdue(task.deadline);
   const soonDue = isWithinDays(task.deadline, 3);
   const isDone = task.status === 'done' || task.status === 'cancelled';
+
+  const priorityItems = useMemo(() => {
+    const levels: TaskPriority[] = ['urgent', 'high', 'medium', 'low'];
+    return levels.map((level) => ({
+      key: level,
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: PRIORITY_COLORS[level], display: 'inline-block', flexShrink: 0 }} />
+          {t(`tasks.priority.${level}`)}
+        </span>
+      ),
+    }));
+  }, [t]);
+
+  const handlePriorityChange = useCallback(
+    (e: { key: string }) => {
+      const newPriority = e.key as TaskPriority;
+      if (newPriority === task.priority) return;
+      updateTask(task.id, { priority: newPriority }).then(() => loadTasks());
+    },
+    [task.id, task.priority, updateTask, loadTasks],
+  );
 
   const handleCheck = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
@@ -110,6 +130,27 @@ function TaskRow({ task, tokens, perspective, isExpanded, onToggleExpand }: Task
         onClick={(e) => e.stopPropagation()}
         style={{ flexShrink: 0 }}
       />
+      <Dropdown
+        menu={{ items: priorityItems, onClick: handlePriorityChange }}
+        trigger={['click']}
+      >
+        <span
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            background: priorityColor,
+            display: 'inline-block',
+            flexShrink: 0,
+            cursor: 'pointer',
+            transition: 'transform 0.15s ease',
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1.3)'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1)'; }}
+          title={t(`tasks.priority.${task.priority}`)}
+        />
+      </Dropdown>
       {/* GAP-7: Task type badge in All perspective */}
       {perspective === 'all' && (
         <Tooltip title={t(`tasks.taskType.${task.task_type}`)}>
@@ -167,6 +208,9 @@ export default function TaskPanel() {
   const loadTaskDetail = useTasksStore((s) => s.loadTaskDetail);
   const connState = useGatewayStore((s) => s.state);
   const send = useChatStore((s) => s.send);
+
+  // Gantt modal state
+  const [ganttOpen, setGanttOpen] = useState(false);
 
   // GAP-9: Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -369,8 +413,17 @@ export default function TaskPanel() {
         />
       </div>
 
-      {/* Show completed toggle */}
+      {/* Gantt button + Show completed toggle */}
       <div style={{ padding: '0 16px 8px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+        <Tooltip title={t('tasks.gantt.open')}>
+          <Button
+            type="text"
+            size="small"
+            icon={<BarChartOutlined />}
+            onClick={() => setGanttOpen(true)}
+          />
+        </Tooltip>
+        <div style={{ flex: 1 }} />
         <Text style={{ fontSize: 12, color: tokens.text.muted }}>{t('tasks.showCompleted')}</Text>
         <Switch size="small" checked={showCompleted} onChange={() => toggleCompleted()} />
       </div>
@@ -439,6 +492,21 @@ export default function TaskPanel() {
           </div>
         )}
       </div>
+
+      {/* Gantt Modal */}
+      {ganttOpen && (
+        <React.Suspense fallback={null}>
+          <GanttModal
+            open={ganttOpen}
+            tasks={tasks}
+            onClose={() => setGanttOpen(false)}
+            onTaskClick={(taskId) => {
+              setGanttOpen(false);
+              handleToggleExpand(taskId);
+            }}
+          />
+        </React.Suspense>
+      )}
     </div>
   );
 }

@@ -17,6 +17,25 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-03-17/18 — Task Module Enhancements (P0-P3)
+
+- [2026-03-17] [Modules] [Claude] feat: `task_delete` agent tool (#10) — destructive delete with pre-fetch title for confirmation
+- [2026-03-17] [Dashboard] [Claude] feat: priority dropdown in TaskRow — clickable color dot, 4-option Dropdown, stopPropagation
+- [2026-03-17] [Dashboard] [Claude] feat: Gantt chart modal (frappe-gantt) — lazy-loaded, Day/Week/Month, dark/light theme, priority-colored bars
+- [2026-03-17] [Dashboard] [Claude] refactor: extract PRIORITY_COLORS to `utils/task-constants.ts` (was duplicated in 4 files)
+- [2026-03-17] [Dashboard] [Claude] fix: add frappe-gantt base CSS import + silence Dart Sass 3.0 deprecation warnings
+- [2026-03-17] [Infra] [Claude] config: add `task_delete`, `task_link_file`, `cron_update_schedule` to `alsoAllow` (local only)
+- [2026-03-17] [Dashboard] [Claude] i18n: add `tasks.gantt.*` keys (7 keys × 2 locales)
+- [2026-03-17] [Infra] [Sylvan] Manual E2E: P0 (delete), P1 (priority), P2 (Gantt) — all pass
+- [2026-03-18] [Modules] [Claude] feat: adaptive heartbeat escalation — HeartbeatService (339 lines), 6-tier deadline tracking (silent→daily→twice_daily→every_6h→hourly→overdue)
+- [2026-03-18] [Modules] [Claude] schema: v6→v7 — new `rc_heartbeat_log` table (ON DELETE CASCADE)
+- [2026-03-18] [Modules] [Claude] integration: gateway_start bootstrap + before_prompt_build tick + after_tool_call lifecycle hooks
+- [2026-03-18] [Modules] [Claude] cron: `deadline_reminders_daily` schedule `0 9 * * *` → `*/30 * * * *`, tick() manages frequency per tier
+- [2026-03-18] [Modules] [Claude] RPC: `rc.heartbeat.status` + `rc.heartbeat.suppress` (interfaces 62→64, hooks 7→8)
+- [2026-03-18] [Infra] [Sylvan] Manual E2E: P3 (tier 升级/降级, overdue 通知, 多任务混合, gateway 重启 bootstrap, task 删除 CASCADE) — all pass
+- [2026-03-18] [Infra] [Claude] Branch: `feat/task-module-enhancements` @ `7870e63` (5 commits), worktree `rc-agent-2/`
+- [2026-03-18] [Infra] [Claude] Tests: 54 files, 987/987 pass, tsc 0 errors (bootstrap-consistency excluded — pre-existing)
+
 ### 2026-03-14 — Claude Memory System Restructuring
 
 - [2026-03-14] [Infra] [Claude] Restructured Claude Code memory system (MEMORY.md 251→124 lines, was truncating at 200)

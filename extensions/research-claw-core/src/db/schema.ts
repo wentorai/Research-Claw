@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — SQLite Schema DDL
  *
- * 12 tables + FTS5 virtual table + triggers + indexes.
+ * 13 tables + FTS5 virtual table + triggers + indexes.
  * All table names prefixed with `rc_` to avoid collision with OpenClaw internals.
  *
  * Tables:
@@ -17,12 +17,13 @@
  *  10. rc_paper_notes      — Annotation notes on papers
  *  11. rc_tasks            — Task items (deadline-sorted)
  *  12. rc_activity_log     — Event tracking / audit log
+ *  13. rc_heartbeat_log    — Adaptive deadline escalation tracking
  *
  * FTS5: rc_papers_fts (title, authors, abstract, notes)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -186,6 +187,16 @@ CREATE TABLE IF NOT EXISTS rc_agent_notifications (
   read       INTEGER NOT NULL DEFAULT 0
 );`;
 
+const RC_HEARTBEAT_LOG = `
+CREATE TABLE IF NOT EXISTS rc_heartbeat_log (
+  task_id       TEXT PRIMARY KEY REFERENCES rc_tasks(id) ON DELETE CASCADE,
+  current_tier  TEXT NOT NULL DEFAULT 'silent',
+  last_notified TEXT,
+  notify_count  INTEGER NOT NULL DEFAULT 0,
+  escalated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  suppressed    INTEGER NOT NULL DEFAULT 0
+);`;
+
 const RC_CRON_STATE = `
 CREATE TABLE IF NOT EXISTS rc_cron_state (
   preset_id      TEXT PRIMARY KEY,
@@ -214,6 +225,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   RC_ACTIVITY_LOG,
   RC_RADAR_CONFIG,
   RC_AGENT_NOTIFICATIONS,
+  RC_HEARTBEAT_LOG,
   RC_CRON_STATE,
 ];
 

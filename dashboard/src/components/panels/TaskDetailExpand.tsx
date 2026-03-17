@@ -5,15 +5,9 @@ import { useTranslation } from 'react-i18next';
 import type { TaskWithDetails, ActivityLogEntry, Task } from '../../stores/tasks';
 import { useUiStore } from '../../stores/ui';
 import type { ThemeTokens } from '../../styles/theme';
+import { PRIORITY_COLORS } from '../../utils/task-constants';
 
 const { Text } = Typography;
-
-const PRIORITY_COLORS: Record<string, string> = {
-  urgent: '#EF4444',
-  high: '#F59E0B',
-  medium: '#3B82F6',
-  low: '#6B7280',
-};
 
 const STATUS_COLORS: Record<string, string> = {
   todo: '#6B7280',

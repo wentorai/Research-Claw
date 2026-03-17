@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — Task Agent Tools
  *
- * 9 agent tools for the task management module:
+ * 10 agent tools for the task management module:
  *   1. task_create           — Create a new research task
  *   2. task_list             — List/filter tasks with smart sorting
  *   3. task_complete         — Mark a task as done
@@ -11,6 +11,7 @@
  *   7. task_link_file        — Link a task to a workspace file
  *   8. cron_update_schedule  — Update cron preset schedule
  *   9. send_notification     — Push a notification to the dashboard bell
+ *  10. task_delete           — Permanently delete a task
  *
  * Each tool uses plain JSON Schema objects for parameters (no TypeBox).
  * Registered via api.registerTool() from the OpenClaw plugin SDK.
@@ -572,6 +573,47 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
         return ok(
           `Notification sent: "${notification.title}" (type: ${notification.type}, id: ${notification.id})`,
           notification,
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 10. task_delete ────────────────────────────────────────────────
+
+  tools.push({
+    name: 'task_delete',
+    description:
+      'Permanently delete a task and all its activity log entries. This is destructive and ' +
+      'cannot be undone. Use only when the user explicitly requests task deletion. ' +
+      'Subtasks of the deleted task will have their parent_task_id set to NULL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'UUID of the task to delete' },
+      },
+      required: ['id'],
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
+      try {
+        if (typeof params.id !== 'string' || !params.id.trim()) {
+          return fail('id is required and must be a non-empty string');
+        }
+        const id = params.id.trim();
+
+        // Fetch task info before deletion for the confirmation message
+        const existing = service.get(id);
+        if (!existing) {
+          return fail(`Task not found: ${id}`);
+        }
+
+        const title = existing.title;
+        service.delete(id);
+
+        return ok(
+          `Deleted task "${title}" (${id}). This action cannot be undone.`,
+          { id, title, deleted: true },
         );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));

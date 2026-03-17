@@ -9,16 +9,9 @@ import { useGatewayStore } from '@/stores/gateway';
 import { useUiStore } from '@/stores/ui';
 import { getThemeTokens } from '@/styles/theme';
 import type { TaskCard as TaskCardType } from '@/types/cards';
+import { PRIORITY_COLORS } from '@/utils/task-constants';
 
 const { Text } = Typography;
-
-/** Priority border colors — spec 01 §7.4.4 + §12.2 */
-const PRIORITY_COLORS: Record<string, string> = {
-  urgent: '#EF4444',
-  high: '#F59E0B',
-  medium: '#3B82F6',
-  low: '#6B7280',
-};
 
 /** Status badge colors — spec 01 §12.2 */
 const STATUS_STYLES: Record<string, { color: string; strikethrough?: boolean }> = {
