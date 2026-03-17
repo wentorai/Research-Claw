@@ -332,9 +332,9 @@ export class TaskService {
          VALUES (?, ?, '{}', NULL, NULL)`,
       );
       for (const preset of PRESET_DEFINITIONS) {
-        // deadline_reminders_daily is enabled by default
-        const defaultEnabled = preset.id === 'deadline_reminders_daily' ? 1 : 0;
-        insertStmt.run(preset.id, defaultEnabled);
+        // All presets disabled by default — monitor system handles scheduling now.
+        // Legacy presets kept for backward compat but should not auto-create gateway jobs.
+        insertStmt.run(preset.id, 0);
       }
     }
   }

@@ -101,6 +101,7 @@ interface SeedMonitor {
 }
 
 const SEED_MONITORS: SeedMonitor[] = [
+  // ── Academic paper discovery ────────────────────────────────────
   {
     id: 'arxiv-daily',
     name: 'arXiv Daily Digest',
@@ -133,6 +134,24 @@ const SEED_MONITORS: SeedMonitor[] = [
       'Report new findings with monitor_report and send_notification.',
   },
   {
+    id: 'citation-alert',
+    name: 'Citation Alert',
+    source_type: 'semantic_scholar',
+    target: '',
+    filters: { track_citations_of: 'library' },
+    schedule: '0 8 * * 1',
+    enabled: false,
+    notify: true,
+    agent_prompt:
+      'Check if any papers in the user\'s library have received new citations. ' +
+      'Use library_citation_graph for each highly-rated paper. ' +
+      'Compare citation counts with previous check (from last_results). ' +
+      'Report any increase with the citing paper title and relevance. ' +
+      'Cache updated counts with monitor_report and send_notification.',
+  },
+
+  // ── Code & tools ────────────────────────────────────────────────
+  {
     id: 'github-releases',
     name: 'GitHub Release Tracker',
     source_type: 'github',
@@ -146,6 +165,24 @@ const SEED_MONITORS: SeedMonitor[] = [
       'Fetch latest release notes and summarize what changed. ' +
       'Cache results with monitor_report and send_notification.',
   },
+  {
+    id: 'github-trending',
+    name: 'GitHub Trending',
+    source_type: 'github',
+    target: '',
+    filters: { scope: 'trending', language: '', since: 'daily' },
+    schedule: '0 9 * * 1-5',
+    enabled: false,
+    notify: true,
+    agent_prompt:
+      'Check GitHub Trending repositories (https://github.com/trending). ' +
+      'Filter by the configured language if set, otherwise check all. ' +
+      'Identify repos relevant to the user\'s research interests. ' +
+      'Summarize top 5 with star counts and descriptions. ' +
+      'Cache results with monitor_report and send_notification.',
+  },
+
+  // ── Feeds & news ────────────────────────────────────────────────
   {
     id: 'rss-feed',
     name: 'RSS Feed Monitor',
@@ -161,6 +198,23 @@ const SEED_MONITORS: SeedMonitor[] = [
       'Cache results with monitor_report and send_notification.',
   },
   {
+    id: 'tech-news-daily',
+    name: 'AI/Tech News Daily',
+    source_type: 'rss',
+    target: 'https://huggingface.co/blog/feed.xml',
+    filters: { keywords: [] },
+    schedule: '0 8 * * *',
+    enabled: false,
+    notify: true,
+    agent_prompt:
+      'Fetch the Hugging Face blog RSS feed. Parse new entries since the last check. ' +
+      'Summarize top entries with their key points. ' +
+      'Highlight anything relevant to the user\'s research interests. ' +
+      'Cache results with monitor_report and send_notification.',
+  },
+
+  // ── Web monitoring ──────────────────────────────────────────────
+  {
     id: 'webpage-watch',
     name: 'Webpage Change Detector',
     source_type: 'webpage',
@@ -173,6 +227,60 @@ const SEED_MONITORS: SeedMonitor[] = [
       'Fetch the target webpage. Compare content with previous check (from last_results). ' +
       'If content has meaningfully changed, extract and summarize the differences. ' +
       'Cache new content with monitor_report. Only send notification if meaningful changes found.',
+  },
+  {
+    id: 'conference-deadlines',
+    name: 'Conference Deadline Tracker',
+    source_type: 'webpage',
+    target: 'https://aideadlin.es/?sub=ML,NLP,CV,AI',
+    filters: { keywords: [] },
+    schedule: '0 9 * * 1',
+    enabled: false,
+    notify: true,
+    agent_prompt:
+      'Fetch the AI conference deadline tracker page. Extract upcoming deadlines within 60 days. ' +
+      'Compare with previous check (from last_results) to identify newly added or approaching deadlines. ' +
+      'For each deadline: conference name, submission date, notification date, location. ' +
+      'Warn about any deadline within 14 days. ' +
+      'Cache results with monitor_report. Send notification if new deadlines or approaching ones found.',
+  },
+
+  // ── Periodic self-reports ───────────────────────────────────────
+  {
+    id: 'weekly-progress',
+    name: 'Weekly Progress Report',
+    source_type: 'custom',
+    target: '',
+    filters: {},
+    schedule: '0 17 * * 5',
+    enabled: false,
+    notify: true,
+    agent_prompt:
+      'Generate a weekly research progress report covering the past 7 days. Include: ' +
+      '1) Papers added/read this week (use library_search). ' +
+      '2) Tasks completed and in-progress (use task_list). ' +
+      '3) Key findings or notes added. ' +
+      '4) Suggested focus areas for next week. ' +
+      'Save the report to workspace: workspace_save("outputs/reports/weekly-YYYY-MM-DD.md", ...). ' +
+      'Send a brief notification with send_notification.',
+  },
+  {
+    id: 'daily-task-reminder',
+    name: 'Daily Task Reminder',
+    source_type: 'custom',
+    target: '',
+    filters: {},
+    schedule: '0 9 * * *',
+    enabled: false,
+    notify: true,
+    agent_prompt:
+      'Check for tasks due within 24 hours using task_list with deadline filter. ' +
+      'Also check for overdue tasks. ' +
+      'Send a notification with send_notification summarizing: ' +
+      '- Number of overdue tasks (if any, list titles). ' +
+      '- Tasks due today. ' +
+      '- Top 3 priority tasks for the day. ' +
+      'Keep the notification concise (under 200 chars for title).',
   },
 ];
 

@@ -80,9 +80,15 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
       const updated = await client.request<Monitor>('rc.monitor.toggle', { id, enabled });
 
       if (enabled) {
-        // 2a. Create gateway cron job
+        // 2a. Clean up any stale gateway job before creating new one
+        if (updated.gateway_job_id) {
+          try { await client.request('cron.remove', { id: updated.gateway_job_id }); } catch { /* */ }
+        }
+
+        // 2b. Create gateway cron job with monitor ID in name for dedup
         const cronResult = await client.request<{ id: string }>('cron.add', {
-          name: updated.name,
+          name: `[rc-monitor] ${updated.name}`,
+          description: `Monitor: ${updated.id}`,
           schedule: { kind: 'cron' as const, expr: updated.schedule },
           sessionTarget: 'isolated',
           payload: { kind: 'agentTurn', message: updated.agent_prompt },
@@ -100,8 +106,8 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
           } catch {
             // Job may not exist
           }
-          await client.request('rc.monitor.setJobId', { id, job_id: '' });
         }
+        await client.request('rc.monitor.setJobId', { id, job_id: '' });
       }
 
       // 4. Reload to get consistent state
@@ -157,7 +163,8 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
 
         // Create new
         const cronResult = await client.request<{ id: string }>('cron.add', {
-          name: updated.name,
+          name: `[rc-monitor] ${updated.name}`,
+          description: `Monitor: ${updated.id}`,
           schedule: { kind: 'cron' as const, expr: updated.schedule },
           sessionTarget: 'isolated',
           payload: { kind: 'agentTurn', message: updated.agent_prompt },

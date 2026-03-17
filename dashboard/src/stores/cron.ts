@@ -271,14 +271,15 @@ export const useCronStore = create<CronState>()((set, get) => ({
   },
 }));
 
-// Reset reconciliation flag when gateway disconnects.
-// Next reconnect triggers fresh reconciliation in loadPresets().
-// Guard: subscribe may not exist when gateway store is mocked in tests.
-if (typeof useGatewayStore.subscribe === 'function') {
-  useGatewayStore.subscribe((state) => {
-    if (state.state !== 'connected') {
-      _reconciled = false;
-      useCronStore.setState({ presetsLoaded: false });
-    }
-  });
-}
+// DISABLED: Old cron preset reconciliation is replaced by the monitor system.
+// The subscribe below was creating duplicate gateway cron jobs that conflicted
+// with rc_monitors. Kept commented for reference during migration period.
+//
+// if (typeof useGatewayStore.subscribe === 'function') {
+//   useGatewayStore.subscribe((state) => {
+//     if (state.state !== 'connected') {
+//       _reconciled = false;
+//       useCronStore.setState({ presetsLoaded: false });
+//     }
+//   });
+// }
