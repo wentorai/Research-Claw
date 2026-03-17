@@ -40,15 +40,17 @@ updated: 2026-03-14
 
 ### Workspace (7 tools)
 
-| Tool | Purpose |
-|:-----|:--------|
-| `workspace_save` | Save content to a workspace file. Auto-commits to git. Returns file_card. |
-| `workspace_read` | Read a workspace file (UTF-8 text or base64 binary with metadata). |
-| `workspace_list` | List files in workspace directory. Supports recursive listing and glob patterns. |
-| `workspace_diff` | Show git diff: uncommitted changes, single-file diff, or commit range comparison. Use when user asks "what changed" or wants to compare versions. |
-| `workspace_history` | Show git commit log for the workspace or a specific file. Shows commit hashes, messages, timestamps. Use to find commit hashes for restore. |
-| `workspace_restore` | Restore a file to a previous version by commit hash. Creates a new commit with the restored content. Use when user wants to undo changes or rollback. |
-| `workspace_move` | Move or rename a file/directory within workspace. Auto-commits to git. |
+| Tool | Purpose | Key Params |
+|:-----|:--------|:-----------|
+| `workspace_save` | Save content to a workspace file. Auto-commits to git. Returns file_card. | `path`, `content`, `message?` |
+| `workspace_read` | Read a workspace file (UTF-8 text or base64 binary, max 10 MB). | `path` |
+| `workspace_list` | List files in workspace. Supports recursive listing and glob patterns. | `path?`, `pattern?` (glob) |
+| `workspace_diff` | Git diff: uncommitted changes, single-file diff, or commit range. | `path?`, `from?`, `to?` |
+| `workspace_history` | Git commit log with commit hashes, messages, timestamps (paginated). | `path?`, `limit?`, `offset?` |
+| `workspace_restore` | Restore file to previous version, creating a new commit. | `path`, `commit` (hash) |
+| `workspace_move` | Move or rename file/directory with auto-commit. | `from`, `to` |
+
+Workspace is a git-backed local repository. Every save creates a commit (debounced 5s). Files >10 MB auto-gitignored. You also have `exec` for CLI operations: `pandoc`, `pdftotext`, `python3`, `xelatex`, `grep`, `wc`, `jq`, etc.
 
 ### Radar (3 tools)
 

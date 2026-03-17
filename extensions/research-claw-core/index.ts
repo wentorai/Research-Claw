@@ -8,10 +8,11 @@
  *   - 31 agent tools (12 literature + 9 task + 7 workspace + 3 radar)
  *   - 61 WS RPC methods + 1 HTTP route = 62 interface methods
  *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 11 rc.ws.* + 4 rc.radar.* = 61 WS; POST /rc/upload = 1 HTTP)
- *   - 7 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call, gateway_start)
+ *   - 8 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  */
 
+import * as fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as path from 'node:path';
 
@@ -76,6 +77,11 @@ interface PluginApi {
     stop?: (ctx: { stateDir: string; logger: PluginLogger }) => void | Promise<void>;
   }) => void;
   on: (hookName: string, handler: (...args: unknown[]) => unknown, opts?: { priority?: number }) => void;
+  registerHook?: (
+    events: string | string[],
+    handler: (event: { type: string; action: string; context: Record<string, unknown> }) => void | Promise<void>,
+    opts?: { name?: string; description?: string },
+  ) => void;
 }
 
 interface PluginDefinition {
@@ -570,7 +576,52 @@ const plugin: PluginDefinition = {
       }
     });
 
-    api.logger.info('Research-Claw Core registered (31 tools, 61 WS RPC + 1 HTTP = 62 interfaces, 7 hooks)');
+    // Hook 8: Redirect bootstrap file loading from workspace root to .ResearchClaw/ subdirectory.
+    //
+    // OpenClaw hardcodes loading AGENTS.md, SOUL.md, etc. from the workspace root.
+    // With skipBootstrap: true, OC won't create default templates at root. This hook
+    // intercepts the agent:bootstrap event and replaces missing root entries with the
+    // actual files from .ResearchClaw/, keeping the workspace root clean for users.
+    //
+    // MEMORY.md + memory/ stay at workspace root (agent memory search scans root).
+    const RELOCATABLE_FILES = new Set([
+      'AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md',
+      'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md',
+    ]);
+
+    if (api.registerHook) {
+      api.registerHook('agent:bootstrap', (event) => {
+        const ctx = event.context as {
+          workspaceDir?: string;
+          bootstrapFiles?: Array<{
+            name: string;
+            path: string;
+            content?: string;
+            missing?: boolean;
+          }>;
+        };
+        if (!ctx?.workspaceDir || !Array.isArray(ctx.bootstrapFiles)) return;
+
+        const rcDir = path.join(ctx.workspaceDir, '.ResearchClaw');
+        if (!fs.existsSync(rcDir)) return;
+
+        ctx.bootstrapFiles = ctx.bootstrapFiles.map((file) => {
+          if (!RELOCATABLE_FILES.has(file.name)) return file;
+
+          const rcPath = path.join(rcDir, file.name);
+          try {
+            const content = fs.readFileSync(rcPath, 'utf-8');
+            return { ...file, path: rcPath, content, missing: false };
+          } catch {
+            return file;
+          }
+        });
+      }, { name: 'research-claw.bootstrap-redirect', description: 'Load prompt files from .ResearchClaw/ subdirectory' });
+    } else {
+      api.logger.warn('registerHook not available — system files will remain at workspace root');
+    }
+
+    api.logger.info('Research-Claw Core registered (31 tools, 61 WS RPC + 1 HTTP = 62 interfaces, 8 hooks)');
   },
 };
 

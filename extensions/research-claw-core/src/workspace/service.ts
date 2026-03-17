@@ -231,6 +231,7 @@ const DEFAULT_TREE_DEPTH = 3;
 
 /** Standard workspace directory scaffold. */
 const WORKSPACE_DIRS = [
+  '.ResearchClaw',
   'uploads',
   'sources/papers',
   'sources/data',
@@ -242,6 +243,30 @@ const WORKSPACE_DIRS = [
   'outputs/notes',
   'outputs/radar',
 ] as const;
+
+/**
+ * Prompt files that live in .ResearchClaw/ (loaded via agent:bootstrap hook).
+ * MEMORY.md + memory/ stay at workspace root (OC memory search scans root).
+ */
+const RELOCATABLE_PROMPT_FILES = [
+  'AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md',
+  'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md',
+] as const;
+
+/**
+ * Root-level entries hidden from rc.ws.tree (system files, like Windows hidden files).
+ * Agent tools (workspace_read/save/list) are NOT affected — only the dashboard tree.
+ */
+const HIDDEN_ROOT_ENTRIES = new Set([
+  // System directories
+  '.ResearchClaw', '.openclaw', '.research-claw', 'memory',
+  // Prompt files that remain at root during migration or as legacy
+  'AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md',
+  'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md', 'BOOTSTRAP.md.done',
+  'MEMORY.md',
+  // OS/tool artifacts
+  '.DS_Store', 'Thumbs.db', '.gitignore',
+]);
 
 const DEFAULT_GITIGNORE = `# Research-Claw workspace — auto-generated
 # Large binary files (managed by size guard)
@@ -446,6 +471,9 @@ export class WorkspaceService {
     );
     await Promise.all(dirCreations);
 
+    // Migrate prompt files from workspace root → .ResearchClaw/ (idempotent)
+    await this.migratePromptFiles();
+
     // Create default .gitignore if it does not exist
     const gitignorePath = path.join(this.root, '.gitignore');
     try {
@@ -470,6 +498,51 @@ export class WorkspaceService {
     }
   }
 
+  /**
+   * Migrate prompt files from workspace root to .ResearchClaw/ subdirectory.
+   *
+   * Idempotent: skips files that already exist in .ResearchClaw/.
+   * Only moves files that physically exist at root AND are not yet in the subdirectory.
+   */
+  private async migratePromptFiles(): Promise<void> {
+    const rcDir = path.join(this.root, '.ResearchClaw');
+
+    for (const filename of RELOCATABLE_PROMPT_FILES) {
+      const rootPath = path.join(this.root, filename);
+      const destPath = path.join(rcDir, filename);
+
+      try {
+        // Skip if destination already exists (already migrated)
+        await fsp.access(destPath, fs.constants.F_OK);
+        continue;
+      } catch {
+        // destPath does not exist — check if source exists at root
+      }
+
+      try {
+        await fsp.access(rootPath, fs.constants.F_OK);
+        // Source exists at root, destination missing → move
+        await fsp.rename(rootPath, destPath);
+      } catch {
+        // Source doesn't exist at root either — nothing to migrate
+      }
+    }
+
+    // Also handle BOOTSTRAP.md.done (renamed after first-run onboarding)
+    const doneSrc = path.join(this.root, 'BOOTSTRAP.md.done');
+    const doneDest = path.join(rcDir, 'BOOTSTRAP.md.done');
+    try {
+      await fsp.access(doneDest, fs.constants.F_OK);
+    } catch {
+      try {
+        await fsp.access(doneSrc, fs.constants.F_OK);
+        await fsp.rename(doneSrc, doneDest);
+      } catch {
+        // Neither exists
+      }
+    }
+  }
+
   // -----------------------------------------------------------------------
   // tree — rc.ws.tree
   // -----------------------------------------------------------------------
@@ -477,16 +550,19 @@ export class WorkspaceService {
   /**
    * Recursive directory listing for the workspace.
    *
-   * Excludes `.git/`. Directories sort before files. Each file gets
-   * metadata (size, modified_at, mime_type) and an optional git_status.
+   * Excludes `.git/` and system files at root level (.ResearchClaw/, AGENTS.md,
+   * MEMORY.md, .openclaw/, .DS_Store, etc.). Directories sort before files.
+   * Each file gets metadata (size, modified_at, mime_type) and an optional git_status.
    *
    * @param root  - Relative path within workspace to start from (default: workspace root)
    * @param depth - Maximum recursion depth (default 3, max 10)
+   * @param includeHidden - If true, include system files at root level (default: false)
    */
   async tree(
     root?: string,
     depth?: number,
-  ): Promise<{ tree: TreeNode[]; workspace_root: string }> {
+    includeHidden?: boolean,
+  ): Promise<{ tree: TreeNode[]; workspace_root: string; hidden_count: number }> {
     const maxDepth = Math.min(
       Math.max(depth ?? DEFAULT_TREE_DEPTH, 1),
       MAX_TREE_DEPTH,
@@ -518,11 +594,14 @@ export class WorkspaceService {
       );
     }
 
-    const nodes = await this.walkDirectory(startDir, maxDepth, 0);
+    const hideSystem = !includeHidden;
+    const counter = { hidden: 0 };
+    const nodes = await this.walkDirectory(startDir, maxDepth, 0, hideSystem, counter);
 
     return {
       tree: nodes,
       workspace_root: this.root,
+      hidden_count: counter.hidden,
     };
   }
 
@@ -533,6 +612,8 @@ export class WorkspaceService {
     dir: string,
     maxDepth: number,
     currentDepth: number,
+    hideSystem: boolean = true,
+    counter: { hidden: number } = { hidden: 0 },
   ): Promise<TreeNode[]> {
     let entries: fs.Dirent[];
     try {
@@ -545,9 +626,19 @@ export class WorkspaceService {
     const dirEntries: fs.Dirent[] = [];
     const fileEntries: fs.Dirent[] = [];
 
+    const isRootLevel = dir === this.root;
+
     for (const entry of entries) {
-      // Skip .git directory
+      // Always skip .git directory
       if (entry.name === '.git') continue;
+
+      // At root level, hide system files (like Windows hidden system files).
+      // Agent tools (workspace_read/save/list) bypass this — only the dashboard
+      // tree is affected, keeping the user-facing workspace clean.
+      if (isRootLevel && hideSystem && HIDDEN_ROOT_ENTRIES.has(entry.name)) {
+        counter.hidden++;
+        continue;
+      }
 
       if (entry.isDirectory()) {
         dirEntries.push(entry);
@@ -577,6 +668,8 @@ export class WorkspaceService {
           fullPath,
           maxDepth,
           currentDepth + 1,
+          hideSystem,
+          counter,
         );
       }
 

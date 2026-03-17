@@ -111,7 +111,7 @@ const LOG_DEFAULT_LIMIT = 20;
  *
  * Rejects dangerous characters (spaces, semicolons, backticks, etc.) for security.
  */
-const COMMIT_REF_PATTERN = /^[0-9a-fA-F]{4,40}$|^HEAD(~\d+|\^\d*)*$|^[a-zA-Z_][a-zA-Z0-9_.\-]*(~\d+|\^\d*)*$/;
+const COMMIT_REF_PATTERN = /^[0-9a-fA-F]{4,40}(~\d+|\^\d*)*$|^HEAD(~\d+|\^\d*)*$|^[a-zA-Z_][a-zA-Z0-9_.\-]*(~\d+|\^\d*)*$/;
 
 const DEFAULT_GITIGNORE = `# Research-Claw workspace — auto-generated
 # Large binary files (managed by size guard)

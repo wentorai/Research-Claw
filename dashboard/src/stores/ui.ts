@@ -24,6 +24,7 @@ const MAX_READ_KEYS = 200;
 const PANEL_TAB_STORAGE = 'rc-right-panel-tab';
 const PANEL_OPEN_STORAGE = 'rc-right-panel-open';
 const LEFT_NAV_COLLAPSED_STORAGE = 'rc-left-nav-collapsed';
+const SHOW_SYSTEM_FILES_STORAGE = 'rc-show-system-files';
 
 const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'radar', 'settings']);
 
@@ -74,6 +75,9 @@ interface UiState {
   /** Set by FileCard to request WorkspacePanel to open a file preview. */
   pendingPreviewPath: string | null;
 
+  /** Whether to show system files (.ResearchClaw/, MEMORY.md, etc.) in workspace tree. */
+  showSystemFiles: boolean;
+
   setRightPanelTab: (tab: PanelTab) => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
@@ -90,6 +94,7 @@ interface UiState {
   triggerWorkspaceRefresh: () => void;
   requestWorkspacePreview: (path: string) => void;
   clearPendingPreview: () => void;
+  setShowSystemFiles: (show: boolean) => void;
 }
 
 export const useUiStore = create<UiState>()((set, get) => ({
@@ -102,6 +107,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   agentStatus: 'disconnected',
   workspaceRefreshKey: 0,
   pendingPreviewPath: null,
+  showSystemFiles: loadBoolean(SHOW_SYSTEM_FILES_STORAGE, false),
 
   setRightPanelTab: (tab: PanelTab) => {
     try { localStorage.setItem(PANEL_TAB_STORAGE, tab); } catch { /* non-fatal */ }
@@ -202,6 +208,11 @@ export const useUiStore = create<UiState>()((set, get) => ({
 
   clearPendingPreview: () => {
     set({ pendingPreviewPath: null });
+  },
+
+  setShowSystemFiles: (show: boolean) => {
+    try { localStorage.setItem(SHOW_SYSTEM_FILES_STORAGE, String(show)); } catch { /* non-fatal */ }
+    set({ showSystemFiles: show });
   },
 
   checkNotifications: async () => {

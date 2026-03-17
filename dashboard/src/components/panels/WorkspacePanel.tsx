@@ -641,10 +641,107 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
   );
 }
 
+// --- Inline diff renderer ---
+
+const MAX_DIFF_LINES = 80;
+
+function DiffView({ diff, tokens }: { diff: string; tokens: ReturnType<typeof getThemeTokens> }) {
+  if (!diff.trim()) return null;
+
+  const lines = diff.split('\n');
+  const truncated = lines.length > MAX_DIFF_LINES;
+  const visible = truncated ? lines.slice(0, MAX_DIFF_LINES) : lines;
+
+  return (
+    <div style={{
+      margin: '4px 0 6px 20px',
+      padding: '6px 8px',
+      borderRadius: 4,
+      background: tokens.bg.secondary,
+      border: `1px solid ${tokens.border.default}`,
+      fontFamily: "'Fira Code', 'Consolas', monospace",
+      fontSize: 11,
+      lineHeight: 1.5,
+      overflowX: 'auto',
+      maxHeight: 300,
+      overflowY: 'auto',
+    }}>
+      {visible.map((line, i) => {
+        let color = tokens.text.muted;
+        let bg = 'transparent';
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+          color = '#4ade80'; bg = 'rgba(74, 222, 128, 0.08)';
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+          color = '#f87171'; bg = 'rgba(248, 113, 113, 0.08)';
+        } else if (line.startsWith('@@')) {
+          color = '#60a5fa'; bg = 'rgba(96, 165, 250, 0.06)';
+        } else if (line.startsWith('diff ') || line.startsWith('index ')) {
+          color = tokens.text.muted;
+        } else {
+          color = tokens.text.secondary;
+        }
+        return (
+          <div key={i} style={{ color, background: bg, padding: '0 4px', whiteSpace: 'pre' }}>
+            {line || '\u00a0'}
+          </div>
+        );
+      })}
+      {truncated && (
+        <div style={{ color: tokens.text.muted, fontStyle: 'italic', padding: '4px 4px 0' }}>
+          ...truncated ({lines.length - MAX_DIFF_LINES} more lines)
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- RecentChanges component ---
 
-function RecentChanges({ commits, tokens }: { commits: CommitEntry[]; tokens: ReturnType<typeof getThemeTokens> }) {
+function RecentChanges({ commits, tokens, hasMore, onLoadMore, loadingMore }: {
+  commits: CommitEntry[];
+  tokens: ReturnType<typeof getThemeTokens>;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  loadingMore: boolean;
+}) {
   const { t } = useTranslation();
+  const client = useGatewayStore((s) => s.client);
+  const [expandedHash, setExpandedHash] = useState<string | null>(null);
+  const [diffContent, setDiffContent] = useState<string>('');
+  const [diffLoading, setDiffLoading] = useState(false);
+
+  // Git's well-known empty tree hash — used to diff the initial commit
+  const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f7cb0cab1';
+
+  const handleToggleDiff = useCallback(async (hash: string) => {
+    if (expandedHash === hash) {
+      setExpandedHash(null);
+      return;
+    }
+    setExpandedHash(hash);
+    setDiffLoading(true);
+    setDiffContent('');
+    try {
+      const result = await client?.request<{ diff: string }>('rc.ws.diff', {
+        from: `${hash}^`,
+        to: hash,
+      });
+      setDiffContent(result?.diff ?? '');
+    } catch {
+      // hash^ fails for the initial commit (no parent) — diff against empty tree
+      try {
+        const fallback = await client?.request<{ diff: string }>('rc.ws.diff', {
+          from: EMPTY_TREE,
+          to: hash,
+        });
+        setDiffContent(fallback?.diff ?? '');
+      } catch {
+        setDiffContent('');
+      }
+    } finally {
+      setDiffLoading(false);
+    }
+  }, [expandedHash, client]);
 
   if (commits.length === 0) return null;
 
@@ -655,29 +752,61 @@ function RecentChanges({ commits, tokens }: { commits: CommitEntry[]; tokens: Re
       </Text>
       <div style={{ marginTop: 6 }}>
         {commits.map((commit) => (
-          <div
-            key={commit.hash}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '4px 0',
-              fontSize: 12,
-            }}
-          >
-            <EditOutlined style={{ color: tokens.text.muted, fontSize: 12, flexShrink: 0 }} />
-            <Text
-              ellipsis
-              style={{ flex: 1, fontSize: 12, color: tokens.text.primary }}
+          <div key={commit.hash}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '4px 0',
+                fontSize: 12,
+                cursor: 'pointer',
+                borderRadius: 4,
+              }}
+              onClick={() => handleToggleDiff(commit.hash)}
             >
-              {commit.message}
-            </Text>
-            <Text style={{ fontSize: 11, color: tokens.text.muted, flexShrink: 0, fontFamily: "'Fira Code', monospace" }}>
-              {relativeTime(commit.timestamp, t)}
-            </Text>
+              <span style={{
+                color: tokens.text.muted,
+                fontSize: 10,
+                flexShrink: 0,
+                transition: 'transform 0.15s',
+                transform: expandedHash === commit.hash ? 'rotate(90deg)' : 'rotate(0deg)',
+                display: 'inline-block',
+              }}>
+                ▶
+              </span>
+              <Text
+                ellipsis
+                style={{ flex: 1, fontSize: 12, color: tokens.text.primary }}
+              >
+                {commit.message}
+              </Text>
+              <Text style={{ fontSize: 11, color: tokens.text.muted, flexShrink: 0, fontFamily: "'Fira Code', monospace" }}>
+                {relativeTime(commit.timestamp, t)}
+              </Text>
+            </div>
+            {expandedHash === commit.hash && (
+              diffLoading
+                ? <div style={{ padding: '8px 20px', fontSize: 11, color: tokens.text.muted }}>
+                    <LoadingOutlined spin style={{ marginRight: 6 }} />
+                    {t('workspace.diffLoading')}
+                  </div>
+                : <DiffView diff={diffContent} tokens={tokens} />
+            )}
           </div>
         ))}
       </div>
+      {hasMore && (
+        <Button
+          type="link"
+          size="small"
+          loading={loadingMore}
+          onClick={onLoadMore}
+          style={{ fontSize: 11, padding: '4px 0', color: tokens.text.muted }}
+        >
+          {t('workspace.loadMore')}
+        </Button>
+      )}
     </div>
   );
 }
@@ -689,6 +818,11 @@ export default function WorkspacePanel() {
   const tokens = useMemo(() => getThemeTokens(configTheme), [configTheme]);
   const client = useGatewayStore((s) => s.client);
   const connState = useGatewayStore((s) => s.state);
+  const workspaceRefreshKey = useUiStore((s) => s.workspaceRefreshKey);
+  const pendingPreviewPath = useUiStore((s) => s.pendingPreviewPath);
+  const clearPendingPreview = useUiStore((s) => s.clearPendingPreview);
+  const showSystemFiles = useUiStore((s) => s.showSystemFiles);
+  const setShowSystemFiles = useUiStore((s) => s.setShowSystemFiles);
 
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [commits, setCommits] = useState<CommitEntry[]>([]);
@@ -711,6 +845,11 @@ export default function WorkspacePanel() {
   // Root-level create (parentPath = '' sentinel)
   const [rootCreateType, setRootCreateType] = useState<'file' | 'directory' | null>(null);
   const [rootCreateLoading, setRootCreateLoading] = useState(false);
+  // System files hidden count (from backend)
+  const [hiddenCount, setHiddenCount] = useState(0);
+  // History pagination
+  const [hasMoreCommits, setHasMoreCommits] = useState(false);
+  const [loadingMoreCommits, setLoadingMoreCommits] = useState(false);
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -782,19 +921,38 @@ export default function WorkspacePanel() {
     try {
       console.log('[WorkspacePanel] loading tree & history');
       const [treeResult, historyResult] = await Promise.all([
-        client.request<{ tree: TreeNode[]; workspace_root: string }>('rc.ws.tree', { depth: 3 }),
+        client.request<{ tree: TreeNode[]; workspace_root: string; hidden_count: number }>('rc.ws.tree', { depth: 3, includeHidden: showSystemFiles }),
         client.request<{ commits: CommitEntry[]; total: number; has_more: boolean }>('rc.ws.history', { limit: 5 }),
       ]);
       setTree(treeResult.tree);
       setWorkspaceRoot(treeResult.workspace_root ?? '');
+      setHiddenCount(treeResult.hidden_count ?? 0);
       setCommits(historyResult.commits);
+      setHasMoreCommits(historyResult.has_more ?? false);
       setHasLoaded(true);
     } catch (err) {
       console.warn('[WorkspacePanel] loadData failed:', err);
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, [client, showSystemFiles]);
+
+  const loadMoreCommits = useCallback(async () => {
+    if (!client?.isConnected || loadingMoreCommits) return;
+    setLoadingMoreCommits(true);
+    try {
+      const result = await client.request<{ commits: CommitEntry[]; total: number; has_more: boolean }>(
+        'rc.ws.history',
+        { limit: 10, offset: commits.length },
+      );
+      setCommits((prev) => [...prev, ...result.commits]);
+      setHasMoreCommits(result.has_more ?? false);
+    } catch (err) {
+      console.warn('[WorkspacePanel] loadMoreCommits failed:', err);
+    } finally {
+      setLoadingMoreCommits(false);
+    }
+  }, [client, loadingMoreCommits, commits.length]);
 
   // Root-level create handler
   const handleRootCreate = useCallback(async (name: string) => {
@@ -857,10 +1015,6 @@ export default function WorkspacePanel() {
     }
   }, [client, t, message, loadData]);
 
-  const workspaceRefreshKey = useUiStore((s) => s.workspaceRefreshKey);
-  const pendingPreviewPath = useUiStore((s) => s.pendingPreviewPath);
-  const clearPendingPreview = useUiStore((s) => s.clearPendingPreview);
-
   useEffect(() => {
     if (connState === 'connected') {
       loadData();
@@ -873,6 +1027,14 @@ export default function WorkspacePanel() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceRefreshKey]);
+
+  // Reload tree when showSystemFiles toggle changes
+  useEffect(() => {
+    if (hasLoaded && connState === 'connected') {
+      loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSystemFiles]);
 
   useEffect(() => {
     if (pendingPreviewPath) {
@@ -950,7 +1112,7 @@ export default function WorkspacePanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} onDragEnd={handlePanelDragEnd}>
-      <RecentChanges commits={commits} tokens={tokens} />
+      <RecentChanges commits={commits} tokens={tokens} hasMore={hasMoreCommits} onLoadMore={loadMoreCommits} loadingMore={loadingMoreCommits} />
 
       {commits.length > 0 && tree.length > 0 && (
         <div style={{ borderTop: `1px solid ${tokens.border.default}`, margin: '4px 16px' }} />
@@ -1064,6 +1226,49 @@ export default function WorkspacePanel() {
           </div>
         </>
       )}
+
+      {/* System files toggle bar */}
+      {!showSystemFiles && hiddenCount > 0 ? (
+        <div style={{
+          padding: '4px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderTop: `1px solid ${tokens.border.default}`,
+        }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {t('workspace.systemFilesHidden', { count: hiddenCount })}
+          </Text>
+          <Button
+            type="link"
+            size="small"
+            style={{ fontSize: 11, padding: 0, height: 'auto' }}
+            onClick={() => setShowSystemFiles(true)}
+          >
+            {t('workspace.showSystemFiles')}
+          </Button>
+        </div>
+      ) : showSystemFiles ? (
+        <div style={{
+          padding: '4px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderTop: `1px solid ${tokens.border.default}`,
+        }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {t('workspace.systemFilesVisible')}
+          </Text>
+          <Button
+            type="link"
+            size="small"
+            style={{ fontSize: 11, padding: 0, height: 'auto' }}
+            onClick={() => setShowSystemFiles(false)}
+          >
+            {t('workspace.hideSystemFiles')}
+          </Button>
+        </div>
+      ) : null}
 
       {/* Upload / move-to-root drop zone */}
       {(() => {

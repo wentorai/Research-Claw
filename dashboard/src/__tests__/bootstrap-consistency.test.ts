@@ -163,8 +163,9 @@ const ALL_RPC = [
 // ---------------------------------------------------------------------------
 
 const WORKSPACE_DIR = path.resolve(__dirname, '../../../workspace');
-const AGENTS_MD_PATH = path.join(WORKSPACE_DIR, 'AGENTS.md');
-const TOOLS_MD_PATH = path.join(WORKSPACE_DIR, 'TOOLS.md');
+const RC_PROMPT_DIR = path.join(WORKSPACE_DIR, '.ResearchClaw');
+const AGENTS_MD_PATH = path.join(RC_PROMPT_DIR, 'AGENTS.md');
+const TOOLS_MD_PATH = path.join(RC_PROMPT_DIR, 'TOOLS.md');
 
 let agentsMd = '';
 let toolsMd = '';

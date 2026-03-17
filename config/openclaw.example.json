@@ -10,6 +10,7 @@
   "agents": {
     "defaults": {
       "workspace": "./workspace",
+      "skipBootstrap": true,
       "compaction": {
         "mode": "safeguard"
       },

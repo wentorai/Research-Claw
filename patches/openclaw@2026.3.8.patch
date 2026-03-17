@@ -1,3 +1,107 @@
+diff --git a/dist/agent-scope-BDXYqF89.js b/dist/agent-scope-BDXYqF89.js
+index 0fc7dac477445b94f6f6407ff6098ef58bbf9c28..5fc2e80e0341e1085da79fa847f1873d9fd213e3 100644
+--- a/dist/agent-scope-BDXYqF89.js
++++ b/dist/agent-scope-BDXYqF89.js
+@@ -376,36 +376,40 @@ async function resolveMemoryBootstrapEntries(resolvedDir) {
+ 	}
+ 	return deduped;
+ }
++function resolveBootstrapFilePath(resolvedDir, name) {
++	const rcPath = path.join(resolvedDir, '.ResearchClaw', name);
++	try { fs.accessSync(rcPath, fs.constants.F_OK); return rcPath; } catch { return path.join(resolvedDir, name); }
++}
+ async function loadWorkspaceBootstrapFiles(dir) {
+ 	const resolvedDir = resolveUserPath(dir);
+ 	const entries = [
+ 		{
+ 			name: DEFAULT_AGENTS_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_AGENTS_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_AGENTS_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_SOUL_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_SOUL_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_SOUL_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_TOOLS_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_TOOLS_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_TOOLS_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_IDENTITY_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_IDENTITY_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_IDENTITY_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_USER_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_USER_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_USER_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_HEARTBEAT_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_HEARTBEAT_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_HEARTBEAT_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_BOOTSTRAP_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_BOOTSTRAP_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_BOOTSTRAP_FILENAME)
+ 		}
+ 	];
+ 	entries.push(...await resolveMemoryBootstrapEntries(resolvedDir));
+diff --git a/dist/agent-scope-CZF6h_5g.js b/dist/agent-scope-CZF6h_5g.js
+index 2c4ce2f12c107bcf8b631f33e2930821a2db3365..3b00dbda4f1a201754ce19586b2c5f88e1298c41 100644
+--- a/dist/agent-scope-CZF6h_5g.js
++++ b/dist/agent-scope-CZF6h_5g.js
+@@ -375,36 +375,40 @@ async function resolveMemoryBootstrapEntries(resolvedDir) {
+ 	}
+ 	return deduped;
+ }
++function resolveBootstrapFilePath(resolvedDir, name) {
++	const rcPath = path.join(resolvedDir, '.ResearchClaw', name);
++	try { fs.accessSync(rcPath, fs.constants.F_OK); return rcPath; } catch { return path.join(resolvedDir, name); }
++}
+ async function loadWorkspaceBootstrapFiles(dir) {
+ 	const resolvedDir = resolveUserPath(dir);
+ 	const entries = [
+ 		{
+ 			name: DEFAULT_AGENTS_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_AGENTS_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_AGENTS_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_SOUL_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_SOUL_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_SOUL_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_TOOLS_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_TOOLS_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_TOOLS_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_IDENTITY_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_IDENTITY_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_IDENTITY_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_USER_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_USER_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_USER_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_HEARTBEAT_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_HEARTBEAT_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_HEARTBEAT_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_BOOTSTRAP_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_BOOTSTRAP_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_BOOTSTRAP_FILENAME)
+ 		}
+ 	];
+ 	entries.push(...await resolveMemoryBootstrapEntries(resolvedDir));
 diff --git a/dist/cli/daemon-cli.js b/dist/cli/daemon-cli.js
 index d8b27557529110039cfce25ff2238eef30de19b9..e87cbf62767b3a4d5ea7a5caacf09a8604503142 100644
 --- a/dist/cli/daemon-cli.js

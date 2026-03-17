@@ -106,14 +106,15 @@ export function registerWorkspaceRpc(
 ): void {
   // -----------------------------------------------------------------------
   // 1. rc.ws.tree — Directory tree for the dashboard sidebar
-  //    params: { root?: string, depth?: number }
+  //    params: { root?: string, depth?: number, includeHidden?: boolean }
   // -----------------------------------------------------------------------
   registerMethod('rc.ws.tree', async (params: Record<string, unknown>) => {
     try {
       const root = optionalString(params, 'root');
       const depth = optionalNumber(params, 'depth');
+      const includeHidden = params.includeHidden === true;
 
-      return service.tree(root, depth);
+      return service.tree(root, depth, includeHidden);
     } catch (err) {
       mapError(err);
     }

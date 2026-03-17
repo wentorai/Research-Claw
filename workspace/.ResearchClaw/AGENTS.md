@@ -156,6 +156,7 @@ to rollback and diff operations.
 
 - All workspace files live under a structured directory:
   `sources/{papers,data,references}` for inputs, `outputs/{drafts,figures,exports,reports}` for your outputs.
+- System prompt files live in `.ResearchClaw/` (hidden from user's dashboard).
 - Every `workspace_save` triggers an auto-commit (debounced 5 seconds for rapid batches).
 - Files over 10 MB are auto-added to `.gitignore` instead of being committed.
 - The git repo is **local-only** — it never pushes to any remote.
@@ -218,6 +219,29 @@ When the user asks to **compare, diff**, or uses Chinese equivalents
 | Undo / rollback | `workspace_history` then `workspace_restore` |
 | Move / rename | `workspace_move` |
 | Check what changed | `workspace_diff` (no args = uncommitted changes) |
+
+### CLI Execution (Extended Capabilities)
+
+You have access to `exec` for operations beyond the 7 workspace tools.
+
+**Safe operations (no approval needed):**
+- File stats: `wc -l`, `du -sh`, `file`, `stat`
+- Search: `grep -r`, `find ... -name`
+- Format conversion: `pandoc`, `pdftotext`
+- Code execution within workspace: `python3 script.py`, `Rscript analysis.R`
+- LaTeX compilation: `xelatex`, `pdflatex`
+- Data processing: `jq`, `sort`, `uniq`, `cut`
+
+**Requires approval_card:** installing packages (`pip install`, `brew install`), network access (`curl`, `wget`), operations outside workspace boundary.
+
+### Cross-Module Integration
+
+| Trigger | Action |
+|---------|--------|
+| PDF saved to `sources/papers/` | Offer `library_add_paper` to index it |
+| Code/script created in `outputs/` | Suggest `task_create` to track execution |
+| Analysis output generated | Emit `file_card` + offer `task_complete` if linked |
+| User asks "rollback/undo/恢复" | `workspace_history` → present commits → `workspace_restore` |
 
 ## §5 Research Skills
 

@@ -14,6 +14,7 @@ import { CopyOutlined, LoadingOutlined, ReloadOutlined } from '@ant-design/icons
 import { useTranslation } from 'react-i18next';
 import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
+import { useUiStore } from '../../stores/ui';
 import { getThemeTokens } from '../../styles/theme';
 import { buildSaveConfig, extractConfigFields } from '../../utils/config-patch';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
@@ -180,6 +181,9 @@ export default function SettingsPanel() {
 
   const systemPromptAppend = useConfigStore((s) => s.systemPromptAppend);
   const setSystemPromptAppend = useConfigStore((s) => s.setSystemPromptAppend);
+
+  const showSystemFiles = useUiStore((s) => s.showSystemFiles);
+  const setShowSystemFiles = useUiStore((s) => s.setShowSystemFiles);
 
   // --- Text endpoint ---
   const [provider, setProvider] = useState('custom');
@@ -619,6 +623,21 @@ export default function SettingsPanel() {
           {t('settings.save')}
         </Button>
       </div>
+
+      {/* ── Display section ── */}
+      <Divider style={{ margin: '12px 0 8px' }} />
+
+      <SettingRow label={t('settings.showSystemFiles')} description={t('settings.showSystemFilesHint')}>
+        <Segmented
+          value={showSystemFiles ? 'on' : 'off'}
+          onChange={(v) => setShowSystemFiles(v === 'on')}
+          options={[
+            { label: 'OFF', value: 'off' },
+            { label: 'ON', value: 'on' },
+          ]}
+          size="small"
+        />
+      </SettingRow>
 
       <Divider style={{ margin: '12px 0 8px' }} />
 
