@@ -14,6 +14,7 @@
     "workspace": "工作区",
     "tasks": "任务",
     "radar": "雷达",
+    "monitor": "监控",
     "settings": "设置",
     "collapse": "折叠侧边栏",
     "expand": "展开侧边栏"
@@ -265,6 +266,30 @@
         "weekly_report": "文献库+任务+工作区"
       }
     }
+  },
+  "monitor": {
+    "title": "监控",
+    "loading": "加载监控中...",
+    "disconnected": "连接网关后查看监控",
+    "empty": "暂无监控配置。",
+    "emptyHint": "让科研龙虾帮你设置 arXiv 论文、GitHub 仓库、RSS 订阅等监控。",
+    "add": "添加监控",
+    "addPrompt": "我想设置一个新的监控。帮我配置。可用的源类型：arXiv、Semantic Scholar、GitHub、RSS、网页、OpenAlex、Twitter、自定义。",
+    "target": "监控目标",
+    "filters": "过滤条件",
+    "findings": "条发现",
+    "recentFindings": "最近发现",
+    "totalChecks": "已检查 {{count}} 次",
+    "neverRun": "从未运行",
+    "error": "错误",
+    "enableFirst": "请先启用此监控",
+    "runNow": "立即运行",
+    "runTriggered": "监控已触发",
+    "askAgent": "询问助手",
+    "askAgentPrompt": "请检查监控「{{name}}」({{source}}) 并汇报结果。立即扫描并总结发现。",
+    "delete": "删除",
+    "deleteConfirmTitle": "删除监控",
+    "deleteConfirmContent": "确定删除「{{name}}」？删除后将停止运行，已缓存的结果也会丢失。"
   },
   "settings": {
     "title": "设置",

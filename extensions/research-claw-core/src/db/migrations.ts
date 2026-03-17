@@ -91,6 +91,33 @@ const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE rc_radar_config ADD COLUMN last_scan_results TEXT;`,
     ].join('\n'),
   },
+  {
+    version: 7,
+    name: 'add_monitors',
+    sql: [
+      `CREATE TABLE IF NOT EXISTS rc_monitors (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  source_type     TEXT NOT NULL,
+  target          TEXT NOT NULL DEFAULT '',
+  filters         TEXT NOT NULL DEFAULT '{}',
+  schedule        TEXT NOT NULL DEFAULT '0 8 * * *',
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  notify          INTEGER NOT NULL DEFAULT 1,
+  agent_prompt    TEXT NOT NULL DEFAULT '',
+  gateway_job_id  TEXT,
+  last_check_at   TEXT,
+  last_results    TEXT,
+  last_error      TEXT,
+  check_count     INTEGER NOT NULL DEFAULT 0,
+  finding_count   INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_monitors_enabled     ON rc_monitors(enabled);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_monitors_source_type ON rc_monitors(source_type);`,
+    ].join('\n'),
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────

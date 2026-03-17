@@ -4,7 +4,7 @@ import {
   BookOutlined,
   FolderOutlined,
   CheckSquareOutlined,
-  RadarChartOutlined,
+  EyeOutlined,
   SettingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -29,7 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'library', icon: <BookOutlined />, labelKey: 'nav.library' },
   { key: 'workspace', icon: <FolderOutlined />, labelKey: 'nav.workspace' },
   { key: 'tasks', icon: <CheckSquareOutlined />, labelKey: 'nav.tasks' },
-  { key: 'radar', icon: <RadarChartOutlined />, labelKey: 'nav.radar' },
+  { key: 'radar', icon: <EyeOutlined />, labelKey: 'nav.monitor' },
   { key: 'settings', icon: <SettingOutlined />, labelKey: 'nav.settings' },
 ];
 

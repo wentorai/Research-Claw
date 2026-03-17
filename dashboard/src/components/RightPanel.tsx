@@ -9,14 +9,14 @@ const { Text } = Typography;
 const LibraryPanel = lazy(() => import('./panels/LibraryPanel'));
 const WorkspacePanel = lazy(() => import('./panels/WorkspacePanel'));
 const TaskPanel = lazy(() => import('./panels/TaskPanel'));
-const RadarPanel = lazy(() => import('./panels/RadarPanel'));
+const MonitorPanel = lazy(() => import('./panels/MonitorPanel'));
 const SettingsPanel = lazy(() => import('./panels/SettingsPanel'));
 
 const TAB_TITLE_KEYS: Record<PanelTab, string> = {
   library: 'library.title',
   workspace: 'workspace.title',
   tasks: 'tasks.title',
-  radar: 'radar.title',
+  radar: 'monitor.title',
   settings: 'settings.title',
 };
 
@@ -29,7 +29,7 @@ function PanelContent({ tab }: { tab: PanelTab }) {
     case 'tasks':
       return <TaskPanel />;
     case 'radar':
-      return <RadarPanel />;
+      return <MonitorPanel />;
     case 'settings':
       return <SettingsPanel />;
   }

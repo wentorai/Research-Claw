@@ -14,6 +14,7 @@
     "workspace": "Workspace",
     "tasks": "Tasks",
     "radar": "Radar",
+    "monitor": "Monitors",
     "settings": "Settings",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar"
@@ -265,6 +266,30 @@
         "weekly_report": "Library + Tasks + Workspace"
       }
     }
+  },
+  "monitor": {
+    "title": "Monitors",
+    "loading": "Loading monitors...",
+    "disconnected": "Connect to gateway to view monitors",
+    "empty": "No monitors configured.",
+    "emptyHint": "Ask your Research-Claw to set up monitoring for arXiv papers, GitHub repos, RSS feeds, and more.",
+    "add": "Add Monitor",
+    "addPrompt": "I want to set up a new monitor. Help me configure it. Available source types: arXiv, Semantic Scholar, GitHub, RSS, Webpage, OpenAlex, Twitter, Custom.",
+    "target": "Target",
+    "filters": "Filters",
+    "findings": "findings",
+    "recentFindings": "Recent findings",
+    "totalChecks": "{{count}} checks",
+    "neverRun": "Never run",
+    "error": "Error",
+    "enableFirst": "Enable this monitor first",
+    "runNow": "Run now",
+    "runTriggered": "Monitor triggered",
+    "askAgent": "Ask Agent",
+    "askAgentPrompt": "Please check and report on the monitor \"{{name}}\" ({{source}}). Run the scan now and summarize findings.",
+    "delete": "Delete",
+    "deleteConfirmTitle": "Delete Monitor",
+    "deleteConfirmContent": "Delete \"{{name}}\"? It will stop running and all cached results will be lost."
   },
   "settings": {
     "title": "Settings",

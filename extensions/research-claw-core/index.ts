@@ -5,9 +5,9 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 31 agent tools (12 literature + 9 task + 7 workspace + 3 radar)
- *   - 61 WS RPC methods + 1 HTTP route = 62 interface methods
- *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 11 rc.ws.* + 4 rc.radar.* = 61 WS; POST /rc/upload = 1 HTTP)
+ *   - 35 agent tools (12 literature + 9 task + 7 workspace + 3 radar + 4 monitor)
+ *   - 71 WS RPC methods + 1 HTTP route = 72 interface methods
+ *     (26 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 11 rc.ws.* + 4 rc.radar.* + 10 rc.monitor.* = 71 WS; POST /rc/upload = 1 HTTP)
  *   - 7 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call, gateway_start)
  *   - 1 service (research-claw-db lifecycle)
  */
@@ -28,6 +28,9 @@ import { createWorkspaceTools } from './src/workspace/tools.js';
 import { registerWorkspaceRpc } from './src/workspace/rpc.js';
 import { registerRadarRpc } from './src/radar/rpc.js';
 import { createRadarTools } from './src/radar/tools.js';
+import { MonitorService } from './src/monitor/service.js';
+import { registerMonitorRpc } from './src/monitor/rpc.js';
+import { createMonitorTools } from './src/monitor/tools.js';
 import type { RegisterMethod } from './src/types.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
@@ -108,6 +111,8 @@ const plugin: PluginDefinition = {
     // ── 2. Initialize services ───────────────────────────────────────
     const litService = new LiteratureService(dbManager.db);
     const taskService = new TaskService(dbManager.db);
+    const monitorService = new MonitorService(dbManager.db);
+    monitorService.seedDefaults();
 
     const wsConfig: WorkspaceConfig = {
       root: api.resolvePath(cfg.workspace?.root ?? 'workspace'),
@@ -166,6 +171,9 @@ const plugin: PluginDefinition = {
     for (const tool of createRadarTools(dbManager.db)) {
       api.registerTool(tool);
     }
+    for (const tool of createMonitorTools(monitorService, dbManager.db)) {
+      api.registerTool(tool);
+    }
 
     // ── 5. Register RPC methods (60 WS total) ────────────────────────
     // Rate limiting not needed: local satellite, no network exposure (ws://127.0.0.1:28789 only)
@@ -197,7 +205,8 @@ const plugin: PluginDefinition = {
     registerLiteratureRpc(registerMethod, litService);   // 26 methods
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
     registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
-    registerRadarRpc(registerMethod, dbManager.db);       // 3 methods
+    registerRadarRpc(registerMethod, dbManager.db);       // 4 methods (legacy, kept for backward compat)
+    registerMonitorRpc(registerMethod, monitorService);   // 10 methods
 
     // ── 6. Register HTTP route: POST /rc/upload ──────────────────────
     api.registerHttpRoute({
@@ -330,11 +339,14 @@ const plugin: PluginDefinition = {
           }
         }
 
-        // Cron schedule management guidance — only inject when presets exist
-        const presets = taskService.cronPresetsList();
-        const activePresets = presets.filter((p: { enabled: boolean }) => p.enabled);
-        if (activePresets.length > 0) {
-          lines.push(`[Research-Claw] ${activePresets.length} active cron preset(s). To change schedules, use cron_update_schedule(preset_id, schedule). Do NOT use native cron tools.`);
+        // Active monitors context — tell agent about enabled monitors
+        const enabledMonitors = monitorService.listEnabled();
+        if (enabledMonitors.length > 0) {
+          lines.push(`[Research-Claw] ${enabledMonitors.length} active monitor(s):`);
+          for (const m of enabledMonitors.slice(0, 5)) {
+            const lastCheck = m.last_check_at ?? 'never';
+            lines.push(`  - "${m.name}" (${m.source_type}, schedule: ${m.schedule}, last: ${lastCheck})`);
+          }
         }
 
         return { prependContext: lines.join('\n') };
@@ -570,7 +582,7 @@ const plugin: PluginDefinition = {
       }
     });
 
-    api.logger.info('Research-Claw Core registered (31 tools, 61 WS RPC + 1 HTTP = 62 interfaces, 7 hooks)');
+    api.logger.info('Research-Claw Core registered (35 tools, 71 WS RPC + 1 HTTP = 72 interfaces, 7 hooks)');
   },
 };
 

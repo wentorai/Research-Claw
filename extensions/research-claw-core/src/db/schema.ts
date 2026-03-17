@@ -22,7 +22,7 @@
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -197,6 +197,27 @@ CREATE TABLE IF NOT EXISTS rc_cron_state (
   schedule       TEXT
 );`;
 
+const RC_MONITORS = `
+CREATE TABLE IF NOT EXISTS rc_monitors (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  source_type     TEXT NOT NULL,
+  target          TEXT NOT NULL DEFAULT '',
+  filters         TEXT NOT NULL DEFAULT '{}',
+  schedule        TEXT NOT NULL DEFAULT '0 8 * * *',
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  notify          INTEGER NOT NULL DEFAULT 1,
+  agent_prompt    TEXT NOT NULL DEFAULT '',
+  gateway_job_id  TEXT,
+  last_check_at   TEXT,
+  last_results    TEXT,
+  last_error      TEXT,
+  check_count     INTEGER NOT NULL DEFAULT 0,
+  finding_count   INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -215,6 +236,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   RC_RADAR_CONFIG,
   RC_AGENT_NOTIFICATIONS,
   RC_CRON_STATE,
+  RC_MONITORS,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -261,6 +283,10 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   // rc_activity_log indexes
   `CREATE INDEX IF NOT EXISTS idx_rc_activity_log_task_id    ON rc_activity_log(task_id);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_activity_log_created_at ON rc_activity_log(created_at);`,
+
+  // rc_monitors indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_monitors_enabled     ON rc_monitors(enabled);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_monitors_source_type ON rc_monitors(source_type);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────
