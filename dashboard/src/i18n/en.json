@@ -173,12 +173,22 @@
       "deleteOk": "Delete",
       "deleteCancel": "Cancel",
       "deleteSuccess": "File deleted",
-      "deleteFailed": "Failed to delete file"
+      "deleteFailed": "Failed to delete file",
+      "rename": "Rename",
+      "newFile": "New File",
+      "newFolder": "New Folder"
     },
     "uploading": "Uploading...",
     "uploadFailed": "Upload failed",
     "moveSuccess": "File moved",
     "moveFailed": "Move failed",
+    "moveToRoot": "Release to move to root",
+    "renameSuccess": "Renamed successfully",
+    "renameFailed": "Rename failed",
+    "createSuccess": "Created successfully",
+    "createFailed": "Creation failed",
+    "searchPlaceholder": "Search files...",
+    "searchNoResults": "No matches found",
     "preview": {
       "title": "File Preview",
       "loading": "Loading file...",

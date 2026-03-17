@@ -21,6 +21,28 @@ export interface Notification {
 
 const READ_KEYS_STORAGE = 'rc-read-dedup-keys';
 const MAX_READ_KEYS = 200;
+const PANEL_TAB_STORAGE = 'rc-right-panel-tab';
+const PANEL_OPEN_STORAGE = 'rc-right-panel-open';
+const LEFT_NAV_COLLAPSED_STORAGE = 'rc-left-nav-collapsed';
+
+const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'radar', 'settings']);
+
+function loadPanelTab(): PanelTab {
+  try {
+    const raw = localStorage.getItem(PANEL_TAB_STORAGE);
+    if (raw && VALID_TABS.has(raw as PanelTab)) return raw as PanelTab;
+  } catch { /* ignore */ }
+  return 'library';
+}
+
+function loadBoolean(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+  } catch { /* ignore */ }
+  return fallback;
+}
 
 function loadReadKeys(): Set<string> {
   try {
@@ -71,10 +93,10 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>()((set, get) => ({
-  rightPanelTab: 'library',
-  rightPanelOpen: true,
+  rightPanelTab: loadPanelTab(),
+  rightPanelOpen: loadBoolean(PANEL_OPEN_STORAGE, true),
   rightPanelWidth: 360,
-  leftNavCollapsed: false,
+  leftNavCollapsed: loadBoolean(LEFT_NAV_COLLAPSED_STORAGE, false),
   notifications: [],
   unreadCount: 0,
   agentStatus: 'disconnected',
@@ -82,14 +104,19 @@ export const useUiStore = create<UiState>()((set, get) => ({
   pendingPreviewPath: null,
 
   setRightPanelTab: (tab: PanelTab) => {
+    try { localStorage.setItem(PANEL_TAB_STORAGE, tab); } catch { /* non-fatal */ }
+    try { localStorage.setItem(PANEL_OPEN_STORAGE, 'true'); } catch { /* non-fatal */ }
     set({ rightPanelTab: tab, rightPanelOpen: true });
   },
 
   toggleRightPanel: () => {
-    set((s) => ({ rightPanelOpen: !s.rightPanelOpen }));
+    const next = !get().rightPanelOpen;
+    try { localStorage.setItem(PANEL_OPEN_STORAGE, String(next)); } catch { /* non-fatal */ }
+    set({ rightPanelOpen: next });
   },
 
   setRightPanelOpen: (open: boolean) => {
+    try { localStorage.setItem(PANEL_OPEN_STORAGE, String(open)); } catch { /* non-fatal */ }
     set({ rightPanelOpen: open });
   },
 
@@ -98,10 +125,13 @@ export const useUiStore = create<UiState>()((set, get) => ({
   },
 
   toggleLeftNav: () => {
-    set((s) => ({ leftNavCollapsed: !s.leftNavCollapsed }));
+    const next = !get().leftNavCollapsed;
+    try { localStorage.setItem(LEFT_NAV_COLLAPSED_STORAGE, String(next)); } catch { /* non-fatal */ }
+    set({ leftNavCollapsed: next });
   },
 
   setLeftNavCollapsed: (collapsed: boolean) => {
+    try { localStorage.setItem(LEFT_NAV_COLLAPSED_STORAGE, String(collapsed)); } catch { /* non-fatal */ }
     set({ leftNavCollapsed: collapsed });
   },
 

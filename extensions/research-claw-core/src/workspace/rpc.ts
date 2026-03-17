@@ -135,12 +135,13 @@ export function registerWorkspaceRpc(
 
   // -----------------------------------------------------------------------
   // 3. rc.ws.save — Write content to a workspace file with optional commit
-  //    params: { path: string, content: string, message?: string }
+  //    params: { path: string, content?: string, message?: string }
+  //    content defaults to '' (empty) to support creating new empty files.
   // -----------------------------------------------------------------------
   registerMethod('rc.ws.save', async (params: Record<string, unknown>) => {
     try {
       const filePath = requireString(params, 'path');
-      const content = requireString(params, 'content');
+      const content = typeof params.content === 'string' ? params.content : (optionalString(params, 'content') ?? '');
       const message = optionalString(params, 'message');
 
       return service.save(filePath, content, message);
@@ -285,7 +286,24 @@ export function registerWorkspaceRpc(
   });
 
   // -----------------------------------------------------------------------
-  // 10. rc.ws.move — Move or rename a file/directory within the workspace
+  // 10. rc.ws.mkdir — Create an empty directory in the workspace
+  //     params: { path: string }
+  //     Creates the directory (recursive) and adds a .gitkeep for git tracking.
+  // -----------------------------------------------------------------------
+  registerMethod('rc.ws.mkdir', async (params: Record<string, unknown>) => {
+    try {
+      const dirPath = requireString(params, 'path');
+      // Create directory, then save a .gitkeep to ensure git tracks it
+      const gitkeepPath = dirPath.replace(/\/$/, '') + '/.gitkeep';
+      const result = await service.save(gitkeepPath, '', `Add: ${dirPath.split('/').pop()}/`);
+      return { ok: true, path: dirPath, committed: result.committed };
+    } catch (err) {
+      mapError(err);
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // 11. rc.ws.move — Move or rename a file/directory within the workspace
   //     params: { from: string, to: string }
   // -----------------------------------------------------------------------
   registerMethod('rc.ws.move', async (params: Record<string, unknown>) => {

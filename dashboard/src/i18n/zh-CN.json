@@ -173,12 +173,22 @@
       "deleteOk": "删除",
       "deleteCancel": "取消",
       "deleteSuccess": "文件已删除",
-      "deleteFailed": "删除文件失败"
+      "deleteFailed": "删除文件失败",
+      "rename": "重命名",
+      "newFile": "新建文件",
+      "newFolder": "新建文件夹"
     },
     "uploading": "上传中...",
     "uploadFailed": "上传失败",
     "moveSuccess": "文件已移动",
     "moveFailed": "移动失败",
+    "moveToRoot": "释放以移动到根目录",
+    "renameSuccess": "重命名成功",
+    "renameFailed": "重命名失败",
+    "createSuccess": "创建成功",
+    "createFailed": "创建失败",
+    "searchPlaceholder": "搜索文件...",
+    "searchNoResults": "无匹配结果",
     "preview": {
       "title": "文件预览",
       "loading": "加载文件中...",

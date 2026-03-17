@@ -19,6 +19,9 @@ import {
   CopyOutlined,
   DeleteOutlined,
   LoadingOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  CloseCircleFilled,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../../stores/gateway';
@@ -29,6 +32,106 @@ import FilePreviewModal from './FilePreviewModal';
 
 const { Text } = Typography;
 const { Dragger } = Upload;
+
+// --- Shared inline name input with IME guard (rename + create) ---
+
+interface InlineNameInputProps {
+  defaultValue?: string;
+  icon: React.ReactNode;
+  iconColor: string;
+  depth: number;
+  tokens: ReturnType<typeof getThemeTokens>;
+  loading?: boolean;
+  onConfirm: (name: string) => void;
+  onCancel: () => void;
+}
+
+function InlineNameInput({ defaultValue = '', icon, iconColor, depth, tokens, loading, onConfirm, onCancel }: InlineNameInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
+  const committedRef = useRef(false);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    if (defaultValue) {
+      const dotIdx = defaultValue.lastIndexOf('.');
+      el.setSelectionRange(0, dotIdx > 0 ? dotIdx : defaultValue.length);
+    }
+  }, [defaultValue]);
+
+  const commit = useCallback((value: string) => {
+    if (committedRef.current) return;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.includes('/') || trimmed === '.' || trimmed === '..') {
+      committedRef.current = true;
+      onCancel();
+      return;
+    }
+    committedRef.current = true;
+    onConfirm(trimmed);
+  }, [onConfirm, onCancel]);
+
+  const cancel = useCallback(() => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    onCancel();
+  }, [onCancel]);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '2px 8px 2px 0',
+        paddingLeft: 8 + depth * 16,
+        fontSize: 12,
+        opacity: loading ? 0.6 : 1,
+        transition: 'opacity 0.15s',
+      }}
+    >
+      {loading
+        ? <LoadingOutlined style={{ fontSize: 14, flexShrink: 0, color: 'var(--accent-secondary)' }} spin />
+        : <span style={{ color: iconColor, fontSize: 14, flexShrink: 0 }}>{icon}</span>}
+      <input
+        ref={inputRef}
+        defaultValue={defaultValue}
+        disabled={loading}
+        onCompositionStart={() => { composingRef.current = true; }}
+        onCompositionEnd={() => { composingRef.current = false; }}
+        onKeyDown={(e) => {
+          if (loading) return;
+          if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+          if (e.key === 'Enter' && !composingRef.current) {
+            e.preventDefault();
+            commit(inputRef.current?.value ?? '');
+          }
+        }}
+        onBlur={() => {
+          if (loading) return;
+          setTimeout(() => {
+            if (!committedRef.current) cancel();
+          }, 80);
+        }}
+        style={{
+          flex: 1,
+          fontSize: 12,
+          fontFamily: 'inherit',
+          padding: '1px 4px',
+          border: `1px solid ${loading ? 'var(--border)' : 'var(--accent-secondary)'}`,
+          borderRadius: 3,
+          background: tokens.bg.surface,
+          color: loading ? tokens.text.muted : tokens.text.primary,
+          outline: 'none',
+          minWidth: 0,
+          cursor: loading ? 'wait' : undefined,
+        }}
+      />
+    </div>
+  );
+}
 
 // --- Types from 03c §8 ---
 
@@ -102,93 +205,236 @@ function relativeTime(timestamp: string, t: (key: string, opts?: Record<string, 
   return t('time.daysAgo', { count: days });
 }
 
+// --- Inline rename input (replaces name span in-place) ---
+
+interface RenameInputProps {
+  defaultValue: string;
+  isFile: boolean;
+  tokens: ReturnType<typeof getThemeTokens>;
+  onConfirm: (name: string) => void;
+  onCancel: () => void;
+}
+
+function RenameInput({ defaultValue, isFile, tokens, onConfirm, onCancel }: RenameInputProps) {
+  const committedRef = useRef(false);
+  const didFocusRef = useRef(false);
+
+  const commit = useCallback((value: string) => {
+    if (committedRef.current) return;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === defaultValue || trimmed.includes('/') || trimmed === '.' || trimmed === '..') {
+      if (!committedRef.current) { committedRef.current = true; onCancel(); }
+      return;
+    }
+    committedRef.current = true;
+    onConfirm(trimmed);
+  }, [defaultValue, onConfirm, onCancel]);
+
+  const cancel = useCallback(() => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    onCancel();
+  }, [onCancel]);
+
+  return (
+    <input
+      ref={(el) => {
+        if (!el || didFocusRef.current) return;
+        didFocusRef.current = true;
+        el.focus();
+        const dotIdx = defaultValue.lastIndexOf('.');
+        el.setSelectionRange(0, dotIdx > 0 && isFile ? dotIdx : defaultValue.length);
+      }}
+      defaultValue={defaultValue}
+      onCompositionStart={(e) => { (e.target as HTMLInputElement).dataset.composing = '1'; }}
+      onCompositionEnd={(e) => { (e.target as HTMLInputElement).dataset.composing = ''; }}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+        if (e.key === 'Enter' && !(e.target as HTMLInputElement).dataset.composing) {
+          e.preventDefault();
+          commit((e.target as HTMLInputElement).value);
+        }
+      }}
+      onBlur={(e) => {
+        setTimeout(() => commit(e.target.value), 80);
+      }}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        flex: 1, fontSize: 12, fontFamily: 'inherit',
+        padding: '0 4px', border: '1px solid var(--accent-secondary)',
+        borderRadius: 3, background: tokens.bg.surface, color: tokens.text.primary,
+        outline: 'none', minWidth: 0,
+      }}
+    />
+  );
+}
+
+// --- Tree search filter utility ---
+
+function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
+  if (!query) return nodes;
+  const q = query.toLowerCase();
+  const filter = (list: TreeNode[]): TreeNode[] => {
+    const result: TreeNode[] = [];
+    for (const node of list) {
+      if (node.type === 'directory') {
+        const filteredChildren = node.children ? filter(node.children) : [];
+        const nameMatch = node.name.toLowerCase().includes(q);
+        if (nameMatch || filteredChildren.length > 0) {
+          result.push({ ...node, children: nameMatch ? node.children : filteredChildren });
+        }
+      } else {
+        if (node.name.toLowerCase().includes(q)) {
+          result.push(node);
+        }
+      }
+    }
+    return result;
+  };
+  return filter(nodes);
+}
+
 // --- FileTree component ---
+
+interface CreatingItem {
+  parentPath: string;
+  type: 'file' | 'directory';
+}
 
 interface FileTreeNodeProps {
   node: TreeNode;
   depth: number;
   tokens: ReturnType<typeof getThemeTokens>;
   workspaceRoot: string;
+  dragSrcPath: string | null;
+  movingPath: string | null;
+  creatingItem: CreatingItem | null;
   onOpenFile?: (path: string) => void;
   onDeleted?: () => void;
   onMoved?: () => void;
+  onDragSrcChange?: (path: string | null) => void;
+  onMoveStart?: (path: string) => void;
+  onMoveEnd?: () => void;
+  onCreateItem?: (item: CreatingItem) => void;
+  onCreateDone?: () => void;
 }
 
-function FileTreeNode({ node, depth, tokens, workspaceRoot, onOpenFile, onDeleted, onMoved }: FileTreeNodeProps) {
+function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingPath, creatingItem, onOpenFile, onDeleted, onMoved, onDragSrcChange, onMoveStart, onMoveEnd, onCreateItem, onCreateDone }: FileTreeNodeProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const client = useGatewayStore((s) => s.client);
   const [expanded, setExpanded] = useState(depth < 2);
   const [dragOver, setDragOver] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
   const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { icon, color } = getFileIcon(node.name, node.type, expanded);
+  const isMoving = movingPath === node.path;
 
-  const contextMenuItems: MenuProps['items'] = useMemo(() => [
-    {
-      key: 'openExternal',
-      icon: <ExportOutlined />,
-      label: t('workspace.contextMenu.openExternal'),
-      onClick: () => {
-        client?.request('rc.ws.openExternal', { path: node.path }).catch(() => {
-          message.error(t('workspace.contextMenu.openFailed'));
-        });
+  // Auto-expand folder when a new item is being created inside it
+  const isCreatingHere = creatingItem !== null && creatingItem.parentPath === node.path;
+  useEffect(() => {
+    if (isCreatingHere && !expanded) setExpanded(true);
+  }, [isCreatingHere, expanded]);
+
+  const contextMenuItems: MenuProps['items'] = useMemo(() => {
+    const items: MenuProps['items'] = [];
+
+    // New File / New Folder — only for directories
+    if (node.type === 'directory') {
+      items.push(
+        {
+          key: 'newFile',
+          icon: <FileOutlined />,
+          label: t('workspace.contextMenu.newFile'),
+          onClick: () => onCreateItem?.({ parentPath: node.path, type: 'file' }),
+        },
+        {
+          key: 'newFolder',
+          icon: <FolderOutlined />,
+          label: t('workspace.contextMenu.newFolder'),
+          onClick: () => onCreateItem?.({ parentPath: node.path, type: 'directory' }),
+        },
+        { type: 'divider' as const },
+      );
+    }
+
+    items.push(
+      {
+        key: 'openExternal',
+        icon: <ExportOutlined />,
+        label: t('workspace.contextMenu.openExternal'),
+        onClick: () => {
+          client?.request('rc.ws.openExternal', { path: node.path }).catch(() => {
+            message.error(t('workspace.contextMenu.openFailed'));
+          });
+        },
       },
-    },
-    {
-      key: 'openFolder',
-      icon: <FolderViewOutlined />,
-      label: t('workspace.contextMenu.openFolder'),
-      onClick: () => {
-        client?.request('rc.ws.openFolder', { path: node.path }).catch(() => {
-          message.error(t('workspace.contextMenu.openFailed'));
-        });
+      {
+        key: 'openFolder',
+        icon: <FolderViewOutlined />,
+        label: t('workspace.contextMenu.openFolder'),
+        onClick: () => {
+          client?.request('rc.ws.openFolder', { path: node.path }).catch(() => {
+            message.error(t('workspace.contextMenu.openFailed'));
+          });
+        },
       },
-    },
-    { type: 'divider' as const },
-    {
-      key: 'copyPath',
-      icon: <CopyOutlined />,
-      label: t('workspace.contextMenu.copyPath'),
-      onClick: () => {
-        const absolutePath = workspaceRoot
-          ? `${workspaceRoot.replace(/\/$/, '')}/${node.path}`
-          : node.path;
-        navigator.clipboard.writeText(absolutePath).then(() => {
-          message.success(t('workspace.contextMenu.pathCopied'));
-        });
+      { type: 'divider' as const },
+      {
+        key: 'copyPath',
+        icon: <CopyOutlined />,
+        label: t('workspace.contextMenu.copyPath'),
+        onClick: () => {
+          const absolutePath = workspaceRoot
+            ? `${workspaceRoot.replace(/\/$/, '')}/${node.path}`
+            : node.path;
+          navigator.clipboard.writeText(absolutePath).then(() => {
+            message.success(t('workspace.contextMenu.pathCopied'));
+          });
+        },
       },
-    },
-    { type: 'divider' as const },
-    {
-      key: 'delete',
-      icon: <DeleteOutlined />,
-      label: t('workspace.contextMenu.delete'),
-      danger: true,
-      onClick: () => {
-        Modal.confirm({
-          title: t('workspace.contextMenu.deleteConfirmTitle'),
-          content: node.path,
-          okText: t('workspace.contextMenu.deleteOk'),
-          cancelText: t('workspace.contextMenu.deleteCancel'),
-          okButtonProps: { danger: true },
-          onOk: async () => {
-            try {
-              await client?.request('rc.ws.delete', { path: node.path });
-              message.success(t('workspace.contextMenu.deleteSuccess'));
-              onDeleted?.();
-            } catch {
-              message.error(t('workspace.contextMenu.deleteFailed'));
-            }
-          },
-        });
+      {
+        key: 'rename',
+        icon: <EditOutlined />,
+        label: t('workspace.contextMenu.rename'),
+        onClick: () => setIsRenaming(true),
       },
-    },
-  ], [node.path, t, client, workspaceRoot, onDeleted, message]);
+      { type: 'divider' as const },
+      {
+        key: 'delete',
+        icon: <DeleteOutlined />,
+        label: t('workspace.contextMenu.delete'),
+        danger: true,
+        onClick: () => {
+          Modal.confirm({
+            title: t('workspace.contextMenu.deleteConfirmTitle'),
+            content: node.path,
+            okText: t('workspace.contextMenu.deleteOk'),
+            cancelText: t('workspace.contextMenu.deleteCancel'),
+            okButtonProps: { danger: true },
+            onOk: async () => {
+              try {
+                await client?.request('rc.ws.delete', { path: node.path });
+                message.success(t('workspace.contextMenu.deleteSuccess'));
+                onDeleted?.();
+              } catch {
+                message.error(t('workspace.contextMenu.deleteFailed'));
+              }
+            },
+          });
+        },
+      },
+    );
+
+    return items;
+  }, [node.path, node.type, t, client, workspaceRoot, onDeleted, message, onCreateItem]);
 
   // --- Drag source: lightweight custom ghost image ---
   const handleDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.setData('text/x-workspace-path', node.path);
     e.dataTransfer.effectAllowed = 'move';
+    onDragSrcChange?.(node.path);
     // Create a small, unobtrusive drag ghost so it doesn't block drop targets
     const ghost = document.createElement('div');
     ghost.textContent = node.name;
@@ -200,12 +446,27 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, onOpenFile, onDelete
     e.dataTransfer.setDragImage(ghost, 0, 0);
     // Clean up the off-screen element after the browser captures it
     requestAnimationFrame(() => document.body.removeChild(ghost));
-  }, [node.path, node.name]);
+  }, [node.path, node.name, onDragSrcChange]);
 
   // --- Drop target (directories only) + auto-expand on hover ---
+  // Block: self-drop, dropping onto own parent, ancestor→descendant
+  const isInvalidDropTarget = useCallback((src: string | null): boolean => {
+    if (!src) return false;
+    // Can't drop onto self
+    if (src === node.path) return true;
+    // Can't drop onto own parent directory
+    const srcDir = src.includes('/') ? src.substring(0, src.lastIndexOf('/')) : '';
+    if (srcDir === node.path) return true;
+    // Can't drop ancestor into descendant (prevents circular moves)
+    if (node.path.startsWith(src + '/')) return true;
+    return false;
+  }, [node.path]);
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     if (node.type !== 'directory') return;
     if (!e.dataTransfer.types.includes('text/x-workspace-path')) return;
+    // Block invalid drop targets using the lifted dragSrcPath
+    if (isInvalidDropTarget(dragSrcPath)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     if (!dragOver) {
@@ -215,7 +476,7 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, onOpenFile, onDelete
         expandTimerRef.current = setTimeout(() => setExpanded(true), 500);
       }
     }
-  }, [node.type, dragOver, expanded]);
+  }, [node.type, dragOver, expanded, dragSrcPath, isInvalidDropTarget]);
 
   const handleDragLeave = useCallback(() => {
     setDragOver(false);
@@ -224,6 +485,48 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, onOpenFile, onDelete
       expandTimerRef.current = null;
     }
   }, []);
+
+  // --- Rename handler ---
+  const handleRename = useCallback(async (newName: string) => {
+    setIsRenaming(false);
+    if (newName === node.name) return;
+    const parentDir = node.path.includes('/') ? node.path.substring(0, node.path.lastIndexOf('/')) : '';
+    const destPath = parentDir ? `${parentDir}/${newName}` : newName;
+    onMoveStart?.(node.path);
+    try {
+      await client?.request('rc.ws.move', { from: node.path, to: destPath });
+      message.success(t('workspace.renameSuccess'));
+      onMoved?.();
+    } catch (err) {
+      console.error('[WorkspacePanel] rename failed:', err);
+      message.error(t('workspace.renameFailed'));
+    } finally {
+      onMoveEnd?.();
+    }
+  }, [node.path, node.name, client, t, message, onMoved, onMoveStart, onMoveEnd]);
+
+  // --- Create file/folder handler ---
+  const [createLoading, setCreateLoading] = useState(false);
+  const handleCreate = useCallback(async (name: string) => {
+    if (!isCreatingHere || !creatingItem) return;
+    const fullPath = `${node.path}/${name}`;
+    setCreateLoading(true);
+    try {
+      if (creatingItem.type === 'directory') {
+        await client?.request('rc.ws.mkdir', { path: fullPath });
+      } else {
+        await client?.request('rc.ws.save', { path: fullPath, content: '', message: `Add: ${name}` });
+      }
+      message.success(t('workspace.createSuccess'));
+      onMoved?.();
+    } catch (err) {
+      console.error('[WorkspacePanel] create failed:', err);
+      message.error(t('workspace.createFailed'));
+    } finally {
+      setCreateLoading(false);
+      onCreateDone?.();
+    }
+  }, [isCreatingHere, creatingItem, node.path, client, t, message, onMoved, onCreateDone]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     setDragOver(false);
@@ -237,13 +540,13 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, onOpenFile, onDelete
     const srcPath = e.dataTransfer.getData('text/x-workspace-path');
     if (!srcPath) return;
 
-    // Don't drop onto own parent or into itself
-    const srcDir = srcPath.includes('/') ? srcPath.substring(0, srcPath.lastIndexOf('/')) : '';
-    if (srcDir === node.path || srcPath === node.path) return;
+    // Block: self, parent, ancestor→descendant
+    if (isInvalidDropTarget(srcPath)) return;
 
     const fileName = srcPath.includes('/') ? srcPath.substring(srcPath.lastIndexOf('/') + 1) : srcPath;
     const destPath = `${node.path}/${fileName}`;
 
+    onMoveStart?.(srcPath);
     try {
       await client?.request('rc.ws.move', { from: srcPath, to: destPath });
       // Auto-expand the target folder so the user sees the moved file
@@ -253,19 +556,22 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, onOpenFile, onDelete
     } catch (err) {
       console.error('[WorkspacePanel] move failed:', err);
       message.error(t('workspace.moveFailed', { defaultValue: 'Move failed' }));
+    } finally {
+      onMoveEnd?.();
     }
-  }, [node, client, t, message, onMoved]);
+  }, [node, client, t, message, onMoved, isInvalidDropTarget, onMoveStart, onMoveEnd]);
 
   return (
     <div>
       <Dropdown menu={{ items: contextMenuItems }} trigger={['contextMenu']}>
         <div
-          draggable
+          draggable={!isMoving}
           onDragStart={handleDragStart}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           onClick={() => {
+            if (isMoving) return;
             if (node.type === 'directory') {
               setExpanded(!expanded);
             } else {
@@ -278,30 +584,59 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, onOpenFile, onDelete
             gap: 6,
             padding: '3px 8px 3px 0',
             paddingLeft: 8 + depth * 16,
-            cursor: 'pointer',
+            cursor: isMoving ? 'wait' : 'pointer',
             fontSize: 12,
             color: tokens.text.primary,
             background: dragOver ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
             borderRadius: dragOver ? 4 : 0,
-            transition: 'background 0.15s',
+            opacity: isMoving ? 0.45 : 1,
+            transition: 'background 0.15s, opacity 0.2s',
+            animation: isMoving ? 'rc-pulse 1.2s ease-in-out infinite' : undefined,
           }}
           onMouseEnter={(e) => {
-            if (!dragOver) (e.currentTarget as HTMLElement).style.background = tokens.bg.surfaceHover;
+            if (!dragOver && !isMoving) (e.currentTarget as HTMLElement).style.background = tokens.bg.surfaceHover;
           }}
           onMouseLeave={(e) => {
-            if (!dragOver) (e.currentTarget as HTMLElement).style.background = 'transparent';
+            if (!dragOver && !isMoving) (e.currentTarget as HTMLElement).style.background = 'transparent';
           }}
         >
           <span style={{ color, fontSize: 14, flexShrink: 0 }}>{icon}</span>
-          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {node.name}
-          </span>
-          <GitBadge status={node.git_status} />
+          {isRenaming ? (
+            <RenameInput
+              defaultValue={node.name}
+              isFile={node.type === 'file'}
+              tokens={tokens}
+              onConfirm={handleRename}
+              onCancel={() => setIsRenaming(false)}
+            />
+          ) : (
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {node.name}
+            </span>
+          )}
+          {isMoving
+            ? <LoadingOutlined style={{ fontSize: 10, color: tokens.text.muted }} spin />
+            : !isRenaming && <GitBadge status={node.git_status} />}
         </div>
       </Dropdown>
-      {expanded && node.children?.map((child) => (
-        <FileTreeNode key={child.path} node={child} depth={depth + 1} tokens={tokens} workspaceRoot={workspaceRoot} onOpenFile={onOpenFile} onDeleted={onDeleted} onMoved={onMoved} />
-      ))}
+      {expanded && (
+        <>
+          {isCreatingHere && creatingItem && (
+            <InlineNameInput
+              icon={creatingItem.type === 'directory' ? <FolderOutlined /> : <FileOutlined />}
+              iconColor="#71717A"
+              depth={depth + 1}
+              tokens={tokens}
+              loading={createLoading}
+              onConfirm={handleCreate}
+              onCancel={() => onCreateDone?.()}
+            />
+          )}
+          {node.children?.map((child) => (
+            <FileTreeNode key={child.path} node={child} depth={depth + 1} tokens={tokens} workspaceRoot={workspaceRoot} dragSrcPath={dragSrcPath} movingPath={movingPath} creatingItem={creatingItem} onOpenFile={onOpenFile} onDeleted={onDeleted} onMoved={onMoved} onDragSrcChange={onDragSrcChange} onMoveStart={onMoveStart} onMoveEnd={onMoveEnd} onCreateItem={onCreateItem} onCreateDone={onCreateDone} />
+          ))}
+        </>
+      )}
     </div>
   );
 }
@@ -365,6 +700,22 @@ export default function WorkspacePanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollRafRef = useRef<number | null>(null);
 
+  // Drag-and-drop: track source path for self/ancestor guard (Fix #3)
+  const [dragSrcPath, setDragSrcPath] = useState<string | null>(null);
+  // Move loading state (Fix #4)
+  const [movingPath, setMovingPath] = useState<string | null>(null);
+  // Drop-to-root zone state (Fix #2)
+  const [rootDropHover, setRootDropHover] = useState(false);
+  // Create file/folder state
+  const [creatingItem, setCreatingItem] = useState<CreatingItem | null>(null);
+  // Root-level create (parentPath = '' sentinel)
+  const [rootCreateType, setRootCreateType] = useState<'file' | 'directory' | null>(null);
+  const [rootCreateLoading, setRootCreateLoading] = useState(false);
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Auto-scroll file tree when dragging near top/bottom edges.
   // Uses requestAnimationFrame for smooth 60fps scrolling.
   const handleTreeDragOver = useCallback((e: React.DragEvent) => {
@@ -410,6 +761,21 @@ export default function WorkspacePanel() {
   // Clean up rAF on unmount
   useEffect(() => () => stopAutoScroll(), [stopAutoScroll]);
 
+  // Clear drag source when drag ends anywhere in the panel
+  const handlePanelDragEnd = useCallback(() => {
+    setDragSrcPath(null);
+    setRootDropHover(false);
+  }, []);
+
+  // Search debounce
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 200);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery]);
+
+  const filteredTree = useMemo(() => filterTree(tree, debouncedQuery), [tree, debouncedQuery]);
+
   const loadData = useCallback(async () => {
     if (!client?.isConnected) return;
     setLoading(true);
@@ -429,6 +795,67 @@ export default function WorkspacePanel() {
       setLoading(false);
     }
   }, [client]);
+
+  // Root-level create handler
+  const handleRootCreate = useCallback(async (name: string) => {
+    setRootCreateLoading(true);
+    try {
+      if (rootCreateType === 'directory') {
+        await client?.request('rc.ws.mkdir', { path: name });
+      } else {
+        await client?.request('rc.ws.save', { path: name, content: '', message: `Add: ${name}` });
+      }
+      message.success(t('workspace.createSuccess'));
+      await loadData();
+    } catch (err) {
+      console.error('[WorkspacePanel] root create failed:', err);
+      message.error(t('workspace.createFailed'));
+    } finally {
+      setRootCreateLoading(false);
+      setRootCreateType(null);
+    }
+  }, [rootCreateType, client, t, message, loadData]);
+
+  // --- Root drop zone handlers (Fix #2): internal files → move to root ---
+  const handleRootDropZoneDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('text/x-workspace-path')) return;
+    // Only show root-drop when dragging internal workspace items
+    if (!dragSrcPath) return;
+    // Already at root (no '/') → no-op
+    if (!dragSrcPath.includes('/')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setRootDropHover(true);
+  }, [dragSrcPath]);
+
+  const handleRootDropZoneDragLeave = useCallback(() => {
+    setRootDropHover(false);
+  }, []);
+
+  const handleRootDropZoneDrop = useCallback(async (e: React.DragEvent) => {
+    setRootDropHover(false);
+    const srcPath = e.dataTransfer.getData('text/x-workspace-path');
+    if (!srcPath || !srcPath.includes('/')) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const fileName = srcPath.substring(srcPath.lastIndexOf('/') + 1);
+    const destPath = fileName;
+
+    setMovingPath(srcPath);
+    try {
+      await client?.request('rc.ws.move', { from: srcPath, to: destPath });
+      message.success(t('workspace.moveSuccess'));
+      await loadData();
+    } catch (err) {
+      console.error('[WorkspacePanel] move to root failed:', err);
+      message.error(t('workspace.moveFailed'));
+    } finally {
+      setMovingPath(null);
+      setDragSrcPath(null);
+    }
+  }, [client, t, message, loadData]);
 
   const workspaceRefreshKey = useUiStore((s) => s.workspaceRefreshKey);
   const pendingPreviewPath = useUiStore((s) => s.pendingPreviewPath);
@@ -522,7 +949,7 @@ export default function WorkspacePanel() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} onDragEnd={handlePanelDragEnd}>
       <RecentChanges commits={commits} tokens={tokens} />
 
       {commits.length > 0 && tree.length > 0 && (
@@ -530,55 +957,186 @@ export default function WorkspacePanel() {
       )}
 
       {tree.length > 0 && (
-        <div
-          ref={scrollRef}
-          onDragOver={handleTreeDragOver}
-          onDragLeave={stopAutoScroll}
-          onDrop={stopAutoScroll}
-          onDragEnd={stopAutoScroll}
-          style={{ flex: 1, overflow: 'auto', paddingTop: 4 }}
-        >
-          <div style={{ padding: '0 16px 4px' }}>
-            <Text strong style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: tokens.text.muted }}>
-              {t('workspace.fileTree')}
-            </Text>
+        <>
+          {/* Sticky header: title + [+] + search — stays fixed above scroll */}
+          <div style={{ flexShrink: 0, paddingTop: 4 }}>
+            {/* FILE TREE title + [+] button */}
+            <div style={{ padding: '0 16px 4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text strong style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: tokens.text.muted }}>
+                {t('workspace.fileTree')}
+              </Text>
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'newFile', icon: <FileOutlined />, label: t('workspace.contextMenu.newFile'), onClick: () => setRootCreateType('file') },
+                    { key: 'newFolder', icon: <FolderOutlined />, label: t('workspace.contextMenu.newFolder'), onClick: () => setRootCreateType('directory') },
+                  ],
+                }}
+                trigger={['click']}
+                placement="bottomRight"
+              >
+                <span
+                  title={t('workspace.newItemTooltip', { defaultValue: 'New...' })}
+                  style={{
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    color: tokens.text.muted,
+                    padding: '0 2px',
+                    borderRadius: 3,
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = tokens.text.primary; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = tokens.text.muted; }}
+                >
+                  <PlusOutlined />
+                </span>
+              </Dropdown>
+            </div>
+
+            {/* Search box */}
+            <div style={{ padding: '0 16px 6px' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '3px 8px',
+                border: `1px solid ${tokens.border.default}`,
+                borderRadius: 4,
+                background: tokens.bg.surface,
+                transition: 'border-color 0.15s',
+              }}
+                onFocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-secondary)'; }}
+                onBlur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = tokens.border.default; }}
+              >
+                <SearchOutlined style={{ fontSize: 12, color: tokens.text.muted, flexShrink: 0 }} />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t('workspace.searchPlaceholder', { defaultValue: 'Search files...' })}
+                  style={{
+                    flex: 1, fontSize: 12, fontFamily: 'inherit',
+                    border: 'none', background: 'transparent',
+                    color: tokens.text.primary, outline: 'none', minWidth: 0,
+                  }}
+                />
+                {searchQuery && (
+                  <CloseCircleFilled
+                    style={{ fontSize: 12, color: tokens.text.muted, cursor: 'pointer', flexShrink: 0 }}
+                    onClick={() => setSearchQuery('')}
+                  />
+                )}
+              </div>
+            </div>
           </div>
-          {tree.map((node) => (
-            <FileTreeNode key={node.path} node={node} depth={0} tokens={tokens} workspaceRoot={workspaceRoot} onOpenFile={setPreviewPath} onDeleted={loadData} onMoved={loadData} />
-          ))}
-        </div>
+
+          {/* Scrollable tree area */}
+          <div
+            ref={scrollRef}
+            onDragOver={handleTreeDragOver}
+            onDragLeave={stopAutoScroll}
+            onDrop={stopAutoScroll}
+            onDragEnd={stopAutoScroll}
+            style={{ flex: 1, overflow: 'auto' }}
+          >
+            {/* Root-level create input */}
+            {rootCreateType && (
+              <InlineNameInput
+                icon={rootCreateType === 'directory' ? <FolderOutlined /> : <FileOutlined />}
+                iconColor="#71717A"
+                depth={0}
+                tokens={tokens}
+                loading={rootCreateLoading}
+                onConfirm={handleRootCreate}
+                onCancel={() => setRootCreateType(null)}
+              />
+            )}
+
+            {/* Tree nodes */}
+            {filteredTree.length > 0 ? (
+              filteredTree.map((node) => (
+                <FileTreeNode key={node.path} node={node} depth={0} tokens={tokens} workspaceRoot={workspaceRoot} dragSrcPath={dragSrcPath} movingPath={movingPath} creatingItem={creatingItem} onOpenFile={setPreviewPath} onDeleted={loadData} onMoved={loadData} onDragSrcChange={setDragSrcPath} onMoveStart={setMovingPath} onMoveEnd={() => setMovingPath(null)} onCreateItem={setCreatingItem} onCreateDone={() => setCreatingItem(null)} />
+              ))
+            ) : debouncedQuery ? (
+              <div style={{ padding: '16px', textAlign: 'center' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('workspace.searchNoResults', { defaultValue: 'No matches found' })}
+                </Text>
+              </div>
+            ) : null}
+          </div>
+        </>
       )}
 
-      {/* Upload drop zone — locked with loading state during upload */}
-      <div style={{ padding: '8px 16px', borderTop: `1px solid ${tokens.border.default}` }}>
-        {uploading ? (
-          <div
-            style={{
-              padding: '12px 0',
-              border: `1px dashed ${tokens.border.hover}`,
-              borderRadius: 4,
-              textAlign: 'center',
-            }}
-          >
-            <LoadingOutlined style={{ fontSize: 16, color: tokens.text.muted, marginRight: 6 }} spin />
-            <span style={{ color: tokens.text.muted, fontSize: 12 }}>
-              {t('workspace.uploading', { defaultValue: 'Uploading...' })}
-            </span>
+      {/* Upload / move-to-root drop zone */}
+      {(() => {
+        // Derive drag state: show root-drop zone as soon as a non-root item is being dragged
+        const isDraggingNonRoot = dragSrcPath !== null && dragSrcPath.includes('/');
+        const showRootDrop = isDraggingNonRoot && !uploading;
+
+        if (uploading) {
+          return (
+            <div style={{ padding: '8px 16px', borderTop: `1px solid ${tokens.border.default}` }}>
+              <div style={{ padding: '12px 0', border: `1px dashed ${tokens.border.hover}`, borderRadius: 4, textAlign: 'center' }}>
+                <LoadingOutlined style={{ fontSize: 16, color: tokens.text.muted, marginRight: 6 }} spin />
+                <span style={{ color: tokens.text.muted, fontSize: 12 }}>
+                  {t('workspace.uploading', { defaultValue: 'Uploading...' })}
+                </span>
+              </div>
+            </div>
+          );
+        }
+
+        if (showRootDrop) {
+          return (
+            <div
+              style={{ padding: '8px 16px', borderTop: `1px solid ${tokens.border.default}` }}
+              onDragOver={handleRootDropZoneDragOver}
+              onDragLeave={handleRootDropZoneDragLeave}
+              onDrop={handleRootDropZoneDrop}
+            >
+              <div
+                style={{
+                  padding: '12px 0',
+                  border: rootDropHover
+                    ? '1px solid rgba(59, 130, 246, 0.7)'
+                    : '1px dashed rgba(59, 130, 246, 0.35)',
+                  borderRadius: 4,
+                  textAlign: 'center',
+                  background: rootDropHover
+                    ? 'rgba(59, 130, 246, 0.12)'
+                    : 'rgba(59, 130, 246, 0.04)',
+                  transition: 'border 0.15s, background 0.15s',
+                }}
+              >
+                <p style={{
+                  color: rootDropHover ? '#60A5FA' : 'rgba(59, 130, 246, 0.6)',
+                  fontSize: 12,
+                  margin: 0,
+                  fontWeight: 500,
+                  transition: 'color 0.15s',
+                }}>
+                  <FolderOutlined style={{ fontSize: 16, marginRight: 4 }} />
+                  {t('workspace.moveToRoot')}
+                </p>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div style={{ padding: '8px 16px', borderTop: `1px solid ${tokens.border.default}` }}>
+            <Dragger
+              accept="*"
+              showUploadList={false}
+              beforeUpload={handleUpload}
+              style={{ padding: '8px 0', border: `1px dashed ${tokens.border.hover}`, background: 'transparent' }}
+            >
+              <p style={{ color: tokens.text.muted, fontSize: 12, margin: 0 }}>
+                <InboxOutlined style={{ fontSize: 16, marginRight: 4 }} />
+                {t('workspace.dragDrop')}
+              </p>
+            </Dragger>
           </div>
-        ) : (
-          <Dragger
-            accept="*"
-            showUploadList={false}
-            beforeUpload={handleUpload}
-            style={{ padding: '8px 0', border: `1px dashed ${tokens.border.hover}`, background: 'transparent' }}
-          >
-            <p style={{ color: tokens.text.muted, fontSize: 12, margin: 0 }}>
-              <InboxOutlined style={{ fontSize: 16, marginRight: 4 }} />
-              {t('workspace.dragDrop')}
-            </p>
-          </Dragger>
-        )}
-      </div>
+        );
+      })()}
 
       <FilePreviewModal
         open={previewPath !== null}
