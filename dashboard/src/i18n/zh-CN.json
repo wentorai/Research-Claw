@@ -190,7 +190,9 @@
     "searchPlaceholder": "搜索文件...",
     "searchNoResults": "无匹配结果",
     "systemFilesHidden": "{{count}} 个系统文件已隐藏",
+    "systemFilesVisible": "系统文件已显示",
     "showSystemFiles": "显示",
+    "hideSystemFiles": "隐藏",
     "preview": {
       "title": "文件预览",
       "loading": "加载文件中...",

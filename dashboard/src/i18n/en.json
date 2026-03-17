@@ -190,7 +190,9 @@
     "searchPlaceholder": "Search files...",
     "searchNoResults": "No matches found",
     "systemFilesHidden": "{{count}} system files hidden",
+    "systemFilesVisible": "System files visible",
     "showSystemFiles": "Show",
+    "hideSystemFiles": "Hide",
     "preview": {
       "title": "File Preview",
       "loading": "Loading file...",

@@ -1077,8 +1077,8 @@ export default function WorkspacePanel() {
         </>
       )}
 
-      {/* System files hidden hint bar */}
-      {!showSystemFiles && hiddenCount > 0 && (
+      {/* System files toggle bar */}
+      {!showSystemFiles && hiddenCount > 0 ? (
         <div style={{
           padding: '4px 16px',
           display: 'flex',
@@ -1098,7 +1098,27 @@ export default function WorkspacePanel() {
             {t('workspace.showSystemFiles')}
           </Button>
         </div>
-      )}
+      ) : showSystemFiles ? (
+        <div style={{
+          padding: '4px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderTop: `1px solid ${tokens.border.default}`,
+        }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {t('workspace.systemFilesVisible')}
+          </Text>
+          <Button
+            type="link"
+            size="small"
+            style={{ fontSize: 11, padding: 0, height: 'auto' }}
+            onClick={() => setShowSystemFiles(false)}
+          >
+            {t('workspace.hideSystemFiles')}
+          </Button>
+        </div>
+      ) : null}
 
       {/* Upload / move-to-root drop zone */}
       {(() => {
