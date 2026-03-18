@@ -5,6 +5,7 @@ import { useLibraryStore } from './library';
 import { useTasksStore } from './tasks';
 import { useSessionsStore } from './sessions';
 import { useCronStore } from './cron';
+import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
 import { primaryModelSupportsVision, hasImageModelConfigured } from './config';
 import i18n from '../i18n';
@@ -566,6 +567,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             useTasksStore.getState().loadTasks();
             useSessionsStore.getState().loadSessions();
             useCronStore.getState().loadPresets();
+            useMonitorStore.getState().loadMonitors();
             useUiStore.getState().triggerWorkspaceRefresh();
             // Channel A: poll for deadline-based notifications
             useUiStore.getState().checkNotifications();
