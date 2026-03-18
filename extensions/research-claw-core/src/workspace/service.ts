@@ -243,7 +243,7 @@ const WORKSPACE_DIRS = [
   'outputs/exports',
   'outputs/reports',
   'outputs/notes',
-  'outputs/radar',
+  'outputs/monitor',
 ] as const;
 
 /**

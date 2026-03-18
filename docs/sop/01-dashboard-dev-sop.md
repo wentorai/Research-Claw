@@ -42,7 +42,7 @@ This SOP governs all development on the **Dashboard** — the React + Vite SPA s
 
 - Project/focus switcher (**NOT** conversation list)
 - Projects = shared workstreams (shared MEMORY.md), not isolated containers
-- Function rail icons: Literature, Workspace, Tasks, Radar, Settings
+- Function rail icons: Literature, Workspace, Tasks, Monitor, Settings
 - Each project card: emoji + name + tags + status indicator
 
 ### 2.4 Center Chat
@@ -60,7 +60,7 @@ This SOP governs all development on the **Dashboard** — the React + Vite SPA s
 | Literature | Pending Review / Saved sub-tabs, search, filter, tag chips, read status badges | |
 | Workspace | File tree (sources/ + outputs/) + output timeline (git log), drag-drop upload | |
 | Tasks | Deadline-sorted list (**NOT Kanban**), human/agent perspective toggle, completed items folded | |
-| Radar | Tracked keywords/authors, findings digest, activity log | |
+| Monitor | Active monitors, scan history, results digest | |
 | Settings | 4 sub-tabs (General / Model / Proxy / About), proxy default 127.0.0.1:7890, connected software list in About | |
 
 ### 2.6 Setup Wizard
@@ -76,7 +76,7 @@ This SOP governs all development on the **Dashboard** — the React + Vite SPA s
 ### 2.8 Notifications
 
 - Bell icon with red badge count (max "99+")
-- Sources: heartbeat, radar, deadline, overdue, approval, error, setup
+- Sources: heartbeat, monitor, deadline, overdue, approval, error, setup
 - Priority colors: Critical (red), High (amber), Medium (blue), Low (gray)
 - Click -> scroll to related chat message
 
@@ -88,7 +88,7 @@ This SOP governs all development on the **Dashboard** — the React + Vite SPA s
 | `task_card` | `TaskCard.tsx` | 03d SS3.2 |
 | `progress_card` | `ProgressCard.tsx` | 03d SS3.3 |
 | `approval_card` | `ApprovalCard.tsx` | 03d SS3.4 |
-| `radar_digest` | `RadarDigest.tsx` | 03d SS3.5 |
+| `monitor_digest` | `MonitorDigest.tsx` | 03d SS3.5 |
 | `file_card` | `FileCard.tsx` | 03d SS3.6 |
 
 Convention: fenced code blocks with card type as language tag. Standard code blocks (e.g., `python`, `typescript`) are handled by the default markdown renderer, not as custom card types (see 03d SS3.7). Unknown types degrade gracefully.
@@ -133,14 +133,14 @@ App.tsx (shell)
 |       +-- TaskCard.tsx
 |       +-- ProgressCard.tsx
 |       +-- ApprovalCard.tsx
-|       +-- RadarDigest.tsx
+|       +-- MonitorDigest.tsx
 |       +-- FileCard.tsx
 +-- RightPanel.tsx
 |   +-- panels/
 |       +-- LibraryPanel.tsx
 |       +-- WorkspacePanel.tsx
 |       +-- TaskPanel.tsx
-|       +-- RadarPanel.tsx
+|       +-- MonitorPanel.tsx
 |       +-- SettingsPanel.tsx
 +-- setup/
 |   +-- SetupWizard.tsx
@@ -161,7 +161,7 @@ App.tsx (shell)
 | sessions | `stores/sessions.ts` | Active session metadata |
 | ui | `stores/ui.ts` | Theme, layout state, panel visibility, notifications |
 | cron | `stores/cron.ts` | Cron preset orchestration (plugin DB + gateway bridge) |
-| radar | `stores/radar.ts` | Radar tracking config cache |
+| monitor | `stores/monitor.ts` | Monitor configuration and scan state |
 
 ---
 

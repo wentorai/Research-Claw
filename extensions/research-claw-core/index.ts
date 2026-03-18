@@ -5,9 +5,9 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 41 agent tools (17 literature + 10 task + 7 workspace + 3 radar + 4 monitor)
- *   - 82 WS RPC methods + 1 HTTP route = 83 interface methods
- *     (34 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 2 rc.heartbeat.* + 12 rc.ws.* + 4 rc.radar.* + 10 rc.monitor.* = 82 WS; POST /rc/upload = 1 HTTP)
+ *   - 38 agent tools (17 literature + 10 task + 7 workspace + 4 monitor)
+ *   - 78 WS RPC methods + 1 HTTP route = 79 interface methods
+ *     (34 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 2 rc.heartbeat.* + 12 rc.ws.* + 10 rc.monitor.* = 78 WS; POST /rc/upload = 1 HTTP)
  *   - 8 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×2, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  */
@@ -28,8 +28,6 @@ import { HeartbeatService } from './src/tasks/heartbeat.js';
 import { WorkspaceService, type WorkspaceConfig } from './src/workspace/service.js';
 import { createWorkspaceTools } from './src/workspace/tools.js';
 import { registerWorkspaceRpc } from './src/workspace/rpc.js';
-import { registerRadarRpc } from './src/radar/rpc.js';
-import { createRadarTools } from './src/radar/tools.js';
 import { MonitorService } from './src/monitor/service.js';
 import { registerMonitorRpc } from './src/monitor/rpc.js';
 import { createMonitorTools } from './src/monitor/tools.js';
@@ -166,7 +164,7 @@ const plugin: PluginDefinition = {
       },
     });
 
-    // ── 4. Register tools (36 total) ─────────────────────────────────
+    // ── 4. Register tools (38 total) ─────────────────────────────────
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
     }
@@ -176,14 +174,11 @@ const plugin: PluginDefinition = {
     for (const tool of createWorkspaceTools(wsService)) {
       api.registerTool(tool);
     }
-    for (const tool of createRadarTools(dbManager.db)) {
-      api.registerTool(tool);
-    }
     for (const tool of createMonitorTools(monitorService, dbManager.db)) {
       api.registerTool(tool);
     }
 
-    // ── 5. Register RPC methods (68 WS total) ────────────────────────
+    // ── 5. Register RPC methods (78 WS total) ────────────────────────
     // Rate limiting not needed: local satellite, no network exposure (ws://127.0.0.1:28789 only)
     //
     // Bridge: our RPC handlers use a simple (params) => result signature,
@@ -213,7 +208,6 @@ const plugin: PluginDefinition = {
     registerLiteratureRpc(registerMethod, litService);   // 33 methods
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
     registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
-    registerRadarRpc(registerMethod, dbManager.db);       // 4 methods (legacy, kept for backward compat)
     registerMonitorRpc(registerMethod, monitorService);   // 10 methods
 
     // Heartbeat RPC (2 methods)
@@ -725,7 +719,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (41 tools, 82 WS RPC + 1 HTTP = 83 interfaces, 8 hooks)');
+    api.logger.info('Research-Claw Core registered (38 tools, 78 WS RPC + 1 HTTP = 79 interfaces, 8 hooks)');
   },
 };
 

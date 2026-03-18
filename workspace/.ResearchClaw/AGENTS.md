@@ -20,14 +20,13 @@ At the start of every interactive session, perform these steps silently:
 
 ## §2 Module Map
 
-Five modules share `.research-claw/library.db`:
+Four modules share `.research-claw/library.db`:
 
 ```
 Library   (17 tools) — paper storage, search, citation graph, Zotero/EndNote/RIS import
 Tasks     (10 tools) — deadlines, progress tracking, paper/file links, cron, notifications
 Workspace  (7 tools) — file CRUD, move/rename, git-backed versioning, diff, history, restore
-Monitor    (4 tools) — universal N-monitor: arxiv, s2, github, rss, webpage, openalex scanning
-Radar      (3 tools) — legacy keyword/author monitoring (prefer Monitor for new setups)
+Monitor    (4 tools) — universal N-monitor: arxiv, github, rss, webpage, openalex, twitter, custom
 ```
 
 Data flow:
@@ -35,11 +34,11 @@ Data flow:
 ```
 API Search ──→ Library ←──→ Workspace
                  ↑               ↓
-        Monitor/Radar          Tasks
+              Monitor          Tasks
 ```
 
 - Search results flow into Library via `library_add_paper` / `library_batch_add`.
-- Monitor/Radar discoveries feed Library (user selects which to add).
+- Monitor discoveries feed Library (user selects which to add).
 - Library papers link to Tasks via `task_link`.
 - Workspace files reference Library papers and Task outputs.
 
@@ -66,8 +65,7 @@ User request
 | 引用 / cite / bibtex | library_export_bibtex | skill: writing/citation |
 | 写 / 草稿 / draft | workspace_save | skill: writing/composition |
 | 任务 / 截止 / deadline | task_create, task_list | — |
-| 监控 / 追踪 / monitor | monitor_create, monitor_scan | radar_configure (legacy) |
-| 雷达 / radar | radar_configure, radar_scan | monitor_create (preferred) |
+| 监控 / 追踪 / monitor | monitor_create, monitor_scan | — |
 | 通知 / 提醒 / notify | send_notification | — |
 | 定时 / 定期 / cron | cron (built-in) | — |
 | 统计 / 分析 / stats | — | skill: analysis/* |
@@ -101,7 +99,7 @@ Config changes auto-trigger SIGUSR1 → gateway restarts in ~3s.
 
 Triggers: "导入PDF", "import PDF", "add this paper from file".
 Steps: Read tool (built-in) → extract title, authors, DOI, arXiv ID, abstract
-→ verify via `get_paper` or `search_arxiv` → deduplicate with `library_search`
+→ verify via `resolve_doi` or `search_arxiv` → deduplicate with `library_search`
 → `library_add_paper` with `source: "local_import"` + `pdf_path` → present `paper_card`.
 Never fabricate metadata. Store PDFs in `sources/papers/`.
 
@@ -218,9 +216,9 @@ Local tools always take priority over skill guidance.
 
 Five rules govern how modules coordinate:
 
-1. **monitor_scan / radar_scan → new papers found** → Present `paper_card` for each
+1. **monitor_scan → new papers found** → Present `paper_card` for each
    notable result. User selects which to add; only then call `library_add_paper`.
-   For monitor results, also emit `monitor_digest` card with summary.
+   Emit `monitor_digest` card with summary.
 2. **library_add_paper + active project** → Auto-call `task_link` to associate the
    paper with the current project task. (Reversible — no confirmation needed.)
 3. **task_complete → research task done** → Output a `progress_card` summarizing
@@ -237,7 +235,7 @@ After every tool call:
 1. **On failure** → Report the error to the user. Log to MEMORY.md `## Tool Notes`
    with date, tool name, error cause, and workaround if known.
 2. **On success with a useful pattern** → Log the effective combination to Tool Notes
-   (e.g., "radar_scan + library_batch_add works well for bulk import").
+   (e.g., "monitor_scan + library_batch_add works well for bulk import").
 3. **On session start** → Read Tool Notes to avoid known issues.
 4. **Retry limit** → Same tool, same parameters: max 2 retries. Then ask the user.
 
@@ -250,7 +248,6 @@ task needs all four.
 
 1. Clarify the research question if ambiguous.
 2. Search multiple databases for comprehensive coverage:
-   - **Semantic Scholar**: citation graphs, recommendations (200M+ papers)
    - **arXiv**: CS, physics, math, bio preprints (latest work)
    - **OpenAlex**: broad coverage, institutions (250M+ works)
    - **CrossRef**: DOI resolution, metadata (130M+ DOIs)
@@ -313,7 +310,7 @@ valid JSON — the dashboard parser uses `JSON.parse()`.
 ### paper_card — Paper Reference
 
 **ONLY for real academic publications** — papers returned by `search_arxiv`,
-`search_arxiv`, `library_search`, `radar_scan`, or papers the user explicitly
+`search_openalex`, `library_search`, `monitor_scan`, or papers the user explicitly
 identifies by title/DOI. NEVER use paper_card to describe software features,
 tool capabilities, concepts, or any content that is not a verifiable scholarly
 work. When in doubt, use plain text.
@@ -370,17 +367,6 @@ decision.
 {"type":"approval_card","action":"Delete 3 duplicate papers from library","context":"Found exact duplicates by DOI matching","risk_level":"medium","details":{"affected_count":3},"approval_id":"evt_abc123"}
 ```
 
-### radar_digest — Monitoring Scan Results
-
-6 fields. Required: `type`, `source`, `query`, `period`, `total_found`,
-`notable_papers`.
-
-`notable_papers`: array of `{title, authors, relevance_note}`.
-
-```radar_digest
-{"type":"radar_digest","source":"arxiv","query":"transformer attention","period":"2026-03-05 to 2026-03-12","total_found":47,"notable_papers":[{"title":"Efficient Multi-Scale Attention","authors":["Chen, X."],"relevance_note":"40% FLOP reduction with maintained accuracy"}]}
-```
-
 ### file_card — Workspace File Reference
 
 **CRITICAL**: ONLY include a file_card when `workspace_save` tool returns one.
@@ -401,14 +387,13 @@ Enum `git_status`: `"new"` | `"modified"` | `"committed"`.
 ### monitor_digest — Monitor Scan Results
 
 Use for results from the **monitor system** (`monitor_scan`, `monitor_report`, or
-cron-triggered monitor runs). Prefer this over `radar_digest` for monitor-initiated
-scans — `radar_digest` is reserved for legacy radar tool output.
+cron-triggered monitor runs).
 
 7 fields. Required: `type`, `monitor_name`, `source_type`, `target`, `total_found`,
 `findings`.
 Optional: `schedule`.
 
-`source_type`: `"arxiv"` | `"semantic_scholar"` | `"github"` | `"rss"` | `"webpage"` |
+`source_type`: `"arxiv"` | `"github"` | `"rss"` | `"webpage"` |
 `"openalex"` | `"twitter"` | `"custom"`.
 
 `findings`: array of `{title, url?, summary?}` (max 10).

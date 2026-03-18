@@ -172,7 +172,7 @@ export const RC_TASK_LIST_RESPONSE = {
       related_paper_id: null,
       related_file_path: null,
       agent_session_id: 'agent:main:main',
-      tags: ['radar'],
+      tags: ['monitoring'],
       notes: null,
     },
     {

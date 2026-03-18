@@ -131,7 +131,7 @@ export const DELTA_SERVER_INITIATED_2: ChatStreamEvent = {
   state: 'delta',
   message: {
     role: 'assistant',
-    content: [{ type: 'text', text: 'Heartbeat: checking your research tasks... Found 2 new papers matching your radar query.' }],
+    content: [{ type: 'text', text: 'Heartbeat: checking your research tasks... Found 2 new papers matching your monitor query.' }],
   },
 };
 
@@ -141,7 +141,7 @@ export const FINAL_SERVER_INITIATED: ChatStreamEvent = {
   state: 'final',
   message: {
     role: 'assistant',
-    content: [{ type: 'text', text: 'Heartbeat: checking your research tasks... Found 2 new papers matching your radar query. Added to library.' }],
+    content: [{ type: 'text', text: 'Heartbeat: checking your research tasks... Found 2 new papers matching your monitor query. Added to library.' }],
     timestamp: 1710400005000,
   },
 };

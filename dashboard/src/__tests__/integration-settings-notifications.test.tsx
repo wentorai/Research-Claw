@@ -505,43 +505,6 @@ describe('Issue 8: Notification Channel B - card extraction', () => {
     expect(heartbeat!.body).toContain('Finished literature review');
   });
 
-  it('extracts radar_digest from assistant message and creates system notification', () => {
-    useChatStore.setState({ runId: 'run-456', streaming: true });
-
-    useGatewayStore.setState({
-      client: createMockClient(vi.fn().mockResolvedValue({ overdue: [], upcoming: [] })),
-      state: 'connected',
-    });
-
-    const radarText = [
-      'Radar scan results:',
-      '',
-      '```radar_digest',
-      JSON.stringify({
-        total_found: 5,
-        query: 'transformer attention',
-      }),
-      '```',
-    ].join('\n');
-
-    useChatStore.getState().handleChatEvent({
-      runId: 'run-456',
-      sessionKey: 'main',
-      state: 'final',
-      message: {
-        role: 'assistant',
-        text: radarText,
-      },
-    });
-
-    const { notifications } = useUiStore.getState();
-    const radar = notifications.find((n) => n.type === 'system');
-    expect(radar).toBeDefined();
-    expect(radar!.title).toContain('Radar');
-    expect(radar!.title).toContain('5');
-    expect(radar!.body).toContain('transformer attention');
-  });
-
   it('extracts approval_card from assistant message and creates error-type notification', () => {
     useChatStore.setState({ runId: 'run-789', streaming: true });
 

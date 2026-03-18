@@ -63,7 +63,7 @@ function usePanelMode(): PanelMode {
   return mode;
 }
 
-const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'tasks', 'radar', 'settings'];
+const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'tasks', 'monitor', 'settings'];
 
 export default function App() {
   const { t } = useTranslation();

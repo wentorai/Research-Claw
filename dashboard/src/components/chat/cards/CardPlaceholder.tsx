@@ -8,7 +8,6 @@ const CARD_LABELS: Record<string, string> = {
   task_card: 'Task',
   progress_card: 'Progress',
   approval_card: 'Approval',
-  radar_digest: 'Radar',
   file_card: 'File',
   monitor_digest: 'Monitor',
 };

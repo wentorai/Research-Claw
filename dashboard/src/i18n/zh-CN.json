@@ -13,7 +13,6 @@
     "library": "文献库",
     "workspace": "工作区",
     "tasks": "任务",
-    "radar": "雷达",
     "monitor": "监控",
     "settings": "设置",
     "collapse": "折叠侧边栏",
@@ -231,59 +230,6 @@
     "minutesAgo": "{{count}}分钟前",
     "hoursAgo": "{{count}}小时前",
     "daysAgo": "{{count}}天前"
-  },
-  "radar": {
-    "title": "科研雷达",
-    "keywords": "追踪关键词",
-    "authors": "追踪作者",
-    "journals": "追踪期刊",
-    "tracking": "追踪配置",
-    "editViaChat": "通过聊天编辑...",
-    "findings": "最新发现",
-    "refresh": "刷新",
-    "empty": "尚未配置雷达。\n告诉助手你想监控的主题、作者或期刊。",
-    "sources": "来源",
-    "noTracking": "暂未追踪任何关键词、作者或期刊。",
-    "addTracking": "通过聊天添加追踪",
-    "noFindings": "暂无扫描结果。点击上方刷新按钮扫描，或让助手帮你扫描。",
-    "noDiscoveries": "暂无发现。请让助手扫描最新论文。",
-    "scanning": "扫描中...",
-    "scanResults": "扫描结果",
-    "newPapers": "新发现",
-    "skipped": "已跳过",
-    "automations": "自动化任务",
-    "section": {
-      "trackingProfile": "追踪画像",
-      "automatedTasks": "自动化任务",
-      "recentDiscoveries": "最近发现"
-    },
-    "cron": {
-      "neverRun": "从未运行",
-      "lastRun": "上次运行",
-      "nextRun": "下次运行",
-      "schedule": "运行频率",
-      "relatedConfig": "关联配置",
-      "reminderWindow": "提醒窗口",
-      "askAgent": "要求助手汇报",
-      "askAgentPrompt": "请汇报自动化任务「{{name}}」的当前状况。包括：上次运行结果、是否需要调整配置、是否需要更改时间或删除此任务。",
-      "delete": "删除此任务",
-      "deleteConfirmTitle": "删除自动化任务",
-      "deleteConfirmContent": "确定删除「{{name}}」？删除后将停止运行。如需恢复，请通过聊天告知助手。",
-      "desc": {
-        "arxiv_daily_scan": "扫描 arXiv 寻找与追踪配置匹配的新论文",
-        "citation_tracking_weekly": "检查已追踪论文的新引用情况",
-        "deadline_reminders_daily": "检查即将到期的任务，提前预警",
-        "group_meeting_prep": "检查组会安排，提前准备汇报材料",
-        "weekly_report": "生成本周研究进展报告"
-      },
-      "related": {
-        "arxiv_daily_scan": "追踪画像中的关键词与来源",
-        "citation_tracking_weekly": "文献库中的论文",
-        "deadline_reminders_daily": "任务面板中的截止日期",
-        "group_meeting_prep": "USER.md 中的组会时间",
-        "weekly_report": "文献库+任务+工作区"
-      }
-    }
   },
   "monitor": {
     "title": "监控",

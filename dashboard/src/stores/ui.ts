@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { useGatewayStore } from './gateway';
 
-export type PanelTab = 'library' | 'workspace' | 'tasks' | 'radar' | 'settings';
+export type PanelTab = 'library' | 'workspace' | 'tasks' | 'monitor' | 'settings';
 
 export type AgentStatus = 'idle' | 'thinking' | 'tool_running' | 'streaming' | 'error' | 'disconnected';
 
@@ -26,11 +26,16 @@ const PANEL_OPEN_STORAGE = 'rc-right-panel-open';
 const LEFT_NAV_COLLAPSED_STORAGE = 'rc-left-nav-collapsed';
 const SHOW_SYSTEM_FILES_STORAGE = 'rc-show-system-files';
 
-const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'radar', 'settings']);
+const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'settings']);
 
 function loadPanelTab(): PanelTab {
   try {
     const raw = localStorage.getItem(PANEL_TAB_STORAGE);
+    // Migrate legacy 'radar' → 'monitor'
+    if (raw === 'radar') {
+      localStorage.setItem(PANEL_TAB_STORAGE, 'monitor');
+      return 'monitor';
+    }
     if (raw && VALID_TABS.has(raw as PanelTab)) return raw as PanelTab;
   } catch { /* ignore */ }
   return 'library';

@@ -178,6 +178,11 @@ const MIGRATIONS: readonly Migration[] = [
       ].join('\n'));
     },
   },
+  {
+    version: 10,
+    name: 'add_monitor_memory',
+    sql: `ALTER TABLE rc_monitors ADD COLUMN memory TEXT NOT NULL DEFAULT '{"v":1,"seen":[],"runs":[],"notes":""}';`,
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────

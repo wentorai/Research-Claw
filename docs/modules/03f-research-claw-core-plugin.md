@@ -28,15 +28,15 @@
 
 `research-claw-core` is the single OpenClaw plugin that aggregates all Research-Claw
 functionality. It acts as the central wiring layer: it owns the SQLite database, registers
-every agent tool (31), every gateway RPC method (61), the HTTP file-upload route, and seven
-lifecycle hooks. Individual feature modules (literature, tasks, workspace, radar) are plain
+every agent tool (28), every gateway RPC method (57), the HTTP file-upload route, and seven
+lifecycle hooks. Individual feature modules (literature, tasks, workspace) are plain
 TypeScript modules with no plugin awareness -- this plugin imports them and connects them
 to the OpenClaw runtime via the `PluginApi` interface.
 
 ### Design Principles
 
 - **Single plugin, multiple modules.** One `openclaw.plugin.json`, one `index.ts` entry
-  point. Feature code lives in `src/literature/`, `src/tasks/`, `src/workspace/`, `src/radar/`, `src/db/`, `src/cards/`.
+  point. Feature code lives in `src/literature/`, `src/tasks/`, `src/workspace/`, `src/db/`, `src/cards/`.
 - **Database ownership.** Only this plugin opens the SQLite connection. Modules receive a
   `Database` handle -- they never construct one.
 - **Zero coupling to OpenClaw internals.** All integration goes through the documented
@@ -68,10 +68,6 @@ research-claw-core/
       service.ts              # WorkspaceService class
       tools.ts                # 7 agent tool definitions
       rpc.ts                  # 11 RPC method handlers
-    radar/
-      scanner.ts              # arXiv + Semantic Scholar scanner
-      tools.ts                # 3 agent tool definitions
-      rpc.ts                  # 4 RPC method handlers
     cards/
       templates.ts            # Message card JSON templates
     __tests__/
@@ -236,9 +232,6 @@ import { registerTaskRpc } from './src/tasks/rpc.js';
 import { WorkspaceService } from './src/workspace/service.js';
 import { createWorkspaceTools } from './src/workspace/tools.js';
 import { registerWorkspaceRpc } from './src/workspace/rpc.js';
-import { registerRadarRpc } from './src/radar/rpc.js';
-import { createRadarTools } from './src/radar/tools.js';
-
 const plugin: PluginDefinition = {
   id: 'research-claw-core',
   name: 'Research-Claw Core',
@@ -260,8 +253,8 @@ const plugin: PluginDefinition = {
     // ── 3. Register database lifecycle service ──────────────
     api.registerService({ id: 'research-claw-db', start() { ... }, stop() { ... } });
 
-    // ── 4. Register tools (31 total) ────────────────────────
-    //   12 literature + 9 task + 7 workspace + 3 radar
+    // ── 4. Register tools (28 total) ────────────────────────
+    //   12 literature + 9 task + 7 workspace
     for (const tool of createLiteratureTools(litService)) api.registerTool(tool);
     for (const tool of createTaskTools(taskService)) api.registerTool(tool);
     for (const tool of createWorkspaceTools(wsService)) api.registerTool(tool);
@@ -360,16 +353,6 @@ Defined in `src/workspace/tools.ts`. Canonical schemas in doc `03c`.
 | 26 | `workspace_history` | `path?`, `limit?` | `{ commits, total, has_more }` | Git log for file or entire workspace. |
 | 27 | `workspace_restore` | `path`, `commit_hash` | `{ path, restored_from, new_commit }` | Checks out specific version. Creates new commit. |
 | 28 | `workspace_move` | `from`, `to` | `{ from, to, committed }` | Move/rename file or directory. Auto-commits. |
-
-### 5.4 Radar Tools (3)
-
-Defined in `src/radar/tools.ts`.
-
-| # | Tool Name | Parameters Summary | Returns | Notes |
-|---|-----------|-------------------|---------|-------|
-| 29 | `radar_configure` | `keywords?`, `authors?`, `journals?`, `sources?` | `RadarConfig` | Sets radar tracking config. Each call replaces specified arrays. |
-| 30 | `radar_get_config` | `{}` | `RadarConfig` | Returns current keywords, authors, journals, sources. |
-| 31 | `radar_scan` | `keywords?`, `sources?`, `max_results?` | `{ results }` | Scans arXiv + Semantic Scholar. Does NOT auto-add to library. |
 
 ### Tool Registration Pattern
 
@@ -546,18 +529,7 @@ Namespace: `rc.ws.*`. Defined in `src/workspace/rpc.ts`. Canonical schemas in do
 | 56 | `rc.ws.openFolder` | `{ path }` | `{ ok }` | Open containing folder in file manager. |
 | 57 | `rc.ws.move` | `{ from, to }` | `{ from, to, committed }` | Move/rename within workspace. |
 
-### 6.6 Radar RPC Methods (4)
-
-Namespace: `rc.radar.*`. Defined in `src/radar/rpc.ts`.
-
-| # | Method | Params | Returns | Notes |
-|---|--------|--------|---------|-------|
-| 58 | `rc.radar.config.get` | `{}` | `RadarConfig` | Returns tracked keywords, authors, journals, sources. |
-| 59 | `rc.radar.config.set` | `{ keywords?, authors?, journals?, sources? }` | `RadarConfig` | Persists radar tracking config. |
-| 60 | `rc.radar.scan` | `{ keywords?, sources?, max_results? }` | `{ results }` | Scans arXiv + Semantic Scholar. Persists cache. |
-| 61 | `rc.radar.lastScan` | `{}` | `{ results, scanned_at }` | Returns cached results from last scan. |
-
-**Total: 61 WS RPC methods** (26 lit + 11 task + 7 cron + 2 notifications + 11 ws + 4 radar)
+**Total: 57 WS RPC methods** (26 lit + 11 task + 7 cron + 2 notifications + 11 ws)
 plus 1 HTTP route (`POST /rc/upload`). Note: `rc.ws.upload` is HTTP POST only (see §7) and
 is not registered as a gateway RPC method.
 

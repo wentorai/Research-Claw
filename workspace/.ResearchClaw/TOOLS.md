@@ -1,12 +1,12 @@
 ---
 file: TOOLS.md
 version: 3.1
-updated: 2026-03-14
+updated: 2026-03-18
 ---
 
 # Tool Reference
 
-## §1 Local Tools (41)
+## §1 Local Tools (38)
 
 ### Library (17 tools)
 
@@ -58,43 +58,39 @@ updated: 2026-03-14
 
 Workspace is a git-backed local repository. Every save creates a commit (debounced 5s). Files >10 MB auto-gitignored. You also have `exec` for CLI operations: `pandoc`, `pdftotext`, `python3`, `xelatex`, `grep`, `wc`, `jq`, etc.
 
-### Radar (3 tools, legacy)
-
-| Tool | Purpose |
-|:-----|:--------|
-| `radar_configure` | Set tracking keywords, authors, journals, sources |
-| `radar_get_config` | Read current radar configuration |
-| `radar_scan` | Scan arXiv/S2 for new papers matching config |
-
 ### Monitor (4 tools)
 
 | Tool | Purpose |
 |:-----|:--------|
-| `monitor_create` | Create a new monitor (arxiv, s2, github, rss, webpage, openalex, twitter, custom) |
+| `monitor_create` | Create a new monitor (arxiv, github, rss, webpage, openalex, twitter, custom) |
 | `monitor_list` | List all monitors with status and last check time |
 | `monitor_report` | Cache scan results for a specific monitor |
 | `monitor_scan` | Instant scan of academic sources without creating a monitor |
 
-## §2 API Tools (12)
+## §2 API Tools (34)
 
-Six external databases, accessed via API tools:
+18 external databases, accessed via research-plugins API tools:
 
-| Database | Coverage | Best for |
-|:---------|:---------|:---------|
-| **Semantic Scholar** | 200M+ papers | Citation graphs, recommendations |
-| **arXiv** | CS, physics, math, bio preprints | Latest preprints, full-text |
-| **OpenAlex** | 250M+ works | Broad coverage, institutions |
-| **CrossRef** | 130M+ DOIs | DOI resolution, metadata |
-| **PubMed / NCBI** | Biomedical literature | Medical, life sciences |
-| **Unpaywall** | OA availability for DOIs | Legal open-access full text |
-
-API tools by database:
-- **Semantic Scholar**: `get_paper`, `get_citations`
-- **OpenAlex**: `search_openalex`, `get_work`, `get_author_openalex`
-- **CrossRef**: `search_crossref`, `resolve_doi`
-- **arXiv**: `search_arxiv`, `get_arxiv_paper`
-- **PubMed**: `search_pubmed`, `get_article`
-- **Unpaywall**: `find_oa_version`
+| Database | Tools | Best for |
+|:---------|:------|:---------|
+| **arXiv** | `search_arxiv`, `get_arxiv_paper` | CS, physics, math, bio preprints |
+| **OpenAlex** | `search_openalex`, `get_work`, `get_author_openalex` | Broad coverage, institutions (250M+ works) |
+| **CrossRef** | `search_crossref`, `resolve_doi` | DOI resolution, metadata (130M+ DOIs) |
+| **PubMed** | `search_pubmed`, `get_article` | Biomedical, life sciences |
+| **Unpaywall** | `find_oa_version` | Legal open-access full text |
+| **bioRxiv/medRxiv** | `search_biorxiv`, `search_medrxiv`, `get_preprint_by_doi` | Biology and medical preprints |
+| **Europe PMC** | `search_europe_pmc`, `get_epmc_citations`, `get_epmc_references` | European biomedical literature |
+| **DBLP** | `search_dblp`, `search_dblp_author` | Computer science bibliography |
+| **INSPIRE-HEP** | `search_inspire`, `get_inspire_paper` | High-energy physics |
+| **OpenCitations** | `get_citations_open`, `get_references_open`, `get_citation_count` | Open citation data |
+| **DOAJ** | `search_doaj` | Open-access journals directory |
+| **HAL** | `search_hal` | French open archives |
+| **OpenAIRE** | `search_openaire` | EU-funded research |
+| **DataCite** | `search_datacite`, `resolve_datacite_doi` | Research datasets and DOIs |
+| **ORCID** | `search_orcid`, `get_orcid_works` | Researcher profiles and publications |
+| **Zenodo** | `search_zenodo`, `get_zenodo_record` | Open data and research outputs |
+| **ROR** | `search_ror` | Research organization registry |
+| **OSF Preprints** | `search_osf_preprints` | Multidisciplinary preprints |
 
 ## §3 Special Tools
 
@@ -129,5 +125,5 @@ Tools always take priority over skill guidance.
 
 ## §6 Tool Count
 
-41 local + 12 API = **53 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
+38 local + 34 API = **72 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
 431 skills accessible on-demand via research-plugins (40 subcategory indexes).

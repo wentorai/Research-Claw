@@ -217,7 +217,7 @@ communication preferences -- just follow this default.
     What topic should I search for?"
 
     After the user provides a topic:
-    a. Search Semantic Scholar, arXiv, OpenAlex, and PubMed for the topic.
+    a. Search arXiv, OpenAlex, and PubMed for the topic.
     b. Present the top 10 results as `paper_card` blocks.
     c. Add them to the local library with `library_add_paper`.
     d. Write a 500-800 word mini literature review synthesizing the findings.

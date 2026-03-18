@@ -16,7 +16,7 @@ export interface CronPreset {
 // Agent turn messages for each preset
 const PRESET_AGENT_TURNS: Record<string, string> = {
   arxiv_daily_scan:
-    'Use radar_scan to check arXiv for new papers matching my radar config. Summarize any interesting findings.',
+    'Use monitor_scan to check arXiv for new papers matching my monitor config. Summarize any interesting findings.',
   citation_tracking_weekly:
     'Check for new citations of my tracked papers using library_citation_graph.',
   deadline_reminders_daily:

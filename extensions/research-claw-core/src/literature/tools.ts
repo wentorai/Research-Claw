@@ -54,7 +54,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         metadata: { type: 'object', description: 'Additional metadata' },
         abstract: { type: 'string', description: 'Paper abstract' },
         url: { type: 'string', description: 'URL to the paper' },
-        source: { type: 'string', description: 'Discovery source (e.g. arxiv, semantic_scholar)' },
+        source: { type: 'string', description: 'Discovery source (e.g. arxiv, openalex, crossref)' },
         source_id: { type: 'string', description: 'Source-specific identifier' },
         keywords: { type: 'array', items: { type: 'string' }, description: 'Paper keywords' },
         language: { type: 'string', description: 'Paper language (e.g. en, zh, ja)' },

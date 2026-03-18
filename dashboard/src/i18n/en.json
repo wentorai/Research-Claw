@@ -13,7 +13,6 @@
     "library": "Literature",
     "workspace": "Workspace",
     "tasks": "Tasks",
-    "radar": "Radar",
     "monitor": "Monitors",
     "settings": "Settings",
     "collapse": "Collapse sidebar",
@@ -231,59 +230,6 @@
     "minutesAgo": "{{count}}m ago",
     "hoursAgo": "{{count}}h ago",
     "daysAgo": "{{count}}d ago"
-  },
-  "radar": {
-    "title": "Research Radar",
-    "keywords": "Tracked Keywords",
-    "authors": "Tracked Authors",
-    "journals": "Tracked Journals",
-    "tracking": "Tracking",
-    "editViaChat": "Edit via chat...",
-    "findings": "Recent Findings",
-    "refresh": "Refresh",
-    "empty": "No radar configured yet.\nTell the agent what topics, authors, or journals you want to monitor.",
-    "sources": "Sources",
-    "noTracking": "No keywords, authors, or journals tracked yet.",
-    "addTracking": "Add tracking via chat",
-    "noFindings": "No scan results yet. Click Refresh above to scan, or ask the assistant.",
-    "noDiscoveries": "No discoveries yet. Ask your assistant to scan for papers.",
-    "scanning": "Scanning...",
-    "scanResults": "Scan Results",
-    "newPapers": "new",
-    "skipped": "skipped",
-    "automations": "Automations",
-    "section": {
-      "trackingProfile": "Tracking Profile",
-      "automatedTasks": "Automated Tasks",
-      "recentDiscoveries": "Recent Discoveries"
-    },
-    "cron": {
-      "neverRun": "Never run",
-      "lastRun": "Last run",
-      "nextRun": "Next run",
-      "schedule": "Schedule",
-      "relatedConfig": "Related",
-      "reminderWindow": "Reminder window",
-      "askAgent": "Ask Agent",
-      "askAgentPrompt": "Please report on the automated task '{{name}}'. Include: last run results, whether configuration needs adjusting, and whether the schedule or task itself should be changed or removed.",
-      "delete": "Delete",
-      "deleteConfirmTitle": "Delete Automated Task",
-      "deleteConfirmContent": "Delete \"{{name}}\"? It will stop running. To restore, ask the assistant in chat.",
-      "desc": {
-        "arxiv_daily_scan": "Scan arXiv for new papers matching your tracking config keywords and sources.",
-        "citation_tracking_weekly": "Check for new citations of your tracked papers in the library.",
-        "deadline_reminders_daily": "Check for tasks with approaching deadlines and send early warnings.",
-        "group_meeting_prep": "Check USER.md for upcoming group meetings and prepare review materials.",
-        "weekly_report": "Generate a weekly research progress report: papers read, tasks completed, key findings."
-      },
-      "related": {
-        "arxiv_daily_scan": "Tracking profile keywords & sources",
-        "citation_tracking_weekly": "Papers in your library",
-        "deadline_reminders_daily": "Task panel deadlines",
-        "group_meeting_prep": "Group meeting times in USER.md",
-        "weekly_report": "Library + Tasks + Workspace"
-      }
-    }
   },
   "monitor": {
     "title": "Monitors",

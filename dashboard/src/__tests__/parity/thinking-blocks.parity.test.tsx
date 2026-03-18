@@ -286,9 +286,6 @@ describe('Thinking block parity with OpenClaw native UI', () => {
       vi.mock('../../stores/sessions', () => ({
         useSessionsStore: { getState: () => ({ loadSessions: vi.fn() }) },
       }));
-      vi.mock('../../stores/radar', () => ({
-        useRadarStore: { getState: () => ({ loadConfig: vi.fn() }) },
-      }));
       vi.mock('../../stores/cron', () => ({
         useCronStore: { getState: () => ({ loadPresets: vi.fn() }) },
       }));

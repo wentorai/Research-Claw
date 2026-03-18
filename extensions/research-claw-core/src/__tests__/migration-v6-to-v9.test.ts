@@ -491,7 +491,6 @@ describe('New user: fresh database', () => {
     expect(tables).toContain('rc_tasks');
     expect(tables).toContain('rc_heartbeat_log');
     expect(tables).toContain('rc_monitors');
-    expect(tables).toContain('rc_radar_config');
     expect(tables).toContain('rc_cron_state');
     expect(tables).toContain('rc_schema_version');
   });

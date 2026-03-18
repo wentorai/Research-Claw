@@ -121,7 +121,7 @@ describe('Chat streaming parity with OpenClaw native UI', () => {
 
       useChatStore.getState().handleChatEvent(DELTA_SERVER_INITIATED_2);
       expect(useChatStore.getState().streamText).toBe(
-        'Heartbeat: checking your research tasks... Found 2 new papers matching your radar query.',
+        'Heartbeat: checking your research tasks... Found 2 new papers matching your monitor query.',
       );
     });
 

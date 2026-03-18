@@ -16,7 +16,7 @@ const TAB_TITLE_KEYS: Record<PanelTab, string> = {
   library: 'library.title',
   workspace: 'workspace.title',
   tasks: 'tasks.title',
-  radar: 'monitor.title',
+  monitor: 'monitor.title',
   settings: 'settings.title',
 };
 
@@ -28,7 +28,7 @@ function PanelContent({ tab }: { tab: PanelTab }) {
       return <WorkspacePanel />;
     case 'tasks':
       return <TaskPanel />;
-    case 'radar':
+    case 'monitor':
       return <MonitorPanel />;
     case 'settings':
       return <SettingsPanel />;

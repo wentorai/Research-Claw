@@ -4,8 +4,8 @@ import { useGatewayStore } from './gateway';
 import { useLibraryStore } from './library';
 import { useTasksStore } from './tasks';
 import { useSessionsStore } from './sessions';
-import { useMonitorStore } from './monitor';
 import { useCronStore } from './cron';
+import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
 import { primaryModelSupportsVision, hasImageModelConfigured } from './config';
 import i18n from '../i18n';
@@ -543,7 +543,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           // MiniMax and some providers send final without a message body.
           // Clear streaming state and reload history to show the result.
           if (event.runId === runId || (get().streaming && !runId)) {
-            set({ streaming: false, streamText: null, runId: null });
+            set({ streaming: false, streamText: null, runId: null, _pendingGapReload: false });
             get().loadHistory();
             setTimeout(() => {
               useLibraryStore.getState().loadPapers();
@@ -585,8 +585,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             useLibraryStore.getState().loadTags();
             useTasksStore.getState().loadTasks();
             useSessionsStore.getState().loadSessions();
-            useMonitorStore.getState().loadMonitors();
             useCronStore.getState().loadPresets();
+            useMonitorStore.getState().loadMonitors();
             useUiStore.getState().triggerWorkspaceRefresh();
             // Channel A: poll for deadline-based notifications
             useUiStore.getState().checkNotifications();

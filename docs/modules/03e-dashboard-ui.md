@@ -483,7 +483,7 @@ interface UiState {
   clearPendingPreview: () => void;               // Resets pendingPreviewPath to null
 }
 
-type PanelTab = 'library' | 'workspace' | 'tasks' | 'radar' | 'settings';
+type PanelTab = 'library' | 'workspace' | 'tasks' | 'monitor' | 'settings';
 
 interface Notification {
   id: string;
@@ -509,19 +509,18 @@ interface CronState {
 }
 ```
 
-### 4.9 Radar Store
+### 4.9 Monitor Store
 
 ```typescript
-interface RadarState {
-  config: RadarConfig | null;
-  lastScan: { results: unknown[]; scanned_at: string | null } | null;
-  scanning: boolean;
+interface MonitorState {
+  monitors: Monitor[];
   loading: boolean;
 
-  loadConfig: () => Promise<void>;
-  saveConfig: (patch: Partial<RadarConfig>) => Promise<void>;
-  scan: (options?: { keywords?: string[]; sources?: string[] }) => Promise<void>;
-  loadLastScan: () => Promise<void>;
+  loadMonitors: () => Promise<void>;
+  createMonitor: (config: MonitorConfig) => Promise<void>;
+  updateMonitor: (id: string, patch: Partial<MonitorConfig>) => Promise<void>;
+  deleteMonitor: (id: string) => Promise<void>;
+  runMonitor: (id: string) => Promise<void>;
 }
 ```
 
@@ -557,7 +556,7 @@ App
         │       ├── RailIcon { icon: Book, tab: 'library', active }
         │       ├── RailIcon { icon: Folder, tab: 'workspace', active }
         │       ├── RailIcon { icon: CheckSquare, tab: 'tasks', active }
-        │       ├── RailIcon { icon: Radar, tab: 'radar', active }
+        │       ├── RailIcon { icon: Monitor, tab: 'monitor', active }
         │       └── RailIcon { icon: Settings, tab: 'settings', active }
         │
         ├── ChatView ───────────────────── grid-area: chat
@@ -568,7 +567,7 @@ App
         │   │       ├── [task_card] → TaskCard component
         │   │       ├── [progress_card] → ProgressCard component
         │   │       ├── [approval_card] → ApprovalCard component
-        │   │       ├── [radar_digest] → RadarDigest component
+        │   │       ├── [monitor_digest] → MonitorDigest component
         │   │       ├── [file_card] → FileCard component
         │   │       └── [code_block] → Shiki highlighted + copy/save
         │   ├── StreamingIndicator { text, visible } (deferred)
@@ -597,11 +596,11 @@ App
         │   │       ├── TaskList { tasks, sortBy: 'deadline' }
         │   │       │   └── TaskRow { task, onComplete, onEdit }
         │   │       └── CompletedFold { tasks, expanded }
-        │   ├── [tab === 'radar']
-        │   │   └── RadarPanel (React.lazy)
-        │   │       ├── TrackedKeywords { items }
-        │   │       ├── TrackedAuthors { items }
-        │   │       └── DigestList { digests }
+        │   ├── [tab === 'monitor']
+        │   │   └── MonitorPanel (React.lazy)
+        │   │       ├── MonitorList { monitors, onToggle, onEdit }
+        │   │       ├── MonitorCreate { onSubmit }
+        │   │       └── MonitorHistory { results }
         │   └── [tab === 'settings']
         │       └── SettingsPanel (React.lazy)
         │           ├── SettingsTabs { 'model' | 'proxy' | 'about' }
@@ -635,7 +634,7 @@ Mount / Tab Switch
     ├── [library tab] rc.lit.list → libraryStore.papers
     ├── [tasks tab]   rc.task.list → tasksStore.tasks
     ├── [workspace]   rc.ws.tree → workspaceStore (not defined above, uses local state)
-    └── [radar tab]   local state only (no dedicated store)
+    └── [monitor tab]  rc.monitor.list → monitorStore.monitors
 ```
 
 ### 6.2 CRUD Routing
@@ -703,7 +702,7 @@ During markdown rendering, intercept fenced code blocks:
 ```typescript
 const CARD_TYPES = new Set([
   'paper_card', 'task_card', 'progress_card',
-  'approval_card', 'radar_digest', 'file_card',
+  'approval_card', 'monitor_digest', 'file_card',
 ]);
 
 // Custom react-markdown code component

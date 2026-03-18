@@ -50,10 +50,6 @@ extensions/research-claw-core/
     |   +-- tools.ts         # Workspace agent tools
     |   +-- rpc.ts           # Workspace RPC handlers (rc.ws.*)
     |   +-- git-tracker.ts   # Auto-commit workspace changes
-    +-- radar/
-    |   +-- rpc.ts           # Radar RPC handlers (rc.radar.*)
-    |   +-- tools.ts         # Radar agent tools
-    |   +-- scanner.ts       # arXiv + Semantic Scholar scanner
     +-- cards/
     |   +-- protocol.ts      # Message card type definitions
     |   +-- serializer.ts    # Card serialization/parsing
@@ -67,7 +63,7 @@ extensions/research-claw-core/
 
 **Location:** `.research-claw/library.db` (configurable via `config.dbPath`)
 
-**15 tables + FTS5** (all prefixed `rc_`):
+**14 tables + FTS5** (all prefixed `rc_`):
 
 | Table | Module | Purpose |
 |-------|--------|---------|
@@ -83,12 +79,11 @@ extensions/research-claw-core/
 | `rc_paper_notes` | Literature | Annotation notes on papers |
 | `rc_tasks` | Tasks | Task items (deadline-sorted) |
 | `rc_activity_log` | Tasks | Event tracking / audit |
-| `rc_radar_config` | Radar | Tracked keywords/authors/journals/sources |
 | `rc_agent_notifications` | Notifications | Agent-pushed bell notifications |
 | `rc_cron_state` | Cron | Preset enable/disable + gateway job IDs |
 | `rc_papers_fts` | Literature | FTS5 virtual table (title, authors, abstract, notes) |
 
-### 2.4 RPC Methods (61 WS + 1 HTTP = 62 total)
+### 2.4 RPC Methods (57 WS + 1 HTTP = 58 total)
 
 | Namespace | Count | Module Doc |
 |-----------|------:|-----------|
@@ -97,13 +92,12 @@ extensions/research-claw-core/
 | `rc.ws.*` | 11 | 03c |
 | `rc.cron.*` | 7 | 03b |
 | `rc.notifications.*` | 2 | — |
-| `rc.radar.*` | 4 | — |
-| **WS total** | **61** | |
+| **WS total** | **57** | |
 | `POST /rc/upload` | 1 | 03c (HTTP) |
 
 Full canonical method list: see `docs/00-reference-map.md` SS3.2.
 
-### 2.5 Agent Tools (31 allowlisted)
+### 2.5 Agent Tools (28 allowlisted)
 
 **Literature (12):**
 - `library_add_paper`, `library_search`, `library_update_paper`, `library_get_paper`, `library_export_bibtex`, `library_reading_stats`
@@ -115,9 +109,6 @@ Full canonical method list: see `docs/00-reference-map.md` SS3.2.
 
 **Workspace (7):**
 - `workspace_save`, `workspace_read`, `workspace_list`, `workspace_diff`, `workspace_history`, `workspace_restore`, `workspace_move`
-
-**Radar (3):**
-- `radar_configure`, `radar_get_config`, `radar_scan`
 
 ### 2.6 HTTP Endpoints
 
@@ -133,7 +124,7 @@ Full canonical method list: see `docs/00-reference-map.md` SS3.2.
 | `task_card` | Task summary | 03d SS3.2 |
 | `progress_card` | Session stats | 03d SS3.3 |
 | `approval_card` | HiL request | 03d SS3.4 |
-| `radar_digest` | Monitoring update | 03d SS3.5 |
+| `monitor_digest` | Monitoring update | 03d SS3.5 |
 | `file_card` | Workspace file ref | 03d SS3.6 |
 
 Note: `code_block` is not a custom card type. Standard fenced code blocks are handled by the default markdown renderer (see 03d SS3.7).
@@ -256,7 +247,7 @@ export async function activate(api: PluginRuntime): Promise<void> {
 
 - **Lifecycle**: `activate()` called once at gateway start. `deactivate()` on shutdown.
 - **Config schema**: Validated by OpenClaw plugin loader via manifest `configSchema`.
-- **Total RPC**: 61 WS + 1 HTTP = 62 methods (26 lit + 11 task + 11 ws + 7 cron + 2 notifications + 4 radar).
+- **Total RPC**: 57 WS + 1 HTTP = 58 methods (26 lit + 11 task + 11 ws + 7 cron + 2 notifications).
 
 ---
 
