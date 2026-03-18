@@ -397,7 +397,7 @@
     "tokensOut": "Out",
     "heartbeat": "Heartbeat",
     "version": "v{{version}}",
-    "versionFallback": "v0.5.0",
+    "versionFallback": "v0.5.1",
     "modelDefault": "(default)",
     "modelNA": "N/A"
   },
@@ -483,6 +483,14 @@
       "gitNew": "New",
       "gitModified": "Modified",
       "gitCommitted": "Committed"
+    },
+    "monitor": {
+      "title": "Monitor Results",
+      "source": "Source",
+      "target": "Target",
+      "schedule": "Schedule",
+      "found": "{{count}} result(s) found",
+      "findings": "Findings"
     }
   },
   "code": {

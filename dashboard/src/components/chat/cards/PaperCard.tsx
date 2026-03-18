@@ -62,17 +62,26 @@ export default function PaperCard(props: PaperCardType) {
         doi: props.doi,
         url: props.url,
         arxiv_id: props.arxiv_id,
+        abstract: props.abstract_preview,
+        tags: props.tags,
       });
       setAdded(true);
       // Refresh library panel data so the paper appears there
       useLibraryStore.getState().loadPapers();
+      useLibraryStore.getState().loadTags();
     } catch {
       // Error handled by gateway layer
     }
   }, [client, props]);
 
   const handleCite = useCallback(async () => {
-    const bibtex = `@article{,
+    // Generate a BibTeX key: firstAuthorSurname + year + firstTitleWord
+    const surname = (props.authors[0] ?? 'unknown').split(/[,\s]/)[0].toLowerCase().replace(/[^a-z]/g, '');
+    const yr = props.year ?? '';
+    const titleWord = (props.title.split(/\s+/).find((w) => w.length > 3) ?? 'paper').toLowerCase().replace(/[^a-z]/g, '');
+    const citeKey = `${surname}${yr}${titleWord}`;
+
+    const bibtex = `@article{${citeKey},
   title={${props.title}},
   author={${props.authors.join(' and ')}},${props.venue ? `\n  journal={${props.venue}},` : ''}${props.year ? `\n  year={${props.year}},` : ''}${props.doi ? `\n  doi={${props.doi}},` : ''}
 }`;

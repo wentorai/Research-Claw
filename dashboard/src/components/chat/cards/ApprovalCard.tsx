@@ -35,6 +35,9 @@ export default function ApprovalCard(props: ApprovalCardProps) {
 
   const handleResolve = useCallback(async (decision: 'allow-once' | 'allow-always' | 'deny') => {
     if (!client || !props.approval_id) {
+      // No approval_id: update visual state only (informational card).
+      // The onResolve callback may also fire if the parent provided one.
+      setStatus(decision === 'deny' ? 'denied' : 'allowed');
       props.onResolve?.(decision);
       return;
     }
@@ -72,15 +75,6 @@ export default function ApprovalCard(props: ApprovalCardProps) {
         <Text strong style={{ fontSize: 15, color: '#F59E0B' }}>
           {t('card.approval.title')}
         </Text>
-        {/* Pulsing glow for high risk */}
-        {props.risk_level === 'high' && (
-          <style>{`
-            @keyframes pulse-glow {
-              0%, 100% { box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
-              50% { box-shadow: 0 0 12px rgba(239, 68, 68, 0.8); }
-            }
-          `}</style>
-        )}
       </div>
 
       {/* Status badge if resolved */}

@@ -57,6 +57,12 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
         },
         filters: {
           type: 'object',
+          properties: {
+            keywords: { type: 'array', items: { type: 'string' }, description: 'Keywords to filter by' },
+            authors: { type: 'array', items: { type: 'string' }, description: 'Author names to filter by' },
+            categories: { type: 'array', items: { type: 'string' }, description: 'arXiv categories (e.g. cs.AI, q-bio.BM)' },
+            language: { type: 'string', description: 'Language filter (e.g. en, zh)' },
+          },
           description: 'Source-specific filter config (e.g. { keywords: ["protein folding"], authors: ["Jumper"] })',
         },
         schedule: {
@@ -170,6 +176,7 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
         },
         results: {
           type: 'array',
+          items: { type: 'object' },
           description: 'Array of findings (papers, posts, releases, etc.). Each item should have at least a "title" field.',
         },
         summary: {

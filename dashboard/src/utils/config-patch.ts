@@ -128,6 +128,15 @@ function resolveExistingApiKey(
  */
 const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
   ui: { assistant: { name: 'Research-Claw' } },
+  agents: {
+    defaults: {
+      workspace: './workspace',
+      skipBootstrap: true,
+      compaction: { mode: 'safeguard' },
+      thinkingDefault: 'medium',
+      subagents: { announceTimeoutMs: 480000 },
+    },
+  },
   gateway: {
     port: 28789,
     mode: 'local',
@@ -169,7 +178,10 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
       'workspace_save', 'workspace_read', 'workspace_list', 'workspace_diff',
       'workspace_history', 'workspace_restore', 'workspace_move',
       'radar_configure', 'radar_get_config', 'radar_scan',
-      'search_papers', 'get_paper', 'get_citations',
+      'monitor_create', 'monitor_list', 'monitor_report', 'monitor_scan',
+      'library_import_ris', 'library_zotero_detect', 'library_zotero_import',
+      'library_endnote_detect', 'library_endnote_import',
+      'get_paper', 'get_citations',
       'search_openalex', 'get_work', 'get_author_openalex',
       'resolve_doi', 'search_crossref', 'search_arxiv', 'get_arxiv_paper',
       'search_pubmed', 'get_article', 'find_oa_version',

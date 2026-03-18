@@ -6,9 +6,9 @@ updated: 2026-03-14
 
 # Tool Reference
 
-## §1 Local Tools (31)
+## §1 Local Tools (41)
 
-### Library (12 tools)
+### Library (17 tools)
 
 | Tool | Purpose |
 |:-----|:--------|
@@ -24,8 +24,13 @@ updated: 2026-03-14
 | `library_add_note` | Add annotation note to a paper |
 | `library_import_bibtex` | Import papers from BibTeX content |
 | `library_citation_graph` | Query citation relationships between papers |
+| `library_import_ris` | Import papers from RIS bibliography format |
+| `library_zotero_detect` | Detect Zotero installation and available libraries |
+| `library_zotero_import` | Import papers from Zotero via API bridge |
+| `library_endnote_detect` | Detect EndNote XML export files |
+| `library_endnote_import` | Import papers from EndNote XML format |
 
-### Tasks (9 tools, incl. send_notification in §3)
+### Tasks (10 tools, incl. send_notification in §3)
 
 | Tool | Purpose |
 |:-----|:--------|
@@ -33,6 +38,7 @@ updated: 2026-03-14
 | `task_list` | List tasks, filter by status/priority/deadline |
 | `task_complete` | Mark a task as complete |
 | `task_update` | Update task details |
+| `task_delete` | Permanently delete a task |
 | `task_link` | Link a task to a paper in the library |
 | `task_note` | Add a timestamped note to a task |
 | `task_link_file` | Link a task to a workspace file path |
@@ -52,7 +58,7 @@ updated: 2026-03-14
 
 Workspace is a git-backed local repository. Every save creates a commit (debounced 5s). Files >10 MB auto-gitignored. You also have `exec` for CLI operations: `pandoc`, `pdftotext`, `python3`, `xelatex`, `grep`, `wc`, `jq`, etc.
 
-### Radar (3 tools)
+### Radar (3 tools, legacy)
 
 | Tool | Purpose |
 |:-----|:--------|
@@ -60,11 +66,16 @@ Workspace is a git-backed local repository. Every save creates a commit (debounc
 | `radar_get_config` | Read current radar configuration |
 | `radar_scan` | Scan arXiv/S2 for new papers matching config |
 
-**Radar notes:** `radar_configure` persists to the database — the dashboard reads
-from there, not chat history. `radar_scan` returns papers but does NOT auto-add them
-to the library.
+### Monitor (4 tools)
 
-## §2 API Tools (13)
+| Tool | Purpose |
+|:-----|:--------|
+| `monitor_create` | Create a new monitor (arxiv, s2, github, rss, webpage, openalex, twitter, custom) |
+| `monitor_list` | List all monitors with status and last check time |
+| `monitor_report` | Cache scan results for a specific monitor |
+| `monitor_scan` | Instant scan of academic sources without creating a monitor |
+
+## §2 API Tools (12)
 
 Six external databases, accessed via API tools:
 
@@ -78,7 +89,7 @@ Six external databases, accessed via API tools:
 | **Unpaywall** | OA availability for DOIs | Legal open-access full text |
 
 API tools by database:
-- **Semantic Scholar**: `search_papers`, `get_paper`, `get_citations`
+- **Semantic Scholar**: `get_paper`, `get_citations`
 - **OpenAlex**: `search_openalex`, `get_work`, `get_author_openalex`
 - **CrossRef**: `search_crossref`, `resolve_doi`
 - **arXiv**: `search_arxiv`, `get_arxiv_paper`
@@ -118,5 +129,5 @@ Tools always take priority over skill guidance.
 
 ## §6 Tool Count
 
-31 local + 13 API = **44 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
+41 local + 12 API = **53 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
 431 skills accessible on-demand via research-plugins (40 subcategory indexes).

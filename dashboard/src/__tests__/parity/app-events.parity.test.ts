@@ -642,8 +642,9 @@ describe('Card notification extraction — chat.ts extractCardNotifications', ()
       },
     });
 
-    // Sub-agent finals go through the else branch (line 359-363) which does NOT call extractCardNotifications
-    expect(useUiStore.getState().notifications).toHaveLength(0);
+    // Sub-agent / server-initiated finals now also extract card notifications
+    // (heartbeat, cron, and monitor runs produce progress_card and radar_digest).
+    expect(useUiStore.getState().notifications).toHaveLength(1);
   });
 });
 

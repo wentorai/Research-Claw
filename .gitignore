@@ -51,7 +51,15 @@ dashboard/test-image-send.mjs
 # Lock files (using pnpm, not npm)
 extensions/*/package-lock.json
 
-# Workspace runtime data (keep only bootstrap .md files: AGENTS/BOOTSTRAP/HEARTBEAT/IDENTITY/MEMORY/SOUL/TOOLS/USER)
+# Workspace runtime data
+# L1 system prompts (AGENTS/SOUL/TOOLS/IDENTITY/HEARTBEAT) are git-tracked and force-updated.
+# L2/L3 runtime files are gitignored — initialized from .example templates at startup.
+workspace/.ResearchClaw/USER.md
+workspace/.ResearchClaw/BOOTSTRAP.md
+workspace/.ResearchClaw/BOOTSTRAP.md.done
+workspace/.ResearchClaw/*_backup_*.md
+workspace/MEMORY.md
+workspace/USER.md
 workspace/.openclaw/
 workspace/memory/
 workspace/sources/

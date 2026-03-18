@@ -10,6 +10,7 @@ const CARD_LABELS: Record<string, string> = {
   approval_card: 'Approval',
   radar_digest: 'Radar',
   file_card: 'File',
+  monitor_digest: 'Monitor',
 };
 
 interface CardPlaceholderProps {

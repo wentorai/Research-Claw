@@ -48,7 +48,11 @@ export default function ProgressCard(props: ProgressCardType) {
   const theme = useConfigStore((s) => s.theme);
   const tokens = getThemeTokens(theme);
 
-  const borderColor = tokens.accent.blue;
+  // Urgent border: if highlights contain overdue/urgent keywords, use red
+  const hasUrgent = props.highlights?.some((h) =>
+    /\b(overdue|urgent|逾期|紧急|URGENT|OVERDUE)\b/i.test(h),
+  );
+  const borderColor = hasUrgent ? '#EF4444' : tokens.accent.blue;
 
   return (
     <CardContainer borderColor={borderColor}>

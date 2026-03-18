@@ -323,8 +323,19 @@ export COREPACK_ENABLE_AUTO_PIN=0
 if [ -d "$INSTALL_DIR/.git" ]; then
   info "Updating existing installation..."
   cd "$INSTALL_DIR"
+
+  # --- Preserve user data files before git operations ---
+  # USER.md, MEMORY.md, BOOTSTRAP.md.done are agent-maintained (L2/L3 layer).
+  # git reset --hard would destroy them if they were still tracked (migration from pre-0.5.1).
+  # After migration they become gitignored, but we still backup for safety.
+  RC_DIR="workspace/.ResearchClaw"
+  _RC_BAK="$(mktemp -d)"
+  [ -f "$RC_DIR/USER.md" ] && cp "$RC_DIR/USER.md" "$_RC_BAK/USER.md"
+  [ -f "workspace/MEMORY.md" ] && cp "workspace/MEMORY.md" "$_RC_BAK/MEMORY.md"
+  [ -f "workspace/USER.md" ] && cp "workspace/USER.md" "$_RC_BAK/WS_USER.md"
+  [ -f "$RC_DIR/BOOTSTRAP.md.done" ] && cp "$RC_DIR/BOOTSTRAP.md.done" "$_RC_BAK/BOOTSTRAP.md.done"
+
   # Recover from interrupted rebase/merge (e.g. user Ctrl+C during update)
-  # reset --hard is safe: user files are in workspace/ and config/ (both gitignored)
   git rebase --abort 2>/dev/null || true
   git merge --abort 2>/dev/null || true
   git reset --hard HEAD 2>/dev/null || true
@@ -334,6 +345,14 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     warn "  - VPN/proxy interference (try disabling VPN or switching to direct connection)"
     die "Update failed. Try manually: cd $INSTALL_DIR && git pull"
   fi
+
+  # --- Restore user data files ---
+  [ -f "$_RC_BAK/USER.md" ] && cp "$_RC_BAK/USER.md" "$RC_DIR/USER.md"
+  [ -f "$_RC_BAK/MEMORY.md" ] && cp "$_RC_BAK/MEMORY.md" "workspace/MEMORY.md"
+  [ -f "$_RC_BAK/WS_USER.md" ] && cp "$_RC_BAK/WS_USER.md" "workspace/USER.md"
+  [ -f "$_RC_BAK/BOOTSTRAP.md.done" ] && cp "$_RC_BAK/BOOTSTRAP.md.done" "$RC_DIR/BOOTSTRAP.md.done"
+  rm -rf "$_RC_BAK"
+
   ok "Updated"
 else
   info "Cloning to $INSTALL_DIR ..."
@@ -446,6 +465,17 @@ else
     if (anyChanged) console.log('  [config] Cleaned stale plugin references');
   " 2>/dev/null || true
 fi
+
+# --- Initialize L2/L3 bootstrap runtime files from .example templates ---
+RC_DIR="workspace/.ResearchClaw"
+[ ! -f "$RC_DIR/USER.md" ] && [ -f "$RC_DIR/USER.md.example" ] && \
+  cp "$RC_DIR/USER.md.example" "$RC_DIR/USER.md"
+[ ! -f "workspace/MEMORY.md" ] && [ -f "workspace/MEMORY.md.example" ] && \
+  cp "workspace/MEMORY.md.example" "workspace/MEMORY.md"
+[ ! -f "workspace/USER.md" ] && [ -f "workspace/USER.md.example" ] && \
+  cp "workspace/USER.md.example" "workspace/USER.md"
+[ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ -f "$RC_DIR/BOOTSTRAP.md.example" ] && \
+  cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md"
 
 info "Building..."
 BUILD_LOG="$(mktemp)"
@@ -602,6 +632,54 @@ else
   fi
 fi
 
+# --- Persist OPENCLAW_CONFIG_PATH in shell profile ---
+# Ensures `openclaw config set/get` always targets the RC project config,
+# not the vanilla ~/.openclaw/openclaw.json.
+RC_ENV_LINE="export OPENCLAW_CONFIG_PATH=\"$INSTALL_DIR/config/openclaw.json\""
+RC_ENV_MARKER="OPENCLAW_CONFIG_PATH"
+RC_PROFILE_WRITTEN=false
+
+for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+  if [ -f "$p" ]; then
+    if grep -q "$RC_ENV_MARKER" "$p" 2>/dev/null; then
+      # Already present — update in-place if path changed (idempotent upgrade)
+      EXISTING_LINE="$(grep "$RC_ENV_MARKER" "$p" 2>/dev/null | head -1)"
+      if [ "$EXISTING_LINE" != "$RC_ENV_LINE" ]; then
+        # Path changed (user reinstalled to different dir) — update
+        sed -i.bak "s|.*${RC_ENV_MARKER}.*|${RC_ENV_LINE}|" "$p" 2>/dev/null && rm -f "${p}.bak"
+        info "Updated OPENCLAW_CONFIG_PATH in $p"
+      fi
+      RC_PROFILE_WRITTEN=true
+      break
+    fi
+  fi
+done
+
+if ! $RC_PROFILE_WRITTEN; then
+  # Not found in any existing profile — append to the user's shell rc
+  RC_SHELL_RC="$HOME/.bashrc"
+  case "$(basename "${SHELL:-/bin/bash}")" in
+    zsh) RC_SHELL_RC="$HOME/.zshrc" ;;
+  esac
+  # Also check existing profiles one more time for files that exist but didn't match
+  for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    if [ -f "$p" ]; then
+      RC_SHELL_RC="$p"
+      break
+    fi
+  done
+  if printf '\n# Research-Claw config path (added by install.sh)\n%s\n' "$RC_ENV_LINE" >> "$RC_SHELL_RC" 2>/dev/null; then
+    ok "OPENCLAW_CONFIG_PATH → $RC_SHELL_RC"
+    RC_PROFILE_WRITTEN=true
+  else
+    warn "Could not write to $RC_SHELL_RC. Add manually:"
+    warn "  $RC_ENV_LINE"
+  fi
+fi
+
+# Apply to current session so the gateway startup below uses it
+export OPENCLAW_CONFIG_PATH="$INSTALL_DIR/config/openclaw.json"
+
 # --- Done ---
 printf "\n  ${G}${B}Ready!${N}\n\n"
 printf "  ${B}Dashboard:${N}  ${C}http://127.0.0.1:$PORT${N}\n"
@@ -655,9 +733,8 @@ cd "$INSTALL_DIR"
 
 # GW_NODE and GW_NODE_DIR already resolved at [6/8] (conda openclaw → system fallback).
 
-# Always use project config — contains RC plugin paths, tool whitelist, dashboard root.
-# install.sh already created config/openclaw.json from template at step [6/8].
-export OPENCLAW_CONFIG_PATH="$(pwd)/config/openclaw.json"
+# OPENCLAW_CONFIG_PATH already exported at line 651 (shell profile section)
+# using $INSTALL_DIR which is absolute ($HOME/research-claw by default).
 
 # Resolve relative paths in config to absolute (prevents CWD drift during agent runs).
 "$GW_NODE" -e "
@@ -687,9 +764,6 @@ if (changed) fs.writeFileSync(f, JSON.stringify(cfg, null, 2) + '\n');
 # OpenClaw device pairing state reject connections with NOT_PAIRED even when
 # dangerouslyDisableDeviceAuth=true. Token auth bypasses device pairing entirely.
 export OPENCLAW_GATEWAY_TOKEN=research-claw
-
-# Sync RC settings → ~/.openclaw/openclaw.json so `openclaw gateway --force` also works.
-"$GW_NODE" scripts/sync-global-config.cjs 2>/dev/null || true
 
 CRASH_COUNT=0
 MAX_CRASHES=10

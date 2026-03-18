@@ -64,14 +64,16 @@ export default function FileCard(props: FileCardType) {
   const fileInfo = getFileTypeInfo(props.name, tokens);
 
   const handleOpenFile = useCallback(() => {
-    client?.request('rc.ws.openExternal', { path: props.path }).catch(() => {
-      message.error(t('workspace.contextMenu.openFailed'));
+    client?.request('rc.ws.openExternal', { path: props.path }).catch((err: unknown) => {
+      const detail = err instanceof Error ? err.message : '';
+      message.error(`${t('workspace.contextMenu.openFailed')}: ${props.path}${detail ? ` (${detail})` : ''}`);
     });
   }, [props.path, client, t]);
 
   const handleOpenFolder = useCallback(() => {
-    client?.request('rc.ws.openFolder', { path: props.path }).catch(() => {
-      message.error(t('workspace.contextMenu.openFailed'));
+    client?.request('rc.ws.openFolder', { path: props.path }).catch((err: unknown) => {
+      const detail = err instanceof Error ? err.message : '';
+      message.error(`${t('workspace.contextMenu.openFailed')}: ${props.path}${detail ? ` (${detail})` : ''}`);
     });
   }, [props.path, client, t]);
 

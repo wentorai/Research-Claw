@@ -278,8 +278,8 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
         id: { type: 'string', description: 'UUID of the task to update' },
         title: { type: 'string', description: 'New title' },
         description: {
-          type: ['string', 'null'],
-          description: 'New description (null to clear)',
+          type: 'string',
+          description: 'New description (empty string to clear)',
         },
         task_type: {
           type: 'string',
@@ -297,24 +297,24 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
           description: 'New priority level',
         },
         deadline: {
-          type: ['string', 'null'],
-          description: 'New deadline ISO 8601 (null to clear)',
+          type: 'string',
+          description: 'New deadline ISO 8601 (empty string to clear)',
         },
         parent_task_id: {
-          type: ['string', 'null'],
-          description: 'Reassign parent (null to detach)',
+          type: 'string',
+          description: 'Reassign parent (empty string to detach)',
         },
         related_paper_id: {
-          type: ['string', 'null'],
-          description: 'Link to a different paper (null to unlink)',
+          type: 'string',
+          description: 'Link to a different paper (empty string to unlink)',
         },
         related_file_path: {
-          type: ['string', 'null'],
-          description: 'Link to a workspace file (null to unlink). Use relative paths like "outputs/drafts/review.md".',
+          type: 'string',
+          description: 'Link to a workspace file (empty string to unlink). Use relative paths like "outputs/drafts/review.md".',
         },
         agent_session_id: {
-          type: ['string', 'null'],
-          description: 'Associate with an agent session',
+          type: 'string',
+          description: 'Associate with an agent session (empty string to clear)',
         },
         tags: {
           type: 'array',
@@ -323,8 +323,8 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
           description: 'Replace tags array (max 20)',
         },
         notes: {
-          type: ['string', 'null'],
-          description: 'Replace notes (null to clear)',
+          type: 'string',
+          description: 'Replace notes (empty string to clear)',
         },
       },
       required: ['id'],
@@ -339,17 +339,22 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
         const patch: TaskPatch = {};
 
         if (params.title !== undefined) patch.title = typeof params.title === 'string' ? params.title : String(params.title);
-        if (params.description !== undefined) patch.description = params.description === null ? null : typeof params.description === 'string' ? params.description : undefined;
+        // Nullable fields: empty string OR null both mean "clear the field".
+        // LLM sends '' (schema says type:'string'), legacy null kept as defense.
+        const clearable = (v: unknown): string | null | undefined =>
+          v === null || v === '' ? null : typeof v === 'string' ? v : undefined;
+
+        if (params.description !== undefined) patch.description = clearable(params.description);
         if (params.task_type !== undefined && typeof params.task_type === 'string') patch.task_type = params.task_type as TaskPatch['task_type'];
         if (params.status !== undefined && typeof params.status === 'string') patch.status = params.status as TaskPatch['status'];
         if (params.priority !== undefined && typeof params.priority === 'string') patch.priority = params.priority as TaskPatch['priority'];
-        if (params.deadline !== undefined) patch.deadline = params.deadline === null ? null : typeof params.deadline === 'string' ? params.deadline : undefined;
-        if (params.parent_task_id !== undefined) patch.parent_task_id = params.parent_task_id === null ? null : typeof params.parent_task_id === 'string' ? params.parent_task_id : undefined;
-        if (params.related_paper_id !== undefined) patch.related_paper_id = params.related_paper_id === null ? null : typeof params.related_paper_id === 'string' ? params.related_paper_id : undefined;
-        if (params.related_file_path !== undefined) patch.related_file_path = params.related_file_path === null ? null : typeof params.related_file_path === 'string' ? params.related_file_path : undefined;
-        if (params.agent_session_id !== undefined) patch.agent_session_id = params.agent_session_id === null ? null : typeof params.agent_session_id === 'string' ? params.agent_session_id : undefined;
+        if (params.deadline !== undefined) patch.deadline = clearable(params.deadline);
+        if (params.parent_task_id !== undefined) patch.parent_task_id = clearable(params.parent_task_id);
+        if (params.related_paper_id !== undefined) patch.related_paper_id = clearable(params.related_paper_id);
+        if (params.related_file_path !== undefined) patch.related_file_path = clearable(params.related_file_path);
+        if (params.agent_session_id !== undefined) patch.agent_session_id = clearable(params.agent_session_id);
         if (params.tags !== undefined && Array.isArray(params.tags)) patch.tags = params.tags.filter((t): t is string => typeof t === 'string');
-        if (params.notes !== undefined) patch.notes = params.notes === null ? null : typeof params.notes === 'string' ? params.notes : undefined;
+        if (params.notes !== undefined) patch.notes = clearable(params.notes);
 
         const task = service.update(id, patch, 'agent');
 

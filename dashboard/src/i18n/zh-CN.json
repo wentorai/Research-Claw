@@ -397,7 +397,7 @@
     "tokensOut": "输出",
     "heartbeat": "心跳",
     "version": "v{{version}}",
-    "versionFallback": "v0.5.0",
+    "versionFallback": "v0.5.1",
     "modelDefault": "（默认）",
     "modelNA": "N/A"
   },
@@ -483,6 +483,14 @@
       "gitNew": "新文件",
       "gitModified": "已修改",
       "gitCommitted": "已提交"
+    },
+    "monitor": {
+      "title": "监控结果",
+      "source": "来源",
+      "target": "目标",
+      "schedule": "调度",
+      "found": "发现 {{count}} 条结果",
+      "findings": "发现"
     }
   },
   "code": {

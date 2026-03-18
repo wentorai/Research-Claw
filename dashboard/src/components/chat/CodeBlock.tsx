@@ -13,6 +13,7 @@ import type {
   ApprovalCard as ApprovalCardType,
   RadarDigest as RadarDigestType,
   FileCard as FileCardType,
+  MonitorDigest as MonitorDigestType,
 } from '@/types/cards';
 import PaperCard from './cards/PaperCard';
 import TaskCard from './cards/TaskCard';
@@ -20,6 +21,7 @@ import ProgressCard from './cards/ProgressCard';
 import ApprovalCard from './cards/ApprovalCard';
 import RadarDigest from './cards/RadarDigest';
 import FileCard from './cards/FileCard';
+import MonitorDigest from './cards/MonitorDigest';
 import CardPlaceholder from './cards/CardPlaceholder';
 import { useConfigStore } from '@/stores/config';
 import { getThemeTokens } from '@/styles/theme';
@@ -165,6 +167,8 @@ function renderCard(cardType: string, data: unknown): React.ReactElement {
       return <RadarDigest {...(data as RadarDigestType)} />;
     case 'file_card':
       return <FileCard {...(data as FileCardType)} />;
+    case 'monitor_digest':
+      return <MonitorDigest {...(data as MonitorDigestType)} />;
     default:
       return <SyntaxHighlightedBlock code={JSON.stringify(data, null, 2)} language="json" />;
   }

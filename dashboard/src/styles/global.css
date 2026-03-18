@@ -119,6 +119,12 @@ html, body {
   50% { opacity: 0; }
 }
 
+/* Approval card high-risk pulsing glow */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 12px rgba(239, 68, 68, 0.8); }
+}
+
 /* Chat input placeholder */
 .chat-textarea::placeholder {
   color: var(--text-tertiary);

@@ -73,7 +73,7 @@ function isVisibleRole(role: string): boolean {
  * Markdown code blocks with card language tags (```progress_card, ```radar_digest, etc.)
  * contain structured data that should also generate notifications.
  */
-const CARD_NOTIFICATION_RE = /```(progress_card|radar_digest|approval_card)\s*\n([\s\S]*?)```/g;
+const CARD_NOTIFICATION_RE = /```(progress_card|radar_digest|monitor_digest|approval_card)\s*\n([\s\S]*?)```/g;
 
 function extractCardNotifications(text: string): void {
   const { addNotification } = useUiStore.getState();
@@ -96,7 +96,7 @@ function extractCardNotifications(text: string): void {
             type: 'heartbeat',
             title: `Heartbeat: ${data.period ?? 'check'}`,
             body: highlights.slice(0, 3).join('; '),
-            dedupKey: `heartbeat:${Date.now()}`,
+            dedupKey: `heartbeat:${data.period ?? 'check'}`,
           });
         }
         break;
@@ -108,7 +108,19 @@ function extractCardNotifications(text: string): void {
             type: 'system',
             title: `Radar: ${total} new papers`,
             body: String(data.query ?? ''),
-            dedupKey: `radar:${data.query}:${Date.now()}`,
+            dedupKey: `radar:${data.query}:${data.period ?? 'latest'}`,
+          });
+        }
+        break;
+      }
+      case 'monitor_digest': {
+        const mTotal = data.total_found as number | undefined;
+        if (mTotal && mTotal > 0) {
+          addNotification({
+            type: 'system',
+            title: `Monitor: ${data.monitor_name ?? 'scan'} — ${mTotal} result(s)`,
+            body: String(data.target ?? ''),
+            dedupKey: `monitor:${data.monitor_name}:${data.target}`,
           });
         }
         break;
@@ -594,6 +606,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             messages: [...s.messages, finalMsg],
             ...(s.streaming && !s.runId ? { streaming: false, streamText: null } : {}),
           }));
+
+          // Channel B: server-initiated runs (heartbeat, cron, monitor) also produce
+          // card notifications (progress_card from heartbeat, radar_digest from monitor).
+          extractCardNotifications(text);
         }
         break;
       }

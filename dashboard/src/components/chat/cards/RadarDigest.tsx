@@ -15,7 +15,8 @@ export default function RadarDigest(props: RadarDigestType) {
   const theme = useConfigStore((s) => s.theme);
   const tokens = getThemeTokens(theme);
 
-  const borderColor = tokens.accent.blue;
+  // Visual weight: green for hits, muted for empty results
+  const borderColor = props.total_found > 0 ? '#10B981' : tokens.text.muted;
 
   return (
     <CardContainer borderColor={borderColor}>

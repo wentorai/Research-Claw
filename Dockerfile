@@ -54,8 +54,16 @@ RUN echo '{}' > /tmp/oc-install.json && \
     plugins install @wentorai/research-plugins && \
     rm /tmp/oc-install.json
 
-# 烘焙配置模板，首次启动时 entrypoint 会复制到 volume
-RUN mkdir -p /defaults && cp config/openclaw.example.json /defaults/openclaw.example.json
+# 烘焙配置模板 + 系统提示词到 /defaults/，entrypoint 会同步到 volume
+RUN mkdir -p /defaults/bootstrap-prompts && \
+    cp config/openclaw.example.json /defaults/openclaw.example.json && \
+    cp workspace/.ResearchClaw/AGENTS.md workspace/.ResearchClaw/SOUL.md \
+       workspace/.ResearchClaw/TOOLS.md workspace/.ResearchClaw/IDENTITY.md \
+       workspace/.ResearchClaw/HEARTBEAT.md /defaults/bootstrap-prompts/ && \
+    cp workspace/.ResearchClaw/BOOTSTRAP.md.example \
+       workspace/.ResearchClaw/USER.md.example /defaults/bootstrap-prompts/ && \
+    cp workspace/MEMORY.md.example /defaults/bootstrap-prompts/ && \
+    cp workspace/USER.md.example /defaults/bootstrap-prompts/ws-USER.md.example
 
 # ── 运行时 ───────────────────────────────────────────────────────────
 COPY scripts/docker-entrypoint.sh /entrypoint.sh

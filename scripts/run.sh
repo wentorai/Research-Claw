@@ -66,8 +66,19 @@ fi
 echo "[run] Using Node: $GW_NODE ($("$GW_NODE" -v))"
 echo "[run] Config: $OPENCLAW_CONFIG_PATH"
 
-# Sync RC settings → ~/.openclaw/openclaw.json so `openclaw gateway --force` also works.
-"$GW_NODE" "$(dirname "$0")/sync-global-config.cjs" 2>/dev/null || true
+# --- Initialize L2/L3 bootstrap runtime files from .example templates ---
+# L1 (AGENTS, SOUL, TOOLS, IDENTITY, HEARTBEAT) are git-tracked and always up-to-date.
+# L2 (BOOTSTRAP.md) and L3 (USER.md, MEMORY.md) are gitignored — only copy if missing.
+RC_DIR="workspace/.ResearchClaw"
+[ ! -f "$RC_DIR/USER.md" ] && [ -f "$RC_DIR/USER.md.example" ] && \
+  cp "$RC_DIR/USER.md.example" "$RC_DIR/USER.md" && echo "[run] USER.md initialized from template"
+[ ! -f "workspace/MEMORY.md" ] && [ -f "workspace/MEMORY.md.example" ] && \
+  cp "workspace/MEMORY.md.example" "workspace/MEMORY.md" && echo "[run] MEMORY.md initialized from template"
+[ ! -f "workspace/USER.md" ] && [ -f "workspace/USER.md.example" ] && \
+  cp "workspace/USER.md.example" "workspace/USER.md" && echo "[run] USER.md initialized from template"
+# BOOTSTRAP.md: only create if onboarding not yet completed (.done doesn't exist)
+[ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ -f "$RC_DIR/BOOTSTRAP.md.example" ] && \
+  cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md" && echo "[run] BOOTSTRAP.md initialized (first run)"
 
 # Token auth — matches Dashboard's DEFAULT_TOKEN ('research-claw').
 export OPENCLAW_GATEWAY_TOKEN=research-claw

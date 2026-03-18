@@ -35,7 +35,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       url,
       token,
       clientName: 'research-claw-dashboard',
-      clientVersion: '0.5.0',
+      clientVersion: '0.5.1',
       platform: 'browser',
       onStateChange: (state: ConnectionState) => {
         set({ state, ...(state === 'connected' ? { connectError: null } : {}) });

@@ -1,7 +1,7 @@
 /**
  * Message Card Protocol
  *
- * Defines 6 structured card types embedded in agent messages as fenced code
+ * Defines 7 structured card types embedded in agent messages as fenced code
  * blocks with special language tags. Cards carry rich, typed payloads that
  * the dashboard UI can render interactively.
  *
@@ -20,7 +20,8 @@ export type CardType =
   | 'progress_card'
   | 'approval_card'
   | 'radar_digest'
-  | 'file_card';
+  | 'file_card'
+  | 'monitor_digest';
 
 /** Canonical set for runtime membership checks. */
 export const CARD_TYPES: ReadonlySet<string> = new Set<CardType>([
@@ -30,6 +31,7 @@ export const CARD_TYPES: ReadonlySet<string> = new Set<CardType>([
   'approval_card',
   'radar_digest',
   'file_card',
+  'monitor_digest',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -69,6 +71,8 @@ export interface TaskCard {
   deadline?: string; // ISO 8601
   /** Title of a related paper, for cross-referencing. */
   related_paper_title?: string;
+  /** Workspace-relative path of a linked output file. */
+  related_file_path?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +149,31 @@ export interface FileCard {
 }
 
 // ---------------------------------------------------------------------------
+// Monitor Digest
+// ---------------------------------------------------------------------------
+
+export interface MonitorFinding {
+  title: string;
+  url?: string;
+  /** Why the agent considers this finding relevant for the user. */
+  summary?: string;
+}
+
+export interface MonitorDigest {
+  type: 'monitor_digest';
+  /** Human-readable monitor name. */
+  monitor_name: string;
+  source_type: string; // "arxiv" | "semantic_scholar" | "github" | "rss" | "webpage" | "openalex" | "twitter" | "custom"
+  /** The search query, URL, or repo target. */
+  target: string;
+  /** Cron schedule expression. */
+  schedule?: string;
+  total_found: number;
+  /** Up to 10 notable findings. */
+  findings: MonitorFinding[];
+}
+
+// ---------------------------------------------------------------------------
 // Union type
 // ---------------------------------------------------------------------------
 
@@ -154,4 +183,5 @@ export type MessageCard =
   | ProgressCard
   | ApprovalCard
   | RadarDigest
-  | FileCard;
+  | FileCard
+  | MonitorDigest;

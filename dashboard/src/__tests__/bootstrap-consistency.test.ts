@@ -1,5 +1,5 @@
 /**
- * Bootstrap Consistency Tests — AGENTS.md v3.1 & TOOLS.md v3.1
+ * Bootstrap Consistency Tests — AGENTS.md v3.2 & TOOLS.md v3.1
  *
  * Validates that the bootstrap files (AGENTS.md, TOOLS.md) accurately
  * reference the tools, RPCs, and capabilities that exist in the
@@ -18,7 +18,7 @@ import * as path from 'node:path';
 // Ground truth: actual tools and RPCs from the plugin source code
 // ---------------------------------------------------------------------------
 
-/** 12 literature agent tools (from literature/tools.ts) */
+/** 17 literature agent tools (from literature/tools.ts) — v0.5.0 adds RIS, Zotero, EndNote */
 const ACTUAL_LITERATURE_TOOLS = [
   'library_add_paper',
   'library_search',
@@ -32,9 +32,14 @@ const ACTUAL_LITERATURE_TOOLS = [
   'library_add_note',
   'library_import_bibtex',
   'library_citation_graph',
+  'library_import_ris',
+  'library_zotero_detect',
+  'library_zotero_import',
+  'library_endnote_detect',
+  'library_endnote_import',
 ] as const;
 
-/** 9 task agent tools (from tasks/tools.ts) — includes task_link_file, cron_update_schedule, send_notification */
+/** 10 task agent tools (from tasks/tools.ts) — includes task_delete, task_link_file, cron_update_schedule, send_notification */
 const ACTUAL_TASK_TOOLS = [
   'task_create',
   'task_list',
@@ -43,6 +48,7 @@ const ACTUAL_TASK_TOOLS = [
   'task_link',
   'task_note',
   'task_link_file',
+  'task_delete',
   'cron_update_schedule',
   'send_notification',
 ] as const;
@@ -65,12 +71,21 @@ const ACTUAL_RADAR_TOOLS = [
   'radar_scan',
 ] as const;
 
-/** All 31 agent tools (12 + 9 + 7 + 3) — from index.ts registration */
+/** 4 monitor agent tools (from monitor/tools.ts) */
+const ACTUAL_MONITOR_TOOLS = [
+  'monitor_create',
+  'monitor_list',
+  'monitor_report',
+  'monitor_scan',
+] as const;
+
+/** All 41 agent tools (18 + 10 + 7 + 3 + 4 - 1 overlap) — from index.ts registration */
 const ALL_AGENT_TOOLS = [
   ...ACTUAL_LITERATURE_TOOLS,
   ...ACTUAL_TASK_TOOLS,
   ...ACTUAL_WORKSPACE_TOOLS,
   ...ACTUAL_RADAR_TOOLS,
+  ...ACTUAL_MONITOR_TOOLS,
 ] as const;
 
 /** 11 workspace WS RPC methods (from workspace/rpc.ts) */
@@ -266,7 +281,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       // a tool that does not actually exist in the plugin code.
       // Allow a few known non-tool identifiers that look like tool names.
       const KNOWN_NON_TOOLS = new Set([
-        'web_search', 'web_fetch', 'search_papers', 'search_arxiv',
+        'web_search', 'web_fetch', 'search_arxiv',
         'search_openalex', 'search_crossref', 'search_pubmed',
         'get_paper', 'get_citations', 'get_work', 'get_author_openalex',
         'resolve_doi', 'get_arxiv_paper', 'get_article', 'find_oa_version',
@@ -281,45 +296,42 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
 
   describe('TOOLS.md — tool counts', () => {
     it('header claims correct total local tool count', () => {
-      // TOOLS.md says "§1 Local Tools (27)" but actual count is 28
-      // This is a KNOWN DISCREPANCY: 12 lit + 7 task + 6 ws + 3 radar = 28
-      // TOOLS.md counts only 6 task tools, excluding send_notification from the count
-      // since it is listed under Special Tools. Let's verify the stated subcounts.
-      expect(ACTUAL_LITERATURE_TOOLS.length).toBe(12);
+      // v0.5.0: 17 lit + 10 task + 7 ws + 3 radar + 4 monitor = 41
+      expect(ACTUAL_LITERATURE_TOOLS.length).toBe(17);
       expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(7);
       expect(ACTUAL_RADAR_TOOLS.length).toBe(3);
-      // Task tools: 9 in code (including task_link_file, cron_update_schedule, send_notification)
-      expect(ACTUAL_TASK_TOOLS.length).toBe(9);
+      expect(ACTUAL_TASK_TOOLS.length).toBe(10);
+      expect(ACTUAL_MONITOR_TOOLS.length).toBe(4);
     });
 
-    it('TOOLS.md states "Library (12 tools)"', () => {
-      expect(toolsMd).toContain('Library (12 tools)');
+    it('TOOLS.md states "Library (17 tools)"', () => {
+      expect(toolsMd).toContain('Library (17 tools)');
     });
 
-    it('TOOLS.md states "Tasks (9 tools, incl. send_notification in §3)"', () => {
-      expect(toolsMd).toContain('Tasks (9 tools');
+    it('TOOLS.md states "Tasks (10 tools, incl. send_notification in §3)"', () => {
+      expect(toolsMd).toContain('Tasks (10 tools');
     });
 
     it('TOOLS.md states "Workspace (7 tools)"', () => {
       expect(toolsMd).toContain('Workspace (7 tools)');
     });
 
-    it('TOOLS.md states "Radar (3 tools)"', () => {
-      expect(toolsMd).toContain('Radar (3 tools)');
+    it('TOOLS.md states "Radar (3 tools, legacy)"', () => {
+      expect(toolsMd).toContain('Radar (3 tools, legacy)');
     });
 
-    it('total local tool count: TOOLS.md says 28, matches actual', () => {
+    it('total local tool count: TOOLS.md says 41, matches actual', () => {
       const stated = toolsMd.match(/§1 Local Tools \((\d+)\)/);
       expect(stated).not.toBeNull();
       const statedCount = parseInt(stated![1], 10);
 
-      // 12 lit + 9 task (incl. task_link_file, cron_update_schedule, send_notification) + 7 ws + 3 radar = 31
-      expect(statedCount).toBe(31);
-      expect(ALL_AGENT_TOOLS.length).toBe(31);
+      // 18 lit + 10 task + 7 ws + 3 radar + 4 monitor = 42 (some overlap: task_delete counted once)
+      expect(statedCount).toBe(41);
+      expect(ALL_AGENT_TOOLS.length).toBe(41);
     });
 
-    it('TOOLS.md §6 states total tool count (31 local + 13 API = 44)', () => {
-      expect(toolsMd).toContain('31 local + 13 API = **44 registered tools**');
+    it('TOOLS.md §6 states total tool count (41 local + 12 API = 53)', () => {
+      expect(toolsMd).toContain('41 local + 12 API = **53 registered tools**');
     });
   });
 
@@ -371,11 +383,13 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       'approval_card', 'paper_card', 'file_card', 'task_card',
       'progress_card', 'radar_digest',
       'pdf_path', 'arxiv_id', 'abstract_preview', 'library_id',
-      'commit_range', 'task_type', 'related_paper_title',
+      'commit_range', 'task_type', 'related_paper_title', 'related_file_path',
       'papers_read', 'papers_added', 'tasks_completed', 'tasks_created',
       'writing_words', 'reading_minutes', 'risk_level', 'approval_id',
       'total_found', 'notable_papers', 'size_bytes', 'mime_type',
       'created_at', 'modified_at', 'git_status', 'relevance_note',
+      'monitor_digest', 'monitor_name', 'source_type', 'total_found',
+      'monitor_scan', 'monitor_report',
     ]);
     const agentToolRefs = [
       ...new Set(
@@ -389,7 +403,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
 
     const allToolSet = new Set(ALL_AGENT_TOOLS as readonly string[]);
     const KNOWN_EXTERNAL_TOOLS = new Set([
-      'search_papers', 'search_arxiv', 'web_search', 'web_fetch',
+      'search_arxiv', 'web_search', 'web_fetch',
       'search_openalex', 'search_crossref', 'search_pubmed',
       'get_paper', 'get_citations', 'get_work', 'get_author_openalex',
       'resolve_doi', 'get_arxiv_paper', 'get_article', 'find_oa_version',
@@ -404,7 +418,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
 
     it('trigger table references valid primary tools', () => {
       const triggerTools = [
-        'search_papers', 'search_arxiv',
+        'search_arxiv', 'search_openalex',
         'library_add_paper', 'library_batch_add',
         'library_tag_paper', 'library_manage_collection',
         'library_export_bibtex',
@@ -442,12 +456,12 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       expect(protocolSection).toContain('arXiv ID');
     });
 
-    it('step 3: verify via API references search_papers or search_arxiv', () => {
+    it('step 3: verify via API references get_paper or search_arxiv', () => {
       const protocolSection = agentsMd.slice(
         agentsMd.indexOf('### PDF Import Protocol'),
         agentsMd.indexOf('## §4'),
       );
-      expect(protocolSection).toContain('search_papers');
+      expect(protocolSection).toContain('search_arxiv');
     });
 
     it('step 4: deduplicate references library_search', () => {
@@ -654,12 +668,16 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
   // ── AGENTS.md — Module Map consistency ────────────────────────────────
 
   describe('AGENTS.md — §2 Module Map', () => {
-    it('states Library has 12 tools', () => {
-      expect(agentsMd).toMatch(/Library\s+\(12 tools\)/);
+    it('states Library has 17 tools', () => {
+      expect(agentsMd).toMatch(/Library\s+\(17 tools\)/);
     });
 
-    it('states Tasks has 9 tools', () => {
-      expect(agentsMd).toMatch(/Tasks\s+\(9 tools\)/);
+    it('states Tasks has 10 tools', () => {
+      expect(agentsMd).toMatch(/Tasks\s+\(10 tools\)/);
+    });
+
+    it('states Monitor has 4 tools', () => {
+      expect(agentsMd).toMatch(/Monitor\s+\(4 tools\)/);
     });
 
     it('states Workspace has 7 tools', () => {
@@ -759,16 +777,16 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
   // ── Version headers ───────────────────────────────────────────────────
 
   describe('Version metadata', () => {
-    it('AGENTS.md is version 3.1', () => {
-      expect(agentsMd).toMatch(/version:\s*3\.1/);
+    it('AGENTS.md is version 3.2', () => {
+      expect(agentsMd).toMatch(/version:\s*3\.2/);
     });
 
     it('TOOLS.md is version 3.1', () => {
       expect(toolsMd).toMatch(/version:\s*3\.1/);
     });
 
-    it('AGENTS.md has 2026-03-14 date', () => {
-      expect(agentsMd).toContain('2026-03-14');
+    it('AGENTS.md has 2026-03-18 date', () => {
+      expect(agentsMd).toContain('2026-03-18');
     });
 
     it('TOOLS.md has 2026-03-14 date', () => {
@@ -890,8 +908,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
   // ── TOOLS.md — API tools ──────────────────────────────────────────────
 
   describe('TOOLS.md — §2 API Tools', () => {
-    it('lists 13 API tools', () => {
-      expect(toolsMd).toContain('§2 API Tools (13)');
+    it('lists 12 API tools', () => {
+      expect(toolsMd).toContain('§2 API Tools (12)');
     });
 
     it('lists all 6 databases', () => {
@@ -904,7 +922,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
     });
 
     const expectedApiTools = [
-      'search_papers', 'get_paper', 'get_citations',
+      'get_paper', 'get_citations',
       'search_openalex', 'get_work', 'get_author_openalex',
       'search_crossref', 'resolve_doi',
       'search_arxiv', 'get_arxiv_paper',
@@ -912,14 +930,14 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       'find_oa_version',
     ];
 
-    it('lists all 13 API tool names', () => {
+    it('lists all 12 API tool names', () => {
       for (const tool of expectedApiTools) {
         expect(toolsMd).toContain(`\`${tool}\``);
       }
     });
 
-    it('API tool count matches (13)', () => {
-      expect(expectedApiTools.length).toBe(13);
+    it('API tool count matches (12)', () => {
+      expect(expectedApiTools.length).toBe(12);
     });
   });
 

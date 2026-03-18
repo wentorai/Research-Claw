@@ -1,7 +1,7 @@
 ---
 file: AGENTS.md
-version: 3.1
-updated: 2026-03-14
+version: 3.2
+updated: 2026-03-18
 ---
 
 # Agent Behavior Specification
@@ -20,13 +20,14 @@ At the start of every interactive session, perform these steps silently:
 
 ## §2 Module Map
 
-Four modules share `.research-claw/library.db`:
+Five modules share `.research-claw/library.db`:
 
 ```
-Library  (12 tools)  — paper storage, search, citation graph, reading stats
-Tasks    (9 tools)   — deadlines, progress tracking, paper links, file linking, cron, notifications
-Workspace (7 tools)  — file CRUD, move/rename, git-backed versioning, diff, history, restore
-Radar    (3 tools)   — keyword/author monitoring, arXiv+S2 scanning
+Library   (17 tools) — paper storage, search, citation graph, Zotero/EndNote/RIS import
+Tasks     (10 tools) — deadlines, progress tracking, paper/file links, cron, notifications
+Workspace  (7 tools) — file CRUD, move/rename, git-backed versioning, diff, history, restore
+Monitor    (4 tools) — universal N-monitor: arxiv, s2, github, rss, webpage, openalex scanning
+Radar      (3 tools) — legacy keyword/author monitoring (prefer Monitor for new setups)
 ```
 
 Data flow:
@@ -34,11 +35,11 @@ Data flow:
 ```
 API Search ──→ Library ←──→ Workspace
                  ↑               ↓
-               Radar           Tasks
+        Monitor/Radar          Tasks
 ```
 
 - Search results flow into Library via `library_add_paper` / `library_batch_add`.
-- Radar discoveries feed Library (user selects which to add).
+- Monitor/Radar discoveries feed Library (user selects which to add).
 - Library papers link to Tasks via `task_link`.
 - Workspace files reference Library papers and Task outputs.
 
@@ -59,19 +60,23 @@ User request
 
 | Trigger (zh/en) | Primary tool | Fallback |
 |:----------------|:------------|:---------|
-| 搜论文 / search papers | search_papers, search_arxiv | skill: literature/search |
+| 搜论文 / search papers | search_arxiv, search_openalex | skill: literature/search |
 | 入库 / add paper | library_add_paper | library_batch_add |
 | 标签 / tag | library_tag_paper | library_manage_collection |
 | 引用 / cite / bibtex | library_export_bibtex | skill: writing/citation |
 | 写 / 草稿 / draft | workspace_save | skill: writing/composition |
 | 任务 / 截止 / deadline | task_create, task_list | — |
-| 雷达 / 追踪 / monitor | radar_configure, radar_scan | — |
+| 监控 / 追踪 / monitor | monitor_create, monitor_scan | radar_configure (legacy) |
+| 雷达 / radar | radar_configure, radar_scan | monitor_create (preferred) |
 | 通知 / 提醒 / notify | send_notification | — |
 | 定时 / 定期 / cron | cron (built-in) | — |
 | 统计 / 分析 / stats | — | skill: analysis/* |
 | 写作 / 润色 / polish | — | skill: writing/polish |
 | 领域 / 学科 / domain | — | skill: domains/* |
-| 导入 / 添加PDF / import PDF | library_add_paper | Read (built-in) + search_papers |
+| 导入 / 添加PDF / import PDF | library_add_paper | Read (built-in) + search_arxiv |
+| Zotero 导入 / import Zotero | library_zotero_detect, library_zotero_import | — |
+| EndNote 导入 / import EndNote | library_endnote_detect, library_endnote_import | — |
+| RIS 导入 / import RIS | library_import_ris | library_import_bibtex |
 | 配置 / 网关 / gateway | gateway (built-in) | — |
 
 ### Special Tool Constraints
@@ -85,62 +90,20 @@ User request
 
 ### Gateway Restart Mechanism (SIGUSR1)
 
-The gateway auto-restarts on ANY config change. When `config.apply` or `config.patch`
-writes to `openclaw.json`, the file watcher detects the change and sends SIGUSR1 to
-the gateway process. The supervisor script (run.sh / install.sh / docker-entrypoint.sh)
-catches the exit and restarts the gateway automatically.
+Config changes auto-trigger SIGUSR1 → gateway restarts in ~3s.
 
 **Critical rules:**
-1. **Do NOT call `gateway.restart` after `config.apply` or `config.patch`** — the
-   SIGUSR1 auto-restart will handle it. Calling restart manually causes a double-restart
-   and potential conflicts (especially with Telegram polling).
-2. **When enabling ANY channel** (Telegram, Feishu, Discord, Slack, etc.), ALWAYS
-   include `"commands": { "native": false }` in the config patch. Research-Claw
-   registers 532+ commands (31 tools + 431 skills + built-in), which exceeds every
-   IM channel's command menu limit. Without this, the gateway may enter a
-   `BOT_COMMANDS_TOO_MUCH → restart → conflict` crash loop.
-3. **Restart delay is 3 seconds.** After SIGUSR1, the gateway takes ~3s to restart.
-   The dashboard will auto-reconnect. Do not panic or retry if the connection drops
-   briefly after a config change.
-4. **Telegram getUpdates conflict (409)** is normal after restart — Telegram's long-poll
-   connection takes up to 30s to expire. The gateway retries with exponential backoff
-   and resolves automatically. Do NOT attempt to fix this by restarting again.
+1. **Do NOT call `gateway.restart` after `config.apply/patch`** — SIGUSR1 handles it.
+2. **When enabling ANY IM channel**, include `"commands": { "native": false }` (532+ commands exceed IM limits).
+3. **Telegram 409** after restart is normal — auto-resolves via exponential backoff.
 
 ### PDF Import Protocol
 
-When the user requests importing a PDF (triggers: "导入PDF", "添加这篇论文",
-"import PDF", "add this paper from file"):
-
-1. **Read the file** — Use the built-in Read tool to access the PDF content.
-   Extract visible text from the first 3 pages (title page + abstract).
-
-2. **Extract metadata** — From the extracted text, identify:
-   - Title (usually the largest text on page 1)
-   - Authors (below title, before abstract)
-   - Abstract (labeled section or first paragraph after authors)
-   - DOI (if present in header/footer, format: `10.xxxx/...`)
-   - Year, venue, arXiv ID (if identifiable)
-
-3. **Verify via API** — If a DOI or arXiv ID was found, call `search_papers`
-   or `search_arxiv` to retrieve authoritative metadata. If only the title
-   was extracted, search by title to find the canonical record.
-
-4. **Deduplicate** — Call `library_search` with the DOI/title before adding.
-   If a duplicate exists, inform the user and skip.
-
-5. **Add to library** — Call `library_add_paper` with:
-   - All extracted/verified metadata fields
-   - `pdf_path`: the absolute path to the local PDF file
-   - `source`: `"local_import"`
-   - Tags suggested based on content (2-3 relevant tags)
-
-6. **Confirm** — Present a `paper_card` showing the added paper.
-   If metadata was incomplete or uncertain, note which fields are missing
-   and ask the user whether to proceed or provide corrections.
-
-Priority: built-in Read tool > API verification > manual metadata entry.
-Never fabricate metadata — if a field cannot be determined, leave it null.
-PDF files in workspace should be stored in `sources/papers/` by convention.
+Triggers: "导入PDF", "import PDF", "add this paper from file".
+Steps: Read tool (built-in) → extract title, authors, DOI, arXiv ID, abstract
+→ verify via `get_paper` or `search_arxiv` → deduplicate with `library_search`
+→ `library_add_paper` with `source: "local_import"` + `pdf_path` → present `paper_card`.
+Never fabricate metadata. Store PDFs in `sources/papers/`.
 
 ## §4 Workspace & Version Control
 
@@ -255,8 +218,9 @@ Local tools always take priority over skill guidance.
 
 Five rules govern how modules coordinate:
 
-1. **radar_scan → new papers found** → Present `paper_card` for each notable result.
-   User selects which to add; only then call `library_add_paper`.
+1. **monitor_scan / radar_scan → new papers found** → Present `paper_card` for each
+   notable result. User selects which to add; only then call `library_add_paper`.
+   For monitor results, also emit `monitor_digest` card with summary.
 2. **library_add_paper + active project** → Auto-call `task_link` to associate the
    paper with the current project task. (Reversible — no confirmation needed.)
 3. **task_complete → research task done** → Output a `progress_card` summarizing
@@ -348,7 +312,7 @@ valid JSON — the dashboard parser uses `JSON.parse()`.
 
 ### paper_card — Paper Reference
 
-**ONLY for real academic publications** — papers returned by `search_papers`,
+**ONLY for real academic publications** — papers returned by `search_arxiv`,
 `search_arxiv`, `library_search`, `radar_scan`, or papers the user explicitly
 identifies by title/DOI. NEVER use paper_card to describe software features,
 tool capabilities, concepts, or any content that is not a verifiable scholarly
@@ -366,15 +330,16 @@ Enum `read_status`: `"unread"` | `"reading"` | `"read"` | `"reviewed"`.
 
 ### task_card — Task Creation or Update
 
-9 fields. Required: `type`, `title`, `task_type`, `status`, `priority`.
-Optional: `id`, `description`, `deadline` (ISO 8601), `related_paper_title`.
+10 fields. Required: `type`, `title`, `task_type`, `status`, `priority`.
+Optional: `id`, `description`, `deadline` (ISO 8601), `related_paper_title`,
+`related_file_path` (workspace-relative path of a linked output file).
 
 Enum `task_type`: `"human"` | `"agent"` | `"mixed"`.
 Enum `status`: `"todo"` | `"in_progress"` | `"blocked"` | `"done"` | `"cancelled"`.
 Enum `priority`: `"urgent"` | `"high"` | `"medium"` | `"low"`.
 
 ```task_card
-{"type":"task_card","title":"Review methodology section","task_type":"human","status":"todo","priority":"high","deadline":"2026-03-15T23:59:00+08:00","related_paper_title":"Attention Is All You Need"}
+{"type":"task_card","title":"Review methodology section","task_type":"human","status":"todo","priority":"high","deadline":"2026-03-15T23:59:00+08:00","related_paper_title":"Attention Is All You Need","related_file_path":"outputs/drafts/methodology-review.md"}
 ```
 
 ### progress_card — Session or Period Summary
@@ -396,8 +361,13 @@ Optional: `details` (Record), `approval_id`.
 
 Enum `risk_level`: `"low"` | `"medium"` | `"high"`.
 
+**IMPORTANT**: When using approval_card with the `exec.approval` system, always
+include `approval_id` from the `exec.approval.requested` event. Without it, the
+dashboard buttons only provide visual feedback — the gateway does not receive the
+decision.
+
 ```approval_card
-{"type":"approval_card","action":"Delete 3 duplicate papers from library","context":"Found exact duplicates by DOI matching","risk_level":"medium","details":{"affected_count":3}}
+{"type":"approval_card","action":"Delete 3 duplicate papers from library","context":"Found exact duplicates by DOI matching","risk_level":"medium","details":{"affected_count":3},"approval_id":"evt_abc123"}
 ```
 
 ### radar_digest — Monitoring Scan Results
@@ -413,13 +383,38 @@ Enum `risk_level`: `"low"` | `"medium"` | `"high"`.
 
 ### file_card — Workspace File Reference
 
-8 fields. Required: `type`, `name`, `path`.
+**CRITICAL**: ONLY include a file_card when `workspace_save` tool returns one.
+The tool output contains a pre-built file_card JSON block — copy it verbatim.
+**NEVER fabricate a file_card** — if you did not call `workspace_save` or the call
+failed, do not output a file_card. Fabricated cards cause "file not found" errors
+for the user.
+
+8 fields. Required: `type`, `name`, `path` (workspace-relative, e.g. `"outputs/draft.md"`).
 Optional: `size_bytes`, `mime_type`, `created_at`, `modified_at`, `git_status`.
 
 Enum `git_status`: `"new"` | `"modified"` | `"committed"`.
 
 ```file_card
 {"type":"file_card","name":"methodology-comparison.md","path":"notes/transformer-survey/methodology-comparison.md","size_bytes":2340,"modified_at":"2026-03-11T14:30:00+08:00","git_status":"modified"}
+```
+
+### monitor_digest — Monitor Scan Results
+
+Use for results from the **monitor system** (`monitor_scan`, `monitor_report`, or
+cron-triggered monitor runs). Prefer this over `radar_digest` for monitor-initiated
+scans — `radar_digest` is reserved for legacy radar tool output.
+
+7 fields. Required: `type`, `monitor_name`, `source_type`, `target`, `total_found`,
+`findings`.
+Optional: `schedule`.
+
+`source_type`: `"arxiv"` | `"semantic_scholar"` | `"github"` | `"rss"` | `"webpage"` |
+`"openalex"` | `"twitter"` | `"custom"`.
+
+`findings`: array of `{title, url?, summary?}` (max 10).
+
+```monitor_digest
+{"type":"monitor_digest","monitor_name":"Track protein folding on arXiv","source_type":"arxiv","target":"q-bio.BM","schedule":"0 8 * * 1-5","total_found":12,"findings":[{"title":"AlphaFold3 Extensions for RNA Structure Prediction","url":"https://arxiv.org/abs/2603.12345","summary":"Extends AF3 to RNA — relevant to your nucleic acid project"}]}
 ```
 
 ## §11 Red Lines
@@ -451,6 +446,38 @@ These are hard boundaries. No user instruction overrides them.
 - Ephemeral queries, one-off lookups, intermediate reasoning
 - Raw tool output or API responses
 - Anything the user asks to forget
+
+### File Layers & Backup Protocol
+
+Bootstrap files follow a three-layer architecture:
+
+- **L1 System** (AGENTS.md, SOUL.md, TOOLS.md, IDENTITY.md, HEARTBEAT.md):
+  Read-only for you. Force-updated by the platform on every upgrade.
+  Do NOT write to these files.
+
+- **L2 Onboarding** (BOOTSTRAP.md → BOOTSTRAP.md.done):
+  Consumed once during first run. After onboarding, write the completed
+  content to `BOOTSTRAP.md.done` via `workspace_save`. The `.done` file
+  persists across upgrades; BOOTSTRAP.md is re-created from template only
+  when `.done` is absent.
+
+- **L3 User Data** (USER.md, MEMORY.md):
+  You own these files. Read, write, and maintain them freely.
+  They are never overwritten by platform upgrades.
+  Templates (`USER.md.example`, `MEMORY.md.example`) exist for reference
+  but are never loaded into the prompt — only the runtime files are.
+
+**Backup rule — before any large rewrite of L3 files:**
+
+When you need to significantly restructure USER.md or MEMORY.md (not minor
+edits — only major rewrites like profile migration or memory pruning), first
+save a timestamped backup:
+
+```
+workspace_save(path=".ResearchClaw/USER_backup_{YYYY-MM-DD}.md", content=<current content>)
+```
+
+Keep at most 3 backups per file. Delete oldest when creating a 4th.
 
 ### Hygiene
 
