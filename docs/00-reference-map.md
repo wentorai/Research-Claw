@@ -96,16 +96,16 @@
 | — | `rc_papers_fts` | 03a §2.9 | FTS5 virtual table on papers (title, authors, abstract, notes) |
 
 | 13 | `rc_agent_notifications` | — | Agent-sent notifications for dashboard bell (type, title, body, read) |
-| 14 | `rc_radar_config` | — | Radar tracking config (keywords, authors, journals, sources, cached scan results) |
-| 15 | `rc_cron_state` | — | Cron preset state (enabled, config, schedule, gateway_job_id) |
+| 14 | `rc_cron_state` | — | Cron preset state (enabled, config, schedule, gateway_job_id) |
 
-All tables prefixed `rc_` to avoid collision with OpenClaw internals. Database located at `.research-claw/library.db` (configured in `openclaw.json`). **15 regular tables + 1 FTS5 virtual table, 3 FTS sync triggers, 23 indexes.** Schema version: 6. Schema source of truth: `extensions/research-claw-core/src/db/schema.ts`.
+All tables prefixed `rc_` to avoid collision with OpenClaw internals. Database located at `.research-claw/library.db` (configured in `openclaw.json`). **14 regular tables + 1 FTS5 virtual table, 3 FTS sync triggers, 23 indexes.** Schema version: 7. Schema source of truth: `extensions/research-claw-core/src/db/schema.ts`.
 
 **Obsolete tables from earlier specs** (do NOT exist in the actual schema):
 - ~~`rc_meta`~~ — replaced by `rc_schema_version`
 - ~~`rc_task_links`~~ — tasks link to papers directly via `rc_tasks.related_paper_id`
 - ~~`rc_workspace_versions`~~ / ~~`rc_workspace_files`~~ — workspace uses git tracking, not DB tables (see 03c)
 - ~~`rc_config`~~ — config loaded from JSON file (`openclaw.json`), not DB
+- ~~`rc_radar_config`~~ — removed in v0.5.2; radar replaced by universal monitor system
 
 ### 3.2 RPC Methods (Custom `rc.*` Namespace)
 
@@ -115,7 +115,6 @@ All tables prefixed `rc_` to avoid collision with OpenClaw internals. Database l
 | `rc.task.*` | 11 | 03b §5 | Task CRUD, complete, upcoming, overdue, link, linkFile, notes |
 | `rc.ws.*` | 11 | 03c §4 | Workspace tree, read, save, history, diff, restore, delete, saveImage, openExternal, openFolder, move (upload is HTTP — see §3.6) |
 | `rc.cron.presets.*` | 7 | 03b §5 | Cron preset list, activate, deactivate, setJobId, delete, restore, updateSchedule |
-| `rc.radar.*` | 4 | — | Radar config get/set, scan, lastScan (arXiv + Semantic Scholar) |
 | `rc.notifications.*` | 2 | — | Pending notifications (tasks + custom) + mark-read for dashboard bell |
 
 **Full RPC method list** (canonical names from module docs):
@@ -146,9 +145,6 @@ rc.cron.presets.list         rc.cron.presets.activate    rc.cron.presets.deactiv
 rc.cron.presets.setJobId     rc.cron.presets.delete      rc.cron.presets.restore
 rc.cron.presets.updateSchedule
                                                                         (7 methods)
-
-rc.radar.config.get     rc.radar.config.set     rc.radar.scan           rc.radar.lastScan
-                                                                        (4 methods)
 
 rc.notifications.pending     rc.notifications.markRead
                                                                         (2 methods)
@@ -185,12 +181,9 @@ rc.notifications.pending     rc.notifications.markRead
 | `workspace_move` | 03c §3 | Move or rename a file/directory within workspace |
 | `task_link_file` | 03b §3 | Link a task to a workspace file |
 | `cron_update_schedule` | 03b §3 | Update cron preset schedule expression |
-| `radar_configure` | — | Set radar tracking keywords, authors, journals |
-| `radar_get_config` | — | Read current radar configuration |
-| `radar_scan` | — | Scan arXiv + Semantic Scholar for new papers |
 | `send_notification` | — | Push a notification to the dashboard bell icon |
 
-**31 tools total** (12 literature + 9 task + 7 workspace + 3 radar). Config `tools.alsoAllow` lists 41 entries (28 RC tools + 13 external API tools). Three RC tools (task_link_file, cron_update_schedule, workspace_move) are registered by the plugin but not yet in alsoAllow — they work because the agent can call any registered tool, while alsoAllow only gates tools that require explicit pre-approval.
+**28 tools total** (12 literature + 9 task + 7 workspace). Config `tools.alsoAllow` lists 41 entries (28 RC tools + 13 external API tools). Three RC tools (task_link_file, cron_update_schedule, workspace_move) are registered by the plugin but not yet in alsoAllow — they work because the agent can call any registered tool, while alsoAllow only gates tools that require explicit pre-approval.
 
 ### 3.4 Message Card Types
 
@@ -200,7 +193,7 @@ rc.notifications.pending     rc.notifications.markRead
 | `task_card` | 03d §3.2 | `TaskCard.tsx` | Task summary + panel link |
 | `progress_card` | 03d §3.3 | `ProgressCard.tsx` | Session/period summary stats |
 | `approval_card` | 03d §3.4 | `ApprovalCard.tsx` | Human-in-Loop approval request |
-| `radar_digest` | 03d §3.5 | `RadarDigest.tsx` | Monitoring update, notable papers |
+| `monitor_digest` | 03d §3.5 | `MonitorDigest.tsx` | Monitoring update, notable papers |
 | `file_card` | 03d §3.6 | `FileCard.tsx` | Workspace file reference |
 
 Convention: fenced code blocks with card type as language tag. Standard code blocks (e.g., `python`, `typescript`) are handled by the default markdown renderer, not as custom card types (see 03d §3.7). Unknown types degrade gracefully to default code block.
@@ -333,4 +326,4 @@ Research-Claw operates **entirely local** with a 4-layer defense model:
 
 ---
 
-*Updated: 2026-03-16 | OpenClaw: 2026.3.8 | Protocol: v3 | RPC: 61 WS + 1 HTTP = 62 methods | Tables: 15 + FTS5 | Tools: 31 | Cards: 6 | Hooks: 7 | Indexes: 23*
+*Updated: 2026-03-18 | OpenClaw: 2026.3.8 | Protocol: v3 | RPC: 57 WS + 1 HTTP = 58 methods | Tables: 14 + FTS5 | Tools: 28 | Cards: 6 | Hooks: 7 | Indexes: 23*

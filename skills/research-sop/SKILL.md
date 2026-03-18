@@ -274,7 +274,8 @@ Resolve user requests using this priority chain:
 
 1. **API tools first.** For literature search, use Layer 1 API tools (see Search
    Architecture above). For library management, use `library_*` tools. For tasks,
-   use `task_*`. For workspace, use `workspace_*`. Tools execute actions directly.
+   use `task_*`. For workspace, use `workspace_*`. For monitoring, use `monitor_*`.
+   Tools execute actions directly.
 2. **Browser RPA second.** When API tools cannot reach the target database or when
    the user requests a specific web-based source, use the `browser` tool (Layer 2).
 3. **Skills for methodology.** Route to skills when the user needs a workflow, best
@@ -309,7 +310,7 @@ content only in chat messages.
 | Literature review | `outputs/drafts/` | `literature-review-{topic}.md` |
 | Paper reading notes | `outputs/notes/` | `{paper-short-title}-notes.md` |
 | Data analysis results | `outputs/reports/` | `analysis-{dataset}.md` |
-| Radar scan findings | `outputs/radar/` | `radar-scan-{date}.md` |
+| Monitor scan findings | `outputs/monitor/` | `monitor-scan-{date}.md` |
 | Weekly/progress report | `outputs/reports/` | `weekly-report-{date}.md` |
 | BibTeX export | `outputs/exports/` | `bibliography-{project}.bib` |
 | Figures/plots | `outputs/figures/` | `fig-{description}.{ext}` |

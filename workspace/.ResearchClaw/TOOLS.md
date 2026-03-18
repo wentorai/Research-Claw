@@ -1,12 +1,12 @@
 ---
 file: TOOLS.md
 version: 3.1
-updated: 2026-03-14
+updated: 2026-03-18
 ---
 
 # Tool Reference
 
-## §1 Local Tools (41)
+## §1 Local Tools (38)
 
 ### Library (17 tools)
 
@@ -57,14 +57,6 @@ updated: 2026-03-14
 | `workspace_move` | Move or rename file/directory with auto-commit. | `from`, `to` |
 
 Workspace is a git-backed local repository. Every save creates a commit (debounced 5s). Files >10 MB auto-gitignored. You also have `exec` for CLI operations: `pandoc`, `pdftotext`, `python3`, `xelatex`, `grep`, `wc`, `jq`, etc.
-
-### Radar (3 tools, legacy)
-
-| Tool | Purpose |
-|:-----|:--------|
-| `radar_configure` | Set tracking keywords, authors, journals, sources |
-| `radar_get_config` | Read current radar configuration |
-| `radar_scan` | Scan arXiv/S2 for new papers matching config |
 
 ### Monitor (4 tools)
 
@@ -129,5 +121,5 @@ Tools always take priority over skill guidance.
 
 ## §6 Tool Count
 
-41 local + 12 API = **53 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
+38 local + 12 API = **50 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
 431 skills accessible on-demand via research-plugins (40 subcategory indexes).

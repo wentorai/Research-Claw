@@ -7,14 +7,13 @@
  *   - monitor_report:  Cache scan results for a specific monitor
  *   - monitor_scan:    Instant scan (arXiv) without creating a monitor
  *
- * Legacy tools (radar_configure, radar_get_config, radar_scan) are replaced
- * by this unified set.
+ * Unified monitoring tools for all source types.
  */
 
 import type { Database } from 'better-sqlite3';
 import type { ToolDefinition } from '../types.js';
 import { MonitorService, type SourceType } from './service.js';
-import { radarScan } from '../radar/scanner.js';
+import { scanSources } from './scanner.js';
 
 function ok(text: string, details?: unknown): unknown {
   return { content: [{ type: 'text', text }], details: details ?? {} };
@@ -255,7 +254,7 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
           return fail('At least one of keywords or authors is required for scanning.');
         }
 
-        const results = await radarScan(db, options);
+        const results = await scanSources(db, options);
 
         const totalPapers = results.reduce((sum, r) => sum + r.papers.length, 0);
         const totalSkipped = results.reduce((sum, r) => sum + r.papers_skipped, 0);

@@ -6,8 +6,8 @@
  * research-claw-core plugin source code.
  *
  * Truth source: index.ts, literature/tools.ts, tasks/tools.ts,
- * workspace/tools.ts, radar/tools.ts, workspace/rpc.ts, literature/rpc.ts,
- * tasks/rpc.ts, radar/rpc.ts
+ * workspace/tools.ts, monitor/tools.ts, workspace/rpc.ts, literature/rpc.ts,
+ * tasks/rpc.ts
  */
 
 import { describe, it, expect } from 'vitest';
@@ -64,13 +64,6 @@ const ACTUAL_WORKSPACE_TOOLS = [
   'workspace_move',
 ] as const;
 
-/** 3 radar agent tools (from radar/tools.ts) */
-const ACTUAL_RADAR_TOOLS = [
-  'radar_configure',
-  'radar_get_config',
-  'radar_scan',
-] as const;
-
 /** 4 monitor agent tools (from monitor/tools.ts) */
 const ACTUAL_MONITOR_TOOLS = [
   'monitor_create',
@@ -79,12 +72,11 @@ const ACTUAL_MONITOR_TOOLS = [
   'monitor_scan',
 ] as const;
 
-/** All 41 agent tools (18 + 10 + 7 + 3 + 4 - 1 overlap) — from index.ts registration */
+/** All 38 agent tools (17 + 10 + 7 + 4) — from index.ts registration */
 const ALL_AGENT_TOOLS = [
   ...ACTUAL_LITERATURE_TOOLS,
   ...ACTUAL_TASK_TOOLS,
   ...ACTUAL_WORKSPACE_TOOLS,
-  ...ACTUAL_RADAR_TOOLS,
   ...ACTUAL_MONITOR_TOOLS,
 ] as const;
 
@@ -157,20 +149,11 @@ const ACTUAL_TASK_RPC = [
   'rc.notifications.markRead',
 ] as const;
 
-/** 4 radar WS RPC methods (from radar/rpc.ts) */
-const ACTUAL_RADAR_RPC = [
-  'rc.radar.config.get',
-  'rc.radar.config.set',
-  'rc.radar.scan',
-  'rc.radar.lastScan',
-] as const;
-
 /** All WS RPC methods */
 const ALL_RPC = [
   ...ACTUAL_WORKSPACE_RPC,
   ...ACTUAL_LITERATURE_RPC,
   ...ACTUAL_TASK_RPC,
-  ...ACTUAL_RADAR_RPC,
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -251,12 +234,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       }
     });
 
-    it('lists all 3 radar tools', () => {
-      for (const tool of ACTUAL_RADAR_TOOLS) {
-        expect(toolsMd).toContain(`\`${tool}\``);
-      }
-    });
-
     it('does not contain phantom tools (tools mentioned but not in plugin)', () => {
       const toolsMdNames = extractBacktickNames(toolsMd);
       // Filter to only tool-like names (underscore-separated, no dots)
@@ -266,7 +243,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
           !name.includes('.') &&
           !name.startsWith('rc.') &&
           !['read_status', 'paper_ids', 'task_type', 'paper_card', 'file_card', 'task_card',
-            'progress_card', 'approval_card', 'radar_digest', 'abstract_preview',
+            'progress_card', 'approval_card', 'abstract_preview',
             'commit_message', 'commit_range', 'commit_hash', 'bibtex_content',
             'bibtex_key', 'note_text', 'tag_name', 'paper_id', 'task_id',
             'source_id', 'arxiv_id', 'pdf_path', 'short_hash', 'local_import',
@@ -296,10 +273,9 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
 
   describe('TOOLS.md — tool counts', () => {
     it('header claims correct total local tool count', () => {
-      // v0.5.0: 17 lit + 10 task + 7 ws + 3 radar + 4 monitor = 41
+      // v0.5.0: 17 lit + 10 task + 7 ws + 4 monitor = 38
       expect(ACTUAL_LITERATURE_TOOLS.length).toBe(17);
       expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(7);
-      expect(ACTUAL_RADAR_TOOLS.length).toBe(3);
       expect(ACTUAL_TASK_TOOLS.length).toBe(10);
       expect(ACTUAL_MONITOR_TOOLS.length).toBe(4);
     });
@@ -316,22 +292,18 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       expect(toolsMd).toContain('Workspace (7 tools)');
     });
 
-    it('TOOLS.md states "Radar (3 tools, legacy)"', () => {
-      expect(toolsMd).toContain('Radar (3 tools, legacy)');
-    });
-
-    it('total local tool count: TOOLS.md says 41, matches actual', () => {
+    it('total local tool count: TOOLS.md says 38, matches actual', () => {
       const stated = toolsMd.match(/§1 Local Tools \((\d+)\)/);
       expect(stated).not.toBeNull();
       const statedCount = parseInt(stated![1], 10);
 
-      // 18 lit + 10 task + 7 ws + 3 radar + 4 monitor = 42 (some overlap: task_delete counted once)
-      expect(statedCount).toBe(41);
-      expect(ALL_AGENT_TOOLS.length).toBe(41);
+      // 17 lit + 10 task + 7 ws + 4 monitor = 38
+      expect(statedCount).toBe(38);
+      expect(ALL_AGENT_TOOLS.length).toBe(38);
     });
 
-    it('TOOLS.md §6 states total tool count (41 local + 12 API = 53)', () => {
-      expect(toolsMd).toContain('41 local + 12 API = **53 registered tools**');
+    it('TOOLS.md §6 states total tool count (38 local + 12 API = 50)', () => {
+      expect(toolsMd).toContain('38 local + 12 API = **50 registered tools**');
     });
   });
 
@@ -381,7 +353,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
     const KNOWN_NON_TOOL_IDENTIFIERS = new Set([
       'read_status', 'local_import', 'short_hash', 'commit_hash',
       'approval_card', 'paper_card', 'file_card', 'task_card',
-      'progress_card', 'radar_digest',
+      'progress_card',
       'pdf_path', 'arxiv_id', 'abstract_preview', 'library_id',
       'commit_range', 'task_type', 'related_paper_title', 'related_file_path',
       'papers_read', 'papers_added', 'tasks_completed', 'tasks_created',
@@ -424,7 +396,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
         'library_export_bibtex',
         'workspace_save',
         'task_create', 'task_list',
-        'radar_configure', 'radar_scan',
         'send_notification',
         'library_search',
       ];
@@ -684,10 +655,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       expect(agentsMd).toMatch(/Workspace\s+\(7 tools\)/);
     });
 
-    it('states Radar has 3 tools', () => {
-      expect(agentsMd).toMatch(/Radar\s+\(3 tools\)/);
-    });
-
     it('workspace description mentions git-backed versioning', () => {
       expect(agentsMd).toMatch(/Workspace.*git.backed/is);
     });
@@ -740,7 +707,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       // Extract from TOOLS.md workspace section
       const wsSection = toolsMd.slice(
         toolsMd.indexOf('### Workspace (7 tools)'),
-        toolsMd.indexOf('### Radar'),
+        toolsMd.indexOf('### Monitor'),
       );
       for (const tool of ACTUAL_WORKSPACE_TOOLS) {
         if (wsSection.includes(`\`${tool}\``)) {
@@ -789,8 +756,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       expect(agentsMd).toContain('2026-03-18');
     });
 
-    it('TOOLS.md has 2026-03-14 date', () => {
-      expect(toolsMd).toContain('2026-03-14');
+    it('TOOLS.md has 2026-03-18 date', () => {
+      expect(toolsMd).toContain('2026-03-18');
     });
   });
 
@@ -817,14 +784,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
   // ── AGENTS.md — Cross-module handoff ──────────────────────────────────
 
   describe('AGENTS.md — §6 Cross-Module Handoff', () => {
-    it('references radar_scan tool', () => {
-      const handoffSection = agentsMd.slice(
-        agentsMd.indexOf('## §6 Cross-Module Handoff'),
-        agentsMd.indexOf('## §7'),
-      );
-      expect(handoffSection).toContain('radar_scan');
-    });
-
     it('references library_add_paper tool', () => {
       const handoffSection = agentsMd.slice(
         agentsMd.indexOf('## §6 Cross-Module Handoff'),

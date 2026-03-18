@@ -92,19 +92,6 @@ describe('CodeBlock', () => {
     expect(screen.getByText('Delete files')).toBeInTheDocument();
   });
 
-  it('renders a radar_digest', () => {
-    const json = JSON.stringify({
-      type: 'radar_digest',
-      source: 'arxiv',
-      query: 'transformers',
-      period: 'this week',
-      total_found: 10,
-      notable_papers: [],
-    });
-    render(<CodeBlock className="language-radar_digest">{json + '\n'}</CodeBlock>);
-    expect(screen.getByText('card.radar.title')).toBeInTheDocument();
-  });
-
   it('renders a file_card', () => {
     const json = JSON.stringify({
       type: 'file_card',

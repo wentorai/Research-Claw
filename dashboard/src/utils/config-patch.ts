@@ -177,7 +177,6 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
       'task_link', 'task_note', 'task_link_file', 'cron_update_schedule', 'send_notification',
       'workspace_save', 'workspace_read', 'workspace_list', 'workspace_diff',
       'workspace_history', 'workspace_restore', 'workspace_move',
-      'radar_configure', 'radar_get_config', 'radar_scan',
       'monitor_create', 'monitor_list', 'monitor_report', 'monitor_scan',
       'library_import_ris', 'library_zotero_detect', 'library_zotero_import',
       'library_endnote_detect', 'library_endnote_import',

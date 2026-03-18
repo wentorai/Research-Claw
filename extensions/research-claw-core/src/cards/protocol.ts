@@ -1,7 +1,7 @@
 /**
  * Message Card Protocol
  *
- * Defines 7 structured card types embedded in agent messages as fenced code
+ * Defines 6 structured card types embedded in agent messages as fenced code
  * blocks with special language tags. Cards carry rich, typed payloads that
  * the dashboard UI can render interactively.
  *
@@ -19,7 +19,6 @@ export type CardType =
   | 'task_card'
   | 'progress_card'
   | 'approval_card'
-  | 'radar_digest'
   | 'file_card'
   | 'monitor_digest';
 
@@ -29,7 +28,6 @@ export const CARD_TYPES: ReadonlySet<string> = new Set<CardType>([
   'task_card',
   'progress_card',
   'approval_card',
-  'radar_digest',
   'file_card',
   'monitor_digest',
 ]);
@@ -112,28 +110,6 @@ export interface ApprovalCard {
 }
 
 // ---------------------------------------------------------------------------
-// Radar Digest
-// ---------------------------------------------------------------------------
-
-export interface NotablePaper {
-  title: string;
-  authors: string[];
-  /** Why the agent considers this paper notable for the user. */
-  relevance_note: string;
-}
-
-export interface RadarDigest {
-  type: 'radar_digest';
-  source: string; // "arxiv" | "pubmed" | "custom"
-  /** The search query or topic that was tracked. */
-  query: string;
-  /** Time window the scan covered. */
-  period: string;
-  total_found: number;
-  notable_papers: NotablePaper[];
-}
-
-// ---------------------------------------------------------------------------
 // File Card
 // ---------------------------------------------------------------------------
 
@@ -182,6 +158,5 @@ export type MessageCard =
   | TaskCard
   | ProgressCard
   | ApprovalCard
-  | RadarDigest
   | FileCard
   | MonitorDigest;

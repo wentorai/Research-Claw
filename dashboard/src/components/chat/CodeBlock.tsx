@@ -11,7 +11,6 @@ import type {
   TaskCard as TaskCardType,
   ProgressCard as ProgressCardType,
   ApprovalCard as ApprovalCardType,
-  RadarDigest as RadarDigestType,
   FileCard as FileCardType,
   MonitorDigest as MonitorDigestType,
 } from '@/types/cards';
@@ -19,7 +18,6 @@ import PaperCard from './cards/PaperCard';
 import TaskCard from './cards/TaskCard';
 import ProgressCard from './cards/ProgressCard';
 import ApprovalCard from './cards/ApprovalCard';
-import RadarDigest from './cards/RadarDigest';
 import FileCard from './cards/FileCard';
 import MonitorDigest from './cards/MonitorDigest';
 import CardPlaceholder from './cards/CardPlaceholder';
@@ -163,8 +161,6 @@ function renderCard(cardType: string, data: unknown): React.ReactElement {
       return <ProgressCard {...(data as ProgressCardType)} />;
     case 'approval_card':
       return <ApprovalCard {...(data as ApprovalCardType)} />;
-    case 'radar_digest':
-      return <RadarDigest {...(data as RadarDigestType)} />;
     case 'file_card':
       return <FileCard {...(data as FileCardType)} />;
     case 'monitor_digest':

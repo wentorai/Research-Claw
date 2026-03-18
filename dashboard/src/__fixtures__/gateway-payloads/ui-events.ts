@@ -59,7 +59,7 @@ export const PRESENCE_EVENT_FRAME: EventFrame = {
 export const CRON_EVENT_FRAME: EventFrame = {
   type: 'event',
   event: 'cron',
-  payload: { cronId: 'daily-radar' },
+  payload: { cronId: 'daily-monitor' },
   seq: 4,
 };
 
@@ -155,12 +155,12 @@ export const PROGRESS_CARD_TEXT = `Here is the heartbeat update:
 
 Let me know if you need more details.`;
 
-export const RADAR_DIGEST_TEXT = `New papers found:
+export const MONITOR_DIGEST_TEXT = `New papers found:
 
-\`\`\`radar_digest
+\`\`\`monitor_digest
 {
   "total_found": 5,
-  "query": "attention mechanisms transformer",
+  "monitor_name": "attention mechanisms transformer",
   "papers": [{"title": "New attention paper"}]
 }
 \`\`\``;
@@ -188,10 +188,10 @@ export const MULTI_CARD_TEXT = `Multiple updates:
 
 And new papers:
 
-\`\`\`radar_digest
+\`\`\`monitor_digest
 {
   "total_found": 3,
-  "query": "deep learning",
+  "monitor_name": "deep learning",
   "papers": []
 }
 \`\`\``;
@@ -208,13 +208,13 @@ export const FINAL_WITH_PROGRESS_CARD: ChatStreamEvent = {
   },
 };
 
-export const FINAL_WITH_RADAR_DIGEST: ChatStreamEvent = {
+export const FINAL_WITH_MONITOR_DIGEST: ChatStreamEvent = {
   runId: 'run-card-002',
   sessionKey: 'main',
   state: 'final',
   message: {
     role: 'assistant',
-    content: [{ type: 'text', text: RADAR_DIGEST_TEXT }],
+    content: [{ type: 'text', text: MONITOR_DIGEST_TEXT }],
     timestamp: 1710400011000,
   },
 };

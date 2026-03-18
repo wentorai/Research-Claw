@@ -71,7 +71,7 @@ The agent emits a fenced code block where the language tag is the card type and
 the body is a single JSON object:
 
 ````markdown
-Here are the top papers from your radar scan:
+Here are the top papers from your monitor scan:
 
 ```paper_card
 {
@@ -192,7 +192,7 @@ interface PaperCard {
 | View Details | Opens paper detail panel in the Dashboard sidebar |
 
 **When to use:** Whenever the agent references a specific paper — search results,
-recommendations, citation lookups, radar digests (as nested items), or reading
+recommendations, citation lookups, monitor digests (as nested items), or reading
 list summaries.
 
 ---
@@ -339,14 +339,14 @@ external services, or any action flagged by `exec-approvals`.
 
 ---
 
-### 3.5 `radar_digest`
+### 3.5 `monitor_digest`
 
-Summarizes results from an automated literature radar scan. Produced by the
-`radar_scan` skill or the nightly arXiv sweep cron job.
+Summarizes results from an automated literature monitor scan. Produced by the
+monitor system or scheduled scan jobs.
 
 ```typescript
-interface RadarDigest {
-  type: 'radar_digest';
+interface MonitorDigest {
+  type: 'monitor_digest';
 
   /** Data source for the scan. Required. */
   source: string;  // "arxiv" | "semantic_scholar" | "pubmed" | "custom"
@@ -380,7 +380,7 @@ interface NotablePaper {
 `notable_paper` entry renders a mini row with an "Expand" button that creates
 a full `paper_card` in the chat.
 
-**When to use:** Automated radar results, topic-tracking digests, or when the
+**When to use:** Automated monitor results, topic-tracking digests, or when the
 user asks "What's new in [topic]?"
 
 ---
@@ -674,19 +674,19 @@ parser to validate payloads before attempting to render a card.
 }
 ```
 
-### 4.5 `radar_digest` Schema
+### 4.5 `monitor_digest` Schema
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://wentor.ai/schemas/cards/radar_digest.json",
-  "title": "RadarDigest",
+  "$id": "https://wentor.ai/schemas/cards/monitor_digest.json",
+  "title": "MonitorDigest",
   "type": "object",
   "required": ["source", "query", "period", "total_found", "notable_papers"],
   "properties": {
     "type": {
       "type": "string",
-      "const": "radar_digest"
+      "const": "monitor_digest"
     },
     "source": {
       "type": "string",
@@ -822,7 +822,7 @@ const CARD_TYPE_REGISTRY = new Set([
   'task_card',
   'progress_card',
   'approval_card',
-  'radar_digest',
+  'monitor_digest',
   'file_card',
 ] as const);
 
@@ -882,7 +882,7 @@ import paperCardSchema from '../schemas/paper_card.json';
 import taskCardSchema from '../schemas/task_card.json';
 import progressCardSchema from '../schemas/progress_card.json';
 import approvalCardSchema from '../schemas/approval_card.json';
-import radarDigestSchema from '../schemas/radar_digest.json';
+import monitorDigestSchema from '../schemas/monitor_digest.json';
 import fileCardSchema from '../schemas/file_card.json';
 
 const ajv = new Ajv({ allErrors: true });
@@ -893,7 +893,7 @@ const validators: Record<CardType, ReturnType<typeof ajv.compile>> = {
   task_card: ajv.compile(taskCardSchema),
   progress_card: ajv.compile(progressCardSchema),
   approval_card: ajv.compile(approvalCardSchema),
-  radar_digest: ajv.compile(radarDigestSchema),
+  monitor_digest: ajv.compile(monitorDigestSchema),
   file_card: ajv.compile(fileCardSchema),
 };
 
@@ -964,7 +964,7 @@ fenced blocks during streaming:
 | `task_card` | `<TaskCard>` | `dashboard/src/components/chat/cards/TaskCard.tsx` |
 | `progress_card` | `<ProgressCard>` | `dashboard/src/components/chat/cards/ProgressCard.tsx` |
 | `approval_card` | `<ApprovalCard>` | `dashboard/src/components/chat/cards/ApprovalCard.tsx` |
-| `radar_digest` | `<RadarDigest>` | `dashboard/src/components/chat/cards/RadarDigest.tsx` |
+| `monitor_digest` | `<MonitorDigest>` | `dashboard/src/components/chat/cards/MonitorDigest.tsx` |
 | `file_card` | `<FileCard>` | `dashboard/src/components/chat/cards/FileCard.tsx` |
 
 ### 6.2 Component Resolver
@@ -981,7 +981,7 @@ const CARD_COMPONENTS: Record<CardType, ComponentType<{ data: any }>> = {
   task_card: lazy(() => import('./cards/TaskCard')),
   progress_card: lazy(() => import('./cards/ProgressCard')),
   approval_card: lazy(() => import('./cards/ApprovalCard')),
-  radar_digest: lazy(() => import('./cards/RadarDigest')),
+  monitor_digest: lazy(() => import('./cards/MonitorDigest')),
   file_card: lazy(() => import('./cards/FileCard')),
 };
 
@@ -1058,7 +1058,7 @@ All card components follow the HashMind dark terminal aesthetic:
   - `task_card`: Amber (`#F59E0B`)
   - `progress_card`: Emerald (`#10B981`)
   - `approval_card`: Varies by `risk_level` (green / amber / red)
-  - `radar_digest`: Purple (`#8B5CF6`)
+  - `monitor_digest`: Purple (`#8B5CF6`)
   - `file_card`: Neutral (`#6B7280`)
 - **Typography:** Monospace for metadata fields, sans-serif for titles
 - **Actions:** Ghost buttons aligned to bottom-right, visible on hover
@@ -1150,7 +1150,7 @@ tokens to minimize context window consumption.
 ## Message Cards
 
 You can embed rich cards in your responses using fenced code blocks.
-Available card types: paper_card, task_card, progress_card, approval_card, radar_digest, file_card.
+Available card types: paper_card, task_card, progress_card, approval_card, monitor_digest, file_card.
 
 Format:
 ```card_type
@@ -1165,7 +1165,7 @@ Rules:
 - Use task_card when creating, updating, or listing research tasks.
 - Use progress_card for activity summaries (daily, weekly, session).
 - Use approval_card when requesting permission for consequential actions.
-- Use radar_digest for literature scan summaries.
+- Use monitor_digest for literature scan summaries.
 - Use file_card when referencing workspace files you created or modified.
 - If unsure whether to use a card, prefer plain text. Cards are for structured data.
 ```
@@ -1265,7 +1265,7 @@ const CARD_TYPE_REGISTRY = new Set([
   'task_card',
   'progress_card',
   'approval_card',
-  'radar_digest',
+  'monitor_digest',
   'file_card',
   'experiment_card',  // <-- new
 ] as const);
@@ -1399,11 +1399,11 @@ describe('<PaperCard>', () => {
 
 | Card Type | Required Fields | Optional Fields | Actions | Typical Source |
 |---|---|---|---|---|
-| `paper_card` | `title`, `authors` | `venue`, `year`, `doi`, `url`, `arxiv_id`, `abstract_preview`, `read_status`, `library_id`, `tags` | Add to Library, Open PDF, Cite, View Details | `literature_search`, `radar_scan`, manual |
+| `paper_card` | `title`, `authors` | `venue`, `year`, `doi`, `url`, `arxiv_id`, `abstract_preview`, `read_status`, `library_id`, `tags` | Add to Library, Open PDF, Cite, View Details | `literature_search`, monitor scan, manual |
 | `task_card` | `title`, `task_type`, `status`, `priority` | `id`, `description`, `deadline`, `related_paper_title` | View in Panel, Mark Complete, Edit | `research_planner`, heartbeat |
 | `progress_card` | `period`, `papers_read`, `papers_added`, `tasks_completed`, `tasks_created` | `writing_words`, `reading_minutes`, `highlights` | (none) | Heartbeat cron, manual |
 | `approval_card` | `action`, `context`, `risk_level` | `details`, `approval_id` | Approve, Reject, Ask for Details | `exec-approvals` |
-| `radar_digest` | `source`, `query`, `period`, `total_found`, `notable_papers` | (none) | Expand notable paper | `radar_scan` cron |
+| `monitor_digest` | `source`, `query`, `period`, `total_found`, `notable_papers` | (none) | Expand notable paper | monitor scan |
 | `file_card` | `name`, `path` | `size_bytes`, `mime_type`, `created_at`, `modified_at`, `git_status` | Open, Download, View Diff | File operations |
 
 ## Appendix B: Full Example Message
@@ -1413,11 +1413,11 @@ Below is a complete agent message demonstrating multiple card types in context:
 ````markdown
 Good morning! Here's your daily research briefing.
 
-## Radar Scan Results
+## Monitor Scan Results
 
 Your arXiv tracker found 12 new papers on "graph neural networks for molecular property prediction" overnight. Here are the most relevant:
 
-```radar_digest
+```monitor_digest
 {
   "source": "arxiv",
   "query": "graph neural networks molecular property prediction",

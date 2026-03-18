@@ -48,8 +48,8 @@ Cross-references: [`05` Plugin SDK details](./modules/05-plugin-sdk.md) | [`03e`
  │                  │  │  research-claw-core   │    │    wentor-connect       │  │   │
  │                  │  │  (L1 plugin)          │    │    (L1 plugin, future)  │  │   │
  │                  │  │                       │    │                         │  │   │
- │                  │  │  - 31 agent tools     │    │  - account sync         │  │   │
- │                  │  │  - 61 WS RPC methods  │    │  - skills sync          │  │   │
+ │                  │  │  - 28 agent tools     │    │  - account sync         │  │   │
+ │                  │  │  - 57 WS RPC methods  │    │  - skills sync          │  │   │
  │                  │  │  - 7 hooks            │    │  - telemetry            │  │   │
  │                  │  │  - 1 HTTP route       │    │                         │  │   │
  │                  │  │  - 1 service (SQLite) │    │  (deferred post-MVP)    │  │   │
@@ -153,7 +153,7 @@ The plugin tier uses OpenClaw's documented Plugin SDK. Plugins are TypeScript pa
 
 | Plugin | Status | Description |
 |--------|--------|-------------|
-| `research-claw-core` | MVP (P0) | Literature library, task management, workspace tracking, 31 tools, 61 WS RPC + 1 HTTP = 62 interface methods |
+| `research-claw-core` | MVP (P0) | Literature library, task management, workspace tracking, 28 tools, 57 WS RPC + 1 HTTP = 58 interface methods |
 | `wentor-connect` | Placeholder | Wentor platform sync (deferred post-MVP) |
 
 **Upgrade risk: LOW.** Plugin SDK is semver-stable. Breaking changes only on OpenClaw major versions. TypeScript compilation catches interface drift at build time.
@@ -722,7 +722,7 @@ Methods the dashboard calls from OpenClaw's standard gateway. Grouped by domain.
 
 ### 5.2 Custom Research-Claw Methods (rc.*)
 
-Registered by the `research-claw-core` plugin via `api.registerGatewayMethod()`. These extend the RPC surface for dashboard-specific functionality. **61 WS methods + 1 HTTP route = 62 total.**
+Registered by the `research-claw-core` plugin via `api.registerGatewayMethod()`. These extend the RPC surface for dashboard-specific functionality. **57 WS methods + 1 HTTP route = 58 total.**
 
 #### rc.lit.* — Literature Library (26 methods)
 
@@ -798,15 +798,6 @@ Registered by the `research-claw-core` plugin via `api.registerGatewayMethod()`.
 | `rc.ws.openExternal` | `{ path }` | `{ ok }` | Open file with system default app |
 | `rc.ws.openFolder` | `{ path }` | `{ ok }` | Open containing folder in file manager |
 | `rc.ws.move` | `{ from, to }` | `{ from, to, committed }` | Move or rename file/directory |
-
-#### rc.radar.* — Radar Tracking (4 methods)
-
-| Method | Params | Returns | Description |
-|--------|--------|---------|-------------|
-| `rc.radar.config.get` | `{}` | `RadarConfig` | Get radar tracking config |
-| `rc.radar.config.set` | `{ keywords?, authors?, journals?, sources? }` | `RadarConfig` | Set radar tracking config |
-| `rc.radar.scan` | `{ keywords?, sources?, max_results? }` | `{ results }` | Scan sources for new papers |
-| `rc.radar.lastScan` | `{}` | `{ results, scanned_at }` | Get cached last scan results |
 
 #### rc.notifications.* — Notifications (2 methods)
 

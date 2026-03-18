@@ -29,7 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'library', icon: <BookOutlined />, labelKey: 'nav.library' },
   { key: 'workspace', icon: <FolderOutlined />, labelKey: 'nav.workspace' },
   { key: 'tasks', icon: <CheckSquareOutlined />, labelKey: 'nav.tasks' },
-  { key: 'radar', icon: <EyeOutlined />, labelKey: 'nav.monitor' },
+  { key: 'monitor', icon: <EyeOutlined />, labelKey: 'nav.monitor' },
   { key: 'settings', icon: <SettingOutlined />, labelKey: 'nav.settings' },
 ];
 

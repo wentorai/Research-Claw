@@ -1,8 +1,7 @@
 /**
  * Monitor Service — CRUD + gateway cron binding for rc_monitors
  *
- * Replaces the old rc_radar_config singleton + rc_cron_state preset system
- * with a universal N-monitor model. Each monitor is an independent
+ * Universal N-monitor model. Each monitor is an independent
  * information source watcher backed by a gateway cron job.
  */
 

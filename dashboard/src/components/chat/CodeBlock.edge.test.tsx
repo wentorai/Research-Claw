@@ -156,23 +156,6 @@ describe('CodeBlock edge cases', () => {
     expect(screen.getByText('test.txt')).toBeInTheDocument();
   });
 
-  it('renders radar_digest with empty notable_papers array', () => {
-    const json = JSON.stringify({
-      type: 'radar_digest',
-      source: 'arxiv',
-      query: 'test',
-      period: 'today',
-      total_found: 0,
-      notable_papers: [],
-    });
-    render(
-      <CodeBlock className="language-radar_digest">
-        {json + '\n'}
-      </CodeBlock>,
-    );
-    expect(screen.getByText('card.radar.title')).toBeInTheDocument();
-  });
-
   it('handles progress_card with all zero metrics via CodeBlock', () => {
     const json = JSON.stringify({
       type: 'progress_card',

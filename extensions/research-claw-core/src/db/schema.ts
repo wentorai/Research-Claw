@@ -178,18 +178,6 @@ CREATE TABLE IF NOT EXISTS rc_activity_log (
   created_at TEXT NOT NULL
 );`;
 
-const RC_RADAR_CONFIG = `
-CREATE TABLE IF NOT EXISTS rc_radar_config (
-  id                TEXT PRIMARY KEY DEFAULT 'default',
-  keywords          TEXT NOT NULL DEFAULT '[]',
-  authors           TEXT NOT NULL DEFAULT '[]',
-  journals          TEXT NOT NULL DEFAULT '[]',
-  sources           TEXT NOT NULL DEFAULT '["arxiv"]',
-  updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  last_scan_at      TEXT,
-  last_scan_results TEXT
-);`;
-
 const RC_AGENT_NOTIFICATIONS = `
 CREATE TABLE IF NOT EXISTS rc_agent_notifications (
   id         TEXT PRIMARY KEY,
@@ -257,7 +245,6 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   RC_PAPER_NOTES,
   RC_TASKS,
   RC_ACTIVITY_LOG,
-  RC_RADAR_CONFIG,
   RC_AGENT_NOTIFICATIONS,
   RC_HEARTBEAT_LOG,
   RC_CRON_STATE,

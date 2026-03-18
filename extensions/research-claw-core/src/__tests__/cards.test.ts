@@ -12,8 +12,8 @@ import {
   type TaskCard,
   type ProgressCard,
   type ApprovalCard,
-  type RadarDigest,
   type FileCard,
+  type MonitorDigest,
   type MessageCard,
   CARD_TYPES,
 } from '../cards/protocol.js';
@@ -95,24 +95,24 @@ describe('serializeCard', () => {
     expect(result).toContain('"risk_level": "medium"');
   });
 
-  it('serializes a radar_digest', () => {
-    const card: RadarDigest = {
-      type: 'radar_digest',
-      source: 'arxiv',
-      query: 'transformer attention',
-      period: '2026-03-05 to 2026-03-12',
+  it('serializes a monitor_digest', () => {
+    const card: MonitorDigest = {
+      type: 'monitor_digest',
+      monitor_name: 'arXiv Daily',
+      source_type: 'arxiv',
+      target: 'transformer attention',
       total_found: 47,
-      notable_papers: [
+      findings: [
         {
           title: 'Efficient Multi-Scale Attention',
-          authors: ['Chen, X.'],
-          relevance_note: 'Reduces FLOPs by 40%',
+          url: 'https://arxiv.org/abs/2026.12345',
+          summary: 'Reduces FLOPs by 40%',
         },
       ],
     };
 
     const result = serializeCard(card);
-    expect(result).toMatch(/^```radar_digest\n/);
+    expect(result).toMatch(/^```monitor_digest\n/);
     expect(result).toContain('"total_found": 47');
   });
 
@@ -327,7 +327,7 @@ describe('edge cases', () => {
       { type: 'task_card', title: 'Task', task_type: 'agent', status: 'todo', priority: 'low' },
       { type: 'progress_card', period: 'today', papers_read: 0, papers_added: 0, tasks_completed: 0, tasks_created: 0 },
       { type: 'approval_card', action: 'Test', context: 'Test', risk_level: 'low' },
-      { type: 'radar_digest', source: 'arxiv', query: 'test', period: 'today', total_found: 0, notable_papers: [] },
+      { type: 'monitor_digest', monitor_name: 'Test', source_type: 'arxiv', target: 'test', total_found: 0, findings: [] },
       { type: 'file_card', name: 'test.md', path: 'notes/test.md' },
     ];
 
@@ -346,7 +346,7 @@ describe('edge cases', () => {
     expect(CARD_TYPES.has('task_card')).toBe(true);
     expect(CARD_TYPES.has('progress_card')).toBe(true);
     expect(CARD_TYPES.has('approval_card')).toBe(true);
-    expect(CARD_TYPES.has('radar_digest')).toBe(true);
     expect(CARD_TYPES.has('file_card')).toBe(true);
+    expect(CARD_TYPES.has('monitor_digest')).toBe(true);
   });
 });

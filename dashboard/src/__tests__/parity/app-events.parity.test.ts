@@ -19,12 +19,10 @@ import { useUiStore } from '../../stores/ui';
 import type { ChatStreamEvent } from '../../gateway/types';
 import {
   PROGRESS_CARD_TEXT,
-  RADAR_DIGEST_TEXT,
   APPROVAL_CARD_TEXT,
   NO_CARD_TEXT,
   MULTI_CARD_TEXT,
   FINAL_WITH_PROGRESS_CARD,
-  FINAL_WITH_RADAR_DIGEST,
   STREAMING_DELTA,
   STREAMING_FINAL,
   USER_MSG,
@@ -542,7 +540,7 @@ describe('handleChatEvent error/aborted — parity with chat.ts:309-334', () => 
 describe('Card notification extraction — chat.ts extractCardNotifications', () => {
   /**
    * Our chat.ts (lines 67-120):
-   * CARD_NOTIFICATION_RE matches ```progress_card, ```radar_digest, ```approval_card
+   * CARD_NOTIFICATION_RE matches ```progress_card, ```monitor_digest, ```approval_card
    * and routes to addNotification with appropriate types.
    *
    * This is Channel B of the notification system (Channel A = RPC polling).
@@ -560,21 +558,6 @@ describe('Card notification extraction — chat.ts extractCardNotifications', ()
     expect(heartbeat!.title).toContain('Heartbeat');
     expect(heartbeat!.title).toContain('daily');
     expect(heartbeat!.body).toContain('3 papers processed');
-  });
-
-  it('radar_digest → system notification', () => {
-    setRunId('run-card-002');
-
-    useChatStore.getState().handleChatEvent(FINAL_WITH_RADAR_DIGEST);
-
-    const notifications = useUiStore.getState().notifications;
-    expect(notifications.length).toBeGreaterThanOrEqual(1);
-
-    const radar = notifications.find((n) => n.type === 'system');
-    expect(radar).toBeDefined();
-    expect(radar!.title).toContain('Radar');
-    expect(radar!.title).toContain('5');
-    expect(radar!.body).toContain('attention mechanisms transformer');
   });
 
   it('approval_card → error-level notification', () => {
@@ -643,7 +626,7 @@ describe('Card notification extraction — chat.ts extractCardNotifications', ()
     });
 
     // Sub-agent / server-initiated finals now also extract card notifications
-    // (heartbeat, cron, and monitor runs produce progress_card and radar_digest).
+    // (heartbeat, cron, and monitor runs produce progress_card and monitor_digest).
     expect(useUiStore.getState().notifications).toHaveLength(1);
   });
 });

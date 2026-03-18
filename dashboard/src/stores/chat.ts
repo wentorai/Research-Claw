@@ -4,8 +4,8 @@ import { useGatewayStore } from './gateway';
 import { useLibraryStore } from './library';
 import { useTasksStore } from './tasks';
 import { useSessionsStore } from './sessions';
-import { useRadarStore } from './radar';
 import { useCronStore } from './cron';
+import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
 import { primaryModelSupportsVision, hasImageModelConfigured } from './config';
 import i18n from '../i18n';
@@ -70,10 +70,10 @@ function isVisibleRole(role: string): boolean {
 /**
  * Channel B: Extract notifications from card-type JSON blocks in assistant messages.
  *
- * Markdown code blocks with card language tags (```progress_card, ```radar_digest, etc.)
+ * Markdown code blocks with card language tags (```progress_card, ```monitor_digest, etc.)
  * contain structured data that should also generate notifications.
  */
-const CARD_NOTIFICATION_RE = /```(progress_card|radar_digest|monitor_digest|approval_card)\s*\n([\s\S]*?)```/g;
+const CARD_NOTIFICATION_RE = /```(progress_card|monitor_digest|approval_card)\s*\n([\s\S]*?)```/g;
 
 function extractCardNotifications(text: string): void {
   const { addNotification } = useUiStore.getState();
@@ -97,18 +97,6 @@ function extractCardNotifications(text: string): void {
             title: `Heartbeat: ${data.period ?? 'check'}`,
             body: highlights.slice(0, 3).join('; '),
             dedupKey: `heartbeat:${data.period ?? 'check'}`,
-          });
-        }
-        break;
-      }
-      case 'radar_digest': {
-        const total = data.total_found as number | undefined;
-        if (total && total > 0) {
-          addNotification({
-            type: 'system',
-            title: `Radar: ${total} new papers`,
-            body: String(data.query ?? ''),
-            dedupKey: `radar:${data.query}:${data.period ?? 'latest'}`,
           });
         }
         break;
@@ -578,8 +566,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             useLibraryStore.getState().loadTags();
             useTasksStore.getState().loadTasks();
             useSessionsStore.getState().loadSessions();
-            useRadarStore.getState().loadConfig();
             useCronStore.getState().loadPresets();
+            useMonitorStore.getState().loadMonitors();
             useUiStore.getState().triggerWorkspaceRefresh();
             // Channel A: poll for deadline-based notifications
             useUiStore.getState().checkNotifications();
@@ -608,7 +596,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           }));
 
           // Channel B: server-initiated runs (heartbeat, cron, monitor) also produce
-          // card notifications (progress_card from heartbeat, radar_digest from monitor).
+          // card notifications (progress_card from heartbeat, monitor_digest from monitor).
           extractCardNotifications(text);
         }
         break;

@@ -14,7 +14,6 @@ export type CardType =
   | 'task_card'
   | 'progress_card'
   | 'approval_card'
-  | 'radar_digest'
   | 'file_card'
   | 'monitor_digest';
 
@@ -24,7 +23,6 @@ export const CARD_TYPES: ReadonlySet<string> = new Set<CardType>([
   'task_card',
   'progress_card',
   'approval_card',
-  'radar_digest',
   'file_card',
   'monitor_digest',
 ]);
@@ -107,28 +105,6 @@ export interface ApprovalCard {
 }
 
 // ---------------------------------------------------------------------------
-// Radar Digest (6 fields + NotablePaper sub-interface)
-// ---------------------------------------------------------------------------
-
-export interface NotablePaper {
-  title: string;
-  authors: string[];
-  /** Why the agent considers this paper notable for the user. */
-  relevance_note: string;
-}
-
-export interface RadarDigest {
-  type: 'radar_digest';
-  source: string; // "arxiv" | "semantic_scholar" | "pubmed" | "custom"
-  /** The search query or topic that was tracked. */
-  query: string;
-  /** Time window the scan covered. */
-  period: string;
-  total_found: number;
-  notable_papers: NotablePaper[];
-}
-
-// ---------------------------------------------------------------------------
 // File Card (8 fields)
 // ---------------------------------------------------------------------------
 
@@ -177,6 +153,5 @@ export type MessageCard =
   | TaskCard
   | ProgressCard
   | ApprovalCard
-  | RadarDigest
   | FileCard
   | MonitorDigest;

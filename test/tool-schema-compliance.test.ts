@@ -97,7 +97,7 @@ function walkSchema(
 // This avoids needing runtime dependencies (better-sqlite3, service stubs).
 
 const TOOLS_DIR = path.resolve(__dirname, '../extensions/research-claw-core/src');
-const TOOL_FILES = ['literature/tools.ts', 'tasks/tools.ts', 'workspace/tools.ts', 'radar/tools.ts', 'monitor/tools.ts'];
+const TOOL_FILES = ['literature/tools.ts', 'tasks/tools.ts', 'workspace/tools.ts', 'monitor/tools.ts'];
 
 interface ExtractedTool {
   file: string;
@@ -176,9 +176,9 @@ for (const file of TOOL_FILES) {
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe('Tool Schema Compliance (static analysis)', () => {
-  it('extracts schemas from all 5 tool files', () => {
-    // We expect at least 38+ tools (41 minus a few that may have complex syntax)
-    expect(allTools.length).toBeGreaterThanOrEqual(38);
+  it('extracts schemas from all 4 tool files', () => {
+    // We expect at least 35+ tools (38 minus a few that may have complex syntax)
+    expect(allTools.length).toBeGreaterThanOrEqual(35);
   });
 
   it('R1: every type:"array" has "items"', () => {
