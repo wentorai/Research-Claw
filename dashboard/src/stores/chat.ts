@@ -551,7 +551,26 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       }
 
       case 'final': {
-        if (!event.message) return;
+        if (!event.message) {
+          // MiniMax and some providers send final without a message body.
+          // Clear streaming state and reload history to show the result.
+          if (event.runId === runId || (get().streaming && !runId)) {
+            set({ streaming: false, streamText: null, runId: null });
+            get().loadHistory();
+            setTimeout(() => {
+              useLibraryStore.getState().loadPapers();
+              useLibraryStore.getState().loadTags();
+              useTasksStore.getState().loadTasks();
+              useSessionsStore.getState().loadSessions();
+              useRadarStore.getState().loadConfig();
+              useCronStore.getState().loadPresets();
+              useUiStore.getState().triggerWorkspaceRefresh();
+              useUiStore.getState().checkNotifications();
+              get().loadSessionUsage();
+            }, 500);
+          }
+          return;
+        }
         // Skip tool result messages — not user-visible
         if (!isVisibleRole(event.message.role)) return;
         const text = extractText(event.message);
