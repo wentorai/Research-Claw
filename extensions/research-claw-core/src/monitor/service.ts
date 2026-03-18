@@ -1,8 +1,9 @@
 /**
- * Monitor Service — CRUD + gateway cron binding for rc_monitors
+ * Monitor Service — CRUD + gateway cron binding + memory for rc_monitors
  *
- * Universal N-monitor model. Each monitor is an independent
- * information source watcher backed by a gateway cron job.
+ * Universal N-monitor model with agent memory. Each monitor is an independent
+ * information source watcher backed by a gateway cron job. The memory column
+ * stores dedup fingerprints, run history, and adaptive notes.
  */
 
 import type BetterSqlite3 from 'better-sqlite3';
@@ -11,19 +12,25 @@ import { randomUUID } from 'node:crypto';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
-export type SourceType =
-  | 'arxiv'
-  | 'github'
-  | 'rss'
-  | 'webpage'
-  | 'openalex'
-  | 'twitter'
-  | 'custom';
+export interface MonitorMemory {
+  v: 1;
+  seen: string[];
+  runs: MonitorRun[];
+  notes: string;
+}
+
+export interface MonitorRun {
+  at: string;
+  found: number;
+  new_count: number;
+  sources: string[];
+  error?: string;
+}
 
 export interface Monitor {
   id: string;
   name: string;
-  source_type: SourceType;
+  source_type: string;
   target: string;
   filters: Record<string, unknown>;
   schedule: string;
@@ -36,13 +43,14 @@ export interface Monitor {
   last_error: string | null;
   check_count: number;
   finding_count: number;
+  memory: MonitorMemory;
   created_at: string;
   updated_at: string;
 }
 
 export interface MonitorInput {
   name: string;
-  source_type: SourceType;
+  source_type: string;
   target?: string;
   filters?: Record<string, unknown>;
   schedule?: string;
@@ -53,7 +61,7 @@ export interface MonitorInput {
 
 export interface MonitorPatch {
   name?: string;
-  source_type?: SourceType;
+  source_type?: string;
   target?: string;
   filters?: Record<string, unknown>;
   schedule?: string;
@@ -80,6 +88,7 @@ interface MonitorRow {
   last_error: string | null;
   check_count: number;
   finding_count: number;
+  memory: string;
   created_at: string;
   updated_at: string;
 }
@@ -89,7 +98,7 @@ interface MonitorRow {
 interface SeedMonitor {
   id: string;
   name: string;
-  source_type: SourceType;
+  source_type: string;
   target: string;
   filters: Record<string, unknown>;
   schedule: string;
@@ -99,123 +108,87 @@ interface SeedMonitor {
 }
 
 const SEED_MONITORS: SeedMonitor[] = [
-  // ── Academic paper discovery ────────────────────────────────────
   {
-    id: 'arxiv-daily',
-    name: 'arXiv Daily Digest',
-    source_type: 'arxiv',
+    id: 'academic-daily',
+    name: 'Academic Paper Digest',
+    source_type: 'academic',
     target: '',
-    filters: { keywords: [], authors: [], categories: ['cs.AI'] },
+    filters: { keywords: [], authors: [], journals: [], domain: '' },
     schedule: '0 7 * * *',
     enabled: false,
     notify: true,
-    agent_prompt:
-      'Scan arXiv for new papers matching this monitor\'s keywords and categories. ' +
-      'Use monitor_scan with source_type="arxiv". ' +
-      'Summarize the top 5 most relevant papers with one-line relevance notes. ' +
-      'Cache results with monitor_report. ' +
-      'Send a notification with send_notification summarizing count and highlights.',
+    agent_prompt: '', // will use defaultAgentPrompt('academic', filters)
   },
-  // ── Code & tools ────────────────────────────────────────────────
   {
-    id: 'github-releases',
+    id: 'code-releases',
     name: 'GitHub Release Tracker',
-    source_type: 'github',
+    source_type: 'code',
     target: '',
     filters: { events: ['release', 'tag'] },
     schedule: '0 9 * * *',
     enabled: false,
     notify: true,
-    agent_prompt:
-      'Check the target GitHub repository for new releases, tags, and significant commits. ' +
-      'Fetch latest release notes and summarize what changed. ' +
-      'Cache results with monitor_report and send_notification.',
+    agent_prompt: '',
   },
   {
-    id: 'github-trending',
+    id: 'code-trending',
     name: 'GitHub Trending',
-    source_type: 'github',
-    target: '',
-    filters: { scope: 'trending', language: '', since: 'daily' },
+    source_type: 'code',
+    target: 'https://github.com/trending',
+    filters: { language: '', since: 'daily' },
     schedule: '0 9 * * 1-5',
     enabled: false,
     notify: true,
-    agent_prompt:
-      'Check GitHub Trending repositories (https://github.com/trending). ' +
-      'Filter by the configured language if set, otherwise check all. ' +
-      'Identify repos relevant to the user\'s research interests. ' +
-      'Summarize top 5 with star counts and descriptions. ' +
-      'Cache results with monitor_report and send_notification.',
+    agent_prompt: '',
   },
-
-  // ── Feeds & news ────────────────────────────────────────────────
   {
-    id: 'rss-feed',
+    id: 'feed-monitor',
     name: 'RSS Feed Monitor',
-    source_type: 'rss',
+    source_type: 'feed',
     target: '',
     filters: { keywords: [] },
     schedule: '0 8 * * *',
     enabled: false,
     notify: true,
-    agent_prompt:
-      'Fetch the RSS/Atom feed at the target URL. Parse new entries since last check. ' +
-      'Filter by keywords if configured. Summarize the top entries. ' +
-      'Cache results with monitor_report and send_notification.',
+    agent_prompt: '',
   },
   {
-    id: 'tech-news-daily',
-    name: 'AI/Tech News Daily',
-    source_type: 'rss',
+    id: 'tech-news',
+    name: 'AI/Tech News',
+    source_type: 'feed',
     target: 'https://huggingface.co/blog/feed.xml',
     filters: { keywords: [] },
     schedule: '0 8 * * *',
     enabled: false,
     notify: true,
-    agent_prompt:
-      'Fetch the Hugging Face blog RSS feed. Parse new entries since the last check. ' +
-      'Summarize top entries with their key points. ' +
-      'Highlight anything relevant to the user\'s research interests. ' +
-      'Cache results with monitor_report and send_notification.',
+    agent_prompt: '',
   },
-
-  // ── Web monitoring ──────────────────────────────────────────────
   {
-    id: 'webpage-watch',
+    id: 'web-watch',
     name: 'Webpage Change Detector',
-    source_type: 'webpage',
+    source_type: 'web',
     target: '',
     filters: { selector: '', keywords: [] },
     schedule: '0 9 * * 1-5',
     enabled: false,
     notify: true,
-    agent_prompt:
-      'Fetch the target webpage. Compare content with previous check (from last_results). ' +
-      'If content has meaningfully changed, extract and summarize the differences. ' +
-      'Cache new content with monitor_report. Only send notification if meaningful changes found.',
+    agent_prompt: '',
   },
   {
     id: 'conference-deadlines',
     name: 'Conference Deadline Tracker',
-    source_type: 'webpage',
+    source_type: 'web',
     target: 'https://aideadlin.es/?sub=ML,NLP,CV,AI',
     filters: { keywords: [] },
     schedule: '0 9 * * 1',
     enabled: false,
     notify: true,
-    agent_prompt:
-      'Fetch the AI conference deadline tracker page. Extract upcoming deadlines within 60 days. ' +
-      'Compare with previous check (from last_results) to identify newly added or approaching deadlines. ' +
-      'For each deadline: conference name, submission date, notification date, location. ' +
-      'Warn about any deadline within 14 days. ' +
-      'Cache results with monitor_report. Send notification if new deadlines or approaching ones found.',
+    agent_prompt: '',
   },
-
-  // ── Periodic self-reports ───────────────────────────────────────
   {
-    id: 'weekly-progress',
+    id: 'weekly-report',
     name: 'Weekly Progress Report',
-    source_type: 'custom',
+    source_type: 'report',
     target: '',
     filters: {},
     schedule: '0 17 * * 5',
@@ -231,9 +204,9 @@ const SEED_MONITORS: SeedMonitor[] = [
       'Send a brief notification with send_notification.',
   },
   {
-    id: 'daily-task-reminder',
+    id: 'daily-reminder',
     name: 'Daily Task Reminder',
-    source_type: 'custom',
+    source_type: 'reminder',
     target: '',
     filters: {},
     schedule: '0 9 * * *',
@@ -252,12 +225,21 @@ const SEED_MONITORS: SeedMonitor[] = [
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-const VALID_SOURCE_TYPES: readonly string[] = [
-  'arxiv', 'github', 'rss', 'webpage', 'openalex', 'twitter', 'custom',
-];
+const DEFAULT_MEMORY: MonitorMemory = { v: 1, seen: [], runs: [], notes: '' };
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function parseMemory(raw: string | null | undefined): MonitorMemory {
+  if (!raw) return { ...DEFAULT_MEMORY, seen: [], runs: [] };
+  try {
+    const parsed = JSON.parse(raw) as MonitorMemory;
+    if (parsed && parsed.v === 1 && Array.isArray(parsed.seen) && Array.isArray(parsed.runs)) {
+      return parsed;
+    }
+  } catch { /* malformed */ }
+  return { ...DEFAULT_MEMORY, seen: [], runs: [] };
 }
 
 function rowToMonitor(row: MonitorRow): Monitor {
@@ -270,7 +252,7 @@ function rowToMonitor(row: MonitorRow): Monitor {
   return {
     id: row.id,
     name: row.name,
-    source_type: row.source_type as SourceType,
+    source_type: row.source_type,
     target: row.target,
     filters,
     schedule: row.schedule,
@@ -283,6 +265,7 @@ function rowToMonitor(row: MonitorRow): Monitor {
     last_error: row.last_error,
     check_count: row.check_count,
     finding_count: row.finding_count,
+    memory: parseMemory(row.memory),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -293,28 +276,54 @@ function validateCron(expr: string): boolean {
   return fields.length === 5;
 }
 
-function validateSourceType(type: string): type is SourceType {
-  return VALID_SOURCE_TYPES.includes(type);
-}
+// ── Default agent prompt for a category ───────────────────────────────
 
-// ── Default agent prompt for a source type ────────────────────────────
+function defaultAgentPrompt(category: string, filters: Record<string, unknown>): string {
+  const protocol =
+    'EXECUTION PROTOCOL (mandatory, follow every step):\n' +
+    '1. READ: Call monitor_get_context with this monitor\'s ID to load memory.\n' +
+    '2. EXECUTE: Perform the monitoring task described below.\n' +
+    '3. REPORT: Call monitor_report with results array + fingerprints array.\n' +
+    '4. OBSERVE: If anything notable happened (source errors, patterns), call monitor_note.\n' +
+    '5. NOTIFY: If new findings > 0 and notify is enabled, call send_notification.\n\n';
 
-function defaultAgentPrompt(sourceType: SourceType): string {
-  switch (sourceType) {
-    case 'arxiv':
-      return 'Scan arXiv for new papers matching this monitor\'s keywords. Use monitor_scan. Summarize top 5 findings. Cache with monitor_report and send_notification.';
-    case 'github':
-      return 'Check the target GitHub repository for new releases, issues, or commits. Summarize what changed. Cache with monitor_report and send_notification.';
-    case 'rss':
-      return 'Fetch the RSS feed at the target URL. Parse new entries since last check. Summarize top entries. Cache with monitor_report and send_notification.';
-    case 'webpage':
-      return 'Fetch the target webpage. Compare with previous check. Summarize any meaningful changes. Cache with monitor_report and send_notification only if changed.';
-    case 'openalex':
-      return 'Search OpenAlex for new works matching this monitor\'s config. Use monitor_scan. Summarize findings. Cache with monitor_report and send_notification.';
-    case 'twitter':
-      return 'Check the target Twitter/X account for new posts. Summarize noteworthy updates. Cache with monitor_report and send_notification.';
-    case 'custom':
-      return 'Execute the custom monitoring task as described. Report findings with monitor_report and send_notification.';
+  switch (category) {
+    case 'academic':
+      return protocol +
+        'TASK: Search for new academic papers matching the configured filters.\n' +
+        'Route by domain using SKILL.md Selection Logic:\n' +
+        '- If journals specified \u2192 search_crossref(journal=...) + search_europe_pmc(JOURNAL:...)\n' +
+        '- CS/AI \u2192 search_dblp + search_arxiv\n' +
+        '- Biomedical \u2192 search_pubmed + search_europe_pmc\n' +
+        '- Economics \u2192 search_crossref(journal=...)\n' +
+        '- Physics \u2192 search_arxiv + search_inspire\n' +
+        '- General \u2192 search_crossref\n' +
+        'Generate fingerprints: doi:{value} or arxiv:{id} for each paper found.';
+    case 'code':
+      return protocol +
+        'TASK: Check the target repository for new releases, tags, or significant updates.\n' +
+        'Use browser to visit the target URL. Extract release notes and changes.\n' +
+        'Generate fingerprints: gh:{repo}:release:{tag} or gh:{repo}:commit:{sha}.';
+    case 'feed':
+      return protocol +
+        'TASK: Fetch the RSS/Atom feed at the target URL.\n' +
+        'Parse entries, filter by configured keywords if any.\n' +
+        'Generate fingerprints: rss:{entry_url} or rss:guid:{guid} for each entry.';
+    case 'web':
+      return protocol +
+        'TASK: Visit the target webpage using browser.\n' +
+        'Take a snapshot and compare with previous content (from memory).\n' +
+        'If meaningfully changed, extract and summarize the differences.\n' +
+        'Generate fingerprints: web:sha256:{content_hash}.';
+    case 'social':
+      return protocol +
+        'TASK: Check the target social media account/hashtag for new posts.\n' +
+        'Use browser to visit the target. Extract noteworthy updates.\n' +
+        'Generate fingerprints: social:{platform}:{post_id}.';
+    default:
+      return protocol +
+        'TASK: Execute the monitoring task. Use available tools (search, browser, fetch) as appropriate.\n' +
+        'Generate a unique fingerprint for each distinct finding.';
   }
 }
 
@@ -338,6 +347,7 @@ export class MonitorService {
 
     const insertAll = this.db.transaction(() => {
       for (const seed of SEED_MONITORS) {
+        const prompt = seed.agent_prompt || defaultAgentPrompt(seed.source_type, seed.filters);
         stmt.run(
           seed.id,
           seed.name,
@@ -347,7 +357,7 @@ export class MonitorService {
           seed.schedule ?? '0 8 * * *',
           seed.enabled ? 1 : 0,
           seed.notify ? 1 : 0,
-          seed.agent_prompt ?? defaultAgentPrompt(seed.source_type as SourceType),
+          prompt,
         );
       }
     });
@@ -390,13 +400,14 @@ export class MonitorService {
 
   create(input: MonitorInput): Monitor {
     if (!input.name?.trim()) throw new Error('name is required');
-    if (!validateSourceType(input.source_type)) throw new Error(`Invalid source_type: ${input.source_type}. Valid: ${VALID_SOURCE_TYPES.join(', ')}`);
+    if (!input.source_type?.trim()) throw new Error('source_type is required and must be a non-empty string');
 
     const schedule = input.schedule ?? '0 8 * * *';
     if (!validateCron(schedule)) throw new Error(`Invalid cron expression: ${schedule} (expected 5 fields)`);
 
     const id = randomUUID();
-    const prompt = input.agent_prompt?.trim() || defaultAgentPrompt(input.source_type);
+    const filters = input.filters ?? {};
+    const prompt = input.agent_prompt?.trim() || defaultAgentPrompt(input.source_type, filters);
 
     this.db.prepare(`
       INSERT INTO rc_monitors (id, name, source_type, target, filters, schedule, enabled, notify, agent_prompt, created_at, updated_at)
@@ -404,9 +415,9 @@ export class MonitorService {
     `).run(
       id,
       input.name.trim(),
-      input.source_type,
+      input.source_type.trim(),
       input.target ?? '',
-      JSON.stringify(input.filters ?? {}),
+      JSON.stringify(filters),
       schedule,
       (input.enabled ?? true) ? 1 : 0,
       (input.notify ?? true) ? 1 : 0,
@@ -419,9 +430,6 @@ export class MonitorService {
   update(id: string, patch: MonitorPatch): Monitor {
     const current = this.get(id); // throws if not found
 
-    if (patch.source_type && !validateSourceType(patch.source_type)) {
-      throw new Error(`Invalid source_type: ${patch.source_type}`);
-    }
     if (patch.schedule && !validateCron(patch.schedule)) {
       throw new Error(`Invalid cron expression: ${patch.schedule} (expected 5 fields)`);
     }
@@ -468,12 +476,39 @@ export class MonitorService {
     this.db.prepare('UPDATE rc_monitors SET gateway_job_id = ? WHERE id = ?').run(jobId, id);
   }
 
-  // ── Report results (called by agent via monitor_report tool) ────
+  // ── Report results with memory dedup ──────────────────────────────
 
-  report(id: string, results: unknown[], summary?: string): Monitor {
+  report(id: string, results: unknown[], fingerprints: string[], summary?: string): Monitor {
     const monitor = this.get(id); // throws if not found
+    const memory = monitor.memory;
     const findingCount = Array.isArray(results) ? results.length : 0;
 
+    // Compute new_count by filtering fingerprints against seen
+    const seenSet = new Set(memory.seen);
+    const newFingerprints = fingerprints.filter((fp) => !seenSet.has(fp));
+    const newCount = newFingerprints.length;
+
+    // Append new fingerprints to seen (FIFO cap 2000)
+    for (const fp of newFingerprints) {
+      memory.seen.push(fp);
+    }
+    while (memory.seen.length > 2000) {
+      memory.seen.shift();
+    }
+
+    // Append a new MonitorRun to runs (cap 30)
+    const run: MonitorRun = {
+      at: now(),
+      found: findingCount,
+      new_count: newCount,
+      sources: [...new Set(fingerprints.map((fp) => fp.split(':')[0]))],
+    };
+    memory.runs.push(run);
+    while (memory.runs.length > 30) {
+      memory.runs.shift();
+    }
+
+    // Update DB
     this.db.prepare(`
       UPDATE rc_monitors SET
         last_check_at = datetime('now'),
@@ -481,9 +516,10 @@ export class MonitorService {
         last_error = NULL,
         check_count = check_count + 1,
         finding_count = finding_count + ?,
+        memory = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(JSON.stringify(results), findingCount, id);
+    `).run(JSON.stringify(results), newCount, JSON.stringify(memory), id);
 
     return this.get(id);
   }
@@ -497,6 +533,50 @@ export class MonitorService {
         updated_at = datetime('now')
       WHERE id = ?
     `).run(error, id);
+  }
+
+  // ── Get context for agent execution ─────────────────────────────
+
+  getContext(id: string): { config: Record<string, unknown>; memory: { notes: string; last_run: MonitorRun | null; seen_count: number }; agent_prompt: string } {
+    const monitor = this.get(id);
+    const mem = monitor.memory;
+
+    return {
+      config: {
+        id: monitor.id,
+        name: monitor.name,
+        source_type: monitor.source_type,
+        target: monitor.target,
+        filters: monitor.filters,
+        schedule: monitor.schedule,
+        notify: monitor.notify,
+      },
+      memory: {
+        notes: mem.notes,
+        last_run: mem.runs.length > 0 ? mem.runs[mem.runs.length - 1] : null,
+        seen_count: mem.seen.length,
+      },
+      agent_prompt: monitor.agent_prompt,
+    };
+  }
+
+  // ── Update adaptive notes ────────────────────────────────────────
+
+  updateNote(id: string, note: string): Monitor {
+    if (note.length > 4096) throw new Error('Note must be <= 4096 characters');
+
+    const monitor = this.get(id); // throws if not found
+    const memory = monitor.memory;
+    memory.notes = note;
+
+    this.db.prepare(`
+      UPDATE rc_monitors SET
+        memory = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(JSON.stringify(memory), id);
+
+    return this.get(id);
   }
 
   // ── List enabled monitors (for reconciliation on startup) ───────

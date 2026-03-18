@@ -1,19 +1,23 @@
 /**
  * Monitor system — RPC methods
  *
- * 8 methods:
- *   - rc.monitor.list     → list all monitors (with optional filters)
- *   - rc.monitor.get      → get a single monitor with last_results
- *   - rc.monitor.create   → create + auto-register gateway cron job
- *   - rc.monitor.update   → update config + sync gateway cron job
- *   - rc.monitor.delete   → delete + remove gateway cron job
- *   - rc.monitor.toggle   → quick enable/disable
- *   - rc.monitor.run      → manual trigger via gateway cron.run
- *   - rc.monitor.history  → execution history via gateway cron.runs
+ * 10 methods:
+ *   - rc.monitor.list       → list all monitors (with optional filters)
+ *   - rc.monitor.get        → get a single monitor with last_results
+ *   - rc.monitor.create     → create + auto-register gateway cron job
+ *   - rc.monitor.update     → update config + sync gateway cron job
+ *   - rc.monitor.delete     → delete + remove gateway cron job
+ *   - rc.monitor.toggle     → quick enable/disable
+ *   - rc.monitor.run        → manual trigger via gateway cron.run
+ *   - rc.monitor.history    → execution history via gateway cron.runs
+ *   - rc.monitor.report     → persist scan results with fingerprints
+ *   - rc.monitor.setJobId   → bind gateway job ID
+ *   - rc.monitor.getContext  → load config + memory for agent execution
+ *   - rc.monitor.updateNote  → write/update adaptive notes
  */
 
 import type { RegisterMethod } from '../types.js';
-import { MonitorService, type MonitorInput, type MonitorPatch, type SourceType } from './service.js';
+import { MonitorService, type MonitorInput, type MonitorPatch } from './service.js';
 
 // ── Validation helpers ────────────────────────────────────────────────
 
@@ -86,7 +90,7 @@ export function registerMonitorRpc(registerMethod: RegisterMethod, service: Moni
     try {
       const input: MonitorInput = {
         name: requireString(params.name, 'name'),
-        source_type: requireString(params.source_type, 'source_type') as SourceType,
+        source_type: requireString(params.source_type, 'source_type'),
         target: optionalString(params.target, 'target'),
         filters: optionalObject(params.filters, 'filters'),
         schedule: optionalString(params.schedule, 'schedule'),
@@ -109,7 +113,7 @@ export function registerMonitorRpc(registerMethod: RegisterMethod, service: Moni
 
       const patch: MonitorPatch = {};
       if (params.name !== undefined) patch.name = requireString(params.name, 'name');
-      if (params.source_type !== undefined) patch.source_type = requireString(params.source_type, 'source_type') as SourceType;
+      if (params.source_type !== undefined) patch.source_type = requireString(params.source_type, 'source_type');
       if (params.target !== undefined) patch.target = optionalString(params.target, 'target');
       if (params.filters !== undefined) patch.filters = optionalObject(params.filters, 'filters');
       if (params.schedule !== undefined) patch.schedule = optionalString(params.schedule, 'schedule');
@@ -182,15 +186,16 @@ export function registerMonitorRpc(registerMethod: RegisterMethod, service: Moni
   });
 
   // ── rc.monitor.report ────────────────────────────────────────────
-  // Called by agent tools to persist scan results.
+  // Called by agent tools to persist scan results with fingerprints.
   registerMethod('rc.monitor.report', async (params: Record<string, unknown>) => {
     try {
       const id = requireString(params.id, 'id');
       const results = params.results;
       if (!Array.isArray(results)) throw new RpcValidationError('results must be an array');
+      const fingerprints = Array.isArray(params.fingerprints) ? params.fingerprints.map(String) : [];
       const summary = optionalString(params.summary, 'summary');
 
-      return service.report(id, results, summary);
+      return service.report(id, results, fingerprints, summary);
     } catch (err) {
       throw err instanceof RpcValidationError ? new Error(err.message) : err;
     }
@@ -207,6 +212,27 @@ export function registerMonitorRpc(registerMethod: RegisterMethod, service: Moni
       const job_id = (typeof rawJobId === 'string' && rawJobId.trim()) ? rawJobId.trim() : null;
       service.setGatewayJobId(id, job_id);
       return { ok: true };
+    } catch (err) {
+      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    }
+  });
+
+  // ── rc.monitor.getContext ────────────────────────────────────────
+  registerMethod('rc.monitor.getContext', async (params: Record<string, unknown>) => {
+    try {
+      const id = requireString(params.id, 'id');
+      return service.getContext(id);
+    } catch (err) {
+      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    }
+  });
+
+  // ── rc.monitor.updateNote ────────────────────────────────────────
+  registerMethod('rc.monitor.updateNote', async (params: Record<string, unknown>) => {
+    try {
+      const id = requireString(params.id, 'id');
+      const note = requireString(params.note, 'note');
+      return service.updateNote(id, note);
     } catch (err) {
       throw err instanceof RpcValidationError ? new Error(err.message) : err;
     }

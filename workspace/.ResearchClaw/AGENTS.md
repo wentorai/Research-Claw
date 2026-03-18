@@ -26,7 +26,7 @@ Four modules share `.research-claw/library.db`:
 Library   (17 tools) — paper storage, search, citation graph, Zotero/EndNote/RIS import
 Tasks     (10 tools) — deadlines, progress tracking, paper/file links, cron, notifications
 Workspace  (7 tools) — file CRUD, move/rename, git-backed versioning, diff, history, restore
-Monitor    (4 tools) — universal N-monitor: arxiv, github, rss, webpage, openalex, twitter, custom
+Monitor    (5 tools) — universal N-monitor with memory: academic, code, feed, web, social, custom
 ```
 
 Data flow:
@@ -65,7 +65,7 @@ User request
 | 引用 / cite / bibtex | library_export_bibtex | skill: writing/citation |
 | 写 / 草稿 / draft | workspace_save | skill: writing/composition |
 | 任务 / 截止 / deadline | task_create, task_list | — |
-| 监控 / 追踪 / monitor | monitor_create, monitor_scan | — |
+| 监控 / 追踪 / monitor | monitor_create, monitor_list | monitor_get_context |
 | 通知 / 提醒 / notify | send_notification | — |
 | 定时 / 定期 / cron | cron (built-in) | — |
 | 统计 / 分析 / stats | — | skill: analysis/* |
@@ -216,7 +216,7 @@ Local tools always take priority over skill guidance.
 
 Five rules govern how modules coordinate:
 
-1. **monitor_scan → new papers found** → Present `paper_card` for each
+1. **monitor_report → new findings** → Present `paper_card` for each
    notable result. User selects which to add; only then call `library_add_paper`.
    Emit `monitor_digest` card with summary.
 2. **library_add_paper + active project** → Auto-call `task_link` to associate the
@@ -235,7 +235,7 @@ After every tool call:
 1. **On failure** → Report the error to the user. Log to MEMORY.md `## Tool Notes`
    with date, tool name, error cause, and workaround if known.
 2. **On success with a useful pattern** → Log the effective combination to Tool Notes
-   (e.g., "monitor_scan + library_batch_add works well for bulk import").
+   (e.g., "monitor_get_context + search_arxiv + library_batch_add works well for bulk import").
 3. **On session start** → Read Tool Notes to avoid known issues.
 4. **Retry limit** → Same tool, same parameters: max 2 retries. Then ask the user.
 
@@ -310,7 +310,7 @@ valid JSON — the dashboard parser uses `JSON.parse()`.
 ### paper_card — Paper Reference
 
 **ONLY for real academic publications** — papers returned by `search_arxiv`,
-`search_openalex`, `library_search`, `monitor_scan`, or papers the user explicitly
+`search_openalex`, `library_search`, or papers the user explicitly
 identifies by title/DOI. NEVER use paper_card to describe software features,
 tool capabilities, concepts, or any content that is not a verifiable scholarly
 work. When in doubt, use plain text.
@@ -386,20 +386,20 @@ Enum `git_status`: `"new"` | `"modified"` | `"committed"`.
 
 ### monitor_digest — Monitor Scan Results
 
-Use for results from the **monitor system** (`monitor_scan`, `monitor_report`, or
+Use for results from the **monitor system** (`monitor_report`, or
 cron-triggered monitor runs).
 
 7 fields. Required: `type`, `monitor_name`, `source_type`, `target`, `total_found`,
 `findings`.
 Optional: `schedule`.
 
-`source_type`: `"arxiv"` | `"github"` | `"rss"` | `"webpage"` |
-`"openalex"` | `"twitter"` | `"custom"`.
+`source_type`: free-form category string (e.g. `"academic"`, `"code"`, `"feed"`,
+`"web"`, `"social"`, `"report"`, `"reminder"`, or any custom string).
 
 `findings`: array of `{title, url?, summary?}` (max 10).
 
 ```monitor_digest
-{"type":"monitor_digest","monitor_name":"Track protein folding on arXiv","source_type":"arxiv","target":"q-bio.BM","schedule":"0 8 * * 1-5","total_found":12,"findings":[{"title":"AlphaFold3 Extensions for RNA Structure Prediction","url":"https://arxiv.org/abs/2603.12345","summary":"Extends AF3 to RNA — relevant to your nucleic acid project"}]}
+{"type":"monitor_digest","monitor_name":"Track protein folding papers","source_type":"academic","target":"","schedule":"0 8 * * 1-5","total_found":12,"findings":[{"title":"AlphaFold3 Extensions for RNA Structure Prediction","url":"https://arxiv.org/abs/2603.12345","summary":"Extends AF3 to RNA — relevant to your nucleic acid project"}]}
 ```
 
 ## §11 Red Lines

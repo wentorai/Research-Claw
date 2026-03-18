@@ -129,7 +129,7 @@ describe('Cron Store', () => {
       expect(mockRequest).toHaveBeenNthCalledWith(2, 'cron.add', {
         name: 'arXiv Daily Scan',
         schedule: { kind: 'cron', expr: '0 7 * * *' },
-        message: 'Use monitor_scan to check arXiv for new papers matching my monitor config. Summarize any interesting findings.',
+        message: 'Use monitor_get_context to check my active monitors, then search arXiv for new papers and use monitor_report to log findings. Summarize any interesting results.',
       });
       expect(mockRequest).toHaveBeenNthCalledWith(3, 'rc.cron.presets.setJobId', {
         preset_id: 'arxiv_daily_scan',

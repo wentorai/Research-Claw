@@ -100,7 +100,7 @@ const plugin: PluginDefinition = {
   id: 'research-claw-core',
   name: 'Research-Claw Core',
   description: 'Literature library, task management, and workspace tracking for academic research',
-  version: '0.5.1',
+  version: '0.5.2',
 
   register(api) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
@@ -174,7 +174,7 @@ const plugin: PluginDefinition = {
     for (const tool of createWorkspaceTools(wsService)) {
       api.registerTool(tool);
     }
-    for (const tool of createMonitorTools(monitorService, dbManager.db)) {
+    for (const tool of createMonitorTools(monitorService)) {
       api.registerTool(tool);
     }
 

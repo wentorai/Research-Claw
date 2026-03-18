@@ -6,7 +6,7 @@ updated: 2026-03-18
 
 # Tool Reference
 
-## §1 Local Tools (38)
+## §1 Local Tools (39)
 
 ### Library (17 tools)
 
@@ -58,14 +58,15 @@ updated: 2026-03-18
 
 Workspace is a git-backed local repository. Every save creates a commit (debounced 5s). Files >10 MB auto-gitignored. You also have `exec` for CLI operations: `pandoc`, `pdftotext`, `python3`, `xelatex`, `grep`, `wc`, `jq`, etc.
 
-### Monitor (4 tools)
+### Monitor (5 tools)
 
 | Tool | Purpose |
 |:-----|:--------|
-| `monitor_create` | Create a new monitor (arxiv, github, rss, webpage, openalex, twitter, custom) |
+| `monitor_create` | Create a new monitor with any free-form source_type category (academic, code, feed, web, social, or custom) |
 | `monitor_list` | List all monitors with status and last check time |
-| `monitor_report` | Cache scan results for a specific monitor |
-| `monitor_scan` | Instant scan of academic sources without creating a monitor |
+| `monitor_report` | Report scan results with dedup fingerprints; updates memory.seen and memory.runs |
+| `monitor_get_context` | Load monitor config + memory (notes, last run, seen count) before execution; MUST call first |
+| `monitor_note` | Write/update adaptive notes for a monitor (max 4096 chars); persists observations across runs |
 
 ## §2 API Tools (34)
 
@@ -125,5 +126,5 @@ Tools always take priority over skill guidance.
 
 ## §6 Tool Count
 
-38 local + 34 API = **72 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
+39 local + 34 API = **73 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
 431 skills accessible on-demand via research-plugins (40 subcategory indexes).

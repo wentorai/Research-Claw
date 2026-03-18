@@ -8,7 +8,7 @@
 
 You define the question. Research-Claw runs the lab. 24/7 on your machine. Every output, yours alone.
 
-[![Version](https://img.shields.io/badge/version-v0.5.1-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
+[![Version](https://img.shields.io/badge/version-v0.5.2-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)

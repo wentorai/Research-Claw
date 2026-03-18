@@ -64,15 +64,16 @@ const ACTUAL_WORKSPACE_TOOLS = [
   'workspace_move',
 ] as const;
 
-/** 4 monitor agent tools (from monitor/tools.ts) */
+/** 5 monitor agent tools (from monitor/tools.ts) — v10 memory redesign */
 const ACTUAL_MONITOR_TOOLS = [
   'monitor_create',
   'monitor_list',
   'monitor_report',
-  'monitor_scan',
+  'monitor_get_context',
+  'monitor_note',
 ] as const;
 
-/** All 38 agent tools (17 + 10 + 7 + 4) — from index.ts registration */
+/** All 39 agent tools (17 + 10 + 7 + 5) — from index.ts registration */
 const ALL_AGENT_TOOLS = [
   ...ACTUAL_LITERATURE_TOOLS,
   ...ACTUAL_TASK_TOOLS,
@@ -257,11 +258,28 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       // Expect no phantom tools — if any exist, they indicate TOOLS.md mentions
       // a tool that does not actually exist in the plugin code.
       // Allow a few known non-tool identifiers that look like tool names.
+      // API tools from research-plugins (external plugin, not in core ALL_AGENT_TOOLS)
       const KNOWN_NON_TOOLS = new Set([
-        'web_search', 'web_fetch', 'search_arxiv',
-        'search_openalex', 'search_crossref', 'search_pubmed',
-        'get_paper', 'get_citations', 'get_work', 'get_author_openalex',
-        'resolve_doi', 'get_arxiv_paper', 'get_article', 'find_oa_version',
+        'web_search', 'web_fetch',
+        // Original 5 modules
+        'search_openalex', 'get_work', 'get_author_openalex',
+        'search_crossref', 'resolve_doi',
+        'search_arxiv', 'get_arxiv_paper',
+        'search_pubmed', 'get_article',
+        'find_oa_version',
+        // Phase 1
+        'search_europe_pmc', 'get_epmc_citations', 'get_epmc_references',
+        'get_citations_open', 'get_references_open', 'get_citation_count',
+        'search_doaj', 'search_dblp', 'search_dblp_author',
+        'search_biorxiv', 'search_medrxiv', 'get_preprint_by_doi',
+        'search_openaire',
+        // Phase 2
+        'search_zenodo', 'get_zenodo_record',
+        'search_orcid', 'get_orcid_works',
+        'search_inspire', 'get_inspire_paper',
+        'search_hal', 'search_osf_preprints',
+        // Phase 3
+        'search_datacite', 'resolve_datacite_doi', 'search_ror',
       ]);
       const truePhantoms = phantomTools.filter((t) => !KNOWN_NON_TOOLS.has(t));
 
@@ -273,11 +291,11 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
 
   describe('TOOLS.md — tool counts', () => {
     it('header claims correct total local tool count', () => {
-      // v0.5.0: 17 lit + 10 task + 7 ws + 4 monitor = 38
+      // 17 lit + 10 task + 7 ws + 5 monitor = 39
       expect(ACTUAL_LITERATURE_TOOLS.length).toBe(17);
       expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(7);
       expect(ACTUAL_TASK_TOOLS.length).toBe(10);
-      expect(ACTUAL_MONITOR_TOOLS.length).toBe(4);
+      expect(ACTUAL_MONITOR_TOOLS.length).toBe(5);
     });
 
     it('TOOLS.md states "Library (17 tools)"', () => {
@@ -292,18 +310,18 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       expect(toolsMd).toContain('Workspace (7 tools)');
     });
 
-    it('total local tool count: TOOLS.md says 38, matches actual', () => {
+    it('total local tool count: TOOLS.md says 39, matches actual', () => {
       const stated = toolsMd.match(/§1 Local Tools \((\d+)\)/);
       expect(stated).not.toBeNull();
       const statedCount = parseInt(stated![1], 10);
 
-      // 17 lit + 10 task + 7 ws + 4 monitor = 38
-      expect(statedCount).toBe(38);
-      expect(ALL_AGENT_TOOLS.length).toBe(38);
+      // 17 lit + 10 task + 7 ws + 5 monitor = 39
+      expect(statedCount).toBe(39);
+      expect(ALL_AGENT_TOOLS.length).toBe(39);
     });
 
-    it('TOOLS.md §6 states total tool count (38 local + 12 API = 50)', () => {
-      expect(toolsMd).toContain('38 local + 12 API = **50 registered tools**');
+    it('TOOLS.md §6 states total tool count (39 local + 34 API = 73)', () => {
+      expect(toolsMd).toContain('39 local + 34 API = **73 registered tools**');
     });
   });
 
@@ -361,7 +379,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       'total_found', 'notable_papers', 'size_bytes', 'mime_type',
       'created_at', 'modified_at', 'git_status', 'relevance_note',
       'monitor_digest', 'monitor_name', 'source_type', 'total_found',
-      'monitor_scan', 'monitor_report',
     ]);
     const agentToolRefs = [
       ...new Set(
@@ -647,8 +664,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       expect(agentsMd).toMatch(/Tasks\s+\(10 tools\)/);
     });
 
-    it('states Monitor has 4 tools', () => {
-      expect(agentsMd).toMatch(/Monitor\s+\(4 tools\)/);
+    it('states Monitor has 5 tools', () => {
+      expect(agentsMd).toMatch(/Monitor\s+\(5 tools\)/);
     });
 
     it('states Workspace has 7 tools', () => {
@@ -867,36 +884,52 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
   // ── TOOLS.md — API tools ──────────────────────────────────────────────
 
   describe('TOOLS.md — §2 API Tools', () => {
-    it('lists 12 API tools', () => {
-      expect(toolsMd).toContain('§2 API Tools (12)');
+    it('lists 34 API tools', () => {
+      expect(toolsMd).toContain('§2 API Tools (34)');
     });
 
-    it('lists all 6 databases', () => {
-      expect(toolsMd).toContain('Semantic Scholar');
+    it('lists key databases', () => {
       expect(toolsMd).toContain('arXiv');
       expect(toolsMd).toContain('OpenAlex');
       expect(toolsMd).toContain('CrossRef');
       expect(toolsMd).toContain('PubMed');
       expect(toolsMd).toContain('Unpaywall');
+      expect(toolsMd).toContain('Europe PMC');
+      expect(toolsMd).toContain('DBLP');
+      expect(toolsMd).toContain('OpenCitations');
+      expect(toolsMd).toContain('bioRxiv');
     });
 
     const expectedApiTools = [
-      'get_paper', 'get_citations',
+      // Original 5 modules (S2 removed)
       'search_openalex', 'get_work', 'get_author_openalex',
       'search_crossref', 'resolve_doi',
       'search_arxiv', 'get_arxiv_paper',
       'search_pubmed', 'get_article',
       'find_oa_version',
+      // Phase 1
+      'search_europe_pmc', 'get_epmc_citations', 'get_epmc_references',
+      'get_citations_open', 'get_references_open', 'get_citation_count',
+      'search_doaj', 'search_dblp', 'search_dblp_author',
+      'search_biorxiv', 'search_medrxiv', 'get_preprint_by_doi',
+      'search_openaire',
+      // Phase 2
+      'search_zenodo', 'get_zenodo_record',
+      'search_orcid', 'get_orcid_works',
+      'search_inspire', 'get_inspire_paper',
+      'search_hal', 'search_osf_preprints',
+      // Phase 3
+      'search_datacite', 'resolve_datacite_doi', 'search_ror',
     ];
 
-    it('lists all 12 API tool names', () => {
+    it('lists all 34 API tool names', () => {
       for (const tool of expectedApiTools) {
         expect(toolsMd).toContain(`\`${tool}\``);
       }
     });
 
-    it('API tool count matches (12)', () => {
-      expect(expectedApiTools.length).toBe(12);
+    it('API tool count matches (34)', () => {
+      expect(expectedApiTools.length).toBe(34);
     });
   });
 

@@ -1,19 +1,16 @@
 /**
  * Monitor system — Agent tools
  *
- * 4 tools:
- *   - monitor_create:  Create a new monitor for any source type
- *   - monitor_list:    List current monitors with status
- *   - monitor_report:  Cache scan results for a specific monitor
- *   - monitor_scan:    Instant scan (arXiv) without creating a monitor
- *
- * Unified monitoring tools for all source types.
+ * 5 tools:
+ *   - monitor_create:      Create a new monitor for any source category
+ *   - monitor_list:        List current monitors with status
+ *   - monitor_report:      Report scan results with dedup fingerprints
+ *   - monitor_get_context: Load monitor config + memory before execution
+ *   - monitor_note:        Write adaptive notes for future runs
  */
 
-import type { Database } from 'better-sqlite3';
 import type { ToolDefinition } from '../types.js';
-import { MonitorService, type SourceType } from './service.js';
-import { scanSources } from './scanner.js';
+import { MonitorService } from './service.js';
 
 function ok(text: string, details?: unknown): unknown {
   return { content: [{ type: 'text', text }], details: details ?? {} };
@@ -23,9 +20,7 @@ function fail(message: string): unknown {
   return { content: [{ type: 'text', text: `Error: ${message}` }], details: { error: message } };
 }
 
-const VALID_SOURCE_TYPES = ['arxiv', 'github', 'rss', 'webpage', 'openalex', 'twitter', 'custom'] as const;
-
-export function createMonitorTools(service: MonitorService, db: Database): ToolDefinition[] {
+export function createMonitorTools(service: MonitorService): ToolDefinition[] {
   const tools: ToolDefinition[] = [];
 
   // ── 1. monitor_create ────────────────────────────────────────────
@@ -33,33 +28,33 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
   tools.push({
     name: 'monitor_create',
     description:
-      'Create a new monitoring target. Supports various source types: arxiv (academic papers), ' +
-      'github (repos/releases), rss (any RSS/Atom feed), ' +
-      'webpage (URL change detection), openalex (open academic data), twitter (X/Twitter accounts), ' +
-      'custom (free-form agent prompt). The monitor will run on the specified schedule and ' +
-      'send notifications to the dashboard bell when new content is found.',
+      'Create a new monitoring target. The source_type is a free-form category string ' +
+      '(e.g. "academic", "code", "feed", "web", "social", "report", "reminder", or any custom string). ' +
+      'Well-known categories get rich default agent prompts with the Read\u2192Execute\u2192Write protocol. ' +
+      'The monitor will run on the specified schedule and send notifications to the dashboard bell ' +
+      'when new content is found.',
     parameters: {
       type: 'object',
       properties: {
         name: {
           type: 'string',
-          description: 'Human-readable name for the monitor (e.g. "Track Yann LeCun on arXiv")',
+          description: 'Human-readable name for the monitor (e.g. "Track Yann LeCun papers")',
         },
         source_type: {
           type: 'string',
-          enum: VALID_SOURCE_TYPES,
-          description: 'Data source type',
+          description: 'Category of the data source (e.g. "academic", "code", "feed", "web", "social", "report", "reminder")',
         },
         target: {
           type: 'string',
-          description: 'Target identifier: URL for rss/webpage, "org/repo" for github, arXiv categories for arxiv, "@username" for twitter, or empty for keyword-based sources',
+          description: 'Target identifier: URL for feeds/webpages, "org/repo" for code, or empty for keyword-based sources',
         },
         filters: {
           type: 'object',
           properties: {
             keywords: { type: 'array', items: { type: 'string' }, description: 'Keywords to filter by' },
             authors: { type: 'array', items: { type: 'string' }, description: 'Author names to filter by' },
-            categories: { type: 'array', items: { type: 'string' }, description: 'arXiv categories (e.g. cs.AI, q-bio.BM)' },
+            journals: { type: 'array', items: { type: 'string' }, description: 'Journal names to filter by' },
+            domain: { type: 'string', description: 'Academic domain (e.g. "cs", "bio", "physics")' },
             language: { type: 'string', description: 'Language filter (e.g. en, zh)' },
           },
           description: 'Source-specific filter config (e.g. { keywords: ["protein folding"], authors: ["Jumper"] })',
@@ -80,14 +75,12 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
         const name = typeof params.name === 'string' ? params.name.trim() : '';
         if (!name) return fail('name is required and must be a non-empty string');
 
-        const sourceType = typeof params.source_type === 'string' ? params.source_type : '';
-        if (!VALID_SOURCE_TYPES.includes(sourceType as SourceType)) {
-          return fail(`Invalid source_type: "${sourceType}". Valid: ${VALID_SOURCE_TYPES.join(', ')}`);
-        }
+        const sourceType = typeof params.source_type === 'string' ? params.source_type.trim() : '';
+        if (!sourceType) return fail('source_type is required and must be a non-empty string');
 
         const monitor = service.create({
           name,
-          source_type: sourceType as SourceType,
+          source_type: sourceType,
           target: typeof params.target === 'string' ? params.target : undefined,
           filters: typeof params.filters === 'object' && params.filters !== null && !Array.isArray(params.filters)
             ? params.filters as Record<string, unknown>
@@ -122,8 +115,7 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
       properties: {
         source_type: {
           type: 'string',
-          enum: VALID_SOURCE_TYPES,
-          description: 'Filter by source type (optional)',
+          description: 'Filter by source type / category (optional)',
         },
         enabled: {
           type: 'boolean',
@@ -145,10 +137,10 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
 
         const lines: string[] = [`${total} monitor(s):\n`];
         for (const m of items) {
-          const status = m.enabled ? '✅' : '⬚';
+          const status = m.enabled ? '\u2705' : '\u2b1a';
           const lastCheck = m.last_check_at ?? 'never';
           const error = m.last_error ? ` [ERROR: ${m.last_error}]` : '';
-          lines.push(`${status} "${m.name}" (${m.source_type}) — schedule: ${m.schedule}, last: ${lastCheck}, findings: ${m.finding_count}${error}`);
+          lines.push(`${status} "${m.name}" (${m.source_type}) \u2014 schedule: ${m.schedule}, last: ${lastCheck}, findings: ${m.finding_count}${error}`);
         }
 
         return ok(lines.join('\n'), { items, total });
@@ -163,9 +155,10 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
   tools.push({
     name: 'monitor_report',
     description:
-      'Report scan results for a specific monitor. Call this after checking a source to ' +
-      'cache the results in the dashboard. The results appear in the monitor\'s expanded ' +
-      'detail view in the dashboard panel.',
+      'Report scan results for a specific monitor with dedup fingerprints. Call this after ' +
+      'checking a source to cache the results and update the monitor\'s memory. Fingerprints ' +
+      'are compared against previously seen items to compute new_count. Results appear in ' +
+      'the monitor\'s expanded detail view in the dashboard panel.',
     parameters: {
       type: 'object',
       properties: {
@@ -178,12 +171,17 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
           items: { type: 'object' },
           description: 'Array of findings (papers, posts, releases, etc.). Each item should have at least a "title" field.',
         },
+        fingerprints: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Unique identifiers for deduplication (e.g. "doi:10.1234/...", "arxiv:2603.12345", "gh:org/repo:release:v1.0"). Compared against memory.seen to count new items.',
+        },
         summary: {
           type: 'string',
           description: 'Brief text summary of findings (optional)',
         },
       },
-      required: ['monitor_id', 'results'],
+      required: ['monitor_id', 'results', 'fingerprints'],
     },
     async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
       try {
@@ -191,13 +189,16 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
         if (!monitorId) return fail('monitor_id is required');
 
         const results = Array.isArray(params.results) ? params.results : [];
+        const fingerprints = Array.isArray(params.fingerprints) ? params.fingerprints.map(String) : [];
         const summary = typeof params.summary === 'string' ? params.summary : undefined;
 
-        const monitor = service.report(monitorId, results, summary);
+        const monitor = service.report(monitorId, results, fingerprints, summary);
+        const lastRun = monitor.memory.runs.length > 0 ? monitor.memory.runs[monitor.memory.runs.length - 1] : null;
 
         return ok(
-          `Results cached for "${monitor.name}": ${results.length} finding(s). ` +
-          `Total findings: ${monitor.finding_count}, checks: ${monitor.check_count}.`,
+          `Results cached for "${monitor.name}": ${results.length} finding(s), ${lastRun?.new_count ?? 0} new. ` +
+          `Total findings: ${monitor.finding_count}, checks: ${monitor.check_count}. ` +
+          `Seen pool: ${monitor.memory.seen.length} items.`,
           monitor,
         );
       } catch (err) {
@@ -206,82 +207,61 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
     },
   });
 
-  // ── 4. monitor_scan ──────────────────────────────────────────────
-  //
-  // Instant scan for academic sources (arXiv).
-  // Reuses the existing scanner infrastructure. Does NOT create a monitor.
+  // ── 4. monitor_get_context ───────────────────────────────────────
 
   tools.push({
-    name: 'monitor_scan',
+    name: 'monitor_get_context',
     description:
-      'Instant scan of academic paper sources (arXiv). Returns discovered ' +
-      'papers without creating a persistent monitor. Use this for one-off searches or when ' +
-      'the user asks "check for new papers". Results are NOT auto-added to library — use ' +
-      'library_add_paper or library_batch_add to save interesting papers.',
+      'Get a monitor\'s configuration and memory state. MUST be called at the start of every ' +
+      'monitor execution to load previous state, dedup info, and adaptive notes.',
     parameters: {
       type: 'object',
       properties: {
-        source_type: {
-          type: 'string',
-          enum: ['arxiv'],
-          description: 'Which source to scan (default: arxiv)',
-        },
-        keywords: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Keywords to search for',
-        },
-        authors: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Author names to search for (arXiv only)',
-        },
-        max_results: {
-          type: 'number',
-          description: 'Max results per source (default: 20, max: 50)',
-        },
+        monitor_id: { type: 'string', description: 'The monitor ID' },
       },
+      required: ['monitor_id'],
     },
     async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
+      const id = typeof params.monitor_id === 'string' ? params.monitor_id.trim() : '';
+      if (!id) return fail('monitor_id is required');
       try {
-        const options: { keywords?: string[]; sources?: string[]; authors?: string[]; max_results?: number } = {};
-        if (Array.isArray(params.keywords)) options.keywords = params.keywords.map(String);
-        if (Array.isArray(params.authors)) options.authors = params.authors.map(String);
-        if (typeof params.source_type === 'string') options.sources = [params.source_type];
-        if (typeof params.max_results === 'number') options.max_results = Math.min(params.max_results, 50);
+        const ctx = service.getContext(id);
+        return ok(
+          `Monitor "${ctx.config.name}" (${ctx.config.source_type})\n` +
+          `Seen: ${ctx.memory.seen_count} items | Last run: ${ctx.memory.last_run?.at ?? 'never'}\n` +
+          `Notes: ${ctx.memory.notes || '(none)'}\n` +
+          `Agent prompt: ${ctx.agent_prompt}`,
+          ctx,
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
 
-        if (!options.keywords?.length && !options.authors?.length) {
-          return fail('At least one of keywords or authors is required for scanning.');
-        }
+  // ── 5. monitor_note ──────────────────────────────────────────────
 
-        const results = await scanSources(db, options);
-
-        const totalPapers = results.reduce((sum, r) => sum + r.papers.length, 0);
-        const totalSkipped = results.reduce((sum, r) => sum + r.papers_skipped, 0);
-
-        const lines: string[] = [];
-        lines.push(`Scan complete: ${totalPapers} new papers found, ${totalSkipped} already in library.`);
-
-        for (const result of results) {
-          if (result.errors.length > 0) {
-            lines.push(`\n[${result.source}] Error: ${result.errors.join('; ')}`);
-          } else {
-            lines.push(`\n[${result.source}] ${result.papers.length} papers (${result.total_found} total, ${result.papers_skipped} skipped)`);
-            for (const paper of result.papers.slice(0, 5)) {
-              const authorsStr = paper.authors.slice(0, 3).join(', ');
-              lines.push(`  - "${paper.title}" (${authorsStr}${paper.year ? `, ${paper.year}` : ''})`);
-            }
-            if (result.papers.length > 5) {
-              lines.push(`  ... and ${result.papers.length - 5} more`);
-            }
-          }
-        }
-
-        if (totalPapers > 0) {
-          lines.push('\nUse library_add_paper or library_batch_add to save interesting papers.');
-        }
-
-        return ok(lines.join('\n'), { results });
+  tools.push({
+    name: 'monitor_note',
+    description:
+      'Write or update adaptive notes for a monitor. Use this to record observations about ' +
+      'source reliability, user preferences, or execution patterns for future runs.',
+    parameters: {
+      type: 'object',
+      properties: {
+        monitor_id: { type: 'string', description: 'The monitor ID' },
+        note: { type: 'string', description: 'Observation or note to save (max 4096 chars). Replaces previous notes.' },
+      },
+      required: ['monitor_id', 'note'],
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
+      const id = typeof params.monitor_id === 'string' ? params.monitor_id.trim() : '';
+      const note = typeof params.note === 'string' ? params.note : '';
+      if (!id) return fail('monitor_id is required');
+      if (!note) return fail('note is required');
+      try {
+        const monitor = service.updateNote(id, note);
+        return ok(`Notes updated for "${monitor.name}".`, { monitor_id: id, notes: monitor.memory.notes });
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
