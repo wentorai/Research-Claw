@@ -5,7 +5,7 @@
  *   - monitor_create:  Create a new monitor for any source type
  *   - monitor_list:    List current monitors with status
  *   - monitor_report:  Cache scan results for a specific monitor
- *   - monitor_scan:    Instant scan (arXiv/S2) without creating a monitor
+ *   - monitor_scan:    Instant scan (arXiv) without creating a monitor
  *
  * Legacy tools (radar_configure, radar_get_config, radar_scan) are replaced
  * by this unified set.
@@ -24,7 +24,7 @@ function fail(message: string): unknown {
   return { content: [{ type: 'text', text: `Error: ${message}` }], details: { error: message } };
 }
 
-const VALID_SOURCE_TYPES = ['arxiv', 'semantic_scholar', 'github', 'rss', 'webpage', 'openalex', 'twitter', 'custom'] as const;
+const VALID_SOURCE_TYPES = ['arxiv', 'github', 'rss', 'webpage', 'openalex', 'twitter', 'custom'] as const;
 
 export function createMonitorTools(service: MonitorService, db: Database): ToolDefinition[] {
   const tools: ToolDefinition[] = [];
@@ -35,7 +35,7 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
     name: 'monitor_create',
     description:
       'Create a new monitoring target. Supports various source types: arxiv (academic papers), ' +
-      'semantic_scholar (academic search), github (repos/releases), rss (any RSS/Atom feed), ' +
+      'github (repos/releases), rss (any RSS/Atom feed), ' +
       'webpage (URL change detection), openalex (open academic data), twitter (X/Twitter accounts), ' +
       'custom (free-form agent prompt). The monitor will run on the specified schedule and ' +
       'send notifications to the dashboard bell when new content is found.',
@@ -209,13 +209,13 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
 
   // ── 4. monitor_scan ──────────────────────────────────────────────
   //
-  // Instant scan for academic sources (arXiv, Semantic Scholar).
+  // Instant scan for academic sources (arXiv).
   // Reuses the existing scanner infrastructure. Does NOT create a monitor.
 
   tools.push({
     name: 'monitor_scan',
     description:
-      'Instant scan of academic paper sources (arXiv, Semantic Scholar). Returns discovered ' +
+      'Instant scan of academic paper sources (arXiv). Returns discovered ' +
       'papers without creating a persistent monitor. Use this for one-off searches or when ' +
       'the user asks "check for new papers". Results are NOT auto-added to library — use ' +
       'library_add_paper or library_batch_add to save interesting papers.',
@@ -224,8 +224,8 @@ export function createMonitorTools(service: MonitorService, db: Database): ToolD
       properties: {
         source_type: {
           type: 'string',
-          enum: ['arxiv', 'semantic_scholar'],
-          description: 'Which source to scan (default: both)',
+          enum: ['arxiv'],
+          description: 'Which source to scan (default: arxiv)',
         },
         keywords: {
           type: 'array',

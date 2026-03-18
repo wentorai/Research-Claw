@@ -124,7 +124,7 @@ export interface NotablePaper {
 
 export interface RadarDigest {
   type: 'radar_digest';
-  source: string; // "arxiv" | "semantic_scholar" | "pubmed" | "custom"
+  source: string; // "arxiv" | "pubmed" | "custom"
   /** The search query or topic that was tracked. */
   query: string;
   /** Time window the scan covered. */
@@ -163,7 +163,7 @@ export interface MonitorDigest {
   type: 'monitor_digest';
   /** Human-readable monitor name. */
   monitor_name: string;
-  source_type: string; // "arxiv" | "semantic_scholar" | "github" | "rss" | "webpage" | "openalex" | "twitter" | "custom"
+  source_type: string; // "arxiv" | "github" | "rss" | "webpage" | "openalex" | "twitter" | "custom"
   /** The search query, URL, or repo target. */
   target: string;
   /** Cron schedule expression. */

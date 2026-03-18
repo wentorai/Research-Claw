@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS rc_radar_config (
   keywords          TEXT NOT NULL DEFAULT '[]',
   authors           TEXT NOT NULL DEFAULT '[]',
   journals          TEXT NOT NULL DEFAULT '[]',
-  sources           TEXT NOT NULL DEFAULT '["arxiv","semantic_scholar"]',
+  sources           TEXT NOT NULL DEFAULT '["arxiv"]',
   updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
   last_scan_at      TEXT,
   last_scan_results TEXT

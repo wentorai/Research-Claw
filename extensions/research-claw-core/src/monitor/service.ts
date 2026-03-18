@@ -14,7 +14,6 @@ import { randomUUID } from 'node:crypto';
 
 export type SourceType =
   | 'arxiv'
-  | 'semantic_scholar'
   | 'github'
   | 'rss'
   | 'webpage'
@@ -118,38 +117,6 @@ const SEED_MONITORS: SeedMonitor[] = [
       'Cache results with monitor_report. ' +
       'Send a notification with send_notification summarizing count and highlights.',
   },
-  {
-    id: 'scholar-watch',
-    name: 'Scholar Watch',
-    source_type: 'semantic_scholar',
-    target: '',
-    filters: { authors: [], keywords: [] },
-    schedule: '0 8 * * 1',
-    enabled: false,
-    notify: true,
-    agent_prompt:
-      'Check Semantic Scholar for new publications by tracked authors. ' +
-      'Use monitor_scan with source_type="semantic_scholar". ' +
-      'Compare against library to skip known papers. ' +
-      'Report new findings with monitor_report and send_notification.',
-  },
-  {
-    id: 'citation-alert',
-    name: 'Citation Alert',
-    source_type: 'semantic_scholar',
-    target: '',
-    filters: { track_citations_of: 'library' },
-    schedule: '0 8 * * 1',
-    enabled: false,
-    notify: true,
-    agent_prompt:
-      'Check if any papers in the user\'s library have received new citations. ' +
-      'Use library_citation_graph for each highly-rated paper. ' +
-      'Compare citation counts with previous check (from last_results). ' +
-      'Report any increase with the citing paper title and relevance. ' +
-      'Cache updated counts with monitor_report and send_notification.',
-  },
-
   // ── Code & tools ────────────────────────────────────────────────
   {
     id: 'github-releases',
@@ -287,7 +254,7 @@ const SEED_MONITORS: SeedMonitor[] = [
 // ── Helpers ───────────────────────────────────────────────────────────
 
 const VALID_SOURCE_TYPES: readonly string[] = [
-  'arxiv', 'semantic_scholar', 'github', 'rss', 'webpage', 'openalex', 'twitter', 'custom',
+  'arxiv', 'github', 'rss', 'webpage', 'openalex', 'twitter', 'custom',
 ];
 
 function now(): string {
@@ -337,8 +304,6 @@ function defaultAgentPrompt(sourceType: SourceType): string {
   switch (sourceType) {
     case 'arxiv':
       return 'Scan arXiv for new papers matching this monitor\'s keywords. Use monitor_scan. Summarize top 5 findings. Cache with monitor_report and send_notification.';
-    case 'semantic_scholar':
-      return 'Search Semantic Scholar for new publications matching this monitor\'s config. Use monitor_scan. Summarize findings. Cache with monitor_report and send_notification.';
     case 'github':
       return 'Check the target GitHub repository for new releases, issues, or commits. Summarize what changed. Cache with monitor_report and send_notification.';
     case 'rss':
