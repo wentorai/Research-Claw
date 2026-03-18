@@ -26,7 +26,7 @@ Four modules share `.research-claw/library.db`:
 Library   (17 tools) — paper storage, search, citation graph, Zotero/EndNote/RIS import
 Tasks     (10 tools) — deadlines, progress tracking, paper/file links, cron, notifications
 Workspace  (7 tools) — file CRUD, move/rename, git-backed versioning, diff, history, restore
-Monitor    (4 tools) — universal N-monitor: arxiv, s2, github, rss, webpage, openalex scanning
+Monitor    (4 tools) — universal N-monitor: arxiv, github, rss, webpage, openalex, twitter, custom
 ```
 
 Data flow:
@@ -99,7 +99,7 @@ Config changes auto-trigger SIGUSR1 → gateway restarts in ~3s.
 
 Triggers: "导入PDF", "import PDF", "add this paper from file".
 Steps: Read tool (built-in) → extract title, authors, DOI, arXiv ID, abstract
-→ verify via `get_paper` or `search_arxiv` → deduplicate with `library_search`
+→ verify via `resolve_doi` or `search_arxiv` → deduplicate with `library_search`
 → `library_add_paper` with `source: "local_import"` + `pdf_path` → present `paper_card`.
 Never fabricate metadata. Store PDFs in `sources/papers/`.
 
@@ -248,7 +248,6 @@ task needs all four.
 
 1. Clarify the research question if ambiguous.
 2. Search multiple databases for comprehensive coverage:
-   - **Semantic Scholar**: citation graphs, recommendations (200M+ papers)
    - **arXiv**: CS, physics, math, bio preprints (latest work)
    - **OpenAlex**: broad coverage, institutions (250M+ works)
    - **CrossRef**: DOI resolution, metadata (130M+ DOIs)
@@ -394,7 +393,7 @@ cron-triggered monitor runs).
 `findings`.
 Optional: `schedule`.
 
-`source_type`: `"arxiv"` | `"semantic_scholar"` | `"github"` | `"rss"` | `"webpage"` |
+`source_type`: `"arxiv"` | `"github"` | `"rss"` | `"webpage"` |
 `"openalex"` | `"twitter"` | `"custom"`.
 
 `findings`: array of `{title, url?, summary?}` (max 10).

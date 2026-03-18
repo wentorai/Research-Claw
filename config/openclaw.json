@@ -1,0 +1,191 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.8",
+    "lastTouchedAt": "2026-03-18T02:44:29.893Z"
+  },
+  "env": {
+    "vars": {},
+    "HTTP_PROXY": "http://127.0.0.1:7890",
+    "HTTPS_PROXY": "http://127.0.0.1:7890"
+  },
+  "ui": {
+    "assistant": {
+      "name": "Research-Claw"
+    }
+  },
+  "models": {
+    "providers": {
+      "zai": {
+        "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+        "apiKey": "5e1e7bc07cfd4f1b9b7d23a7faba0813.CtRkpeXKW1R4fsB4",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "glm-5",
+            "name": "glm-5",
+            "api": "openai-completions",
+            "reasoning": true,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 204800,
+            "maxTokens": 131072
+          },
+          {
+            "id": "glm-4.6v",
+            "name": "glm-4.6v",
+            "api": "openai-completions",
+            "reasoning": false,
+            "input": [
+              "text",
+              "image"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 8192,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "zai/glm-5"
+      },
+      "imageModel": {
+        "primary": "zai/glm-4.6v"
+      },
+      "workspace": "/Users/sylvanl/Downloads/wentor/research-claw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "thinkingDefault": "medium",
+      "subagents": {
+        "announceTimeoutMs": 480000
+      }
+    }
+  },
+  "tools": {
+    "profile": "full",
+    "alsoAllow": [
+      "library_add_paper",
+      "library_search",
+      "library_update_paper",
+      "library_get_paper",
+      "library_export_bibtex",
+      "library_reading_stats",
+      "library_batch_add",
+      "library_manage_collection",
+      "library_tag_paper",
+      "library_add_note",
+      "library_import_bibtex",
+      "library_citation_graph",
+      "task_create",
+      "task_list",
+      "task_complete",
+      "task_update",
+      "task_link",
+      "task_note",
+      "task_link_file",
+      "task_delete",
+      "cron_update_schedule",
+      "send_notification",
+      "workspace_save",
+      "workspace_read",
+      "workspace_list",
+      "workspace_diff",
+      "workspace_history",
+      "workspace_restore",
+      "workspace_move",
+      "radar_configure",
+      "radar_get_config",
+      "radar_scan",
+      "monitor_create",
+      "monitor_list",
+      "monitor_report",
+      "monitor_scan",
+      "library_import_ris",
+      "library_zotero_detect",
+      "library_zotero_import",
+      "library_endnote_detect",
+      "library_endnote_import",
+      "search_openalex",
+      "get_work",
+      "get_author_openalex",
+      "resolve_doi",
+      "search_crossref",
+      "search_arxiv",
+      "get_arxiv_paper",
+      "search_pubmed",
+      "get_article",
+      "find_oa_version"
+    ],
+    "sessions": {
+      "visibility": "all"
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "cron": {
+    "enabled": true
+  },
+  "gateway": {
+    "port": 28789,
+    "mode": "local",
+    "bind": "loopback",
+    "controlUi": {
+      "root": "/Users/sylvanl/Downloads/wentor/research-claw/dashboard/dist",
+      "allowedOrigins": [
+        "http://127.0.0.1:28789",
+        "http://localhost:28789",
+        "http://127.0.0.1:5175",
+        "http://localhost:5175"
+      ]
+    },
+    "auth": {
+      "mode": "none"
+    }
+  },
+  "skills": {
+    "load": {
+      "extraDirs": [
+        "/Users/sylvanl/Downloads/wentor/research-claw/skills"
+      ]
+    }
+  },
+  "plugins": {
+    "enabled": true,
+    "load": {
+      "paths": [
+        "/Users/sylvanl/Downloads/wentor/research-claw/extensions/research-claw-core"
+      ]
+    },
+    "entries": {
+      "research-claw-core": {
+        "enabled": true,
+        "config": {
+          "dbPath": ".research-claw/library.db",
+          "autoTrackGit": true,
+          "defaultCitationStyle": "apa",
+          "heartbeatDeadlineWarningHours": 48
+        }
+      }
+    }
+  }
+}

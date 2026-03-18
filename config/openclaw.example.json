@@ -93,8 +93,6 @@
       "workspace_diff",
       "workspace_history",
       "workspace_restore",
-      "get_paper",
-      "get_citations",
       "search_openalex",
       "get_work",
       "get_author_openalex",
