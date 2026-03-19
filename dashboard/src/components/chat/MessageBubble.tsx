@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Typography, Image } from 'antd';
@@ -237,27 +237,32 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
+  // Stable ref so handleCopy doesn't depend on the message object identity
+  // (streaming messages create a new object every render).
+  const messageRef = useRef(message);
+  messageRef.current = message;
 
   const handleCopy = useCallback(() => {
     if (copied) return;
+    const msg = messageRef.current;
     const rawText =
-      message.text ??
-      (typeof message.content === 'string'
-        ? message.content
-        : Array.isArray(message.content)
-          ? message.content
+      msg.text ??
+      (typeof msg.content === 'string'
+        ? msg.content
+        : Array.isArray(msg.content)
+          ? msg.content
               .filter((c) => c.type === 'text' && c.text)
               .map((c) => c.text!)
               .join('')
           : '');
-    const copyText = message.role === 'user'
+    const copyText = msg.role === 'user'
       ? stripUserMetaPrefix(rawText)
       : stripModelSpecialTokens(stripThinkingTags(rawText));
     navigator.clipboard.writeText(stripImageMarkers(copyText)).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }).catch(() => { /* clipboard unavailable */ });
-  }, [message, copied]);
+  }, [copied]);
 
   // Extract raw text — only from type:'text' blocks (NOT type:'thinking')
   // Source: openclaw/ui/src/ui/chat/message-extract.ts:85-109 (extractRawText)

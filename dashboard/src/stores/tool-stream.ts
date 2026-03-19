@@ -38,6 +38,12 @@ interface ToolStreamState {
 
 const ACTIVE_STATES = new Set(['thinking', 'tool_running', 'streaming']);
 
+/**
+ * Max age (ms) for a pending tool before it's considered stale and evicted.
+ * Guards against memory leaks when phase:"end" events are lost (network jitter).
+ */
+const STALE_TOOL_MS = 120_000;
+
 export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
   pendingTools: [],
   bgActivity: null,
@@ -75,8 +81,11 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
           },
         });
       } else if (evt.state === 'idle' || evt.state === 'error') {
-        // Any idle/error clears background activity
-        if (get().bgActivity?.runId === evt.runId || !evt.runId) {
+        // Clear bgActivity only when the idle/error is for the tracked run.
+        // Skip runId-less broadcasts to avoid clearing activity for a run
+        // that is still in-flight but whose status we haven't received yet.
+        const bg = get().bgActivity;
+        if (bg && evt.runId && bg.runId === evt.runId) {
           set({ bgActivity: null });
         }
       }
@@ -93,26 +102,32 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
       const name = evt.data.name ?? evt.data.toolName;
 
       if (!isBackground) {
-        // Foreground: update pendingTools for inline chat display
+        // Foreground: update pendingTools for inline chat display.
+        // On every mutation, also evict stale tools (startedAt > STALE_TOOL_MS ago)
+        // to prevent memory leaks when phase:"end" events are lost.
+        const now = Date.now();
+        const evictStale = (tools: PendingTool[]) =>
+          tools.filter((t) => now - t.startedAt < STALE_TOOL_MS);
+
         switch (phase) {
           case 'start':
             set((s) => ({
               pendingTools: [
-                ...s.pendingTools,
-                { toolCallId, name: name ?? 'unknown', phase: 'start', startedAt: Date.now() },
+                ...evictStale(s.pendingTools),
+                { toolCallId, name: name ?? 'unknown', phase: 'start', startedAt: now },
               ],
             }));
             break;
           case 'running':
             set((s) => ({
-              pendingTools: s.pendingTools.map((t) =>
+              pendingTools: evictStale(s.pendingTools).map((t) =>
                 t.toolCallId === toolCallId ? { ...t, phase: 'running' } : t,
               ),
             }));
             break;
           case 'result':
             set((s) => ({
-              pendingTools: s.pendingTools.map((t) =>
+              pendingTools: evictStale(s.pendingTools).map((t) =>
                 t.toolCallId === toolCallId ? { ...t, phase: 'result' } : t,
               ),
             }));
@@ -124,7 +139,7 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
               }));
             }, 800);
             set((s) => ({
-              pendingTools: s.pendingTools.map((t) =>
+              pendingTools: evictStale(s.pendingTools).map((t) =>
                 t.toolCallId === toolCallId ? { ...t, phase: 'end' } : t,
               ),
             }));
