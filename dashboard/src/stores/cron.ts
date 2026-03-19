@@ -71,12 +71,13 @@ async function reconcileEnabledPresets(presets: CronPreset[]): Promise<void> {
         }
       }
 
-      // 2. Create fresh gateway cron job
+      // 2. Create fresh gateway cron job (stable sessionKey → reuses session across restarts)
       const message = PRESET_AGENT_TURNS[preset.id] ?? `Run cron preset: ${preset.id}`;
       const cronResult = await client.request<{ id: string }>('cron.add', {
         name: preset.name,
         schedule: { kind: 'cron' as const, expr: preset.schedule },
         message,
+        sessionKey: `cron:rc-preset:${preset.id}`,
       });
 
       // 3. Persist new gateway job ID
@@ -133,12 +134,13 @@ export const useCronStore = create<CronState>()((set, get) => ({
       const preset = get().presets.find((p) => p.id === presetId);
       if (!preset) return;
 
-      // 3. Create actual gateway cron job
+      // 3. Create actual gateway cron job (stable sessionKey → no duplicate sessions)
       const message = PRESET_AGENT_TURNS[presetId] ?? `Run cron preset: ${presetId}`;
       const cronResult = await client.request<{ id: string }>('cron.add', {
         name: preset.name,
         schedule: { kind: 'cron' as const, expr: preset.schedule },
         message,
+        sessionKey: `cron:rc-preset:${presetId}`,
       });
 
       // 4. Store the gateway job ID in our DB
@@ -215,12 +217,13 @@ export const useCronStore = create<CronState>()((set, get) => ({
           // Old job may not exist
         }
 
-        // Create new gateway job with updated schedule
+        // Create new gateway job with updated schedule (stable sessionKey)
         const message = PRESET_AGENT_TURNS[presetId] ?? `Run cron preset: ${presetId}`;
         const cronResult = await client.request<{ id: string }>('cron.add', {
           name: preset.name,
           schedule: { kind: 'cron' as const, expr: schedule },
           message,
+          sessionKey: `cron:rc-preset:${presetId}`,
         });
 
         // Store new gateway job ID

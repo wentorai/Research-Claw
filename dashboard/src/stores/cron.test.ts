@@ -130,6 +130,7 @@ describe('Cron Store', () => {
         name: 'arXiv Daily Scan',
         schedule: { kind: 'cron', expr: '0 7 * * *' },
         message: 'Run cron preset: arxiv_daily_scan',
+        sessionKey: 'cron:rc-preset:arxiv_daily_scan',
       });
       expect(mockRequest).toHaveBeenNthCalledWith(3, 'rc.cron.presets.setJobId', {
         preset_id: 'arxiv_daily_scan',
@@ -150,7 +151,29 @@ describe('Cron Store', () => {
 
       expect(mockRequest).toHaveBeenNthCalledWith(2, 'cron.add', expect.objectContaining({
         message: 'Run cron preset: group_meeting_prep',
+        sessionKey: 'cron:rc-preset:group_meeting_prep',
       }));
+    });
+
+    it('passes stable sessionKey based on preset ID (not gateway job ID)', async () => {
+      useCronStore.setState({ presets: FIVE_PRESETS, presetsLoaded: true });
+
+      mockRequest.mockResolvedValueOnce({ ok: true }); // activate
+      mockRequest.mockResolvedValueOnce({ id: 'gw-job-new' }); // cron.add
+      mockRequest.mockResolvedValueOnce({ ok: true }); // setJobId
+      mockRequest.mockResolvedValueOnce({ presets: FIVE_PRESETS }); // reload
+
+      await useCronStore.getState().activatePreset('deadline_reminders_daily');
+
+      // sessionKey must be derived from preset ID (stable), not gateway job ID (volatile)
+      const cronAddCall = mockRequest.mock.calls.find(
+        (c: unknown[]) => c[0] === 'cron.add',
+      );
+      expect(cronAddCall).toBeDefined();
+      expect(cronAddCall![1]).toHaveProperty(
+        'sessionKey',
+        'cron:rc-preset:deadline_reminders_daily',
+      );
     });
 
     it('passes config to activate RPC when provided', async () => {
