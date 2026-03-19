@@ -9,7 +9,10 @@
  */
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
+import * as http from 'node:http';
+import * as https from 'node:https';
 import * as path from 'node:path';
+import { URL } from 'node:url';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -128,6 +131,116 @@ function writeAuthStore(store: AuthProfileStore): void {
   fs.renameSync(tmp, storePath);
 }
 
+// ── Proxy-aware HTTP ───────────────────────────────────────────────────────
+
+/**
+ * Resolve proxy URL from environment or RC config.
+ * Priority: HTTPS_PROXY > HTTP_PROXY > config.env.HTTPS_PROXY > config.env.HTTP_PROXY
+ */
+function resolveProxyUrl(): string | null {
+  // 1. Environment variables (set by run.sh or user)
+  const envProxy = process.env.HTTPS_PROXY || process.env.https_proxy ||
+                   process.env.HTTP_PROXY || process.env.http_proxy;
+  if (envProxy) return envProxy;
+
+  // 2. RC config file (config/openclaw.json → env.HTTPS_PROXY)
+  try {
+    const configPath = process.env.OPENCLAW_CONFIG_PATH;
+    if (configPath) {
+      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      return cfg?.env?.HTTPS_PROXY || cfg?.env?.HTTP_PROXY || null;
+    }
+  } catch { /* ignore */ }
+
+  return null;
+}
+
+/**
+ * POST with proxy support via CONNECT tunnel (no external dependencies).
+ * Falls back to direct request if no proxy configured.
+ */
+function proxyAwarePost(
+  targetUrl: string,
+  body: string,
+): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+  const target = new URL(targetUrl);
+  const proxyUrl = resolveProxyUrl();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Content-Length': Buffer.byteLength(body).toString(),
+  };
+
+  return new Promise((resolve, reject) => {
+    const handleResponse = (res: http.IncomingMessage) => {
+      let data = '';
+      res.on('data', (chunk: string) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`Token exchange failed (${res.statusCode}): ${data.slice(0, 200)}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(data));
+        } catch {
+          reject(new Error(`Token exchange returned invalid JSON: ${data.slice(0, 100)}`));
+        }
+      });
+    };
+
+    if (proxyUrl) {
+      // CONNECT tunnel through HTTP proxy
+      const proxy = new URL(proxyUrl);
+      const connectReq = http.request({
+        host: proxy.hostname,
+        port: Number(proxy.port) || 7890,
+        method: 'CONNECT',
+        path: `${target.hostname}:${target.port || 443}`,
+      });
+
+      connectReq.on('connect', (_res, socket) => {
+        const req = https.request({
+          method: 'POST',
+          hostname: target.hostname,
+          path: target.pathname + target.search,
+          headers: { ...headers, Host: target.hostname },
+          createConnection: () => socket,
+        } as https.RequestOptions, handleResponse);
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+      });
+
+      connectReq.on('error', (err) => {
+        // Proxy failed — try direct as fallback
+        directPost(target, headers, body, handleResponse, reject);
+      });
+      connectReq.end();
+    } else {
+      directPost(target, headers, body, handleResponse, reject);
+    }
+  });
+}
+
+function directPost(
+  target: URL,
+  headers: Record<string, string>,
+  body: string,
+  onResponse: (res: http.IncomingMessage) => void,
+  onError: (err: Error) => void,
+): void {
+  const req = https.request({
+    method: 'POST',
+    hostname: target.hostname,
+    port: target.port || 443,
+    path: target.pathname + target.search,
+    headers: { ...headers, Host: target.hostname },
+  }, onResponse);
+  req.on('error', onError);
+  req.write(body);
+  req.end();
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────
 
 export function oauthGetProviders(): string[] {
@@ -207,7 +320,7 @@ export async function oauthComplete(
     throw new Error('State mismatch — possible CSRF attack. Please try again.');
   }
 
-  // Exchange code for tokens
+  // Exchange code for tokens (proxy-aware for China/VPN users)
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     client_id: def.clientId,
@@ -216,22 +329,7 @@ export async function oauthComplete(
     redirect_uri: def.redirectUri,
   });
 
-  const resp = await fetch(def.tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`Token exchange failed (${resp.status}): ${text.slice(0, 200)}`);
-  }
-
-  const tokens = (await resp.json()) as {
-    access_token: string;
-    refresh_token: string;
-    expires_in: number;
-  };
+  const tokens = await proxyAwarePost(def.tokenUrl, body.toString());
 
   if (!tokens.access_token || !tokens.refresh_token) {
     throw new Error('Token exchange returned incomplete data.');
