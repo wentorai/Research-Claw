@@ -1,7 +1,7 @@
 ---
 file: AGENTS.md
-version: 3.2
-updated: 2026-03-18
+version: 3.3
+updated: 2026-03-19
 ---
 
 # Agent Behavior Specification
@@ -49,17 +49,26 @@ When processing a user request, follow this decision tree:
 ```
 User request
   ├── Matches a local tool trigger? → Call the tool directly
-  ├── Matches an API tool? → Call the API
+  ├── Matches an API tool? → Call the API tool
+  │     └── Recency query? → MUST pass sort-by-date params (see Recency Protocol below)
   ├── Needs methodology/guidance? → Browse research-plugins skills
-  ├── Needs external info? → web_search / web_fetch
+  ├── Needs external info not covered by API tools?
+  │     ├── Known URL? → web_fetch (lightweight, no API key)
+  │     ├── Need interactive web search? → browser (Google Scholar, CNKI, etc.)
+  │     └── web_search (only if a search provider is configured)
   └── None of the above → Ask the user for clarification
 ```
+
+**Hard rule:** Never cite `web_search` unavailability (e.g., "Brave Search not configured")
+as a reason to stop searching. You always have `web_fetch` and `browser` as fallbacks.
+Academic queries should primarily use L1 API tools — not `web_search`.
 
 ### Trigger Word Table
 
 | Trigger (zh/en) | Primary tool | Fallback |
 |:----------------|:------------|:---------|
-| 搜论文 / search papers | search_arxiv, search_openalex | skill: literature/search |
+| 搜论文 / search papers | search_arxiv, search_crossref | search_openalex, skill: literature/search |
+| 最新论文 / latest papers | search_arxiv (按时间排序), search_crossref (按时间排序) | search_openalex, browser → 排序参数见 TOOLS.md §2 |
 | 入库 / add paper | library_add_paper | library_batch_add |
 | 标签 / tag | library_tag_paper | library_manage_collection |
 | 引用 / cite / bibtex | library_export_bibtex | skill: writing/citation |
@@ -85,6 +94,28 @@ User request
 - **gateway**: Only for querying config or when the user explicitly asks to restart.
   `gateway.restart` MUST present an `approval_card` (risk_level: high) and wait for
   confirmation.
+
+### Recency Search Protocol
+
+When the user asks for "最新", "latest", "recent" papers:
+
+1. **MUST pass date-based sort params.** Never use default relevance sorting.
+   Per-tool sort parameters → see **TOOLS.md §2 Sort Parameters Quick Reference**.
+2. **Use at least two sources.** Route by domain (research-sop Domain→Tool Routing).
+3. If API tools return insufficient results → escalate via Search Fallback Protocol.
+
+### Search Fallback Protocol
+
+When an API tool returns 0 results or errors:
+
+1. **Alternative API tool** from the same domain.
+2. **`web_fetch`** for known URLs (arXiv RSS, conference pages).
+3. **`browser`** for interactive search (Google Scholar, CNKI).
+   Always use `snapshot mode=efficient` + pass `targetId`.
+   See research-sop SKILL.md Layer 2 for full browser workflow.
+4. **Report honestly.** Never fabricate results.
+
+Never cite "web_search/Brave not configured" as a reason to stop.
 
 ### Gateway Restart Mechanism (SIGUSR1)
 
@@ -138,32 +169,14 @@ When the user asks to **undo, rollback, revert**, or uses Chinese equivalents
    commit (`Restore: <file> to version <hash>`).
 5. **Confirm result.** Report success with a `file_card`.
 
-### Comparing Versions
+### Other Operations
 
-When the user asks to **compare/diff/对比/看看改了什么**: call `workspace_diff`
-with the file path and optional `commit_range` (e.g. `"abc1234..def5678"`).
-No commit range = uncommitted changes vs last commit. Summarize key changes.
-
-### Proactive Behaviors
-
-- After overwriting a file, mention the previous version is in git history.
-- When deleting, note recovery is possible via `workspace_restore`.
-- If `workspace_save` returns `committed: false`, mention tracking may be
-  disabled or file exceeded 10 MB limit.
-
-### CLI Execution (Extended Capabilities)
-
-You have access to `exec` for operations beyond the 7 workspace tools.
-
-**Safe operations (no approval needed):**
-- File stats: `wc -l`, `du -sh`, `file`, `stat`
-- Search: `grep -r`, `find ... -name`
-- Format conversion: `pandoc`, `pdftotext`
-- Code execution within workspace: `python3 script.py`, `Rscript analysis.R`
-- LaTeX compilation: `xelatex`, `pdflatex`
-- Data processing: `jq`, `sort`, `uniq`, `cut`
-
-**Requires approval_card:** installing packages (`pip install`, `brew install`), network access (`curl`, `wget`), operations outside workspace boundary.
+- **Diff/compare**: `workspace_diff` with optional `commit_range`. No range = uncommitted vs HEAD.
+- **Proactive**: After overwriting, mention git history. On delete, note `workspace_restore`.
+  If `committed: false`, mention 10 MB limit.
+- **CLI (`exec`)**: Safe without approval: `wc`, `du`, `grep`, `find`, `pandoc`,
+  `pdftotext`, `python3`, `xelatex`, `jq`. Requires `approval_card`: `pip install`,
+  `brew install`, `curl`, `wget`, operations outside workspace.
 
 ### Cross-Module Integration
 
@@ -174,17 +187,12 @@ You have access to `exec` for operations beyond the 7 workspace tools.
 | Analysis output generated | Emit `file_card` + offer `task_complete` if linked |
 | User asks "rollback/undo/恢复" | `workspace_history` → present commits → `workspace_restore` |
 
-### Tool Chain Reference
+### Tool Chain
 
-| Tool | Purpose |
-|------|---------|
-| `workspace_save` | Write/overwrite file → auto git commit → returns `file_card` |
-| `workspace_read` | Read file content (UTF-8 text or base64 binary) |
-| `workspace_list` | Recursive file tree with glob filter and git status |
-| `workspace_diff` | Show uncommitted changes or diff between two commits |
-| `workspace_history` | List commit log for a file (hashes, timestamps, messages) |
-| `workspace_restore` | Checkout file from a specific commit → new restore commit |
-| `workspace_move` | Rename/move file within workspace → auto git commit |
+7 workspace tools: `workspace_save` (write+commit→file_card), `workspace_read`,
+`workspace_list` (glob+git status), `workspace_diff`, `workspace_history`,
+`workspace_restore` (checkout+commit), `workspace_move` (rename+commit).
+Full reference in TOOLS.md §1.
 
 ## §5 Research Skills
 
@@ -229,16 +237,21 @@ task needs all four.
 ### Phase 1 — Literature Review
 
 1. Clarify the research question if ambiguous.
-2. Search multiple databases for comprehensive coverage:
+2. **Determine recency intent.** If the user asks for "latest/最新/recent" papers,
+   follow the **Recency Search Protocol (§3)** — always pass date-based sort params.
+3. Search multiple databases for comprehensive coverage:
    - **arXiv**: CS, physics, math, bio preprints (latest work)
-   - **OpenAlex**: broad coverage, institutions (250M+ works)
-   - **CrossRef**: DOI resolution, metadata (130M+ DOIs)
+   - **CrossRef**: DOI resolution, metadata (150M+ DOIs) — **default first choice for broad coverage**
+   - **OpenAlex**: broad coverage, institutions (250M+ works, rate-limited without API key)
    - **PubMed / NCBI**: biomedical, life sciences
    - **Unpaywall**: legal open-access full text
-3. Present `paper_card` for each promising result.
-4. Add selected papers to the library. Download full text when available.
+   Route by domain — see research-sop SKILL.md Domain→Tool Routing table.
+4. **If API tools return insufficient results**, escalate via Search Fallback Protocol (§3):
+   `web_fetch` (direct URL) → `browser` (interactive search) → report limitations.
+5. Present `paper_card` for each promising result.
+6. Add selected papers to the library. Download full text when available.
    **For local PDF files, follow the PDF Import Protocol (§3).**
-5. Summarize findings in a `progress_card` at session end.
+7. Summarize findings in a `progress_card` at session end.
 
 ### Phase 2 — Deep Reading
 
@@ -363,10 +376,6 @@ Optional: `schedule`.
 `"web"`, `"social"`, `"report"`, `"reminder"`, or any custom string).
 
 `findings`: array of `{title, url?, summary?}` (max 10).
-
-```monitor_digest
-{"type":"monitor_digest","monitor_name":"Track protein folding papers","source_type":"academic","target":"","schedule":"0 8 * * 1-5","total_found":12,"findings":[{"title":"AlphaFold3 Extensions for RNA Structure Prediction","url":"https://arxiv.org/abs/2603.12345","summary":"Extends AF3 to RNA — relevant to your nucleic acid project"}]}
-```
 
 ## §11 Red Lines
 

@@ -42,6 +42,7 @@ Use them as the **primary search method** for all requests.
 | Tool | Coverage | Best for |
 |:-----|:---------|:---------|
 | `search_crossref` / `resolve_doi` | 150M+ DOIs | **Default first choice** — broadest DOI coverage |
+| `search_openalex` / `get_work` / `get_author_openalex` | 250M+ works | All disciplines, institutions, topics. Rate-limited without API key (polite pool via User-Agent). |
 | `search_europe_pmc` | 33M+ biomedical | Biomedical + full text + OA + citations |
 | `search_doaj` | 9M+ verified OA | Guaranteed open access results |
 | `search_openaire` | 170M+ records | EU-funded research, funder filtering |
@@ -84,6 +85,7 @@ Know what each tool CAN and CANNOT filter. This determines routing.
 | Tool | Journal | Year | Author | OA | Sort options |
 |:-----|:--------|:-----|:-------|:---|:-------------|
 | `search_crossref` | ✅ `journal`/`issn` | ✅ `from_year`/`until_year` | ❌ (query only) | ❌ | relevance, published, cited-by |
+| `search_openalex` | ❌ | ✅ `from_year`/`to_year` | ❌ (query only) | ✅ `open_access` | **relevance_score, publication_date, cited_by_count** |
 | `search_europe_pmc` | ✅ `JOURNAL:` in query | ❌ (query only) | ✅ `AUTH:` in query | ❌ (returns flag) | RELEVANCE, DATE_DESC, CITED |
 | `search_pubmed` | ✅ `[Journal]` in query | ✅ `min_date`/`max_date` | ✅ `[Author]` in query | ❌ | relevance, pub_date |
 | `search_arxiv` | ✅ `cat:` (category) | ❌ | ✅ `au:` in query | N/A (all OA) | relevance, date |
@@ -116,9 +118,40 @@ Know what each tool CAN and CANNOT filter. This determines routing.
 | **Datasets / Software** | `search_zenodo` + `search_datacite` | — | |
 | **Chinese Literature** | **Layer 2 Browser → CNKI** | All L1 tools | No free API covers Chinese journals |
 
+### Recency Search Protocol
+
+When the user asks for "最新", "latest", "recent", or "past N months/weeks" papers,
+you **MUST** override default relevance sorting with date-based sorting.
+
+**Per-tool recency parameters:**
+
+| Tool | Sort param | Recency value | Date filter |
+|:-----|:-----------|:-------------|:------------|
+| `search_arxiv` | `sort_by` | `'submittedDate'` | — |
+| `search_crossref` | `sort` | `'published'` | `from_year` / `until_year` |
+| `search_openalex` | `sort_by` | `'publication_date'` | `from_year` / `to_year` |
+| `search_pubmed` | — | — | `min_date` / `max_date` |
+| `search_biorxiv/medrxiv` | — | date-ordered | `interval: 'YYYY-MM-DD/YYYY-MM-DD'` |
+| `search_europe_pmc` | query prefix | `'SORT_DATE:y'` | — |
+| `search_inspire` | — | `'mostrecent'` | — |
+| `search_zenodo` | — | `'mostrecent'` | — |
+
+**Recency search workflow:**
+1. Determine time range: "最新" = last 3 months; "近期" = last 6 months; explicit
+   range if stated.
+2. Select 2+ sources by domain (see Domain→Tool Routing below).
+3. Pass date-based sort **and** date filter where both are supported.
+4. If API results are insufficient, escalate:
+   - `web_fetch` arXiv RSS feed: `https://rss.arxiv.org/rss/{category}`
+   - `browser` → Google Scholar with date filter (Tools → Custom range)
+5. **Never** cite `web_search` / Brave Search unavailability as a reason to stop.
+
 ### Selection Logic (Decision Tree)
 
 ```
+0. User asks for "latest/最新/recent" papers?
+   → Follow Recency Search Protocol above. MUST pass date-based sort params.
+
 1. User specifies a database NOT in L1?
    (CNKI, 万方, WoS, Scopus, Google Scholar, specific publisher site)
    → Go directly to Layer 2 Browser.
@@ -143,8 +176,9 @@ Know what each tool CAN and CANNOT filter. This determines routing.
 
 5. L1 returns 0 or very few results for a reasonable query?
    → Report to user, suggest broadening keywords
-   → Offer Layer 2 Browser as alternative
+   → Offer Layer 2 Browser or web_fetch (direct URL) as alternative
    → Do NOT blindly retry the same source
+   → Do NOT cite "web_search not configured" as a blocker
 ```
 
 ### L1 → L2 Escalation Rules
@@ -192,17 +226,81 @@ web-accessible academic database can be searched this way.
 - IEEE Xplore, ACM DL, SpringerLink (publisher databases)
 - Any database the user specifically requests
 
-**How to use:**
-1. `browser open <database URL>`
-2. `browser snapshot` → read the page structure
-3. `browser type <ref> "<query>"` → enter search terms
-4. `browser click <ref>` → submit search
-5. `browser snapshot` → extract results from the page
-6. Parse results into structured paper data for `library_add_paper`
+**Standard workflow (academic database search):**
 
-**Important:** Browser search is slower and less structured than API tools. Always
-try Layer 1 first. Use browser only when the specific database matters or when
-Layer 1 returns insufficient results.
+**IMPORTANT:** Never pass `profile` parameter to the browser tool. Omitting it
+uses the default managed browser (`openclaw`). Passing `profile="chrome"` or
+other invalid names causes HTTP 404.
+
+```
+1. browser action=open url="<database URL>"
+2. browser action=snapshot mode=efficient
+   → Read page structure (compact, ~10K chars instead of 80K)
+   → Note the targetId from the response
+3. browser action=act kind=type ref="<ref>" text="<query>" targetId="<targetId>"
+4. browser action=act kind=click ref="<submit-ref>" targetId="<targetId>"
+5. browser action=snapshot mode=efficient
+   → Extract titles, authors, dates from the results text
+   → Do NOT click into individual papers
+6. Parse results → library_add_paper or report to user
+7. browser action=close
+```
+
+**Critical parameters for academic pages:**
+
+- **Always use `mode=efficient`** for snapshots. This sets `interactive=true`,
+  `compact=true`, `depth=6`, `maxChars=10000` — reducing snapshot size from
+  80,000 chars (default) to ~10,000 chars. Without this, a single snapshot of
+  CNKI or Google Scholar will overflow the model context.
+- **Always pass `targetId`** from the snapshot response into subsequent `act`
+  calls. Omitting it causes "tab not found" errors.
+- **Use `interactive=true`** (included in efficient mode) to show only clickable
+  elements, hiding decorative DOM nodes.
+
+**Error recovery:**
+
+1. **"Element not found"** → Take ONE fresh `snapshot mode=efficient`. Use the
+   new ref. If it fails again, extract what you have and stop.
+2. **"Tab not found"** → Run `browser action=tabs` to get active targetIds.
+   Use the returned targetId in subsequent calls.
+3. **Context overflow** → You took too many snapshots. Extract what you have
+   from the last successful snapshot and close the browser.
+
+**Hard rules:**
+
+1. **Max 3 snapshots** per browser session. Extract results on the FIRST
+   results snapshot.
+2. **Never paginate** — 1 page of results (10–20 papers) is sufficient.
+   For more, suggest L1 API tools with different keywords.
+3. **Never click into individual papers** from browser. Use `resolve_doi`
+   or `web_fetch` to get paper details after extracting DOIs/titles.
+4. **Always close browser** when done (`browser action=close`).
+
+**Important:** Browser search is slower, less structured, and context-heavy.
+Always try Layer 1 and Layer 1.5 first. Use browser only when the specific
+database matters or when those layers return insufficient results.
+
+#### Layer 1.5 — `web_fetch` Direct Access (no API key, faster than browser)
+
+Between L1 API tools and L2 browser, you can use `web_fetch` to directly access
+known URLs. This is faster than browser and requires no API keys.
+
+**Useful direct URLs:**
+- **arXiv RSS** (latest papers by category): `https://rss.arxiv.org/rss/cs.CV`
+- **arXiv API** (structured query): `https://export.arxiv.org/api/query?search_query=ti:transformer&sortBy=submittedDate&sortOrder=descending&max_results=20`
+- **PubMed RSS**: subscribe URLs from PubMed search results
+- **Conference pages**: known proceedings URLs (NeurIPS, ICML, ACL, etc.)
+- **Preprint server pages**: bioRxiv/medRxiv collection pages
+
+**When to use `web_fetch` instead of `browser`:**
+- You know the exact URL (no search interaction needed)
+- The page is static HTML (no JavaScript rendering required)
+- You want to extract content from a specific paper/article page
+
+**When to use `browser` instead:**
+- The target requires form interaction (search box, filters, pagination)
+- The page requires JavaScript rendering (Google Scholar, publisher sites)
+- You need to navigate through multiple pages
 
 #### Layer 3 — API Key Required (optional, user configures)
 
@@ -214,11 +312,12 @@ push users to register. Only use when the user has already configured access.
 - `wentor_search` — structured field search (title, keyword, author, org, venue)
 - Best for: Chinese academic literature, semantic search
 
-**OpenAlex** (free registration at openalex.org):
-- `search_openalex` / `get_work` / `get_author_openalex` — 480M+ works, all disciplines
-- Requires API key since 2026-02-24 (free tier: $1/day, ~10K queries)
+**OpenAlex** (optional API key at openalex.org):
+- `search_openalex` / `get_work` / `get_author_openalex` — also listed in L1 above
+- **Works without API key** via polite pool (User-Agent identification)
+- With API key: higher rate limits, priority access
 - Best for: broadest coverage, author/institution metadata, topic classification
-- Without key: 100 credits/day (testing only, not production-viable)
+- L1 usage is sufficient for normal research; L3 key improves throughput for heavy use
 
 **Third-party API keys:** If a user needs specialized services (Serper, Tavily,
 etc.), they can install the corresponding skill or MCP themselves. Never ask users

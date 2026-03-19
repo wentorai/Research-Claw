@@ -1,5 +1,5 @@
 /**
- * Bootstrap Consistency Tests — AGENTS.md v3.2 & TOOLS.md v3.1
+ * Bootstrap Consistency Tests — AGENTS.md v3.3 & TOOLS.md v3.2
  *
  * Validates that the bootstrap files (AGENTS.md, TOOLS.md) accurately
  * reference the tools, RPCs, and capabilities that exist in the
@@ -196,7 +196,7 @@ function extractBacktickNames(text: string): string[] {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
+describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
   // ── Precondition ──────────────────────────────────────────────────────
 
   it('bootstrap files exist and are non-empty', () => {
@@ -249,6 +249,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
             'bibtex_key', 'note_text', 'tag_name', 'paper_id', 'task_id',
             'source_id', 'arxiv_id', 'pdf_path', 'short_hash', 'local_import',
             'max_results',
+            // Sort/filter parameter names from §2 Sort Parameters Quick Reference
+            'sort_by', 'from_year', 'until_year', 'to_year', 'min_date', 'max_date',
           ].includes(name),
       );
 
@@ -320,8 +322,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       expect(ALL_AGENT_TOOLS.length).toBe(39);
     });
 
-    it('TOOLS.md §6 states total tool count (39 local + 34 API = 73)', () => {
-      expect(toolsMd).toContain('39 local + 34 API = **73 registered tools**');
+    it('TOOLS.md §7 states total tool count (39 local + 34 API + 3 OC web = 76)', () => {
+      expect(toolsMd).toContain('39 local + 34 API + 3 OC web = **76 available tools**');
     });
   });
 
@@ -379,6 +381,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       'total_found', 'notable_papers', 'size_bytes', 'mime_type',
       'created_at', 'modified_at', 'git_status', 'relevance_note',
       'monitor_digest', 'monitor_name', 'source_type', 'total_found',
+      // Sort/filter parameter names from Recency Search Protocol
+      'sort_by', 'from_year', 'until_year', 'to_year', 'min_date', 'max_date',
     ]);
     const agentToolRefs = [
       ...new Set(
@@ -396,6 +400,11 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       'search_openalex', 'search_crossref', 'search_pubmed',
       'get_paper', 'get_citations', 'get_work', 'get_author_openalex',
       'resolve_doi', 'get_arxiv_paper', 'get_article', 'find_oa_version',
+      // Additional API tools referenced in Recency Search Protocol / Search Fallback
+      'search_europe_pmc', 'search_inspire', 'search_zenodo',
+      'search_biorxiv', 'search_medrxiv',
+      // OC built-in tools referenced in Search Fallback Protocol
+      'sessions_spawn',
     ]);
 
     it('every tool referenced in AGENTS.md exists in the plugin or is a known external tool', () => {
@@ -407,7 +416,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
 
     it('trigger table references valid primary tools', () => {
       const triggerTools = [
-        'search_arxiv', 'search_openalex',
+        'search_arxiv', 'search_crossref',
         'library_add_paper', 'library_batch_add',
         'library_tag_paper', 'library_manage_collection',
         'library_export_bibtex',
@@ -648,7 +657,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
         agentsMd.indexOf('## §4 Workspace & Version Control'),
         agentsMd.indexOf('## §5'),
       );
-      expect(wsSection).toMatch(/previous version/i);
       expect(wsSection).toMatch(/git history/i);
     });
   });
@@ -706,22 +714,26 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
       expect(toolsMd).toMatch(/Workspace \(7 tools\)/);
     });
 
-    it('AGENTS.md §4 tool chain table matches TOOLS.md workspace tool list', () => {
+    it('AGENTS.md §4 tool chain section lists all workspace tools', () => {
       const wsToolsInAgents: string[] = [];
-      const wsToolsInToolsMd: string[] = [];
 
-      // Extract from AGENTS.md §4 tool chain table
-      const chainTable = agentsMd.slice(
-        agentsMd.indexOf('### Tool Chain Reference'),
+      // Extract from AGENTS.md §4 tool chain section (compact format)
+      const chainSection = agentsMd.slice(
+        agentsMd.indexOf('### Tool Chain'),
         agentsMd.indexOf('## §5'),
       );
       for (const tool of ACTUAL_WORKSPACE_TOOLS) {
-        if (chainTable.includes(`\`${tool}\``)) {
+        if (chainSection.includes(`\`${tool}\``)) {
           wsToolsInAgents.push(tool);
         }
       }
 
-      // Extract from TOOLS.md workspace section
+      expect(wsToolsInAgents.sort()).toEqual(ACTUAL_WORKSPACE_TOOLS.slice().sort());
+    });
+
+    it('TOOLS.md workspace section lists all workspace tools', () => {
+      const wsToolsInToolsMd: string[] = [];
+
       const wsSection = toolsMd.slice(
         toolsMd.indexOf('### Workspace (7 tools)'),
         toolsMd.indexOf('### Monitor'),
@@ -732,7 +744,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
         }
       }
 
-      expect(wsToolsInAgents.sort()).toEqual(ACTUAL_WORKSPACE_TOOLS.slice().sort());
       expect(wsToolsInToolsMd.sort()).toEqual(ACTUAL_WORKSPACE_TOOLS.slice().sort());
     });
   });
@@ -761,20 +772,20 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
   // ── Version headers ───────────────────────────────────────────────────
 
   describe('Version metadata', () => {
-    it('AGENTS.md is version 3.2', () => {
-      expect(agentsMd).toMatch(/version:\s*3\.2/);
+    it('AGENTS.md is version 3.3', () => {
+      expect(agentsMd).toMatch(/version:\s*3\.3/);
     });
 
-    it('TOOLS.md is version 3.1', () => {
-      expect(toolsMd).toMatch(/version:\s*3\.1/);
+    it('TOOLS.md is version 3.2', () => {
+      expect(toolsMd).toMatch(/version:\s*3\.2/);
     });
 
-    it('AGENTS.md has 2026-03-18 date', () => {
-      expect(agentsMd).toContain('2026-03-18');
+    it('AGENTS.md has 2026-03-19 date', () => {
+      expect(agentsMd).toContain('2026-03-19');
     });
 
-    it('TOOLS.md has 2026-03-18 date', () => {
-      expect(toolsMd).toContain('2026-03-18');
+    it('TOOLS.md has 2026-03-19 date', () => {
+      expect(toolsMd).toContain('2026-03-19');
     });
   });
 
@@ -963,7 +974,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.1 & TOOLS.md v3.1)', () => {
         '## §3 Special Tools',
         '## §4 Research Skills',
         '## §5 Citation & Export',
-        '## §6 Tool Count',
+        '## §6 OpenClaw Inherited Web Tools',
+        '## §7 Tool Count',
       ];
       for (const section of expectedSections) {
         expect(toolsMd).toContain(section);

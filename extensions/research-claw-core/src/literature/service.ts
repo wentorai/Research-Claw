@@ -733,7 +733,11 @@ function paperToRIS(paper: Paper): string {
 function normalizeTitleForComparison(title: string): string {
   return title
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
+    // Keep CJK characters (Unicode ranges: CJK Unified Ideographs + extensions),
+    // Latin a-z, digits, and whitespace. Without this, Chinese/Japanese/Korean
+    // titles are stripped to empty strings, causing all CJK papers to be
+    // treated as duplicates of each other.
+    .replace(/[^a-z0-9\s\u4e00-\u9fff\u3400-\u4dbf\uac00-\ud7af\u3040-\u309f\u30a0-\u30ff]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -795,16 +799,21 @@ export class LiteratureService {
     // Duplicate check on normalized title — prevent title-only duplicates
     {
       const normalizedInput = normalizeTitleForComparison(input.title);
-      const candidates = this.db
-        .prepare(
-          `SELECT * FROM rc_papers WHERE LOWER(TRIM(title)) LIKE ? AND ${NOT_DELETED}`,
-        )
-        .all(`%${normalizedInput.split(' ')[0] ?? ''}%`) as PaperRow[];
+      const firstWord = normalizedInput.split(' ')[0] ?? '';
+      // Skip title dedup if the normalized title is empty or the first token
+      // is too short to be a meaningful LIKE prefix (prevents LIKE '%%' matching everything)
+      if (normalizedInput.length > 0 && firstWord.length > 1) {
+        const candidates = this.db
+          .prepare(
+            `SELECT * FROM rc_papers WHERE LOWER(TRIM(title)) LIKE ? AND ${NOT_DELETED}`,
+          )
+          .all(`%${firstWord}%`) as PaperRow[];
 
-      for (const row of candidates) {
-        if (normalizeTitleForComparison(row.title) === normalizedInput) {
-          const tags = getTagsForPaper(this.db, row.id);
-          return { ...rowToPaper(row, tags), duplicate: true };
+        for (const row of candidates) {
+          if (normalizeTitleForComparison(row.title) === normalizedInput) {
+            const tags = getTagsForPaper(this.db, row.id);
+            return { ...rowToPaper(row, tags), duplicate: true };
+          }
         }
       }
     }

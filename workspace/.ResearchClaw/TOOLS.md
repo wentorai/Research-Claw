@@ -1,7 +1,7 @@
 ---
 file: TOOLS.md
-version: 3.1
-updated: 2026-03-18
+version: 3.2
+updated: 2026-03-19
 ---
 
 # Tool Reference
@@ -75,8 +75,8 @@ Workspace is a git-backed local repository. Every save creates a commit (debounc
 | Database | Tools | Best for |
 |:---------|:------|:---------|
 | **arXiv** | `search_arxiv`, `get_arxiv_paper` | CS, physics, math, bio preprints |
-| **OpenAlex** | `search_openalex`, `get_work`, `get_author_openalex` | Broad coverage, institutions (250M+ works) |
-| **CrossRef** | `search_crossref`, `resolve_doi` | DOI resolution, metadata (130M+ DOIs) |
+| **OpenAlex** | `search_openalex`, `get_work`, `get_author_openalex` | Broad coverage, institutions (250M+ works). Rate-limited without API key. |
+| **CrossRef** | `search_crossref`, `resolve_doi` | DOI resolution, metadata (150M+ DOIs) — **broadest, default first choice** |
 | **PubMed** | `search_pubmed`, `get_article` | Biomedical, life sciences |
 | **Unpaywall** | `find_oa_version` | Legal open-access full text |
 | **bioRxiv/medRxiv** | `search_biorxiv`, `search_medrxiv`, `get_preprint_by_doi` | Biology and medical preprints |
@@ -92,6 +92,25 @@ Workspace is a git-backed local repository. Every save creates a commit (debounc
 | **Zenodo** | `search_zenodo`, `get_zenodo_record` | Open data and research outputs |
 | **ROR** | `search_ror` | Research organization registry |
 | **OSF Preprints** | `search_osf_preprints` | Multidisciplinary preprints |
+
+### Sort Parameters Quick Reference
+
+When the user asks for "latest/最新" papers, you **MUST** pass date-based sort params.
+
+| Tool | Sort parameter | Recency value | Date filter params |
+|:-----|:--------------|:-------------|:-------------------|
+| `search_arxiv` | `sort_by` | `'submittedDate'` | — |
+| `search_crossref` | `sort` | `'published'` | `from_year`, `until_year` |
+| `search_openalex` | `sort_by` | `'publication_date'` | `from_year`, `to_year` |
+| `search_pubmed` | — | — | `min_date`, `max_date` |
+| `search_biorxiv` | — | (date-ordered by default) | `interval: 'YYYY-MM-DD/YYYY-MM-DD'` |
+| `search_europe_pmc` | query prefix | `'SORT_DATE:y'` in query | — |
+| `search_inspire` | query param | `'mostrecent'` | — |
+| `search_zenodo` | query param | `'mostrecent'` | — |
+| `search_hal` | — | sorted by `producedDate` | — |
+
+Default sort is `relevance` for most tools. **Never rely on the default when the user
+wants recent papers.**
 
 ## §3 Special Tools
 
@@ -124,7 +143,38 @@ Tools always take priority over skill guidance.
 - **Export formats:** BibTeX (.bib), RIS (.ris), CSV (.csv), JSON, Markdown
 - **Import formats:** PDF, BibTeX (.bib), RIS (.ris), CSV, DOI list
 
-## §6 Tool Count
+## §6 OpenClaw Inherited Web Tools
 
-39 local + 34 API = **73 registered tools**, all in `openclaw.json` `tools.alsoAllow`.
+These tools come from OpenClaw core (not research-plugins). They are always available
+via `profile: "full"` and do NOT require explicit `alsoAllow` entries.
+
+| Tool | API Key? | Purpose | When to use |
+|:-----|:---------|:--------|:------------|
+| `web_fetch` | **No** | HTTP GET → markdown extraction | Direct URL access: arXiv RSS, conference pages, known paper URLs, API endpoints |
+| `browser` | **No** | Full browser control (open, snapshot, act, close). **Always use `snapshot mode=efficient`** for academic pages. **Never pass `profile`** — omit it to use the default managed browser. | Interactive web search: Google Scholar, CNKI, IEEE Xplore, publisher sites |
+| `web_search` | **Yes** (Brave/Google/Perplexity/XAI/Firecrawl/Moonshot) | Structured web search results | General web queries — only if a provider is configured |
+
+### Priority for academic search
+
+```
+L1: API tools (search_arxiv, search_crossref, etc.) — always try first
+L2: web_fetch (known URLs, RSS feeds, direct API) — no API key needed
+L3: browser (interactive web search) — no API key needed, slower
+L4: web_search — only if configured, NOT required for academic tasks
+```
+
+**Critical:** Never say "I cannot search because web_search/Brave Search is not
+configured." Academic search should use L1 API tools. If those are insufficient,
+escalate to `web_fetch` or `browser` — both work without any API keys.
+
+### Useful direct URLs for `web_fetch`
+
+- arXiv RSS: `https://rss.arxiv.org/rss/{category}` (e.g. `cs.CV`, `cs.RO`)
+- arXiv API: `https://export.arxiv.org/api/query?search_query=...&sortBy=submittedDate`
+- Google Scholar: use `browser` instead (requires JS interaction)
+- PubMed RSS: `https://pubmed.ncbi.nlm.nih.gov/rss/search/...`
+
+## §7 Tool Count
+
+39 local + 34 API + 3 OC web = **76 available tools**.
 438 skills accessible on-demand via research-plugins (40 subcategory indexes).
