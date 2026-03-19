@@ -35,7 +35,8 @@
     "thinkingLabel": "思考过程",
     "imageNotSupported": "当前模型不支持图片处理。请在设置中启用独立视觉模型，或切换到支持图片的主模型（如 Claude、GPT-4o）。",
     "bgWorking": "正在后台工作...",
-    "refresh": "刷新对话"
+    "refresh": "刷新对话",
+    "copyRaw": "复制原文（思维链 + Markdown）"
   },
   "library": {
     "title": "文献库",

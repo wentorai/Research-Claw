@@ -35,7 +35,8 @@
     "thinkingLabel": "Thinking",
     "imageNotSupported": "Current model does not support image input. Please enable a separate vision model in Settings, or switch to a model that supports images (e.g. Claude, GPT-4o).",
     "bgWorking": "Working in background...",
-    "refresh": "Refresh chat"
+    "refresh": "Refresh chat",
+    "copyRaw": "Copy source (thinking + markdown)"
   },
   "library": {
     "title": "Literature Library",
