@@ -358,6 +358,8 @@
     "apiKeyExisting": "Existing key preserved — enter new to replace",
     "openaiCodexOauthNoApiKey": "No API key required (OAuth provider)",
     "openaiCodexOauthHint": "To use OpenAI OAuth (Codex/ChatGPT), run: openclaw models auth login --provider openai-codex. Then select provider openai-codex and save.",
+    "miniMaxPortalOauthNoApiKey": "No API key required (MiniMax OAuth)",
+    "miniMaxPortalOauthHint": "To use MiniMax OAuth (Coding Plan), run: openclaw plugins enable minimax-portal-auth && openclaw onboard --auth-choice minimax-portal. Then select provider minimax-portal and save.",
     "modelName": "Text Endpoint",
     "provider": "Provider",
     "providerCustom": "Custom / Other",

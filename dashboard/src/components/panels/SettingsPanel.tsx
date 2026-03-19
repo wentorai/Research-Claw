@@ -211,6 +211,7 @@ export default function SettingsPanel() {
   const [restarting, setRestarting] = useState(false);
 
   const isOpenAICodexOAuth = provider === 'openai-codex';
+  const isMiniMaxPortalOAuth = provider === 'minimax-portal';
 
   const handleProviderChange = (id: string) => {
     setProvider(id);
@@ -222,7 +223,7 @@ export default function SettingsPanel() {
     }
     // Provider-specific auth UX:
     // `openai-codex` uses OAuth profiles; do not carry over apiKeyConfigured from previous providers.
-    if (id === 'openai-codex') {
+    if (id === 'openai-codex' || id === 'minimax-portal') {
       setApiKey('');
       setApiKeyConfigured(false);
     }
@@ -482,18 +483,20 @@ export default function SettingsPanel() {
           onChange={(e) => setApiKey(e.target.value)}
           size="small"
           style={{ width: 220 }}
-          disabled={isOpenAICodexOAuth}
+          disabled={isOpenAICodexOAuth || isMiniMaxPortalOAuth}
           placeholder={
             isOpenAICodexOAuth
               ? t('setup.openaiCodexOauthNoApiKey')
+              : isMiniMaxPortalOAuth
+                ? t('setup.miniMaxPortalOauthNoApiKey')
               : (apiKeyConfigured && !apiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder'))
           }
         />
       </SettingRow>
-      {isOpenAICodexOAuth && (
+      {(isOpenAICodexOAuth || isMiniMaxPortalOAuth) && (
         <div style={{ marginTop: -6, marginBottom: 6 }}>
           <Text type="secondary" style={{ fontSize: 11 }}>
-            {t('setup.openaiCodexOauthHint')}
+            {isOpenAICodexOAuth ? t('setup.openaiCodexOauthHint') : t('setup.miniMaxPortalOauthHint')}
           </Text>
         </div>
       )}

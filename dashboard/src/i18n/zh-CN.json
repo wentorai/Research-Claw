@@ -358,6 +358,8 @@
     "apiKeyExisting": "已有密钥将保留 — 输入新密钥可替换",
     "openaiCodexOauthNoApiKey": "无需 API Key（OAuth 提供方）",
     "openaiCodexOauthHint": "使用 OpenAI OAuth（Codex/ChatGPT）请运行：openclaw models auth login --provider openai-codex。完成后在此选择 openai-codex 并保存。",
+    "miniMaxPortalOauthNoApiKey": "无需 API Key（MiniMax OAuth）",
+    "miniMaxPortalOauthHint": "使用 MiniMax OAuth（Coding Plan）请运行：openclaw plugins enable minimax-portal-auth && openclaw onboard --auth-choice minimax-portal。完成后在此选择 minimax-portal 并保存。",
     "modelName": "文本端点",
     "provider": "模型供应商",
     "providerCustom": "自定义 / 其他",
