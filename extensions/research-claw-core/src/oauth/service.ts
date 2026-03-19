@@ -11,6 +11,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as https from 'node:https';
+import * as tls from 'node:tls';
 import * as path from 'node:path';
 import { URL } from 'node:url';
 
@@ -155,9 +156,11 @@ function resolveProxyUrl(): string | null {
   return null;
 }
 
+const REQUEST_TIMEOUT_MS = 20_000;
+
 /**
- * POST with proxy support via CONNECT tunnel (no external dependencies).
- * Falls back to direct request if no proxy configured.
+ * POST with proxy support via CONNECT tunnel + TLS (no external dependencies).
+ * Falls back to direct request if no proxy configured or proxy fails.
  */
 function proxyAwarePost(
   targetUrl: string,
@@ -166,79 +169,148 @@ function proxyAwarePost(
   const target = new URL(targetUrl);
   const proxyUrl = resolveProxyUrl();
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Content-Length': Buffer.byteLength(body).toString(),
-  };
+  if (proxyUrl) {
+    return tunnelPost(target, body, proxyUrl).catch(() => {
+      // Proxy failed — fall back to direct
+      return directPost(target, body);
+    });
+  }
+  return directPost(target, body);
+}
 
+type TokenResult = { access_token: string; refresh_token: string; expires_in: number };
+
+/**
+ * Direct HTTPS POST (no proxy).
+ */
+function directPost(target: URL, body: string): Promise<TokenResult> {
   return new Promise((resolve, reject) => {
-    const handleResponse = (res: http.IncomingMessage) => {
-      let data = '';
-      res.on('data', (chunk: string) => { data += chunk; });
-      res.on('end', () => {
-        if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(`Token exchange failed (${res.statusCode}): ${data.slice(0, 200)}`));
-          return;
-        }
-        try {
-          resolve(JSON.parse(data));
-        } catch {
-          reject(new Error(`Token exchange returned invalid JSON: ${data.slice(0, 100)}`));
-        }
-      });
-    };
-
-    if (proxyUrl) {
-      // CONNECT tunnel through HTTP proxy
-      const proxy = new URL(proxyUrl);
-      const connectReq = http.request({
-        host: proxy.hostname,
-        port: Number(proxy.port) || 7890,
-        method: 'CONNECT',
-        path: `${target.hostname}:${target.port || 443}`,
-      });
-
-      connectReq.on('connect', (_res, socket) => {
-        const req = https.request({
-          method: 'POST',
-          hostname: target.hostname,
-          path: target.pathname + target.search,
-          headers: { ...headers, Host: target.hostname },
-          createConnection: () => socket,
-        } as https.RequestOptions, handleResponse);
-        req.on('error', reject);
-        req.write(body);
-        req.end();
-      });
-
-      connectReq.on('error', (err) => {
-        // Proxy failed — try direct as fallback
-        directPost(target, headers, body, handleResponse, reject);
-      });
-      connectReq.end();
-    } else {
-      directPost(target, headers, body, handleResponse, reject);
-    }
+    const req = https.request({
+      method: 'POST',
+      hostname: target.hostname,
+      port: Number(target.port) || 443,
+      path: target.pathname + target.search,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body).toString(),
+        Host: target.hostname,
+      },
+      timeout: REQUEST_TIMEOUT_MS,
+    }, (res) => collectResponse(res, resolve, reject));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Token exchange timed out (direct)')); });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
   });
 }
 
-function directPost(
-  target: URL,
-  headers: Record<string, string>,
-  body: string,
-  onResponse: (res: http.IncomingMessage) => void,
-  onError: (err: Error) => void,
+/**
+ * HTTPS POST through HTTP CONNECT tunnel.
+ * 1. HTTP CONNECT to proxy → get raw TCP socket
+ * 2. tls.connect over that socket → TLS-wrapped socket
+ * 3. Write raw HTTP/1.1 request over TLS socket
+ * 4. Parse response
+ */
+function tunnelPost(target: URL, body: string, proxyUrl: string): Promise<TokenResult> {
+  return new Promise((resolve, reject) => {
+    const proxy = new URL(proxyUrl);
+    const targetPort = Number(target.port) || 443;
+
+    // Step 1: CONNECT to proxy
+    const connectReq = http.request({
+      host: proxy.hostname,
+      port: Number(proxy.port) || 7890,
+      method: 'CONNECT',
+      path: `${target.hostname}:${targetPort}`,
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+
+    connectReq.on('timeout', () => { connectReq.destroy(); reject(new Error('Proxy CONNECT timed out')); });
+
+    connectReq.on('connect', (connectRes, socket) => {
+      if (connectRes.statusCode !== 200) {
+        socket.destroy();
+        reject(new Error(`Proxy CONNECT failed: ${connectRes.statusCode}`));
+        return;
+      }
+
+      // Step 2: TLS handshake over the tunneled socket
+      const tlsSocket = tls.connect({
+        socket: socket as import('node:net').Socket,
+        host: target.hostname,
+        servername: target.hostname,
+      }, () => {
+        // Step 3: Write raw HTTP/1.1 request
+        const reqHeaders = [
+          `POST ${target.pathname}${target.search} HTTP/1.1`,
+          `Host: ${target.hostname}`,
+          'Content-Type: application/x-www-form-urlencoded',
+          `Content-Length: ${Buffer.byteLength(body)}`,
+          'Connection: close',
+          '',
+          '',
+        ].join('\r\n');
+
+        tlsSocket.write(reqHeaders + body);
+      });
+
+      tlsSocket.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        tlsSocket.destroy();
+        reject(new Error('Token exchange timed out (tunnel)'));
+      });
+
+      // Step 4: Collect and parse response
+      let rawData = '';
+      tlsSocket.on('data', (chunk: Buffer) => { rawData += chunk.toString(); });
+      tlsSocket.on('end', () => {
+        // Parse HTTP response: split headers from body at \r\n\r\n
+        const splitIdx = rawData.indexOf('\r\n\r\n');
+        if (splitIdx < 0) {
+          reject(new Error('Malformed HTTP response from token endpoint'));
+          return;
+        }
+        const statusLine = rawData.slice(0, rawData.indexOf('\r\n'));
+        const statusMatch = statusLine.match(/HTTP\/\d\.\d (\d+)/);
+        const statusCode = statusMatch ? Number(statusMatch[1]) : 0;
+        const responseBody = rawData.slice(splitIdx + 4);
+
+        if (statusCode >= 400) {
+          reject(new Error(`Token exchange failed (${statusCode}): ${responseBody.slice(0, 200)}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(responseBody));
+        } catch {
+          reject(new Error(`Token exchange returned invalid JSON: ${responseBody.slice(0, 100)}`));
+        }
+      });
+
+      tlsSocket.on('error', reject);
+    });
+
+    connectReq.on('error', reject);
+    connectReq.end();
+  });
+}
+
+function collectResponse(
+  res: http.IncomingMessage,
+  resolve: (v: TokenResult) => void,
+  reject: (e: Error) => void,
 ): void {
-  const req = https.request({
-    method: 'POST',
-    hostname: target.hostname,
-    port: target.port || 443,
-    path: target.pathname + target.search,
-    headers: { ...headers, Host: target.hostname },
-  }, onResponse);
-  req.on('error', onError);
-  req.write(body);
-  req.end();
+  let data = '';
+  res.on('data', (chunk: string) => { data += chunk; });
+  res.on('end', () => {
+    if (res.statusCode && res.statusCode >= 400) {
+      reject(new Error(`Token exchange failed (${res.statusCode}): ${data.slice(0, 200)}`));
+      return;
+    }
+    try {
+      resolve(JSON.parse(data));
+    } catch {
+      reject(new Error(`Token exchange returned invalid JSON: ${data.slice(0, 100)}`));
+    }
+  });
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
