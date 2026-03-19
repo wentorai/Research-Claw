@@ -20,8 +20,10 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/research-claw}"
 PORT="${PORT:-28789}"
 REPO="https://github.com/wentorai/Research-Claw.git"
 NODE_MIN=22
-PNPM_VERSION=9
+PNPM_VERSION=9.15.0
 ISSUES_URL="https://github.com/wentorai/Research-Claw/issues"
+RC_PNPM_PREFIX="${RC_PNPM_PREFIX:-$INSTALL_DIR/.tools/pnpm}"
+PNPM_BIN=""
 
 # --- Colors (disabled in pipes) ---
 if [ -t 1 ] && [ -t 2 ]; then
@@ -302,15 +304,52 @@ ensure_node() {
 
 ensure_node
 
-# --- [4/8 cont.] pnpm ---
-if ! command -v pnpm &>/dev/null; then
-  info "Installing pnpm..."
-  npm install -g "pnpm@$PNPM_VERSION" &>/dev/null || true
-fi
-if ! command -v pnpm &>/dev/null; then
-  die "pnpm installation failed. Install manually: npm install -g pnpm@$PNPM_VERSION"
-fi
-ok "pnpm $(pnpm -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+activate_private_pnpm() {
+  local bin_dir="$RC_PNPM_PREFIX/bin"
+  if [ ! -x "$bin_dir/pnpm" ]; then
+    return 1
+  fi
+  case ":$PATH:" in
+    *":$bin_dir:"*) ;;
+    *) export PATH="$bin_dir:$PATH" ;;
+  esac
+  return 0
+}
+
+pnpm_cmd_works() {
+  command -v pnpm &>/dev/null || return 1
+  pnpm --version &>/dev/null
+}
+
+install_private_pnpm() {
+  mkdir -p "$RC_PNPM_PREFIX"
+  info "Installing standalone pnpm $PNPM_VERSION..."
+  npm install --prefix "$RC_PNPM_PREFIX" -g "pnpm@$PNPM_VERSION"
+  activate_private_pnpm
+}
+
+ensure_pnpm() {
+  if pnpm_cmd_works; then
+    PNPM_BIN="$(command -v pnpm)"
+    ok "pnpm $(pnpm --version)"
+    return 0
+  fi
+
+  activate_private_pnpm || true
+  if pnpm_cmd_works; then
+    PNPM_BIN="$(command -v pnpm)"
+    ok "pnpm $(pnpm --version)"
+    return 0
+  fi
+
+  warn "Detected a broken pnpm/Corepack shim. Falling back to a standalone pnpm install."
+  if ! install_private_pnpm || ! pnpm_cmd_works; then
+    die "pnpm installation failed. Install manually: npm install --prefix $RC_PNPM_PREFIX -g pnpm@$PNPM_VERSION"
+  fi
+
+  PNPM_BIN="$(command -v pnpm)"
+  ok "pnpm $(pnpm --version)"
+}
 
 # --- Disable Corepack strict mode ---
 # Node 22+ enables Corepack by default. If a parent directory (e.g. ~/) has a
@@ -376,6 +415,9 @@ export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf"
 export GIT_CONFIG_VALUE_0="git@github.com:"
 
+# --- [5/8 cont.] pnpm ---
+ensure_pnpm
+
 # --- Detect gateway Node (early — needed for ABI rebuild, plugin install, gateway launch) ---
 # OpenClaw re-execs under conda "openclaw" env's Node at runtime, regardless of which
 # node launches entry.js. So we MUST compile native modules for that Node, not system node.
@@ -412,7 +454,7 @@ fi
 # Put $GW_NODE first in PATH so pnpm compiles native modules (better-sqlite3)
 # for the gateway's Node, not the system Node. This avoids ABI mismatch entirely.
 info "Installing dependencies..."
-if ! (PATH="$GW_NODE_DIR:$PATH" pnpm install --frozen-lockfile 2>/dev/null || PATH="$GW_NODE_DIR:$PATH" pnpm install); then
+if ! (PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install --frozen-lockfile 2>/dev/null || PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install); then
   die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
 fi
 ok "Dependencies installed"
@@ -611,7 +653,7 @@ RC_DIR="workspace/.ResearchClaw"
 
 info "Building..."
 BUILD_LOG="$(mktemp)"
-if pnpm build >"$BUILD_LOG" 2>&1; then
+if "$PNPM_BIN" build >"$BUILD_LOG" 2>&1; then
   tail -3 "$BUILD_LOG"
 else
   tail -20 "$BUILD_LOG"
@@ -624,7 +666,7 @@ ok "Build complete"
 # --- Verify dashboard build ---
 if [ ! -d "dashboard/dist" ] || [ ! -f "dashboard/dist/index.html" ]; then
   warn "Dashboard build missing. Rebuilding..."
-  pnpm build:dashboard 2>&1 | tail -3 || true
+  "$PNPM_BIN" build:dashboard 2>&1 | tail -3 || true
   if [ ! -f "dashboard/dist/index.html" ]; then
     warn "Dashboard build failed. The gateway will start but the web UI may not load."
     warn "Try: cd $INSTALL_DIR && pnpm build:dashboard"
@@ -660,7 +702,7 @@ ensure_native_modules() {
 
   # Attempt 1: targeted rebuild (fast, works for simple ABI mismatch)
   info "Native module ABI mismatch — rebuilding better-sqlite3..."
-  pnpm rebuild better-sqlite3 2>&1 | tail -3 || true
+  "$PNPM_BIN" rebuild better-sqlite3 2>&1 | tail -3 || true
   if test_sqlite3; then
     ok "Native modules rebuilt for $("$GW_NODE" -v)"
     return 0
@@ -670,11 +712,11 @@ ensure_native_modules() {
   # Use $GW_NODE_DIR in PATH so native modules compile for the correct Node
   info "Rebuild failed — clean reinstalling dependencies..."
   rm -rf node_modules
-  if ! (PATH="$GW_NODE_DIR:$PATH" pnpm install --frozen-lockfile 2>/dev/null || PATH="$GW_NODE_DIR:$PATH" pnpm install); then
+  if ! (PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install --frozen-lockfile 2>/dev/null || PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install); then
     die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
   fi
   # Rebuild dashboard after clean install
-  pnpm build 2>&1 | tail -3 || true
+  "$PNPM_BIN" build 2>&1 | tail -3 || true
 
   if test_sqlite3; then
     ok "Native modules OK (clean install)"
@@ -839,7 +881,7 @@ export OPENCLAW_CONFIG_PATH="$INSTALL_DIR/config/openclaw.json"
 printf "\n  ${G}${B}Ready!${N}\n\n"
 printf "  ${B}Dashboard:${N}  ${C}http://127.0.0.1:$PORT${N}\n"
 printf "  ${B}Location:${N}   $INSTALL_DIR\n"
-printf "  ${B}Start:${N}      cd $INSTALL_DIR && pnpm serve\n"
+printf "  ${B}Start:${N}      cd $INSTALL_DIR && bash scripts/run.sh\n"
 printf "  ${B}Plugins:${N}    cd $INSTALL_DIR && npx openclaw plugins install <name>\n"
 printf "  ${B}Update:${N}     curl -fsSL https://wentor.ai/install.sh | bash\n\n"
 printf "  ${Y}TIP:${N}  Use ${B}Chrome${N} for the best experience.\n"
