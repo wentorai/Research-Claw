@@ -88,6 +88,11 @@ RC_DIR="workspace/.ResearchClaw"
 # Token auth — matches Dashboard's DEFAULT_TOKEN ('research-claw').
 export OPENCLAW_GATEWAY_TOKEN=research-claw
 
+# Ensure `openclaw` CLI is available to agent's system.run commands.
+# Without this, agent diagnostics (`openclaw doctor`, `openclaw plugins list`) fail
+# with "command not found" because node_modules/.bin is not in PATH.
+export PATH="$(pwd)/node_modules/.bin:$PATH"
+
 STOP=false
 trap 'STOP=true' INT TERM
 

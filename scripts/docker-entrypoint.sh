@@ -235,6 +235,9 @@ echo "[research-claw] Open dashboard: http://127.0.0.1:$PORT/?token=$OPENCLAW_GA
 echo "[research-claw] Gateway token: $OPENCLAW_GATEWAY_TOKEN"
 echo "[research-claw] (Tip: set OPENCLAW_GATEWAY_TOKEN env var for a fixed token)"
 
+# Ensure `openclaw` CLI is available to agent's system.run commands.
+export PATH="/app/node_modules/.bin:$PATH"
+
 STOP=false
 trap 'STOP=true' INT TERM
 
