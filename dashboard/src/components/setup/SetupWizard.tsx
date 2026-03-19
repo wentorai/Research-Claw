@@ -66,8 +66,8 @@ export default function SetupWizard() {
     if (preset.models.length > 0 && !textModel) {
       setTextModel(preset.models[0].id);
     }
-    // OAuth-profile providers: do not prompt for API key here.
-    if (id === 'openai-codex' || id === 'minimax-portal') {
+    // `openai-codex` uses OAuth profiles; do not prompt for API key here.
+    if (id === 'openai-codex') {
       setApiKey('');
     }
   };
@@ -129,9 +129,8 @@ export default function SetupWizard() {
   }, [restarting, connState]);
 
   const isOpenAICodexOAuth = provider === 'openai-codex';
-  const isMiniMaxPortalOAuth = provider === 'minimax-portal';
   const canStart =
-    (isOpenAICodexOAuth || isMiniMaxPortalOAuth || apiKey.trim().length > 0 || hasExistingConfig.current) &&
+    (isOpenAICodexOAuth || apiKey.trim().length > 0 || hasExistingConfig.current) &&
     baseUrl.trim().length > 0 &&
     textModel.trim().length > 0;
 
@@ -317,19 +316,17 @@ export default function SetupWizard() {
             <Input
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              disabled={isOpenAICodexOAuth || isMiniMaxPortalOAuth}
+              disabled={isOpenAICodexOAuth}
               placeholder={
                 isOpenAICodexOAuth
                   ? t('setup.openaiCodexOauthNoApiKey')
-                  : isMiniMaxPortalOAuth
-                    ? t('setup.miniMaxPortalOauthNoApiKey')
                   : (hasExistingConfig.current && !apiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder'))
               }
               prefix={<ApiOutlined />}
             />
-            {(isOpenAICodexOAuth || isMiniMaxPortalOAuth) && (
+            {isOpenAICodexOAuth && (
               <Text type="secondary" style={{ fontSize: 11, marginTop: 6, display: 'block' }}>
-                {isOpenAICodexOAuth ? t('setup.openaiCodexOauthHint') : t('setup.miniMaxPortalOauthHint')}
+                {t('setup.openaiCodexOauthHint')}
               </Text>
             )}
           </div>

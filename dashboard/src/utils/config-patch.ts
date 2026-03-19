@@ -80,8 +80,6 @@ function providerSupportsRedactedApiKeySentinel(providerKey: string): boolean {
   // when the user leaves the apiKey field empty.
   // `openai-codex` uses auth-profiles (oauth refresh) rather than apiKey in config.
   if (providerKey === 'openai-codex') return false;
-  // `minimax-portal` uses auth-profiles (OAuth via minimax-portal-auth plugin).
-  if (providerKey === 'minimax-portal') return false;
   return true;
 }
 

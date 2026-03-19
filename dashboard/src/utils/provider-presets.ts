@@ -208,19 +208,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     urlPattern: /minimax\.io/i,
   },
   {
-    id: 'minimax-portal',
-    label: 'MiniMax OAuth (Coding Plan)',
-    // OpenClaw's minimax-portal-auth uses auth profiles (no API key in config).
-    // Base URL here is only for display / initial fill.
-    baseUrl: 'https://api.minimax.io/anthropic',
-    api: 'anthropic-messages',
-    models: [
-      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5 (OAuth)', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
-      { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed (OAuth)', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
-    ],
-    // Detect via provider key (preferred); URL overlaps with minimax api key preset.
-  },
-  {
     id: 'minimax-cn',
     label: 'MiniMax (国内)',
     baseUrl: 'https://api.minimaxi.com/anthropic',
