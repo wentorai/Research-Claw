@@ -13,6 +13,18 @@ import i18n from '../i18n';
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 
 /**
+ * Normalize session key for comparison.
+ * The gateway canonicalizes bare keys: "project-xxx" → "agent:main:project-xxx".
+ * Dashboard stores the bare key, but gateway broadcasts events with the canonical form.
+ * Strip the "agent:<agentId>:" prefix to compare on the bare key.
+ */
+const CANONICAL_PREFIX_RE = /^agent:[^:]+:/;
+function normalizeSessionKey(key: string | undefined): string {
+  if (!key) return '';
+  return key.replace(CANONICAL_PREFIX_RE, '');
+}
+
+/**
  * Debounce timer for gap-triggered history reloads.
  * Module-level to avoid polluting Zustand store serialization.
  */
@@ -532,9 +544,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
   handleChatEvent: (event: ChatStreamEvent) => {
     // Session isolation: drop events for non-active sessions.
-    // Strict match with OC: openclaw/ui/src/ui/controllers/chat.ts:266
-    //   if (payload.sessionKey !== state.sessionKey) return null;
-    if (event.sessionKey !== get().sessionKey) {
+    // Gateway canonicalizes keys: "project-xxx" → "agent:main:project-xxx".
+    // Dashboard stores bare key, so normalize both sides before comparing.
+    // Source: openclaw/src/gateway/server-methods/chat.ts:1189-1190
+    if (normalizeSessionKey(event.sessionKey) !== normalizeSessionKey(get().sessionKey)) {
       return;
     }
 

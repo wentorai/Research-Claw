@@ -250,7 +250,7 @@ export default function MessageInput() {
             type="text"
             icon={<ReloadOutlined />}
             onClick={handleRefresh}
-            disabled={!isConnected || sending || streaming}
+            disabled={!isConnected}
             style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
           />
         </Tooltip>
