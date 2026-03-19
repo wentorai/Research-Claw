@@ -88,9 +88,18 @@ trap 'STOP=true' INT TERM
 
 while true; do
   echo "[run] Starting Research-Claw gateway..."
+  # MiniMax OAuth (sk-cp-...) compatibility:
+  # Start a local proxy that forwards requests to MiniMax with Authorization: Bearer <token>.
+  # It is a no-op unless models.providers.minimax.apiKey starts with "sk-cp-".
+  "$GW_NODE" ./scripts/minimax-oauth-proxy.mjs >/tmp/research-claw-minimax-oauth-proxy.log 2>&1 &
+  PROXY_PID=$!
+
   "$GW_NODE" ./node_modules/openclaw/dist/entry.js \
     gateway run --allow-unconfigured --auth token --port 28789 --force
   CODE=$?
+
+  # Stop proxy when gateway exits (gateway restart loop).
+  kill "$PROXY_PID" >/dev/null 2>&1 || true
 
   if $STOP; then
     echo "[run] Stopped."

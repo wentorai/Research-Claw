@@ -391,6 +391,7 @@ describe('Provider preset metadata — openclaw/src/agents/provider-capabilities
     // openclaw accepts these api values in provider config
     const validApis = [
       'openai-completions',
+      'openai-codex-responses',
       'anthropic-messages',
       'google-generative-ai',
       'bedrock-converse-stream',

@@ -53,10 +53,16 @@ STOP=false
 trap 'STOP=true' INT TERM
 
 while true; do
+  # MiniMax OAuth (sk-cp-...) compatibility proxy (no-op unless configured).
+  node /app/scripts/minimax-oauth-proxy.mjs >/tmp/research-claw-minimax-oauth-proxy.log 2>&1 &
+  PROXY_PID=$!
+
   OPENCLAW_CONFIG_PATH=$CONFIG_FILE \
     node /app/node_modules/openclaw/dist/entry.js \
     gateway run --allow-unconfigured --auth token --port 28789 --bind lan --force
   CODE=$?
+
+  kill "$PROXY_PID" >/dev/null 2>&1 || true
 
   if [ "$STOP" = "true" ]; then
     exit 0

@@ -66,6 +66,23 @@ function cleanUrl(url: string): string {
   return url.replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
 }
 
+function isMiniMaxOAuthToken(apiKey?: string): boolean {
+  return typeof apiKey === 'string' && apiKey.startsWith('sk-cp-');
+}
+
+function minimaxProxyBaseUrl(): string {
+  const port = 28790; // scripts/minimax-oauth-proxy.mjs default
+  return `http://127.0.0.1:${port}/anthropic`;
+}
+
+function providerSupportsRedactedApiKeySentinel(providerKey: string): boolean {
+  // Providers that authenticate via OAuth profiles should not emit an apiKey sentinel
+  // when the user leaves the apiKey field empty.
+  // `openai-codex` uses auth-profiles (oauth refresh) rather than apiKey in config.
+  if (providerKey === 'openai-codex') return false;
+  return true;
+}
+
 /**
  * Resolve full model definition from provider presets.
  * Returns all metadata fields (input, contextWindow, maxTokens, reasoning).
@@ -234,9 +251,17 @@ export function buildSaveConfig(
     const existing = resolveExistingApiKey(currentConfig, providerKey);
     if (existing) {
       textProvider.apiKey = existing;
-    } else if (input.apiKeyConfigured) {
+    } else if (input.apiKeyConfigured && providerSupportsRedactedApiKeySentinel(providerKey)) {
       textProvider.apiKey = REDACTED_SENTINEL;
     }
+  }
+
+  // MiniMax OAuth (sk-cp-...) compatibility:
+  // Route MiniMax traffic through a local proxy that injects Authorization: Bearer <token>.
+  // We preserve the real upstream URL in `upstreamBaseUrl` for the proxy to read.
+  if ((providerKey === 'minimax' || providerKey === 'minimax-cn') && isMiniMaxOAuthToken(input.apiKey)) {
+    textProvider.upstreamBaseUrl = baseUrl;
+    textProvider.baseUrl = minimaxProxyBaseUrl();
   }
 
   const providers: Record<string, unknown> = {
@@ -368,9 +393,18 @@ export function extractConfigFields(
   const apiKeyRaw = textProviderDef?.apiKey;
   const visionApiKeyRaw = visionProviderDef?.apiKey;
 
+  const displayBaseUrl = (() => {
+    const raw = (textProviderDef?.baseUrl as string) ?? '';
+    const upstream = (textProviderDef?.upstreamBaseUrl as string) ?? '';
+    if ((textProviderKey === 'minimax' || textProviderKey === 'minimax-cn') && raw.startsWith('http://127.0.0.1:28790')) {
+      return upstream || raw;
+    }
+    return raw;
+  })();
+
   return {
     provider: textProviderKey,
-    baseUrl: (textProviderDef?.baseUrl as string) ?? '',
+    baseUrl: displayBaseUrl,
     api: (textProviderDef?.api as string) ?? 'openai-completions',
     apiKey: deRedact(apiKeyRaw),
     apiKeyConfigured: typeof apiKeyRaw === 'string' && apiKeyRaw.length > 0,

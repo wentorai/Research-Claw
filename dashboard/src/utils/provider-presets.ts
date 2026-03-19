@@ -36,7 +36,14 @@ export interface ProviderPreset {
   /** API base URL */
   baseUrl: string;
   /** API protocol for pi-ai */
-  api: 'openai-completions' | 'anthropic-messages' | 'google-generative-ai' | 'bedrock-converse-stream' | 'ollama' | 'github-copilot';
+  api:
+    | 'openai-completions'
+    | 'openai-codex-responses'
+    | 'anthropic-messages'
+    | 'google-generative-ai'
+    | 'bedrock-converse-stream'
+    | 'ollama'
+    | 'github-copilot';
   /** Suggested models for this provider */
   models: ProviderModel[];
   /** URL pattern to match when detecting provider from existing config */
@@ -77,6 +84,16 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'gpt-5-mini', name: 'GPT-5 Mini', input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
     ],
     urlPattern: /openai\.com/i,
+  },
+  {
+    id: 'openai-codex',
+    label: 'OpenAI Codex (ChatGPT OAuth)',
+    baseUrl: 'https://chatgpt.com/backend-api',
+    api: 'openai-codex-responses',
+    models: [
+      { id: 'gpt-5.4', name: 'Codex GPT-5.4 (OAuth)', reasoning: true, input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
+    ],
+    urlPattern: /chatgpt\.com\/backend-api/i,
   },
   {
     id: 'google',

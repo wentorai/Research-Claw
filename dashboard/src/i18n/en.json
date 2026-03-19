@@ -356,6 +356,8 @@
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter your API key",
     "apiKeyExisting": "Existing key preserved — enter new to replace",
+    "openaiCodexOauthNoApiKey": "No API key required (OAuth provider)",
+    "openaiCodexOauthHint": "To use OpenAI OAuth (Codex/ChatGPT), run: openclaw models auth login --provider openai-codex. Then select provider openai-codex and save.",
     "modelName": "Text Endpoint",
     "provider": "Provider",
     "providerCustom": "Custom / Other",
