@@ -1,17 +1,25 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Button, Tooltip, message } from 'antd';
-import { SendOutlined, PaperClipOutlined } from '@ant-design/icons';
+import { SendOutlined, PaperClipOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
+import { useToolStreamStore } from '../../stores/tool-stream';
 import type { ChatAttachment } from '../../gateway/types';
+
+const DRAFT_STORAGE_PREFIX = 'rc-chat-draft:';
 
 const MAX_SIZE = 5_000_000; // 5MB — must match gateway's parseMessageWithAttachments limit
 const ACCEPTED_TYPES = /^image\/(png|jpe?g|gif|webp|bmp|tiff|heic|heif)$/;
 
 export default function MessageInput() {
   const { t } = useTranslation();
-  const [text, setText] = useState('');
+  const sessionKey = useChatStore((s) => s.sessionKey);
+  const [text, setText] = useState(() => {
+    try {
+      return localStorage.getItem(DRAFT_STORAGE_PREFIX + sessionKey) ?? '';
+    } catch { return ''; }
+  });
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -20,10 +28,42 @@ export default function MessageInput() {
   const abort = useChatStore((s) => s.abort);
   const sending = useChatStore((s) => s.sending);
   const streaming = useChatStore((s) => s.streaming);
+  const loadHistory = useChatStore((s) => s.loadHistory);
   const connState = useGatewayStore((s) => s.state);
 
   const isConnected = connState === 'connected';
   const canSend = (text.trim().length > 0 || attachments.length > 0) && isConnected && !sending;
+
+  // Persist draft to localStorage (session-isolated)
+  useEffect(() => {
+    try {
+      if (text) {
+        localStorage.setItem(DRAFT_STORAGE_PREFIX + sessionKey, text);
+      } else {
+        localStorage.removeItem(DRAFT_STORAGE_PREFIX + sessionKey);
+      }
+    } catch { /* storage full — non-fatal */ }
+  }, [text, sessionKey]);
+
+  // Restore draft when session changes
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_STORAGE_PREFIX + sessionKey) ?? '';
+      setText(saved);
+      // Resize textarea to fit restored draft
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        if (saved) {
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+        }
+      }
+    } catch { /* ignore */ }
+  }, [sessionKey]);
+
+  const handleRefresh = useCallback(() => {
+    useToolStreamStore.getState().clearAll();
+    loadHistory();
+  }, [loadHistory]);
 
   const processFiles = useCallback(
     (files: FileList | File[]) => {
@@ -109,11 +149,13 @@ export default function MessageInput() {
     if ((!msg && attachments.length === 0) || !isConnected || sending) return;
     setText('');
     setAttachments([]);
+    // Clear persisted draft on send
+    try { localStorage.removeItem(DRAFT_STORAGE_PREFIX + sessionKey); } catch { /* ignore */ }
     send(msg, attachments.length > 0 ? attachments : undefined);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [text, attachments, isConnected, sending, send]);
+  }, [text, attachments, isConnected, sending, send, sessionKey]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Do not intercept Enter during IME composition (e.g. Chinese pinyin input)
@@ -201,6 +243,18 @@ export default function MessageInput() {
           transition: 'border-color 0.15s ease',
         }}
       >
+        {/* Refresh button — reloads chat history without losing draft.
+          * Matches OC chat view's onRefresh (app-render.ts:1386-1388). */}
+        <Tooltip title={t('chat.refresh')}>
+          <Button
+            type="text"
+            icon={<ReloadOutlined />}
+            onClick={handleRefresh}
+            disabled={!isConnected || sending || streaming}
+            style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
+          />
+        </Tooltip>
+
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
