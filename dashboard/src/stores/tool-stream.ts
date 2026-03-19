@@ -44,17 +44,24 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
       data?: {
         phase?: string;
         name?: string;
+        toolName?: string;
         toolCallId?: string;
       };
     };
 
     if (!evt.stream || !evt.data) return;
 
-    const isBackground = !!evt.runId && !!chatRunId && evt.runId !== chatRunId;
+    // Background = different runId from the user's active chat.
+    // When chatRunId is null (no active user chat), server-initiated runs are foreground-ish
+    // but we still show them as background since the user didn't initiate them.
+    const isBackground = !!evt.runId && (!chatRunId || evt.runId !== chatRunId);
 
     // Handle tool stream events
+    // Gateway sends data.name (server-chat.agent-events.test.ts:537), but also
+    // accept data.toolName for forward-compat with any gateway variants.
     if (evt.stream === 'tool' && evt.data.phase && evt.data.toolCallId) {
-      const { phase, name, toolCallId } = evt.data;
+      const { phase, toolCallId } = evt.data;
+      const name = evt.data.name ?? evt.data.toolName;
 
       if (!isBackground) {
         // Foreground: update pendingTools for inline chat display

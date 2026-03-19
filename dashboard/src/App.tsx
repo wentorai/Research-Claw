@@ -124,7 +124,7 @@ export default function App() {
       }
     });
 
-    const unsubAgent = client.subscribe('agent', (payload) => {
+    const handleAgentPayload = (payload: unknown) => {
       const status = payload as { state?: string };
       if (status.state) {
         setAgentStatus(status.state as 'idle' | 'thinking' | 'tool_running' | 'streaming' | 'error');
@@ -132,11 +132,17 @@ export default function App() {
       // Feed tool stream store for P1-2 (inline tool display) and P1-3 (bg activity)
       const chatRunId = useChatStore.getState().runId;
       useToolStreamStore.getState().handleAgentEvent(payload, chatRunId);
-    });
+    };
+
+    const unsubAgent = client.subscribe('agent', handleAgentPayload);
+    // session.tool mirrors tool events to late-joining operator UIs (reconnect scenario).
+    // Source: openclaw/src/gateway/server-chat.ts:747-751
+    const unsubSessionTool = client.subscribe('session.tool', handleAgentPayload);
 
     return () => {
       unsubChat();
       unsubAgent();
+      unsubSessionTool();
     };
   }, [client, handleChatEvent, setAgentStatus]);
 
