@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   App,
   AutoComplete,
@@ -211,6 +211,11 @@ export default function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
+  // Controls whether the next gatewayConfig change should sync into form fields.
+  // True on mount (initial load) and after explicit refresh / save-restart.
+  // Prevents WebSocket reconnections from overwriting in-progress user edits.
+  const syncNeeded = useRef(true);
+
   const isOpenAICodexOAuth = provider === 'openai-codex';
   const [oauthModalOpen, setOauthModalOpen] = useState(false);
 
@@ -279,9 +284,12 @@ export default function SettingsPanel() {
     }
   }, [state, gatewayConfig, gatewayConfigLoading, loadGatewayConfig]);
 
-  // Sync form fields from gateway config
+  // Sync form fields from gateway config — only when explicitly requested
+  // (initial mount, manual refresh, or post-save restart).
   useEffect(() => {
-    if (!gatewayConfig) return;
+    if (!gatewayConfig || !syncNeeded.current) return;
+    syncNeeded.current = false;
+
     const fields = extractConfigFields(gatewayConfig as unknown as Record<string, unknown>);
     setBaseUrl(fields.baseUrl);
     setApi(fields.api);
@@ -312,11 +320,11 @@ export default function SettingsPanel() {
     } else {
       setProxyEnabled(false);
     }
-    // Clear restarting state when config refreshes after reconnect
     setRestarting(false);
   }, [gatewayConfig]);
 
   const handleRefresh = useCallback(() => {
+    syncNeeded.current = true;
     loadGatewayConfig();
   }, [loadGatewayConfig]);
 
@@ -400,6 +408,7 @@ export default function SettingsPanel() {
           });
 
           message.success(t('settings.saved'));
+          syncNeeded.current = true;
           setRestarting(true);
         } catch {
           message.error(t('settings.saveFailed'));
@@ -528,6 +537,7 @@ export default function SettingsPanel() {
           value={textModel}
           onChange={setTextModel}
           options={modelOptions}
+          allowClear
           size="small"
           style={{ width: 220 }}
           placeholder="glm-5"
@@ -574,6 +584,7 @@ export default function SettingsPanel() {
               value={visionModel}
               onChange={setVisionModel}
               options={visionModelOptions}
+              allowClear
               size="small"
               style={{ width: 220 }}
               placeholder={t('settings.noVisionModel')}

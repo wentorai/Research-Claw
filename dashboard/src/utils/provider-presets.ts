@@ -201,6 +201,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.minimax.io/anthropic',
     api: 'anthropic-messages',
     models: [
+      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'MiniMax-M2.7-highspeed', name: 'MiniMax M2.7 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-VL-01', name: 'MiniMax VL-01 (Vision)', input: ['text', 'image'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
@@ -213,6 +215,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.minimaxi.com/anthropic',
     api: 'anthropic-messages',
     models: [
+      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'MiniMax-M2.7-highspeed', name: 'MiniMax M2.7 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-VL-01', name: 'MiniMax VL-01 (Vision)', input: ['text', 'image'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
