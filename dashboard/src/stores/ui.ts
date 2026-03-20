@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { useGatewayStore } from './gateway';
 
-export type PanelTab = 'library' | 'workspace' | 'tasks' | 'monitor' | 'settings';
+export type PanelTab = 'library' | 'workspace' | 'tasks' | 'monitor' | 'extensions' | 'settings';
 
 export type AgentStatus = 'idle' | 'thinking' | 'tool_running' | 'streaming' | 'error' | 'disconnected';
 
@@ -26,7 +26,7 @@ const PANEL_OPEN_STORAGE = 'rc-right-panel-open';
 const LEFT_NAV_COLLAPSED_STORAGE = 'rc-left-nav-collapsed';
 const SHOW_SYSTEM_FILES_STORAGE = 'rc-show-system-files';
 
-const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'settings']);
+const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'extensions', 'settings']);
 
 function loadPanelTab(): PanelTab {
   try {

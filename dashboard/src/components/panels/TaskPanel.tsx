@@ -369,20 +369,6 @@ export default function TaskPanel() {
     </React.Fragment>
   );
 
-  // Empty state
-  if (!loading && tasks.length === 0) {
-    return (
-      <div style={{ padding: 24, textAlign: 'center', paddingTop: 60 }}>
-        <CheckSquareOutlined style={{ fontSize: 48, color: tokens.text.muted, opacity: 0.4 }} />
-        <div style={{ marginTop: 16, whiteSpace: 'pre-line' }}>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            {t('tasks.empty')}
-          </Text>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Perspective toggle */}
@@ -428,7 +414,19 @@ export default function TaskPanel() {
         <Switch size="small" checked={showCompleted} onChange={() => toggleCompleted()} />
       </div>
 
-      {/* Task sections */}
+      {/* Empty state — inside scrollable area so controls remain visible */}
+      {!loading && tasks.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center', paddingTop: 60 }}>
+          <CheckSquareOutlined style={{ fontSize: 48, color: tokens.text.muted, opacity: 0.4 }} />
+          <div style={{ marginTop: 16, whiteSpace: 'pre-line' }}>
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              {t('tasks.empty')}
+            </Text>
+          </div>
+        </div>
+      ) : (
+
+      /* Task sections */
       <div style={{ flex: 1, overflow: 'auto' }}>
         {/* Overdue */}
         {sections.overdue.length > 0 && (
@@ -492,6 +490,7 @@ export default function TaskPanel() {
           </div>
         )}
       </div>
+      )}
 
       {/* Gantt Modal */}
       {ganttOpen && (
