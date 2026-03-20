@@ -77,9 +77,22 @@ export default function ChatView() {
   // Safari workaround: clicking blank areas in overflow:hidden containers
   // doesn't clear text selection. Explicitly clear when clicking the scroll
   // container background (not text or buttons).
+  // Guard: do NOT clear if the click is the tail end of a drag-selection
+  // (cross-bubble text select). Distinguish via mousedown→mouseup distance.
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+  }, []);
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return;
+    // If mouse moved > 5px between down and up, this is a drag-select, not a click
+    const down = mouseDownPosRef.current;
+    if (down) {
+      const dist = Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y);
+      if (dist > 5) return;
+    }
     const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && e.target === e.currentTarget) {
+    if (sel && !sel.isCollapsed) {
       sel.removeAllRanges();
     }
   }, []);
@@ -154,6 +167,7 @@ export default function ChatView() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
+          onMouseDown={handleContainerMouseDown}
           onClick={handleContainerClick}
           style={{
             height: '100%',
