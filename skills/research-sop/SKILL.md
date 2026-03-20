@@ -29,8 +29,36 @@ Construct search queries with:
 
 ### Three-Layer Search Architecture
 
-Literature search uses a **priority fallback** model. Start from Layer 1; escalate
-to Layer 2 or Layer 3 only when the previous layer cannot satisfy the request.
+Literature search uses a **priority fallback** model. Start from Layer 0 for local
+imports; Layer 1 for search; escalate to Layer 2/3 when the previous layer cannot
+satisfy the request.
+
+#### Layer 0 — Local Reference Manager Import (not search)
+
+One-time or periodic import from user's existing reference manager.
+These are **NOT search tools** — they read local databases directly.
+
+| Source | Detect → Import | Mechanism | Env |
+|:-------|:---------------|:----------|:----|
+| Zotero | `library_zotero_detect` → `library_zotero_import` | ~/Zotero/zotero.sqlite (read-only) | Native |
+| EndNote | `library_endnote_detect` → `library_endnote_import` | ~/Documents/*.enl (read-only) | Native |
+| BibTeX/RIS | `library_import_bibtex` / `library_import_ris` | Parse content string | All |
+
+**Zotero fallback chain** (try in order):
+1. **SQLite direct** — fastest, works offline, Zotero need not be running
+2. **Local API** (localhost:23119) — Zotero must be running, read-only
+3. **Web API v3** (api.zotero.org) — needs API Key + User ID, full CRUD
+4. **Format export** — `library_export_bibtex/ris` → guide user to import manually
+
+**EndNote fallback chain**: SQLite direct → Format export (no API available).
+
+**Docker environment**: SQLite and Local API are unavailable (host filesystem
+isolated). Explain to user: use BibTeX/RIS export from source app, or mount host
+Zotero directory as Docker volume.
+
+**Reverse path (RC → Zotero/EndNote)**: If Zotero Web API Key configured →
+`library_zotero_web_create` (requires approval_card). Otherwise →
+`library_export_bibtex` + guide user to File > Import in their reference manager.
 
 #### Layer 1 — Built-in API Tools (free, no auth, structured data)
 

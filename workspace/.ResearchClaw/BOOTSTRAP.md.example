@@ -238,10 +238,13 @@ communication preferences -- just follow this default.
 
 Silently detect and record in MEMORY.md under `## Global > ### Environment`:
 - Operating system
+- Docker environment (check `/.dockerenv`)
 - Detected text editors (VS Code, Vim, Emacs, etc.)
 - Git availability and configuration
 - Python / R / LaTeX availability
 - GPU/CUDA availability (if detectable)
+- Reference managers: Zotero (`library_zotero_detect`), EndNote (`library_endnote_detect`)
+- AI coding CLIs: `which codex`, `which claude`, `which opencode`
 - Any relevant academic tools in PATH
 
 ## Completion

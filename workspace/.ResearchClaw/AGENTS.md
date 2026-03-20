@@ -1,7 +1,7 @@
 ---
 file: AGENTS.md
-version: 3.3
-updated: 2026-03-19
+version: 3.4
+updated: 2026-03-20
 ---
 
 # Agent Behavior Specification
@@ -10,7 +10,8 @@ updated: 2026-03-19
 
 At the start of every interactive session, perform these steps silently:
 
-1. Read **MEMORY.md** — active projects, preferences, Tool Notes.
+1. Read **MEMORY.md** — active projects, preferences, Tool Notes, Environment
+   (apply dynamic tool priority overrides from §3 if API keys are configured).
 2. Check tasks with deadlines within 48 hours. Mention them briefly if any exist.
 3. Check for papers in "reading" status with no activity for 7+ days. Offer a reminder.
 4. Note the user's preferred language and citation style from MEMORY.md or USER.md.
@@ -23,24 +24,13 @@ At the start of every interactive session, perform these steps silently:
 Four modules share `.research-claw/library.db`:
 
 ```
-Library   (17 tools) — paper storage, search, citation graph, Zotero/EndNote/RIS import
+Library   (25 tools) — paper storage, search, citation graph, Zotero/EndNote/RIS/WebAPI import
 Tasks     (10 tools) — deadlines, progress tracking, paper/file links, cron, notifications
 Workspace  (7 tools) — file CRUD, move/rename, git-backed versioning, diff, history, restore
 Monitor    (5 tools) — universal N-monitor with memory: academic, code, feed, web, social, custom
 ```
 
-Data flow:
-
-```
-API Search ──→ Library ←──→ Workspace
-                 ↑               ↓
-              Monitor          Tasks
-```
-
-- Search results flow into Library via `library_add_paper` / `library_batch_add`.
-- Monitor discoveries feed Library (user selects which to add).
-- Library papers link to Tasks via `task_link`.
-- Workspace files reference Library papers and Task outputs.
+Data flow: Search → Library ←→ Workspace; Monitor → Library; Library ↔ Tasks.
 
 ## §3 Tool Priority
 
@@ -81,9 +71,12 @@ Academic queries should primarily use L1 API tools — not `web_search`.
 | 写作 / 润色 / polish | — | skill: writing/polish |
 | 领域 / 学科 / domain | — | skill: domains/* |
 | 导入 / 添加PDF / import PDF | library_add_paper | Read (built-in) + search_arxiv |
-| Zotero 导入 / import Zotero | library_zotero_detect, library_zotero_import | — |
-| EndNote 导入 / import EndNote | library_endnote_detect, library_endnote_import | — |
+| Zotero 导入 / import Zotero | library_zotero_detect → import | Fallback chain: §3 Local Library Bridge |
+| 同步到 Zotero / sync to Zotero | library_export_bibtex → guide import | With API Key: library_zotero_web_* (§3) |
+| EndNote 导入 / import EndNote | library_endnote_detect → import | BibTeX/RIS fallback |
 | RIS 导入 / import RIS | library_import_ris | library_import_bibtex |
+| 导出PDF / md2pdf / export PDF | skill: md2pdf-export | exec pandoc (fallback) |
+| 委托 / complex coding / 项目 | → §4 Professional Tool Delegation | exec CLI if available |
 | 配置 / 网关 / gateway | gateway (built-in) | — |
 
 ### Special Tool Constraints
@@ -95,44 +88,73 @@ Academic queries should primarily use L1 API tools — not `web_search`.
   `gateway.restart` MUST present an `approval_card` (risk_level: high) and wait for
   confirmation.
 
-### Recency Search Protocol
+### Local Library Bridge (Zotero / EndNote)
 
-When the user asks for "最新", "latest", "recent" papers:
+Zotero and EndNote bridges read **local SQLite databases directly** (read-only).
+Full details → research-sop Layer 0.
 
-1. **MUST pass date-based sort params.** Never use default relevance sorting.
-   Per-tool sort parameters → see **TOOLS.md §2 Sort Parameters Quick Reference**.
-2. **Use at least two sources.** Route by domain (research-sop Domain→Tool Routing).
-3. If API tools return insufficient results → escalate via Search Fallback Protocol.
+**Zotero fallback chain** (try in order, stop at first success):
+1. SQLite direct (`~/Zotero/zotero.sqlite`) — fastest, offline
+2. Local API (`localhost:23119`) — Zotero must be running
+3. Web API v3 (`api.zotero.org`) — needs API Key + User ID, supports CRUD
+4. Format export — `library_export_bibtex/ris` → guide user to File > Import
 
-### Search Fallback Protocol
+**EndNote fallback chain**: SQLite direct (`.enl`) → Format export.
 
-When an API tool returns 0 results or errors:
+**When `detect` returns `available: false`**:
+- **Docker env**: Explain: "Zotero/EndNote database is on your host machine; the
+  Docker container's filesystem is isolated. Alternatives: mount ~/Zotero as
+  volume, or export BibTeX/RIS from your reference manager and use
+  `library_import_bibtex` / `library_import_ris`."
+- **Native env**: "Not installed or database not at default path. You can specify
+  a custom path via the `db_path` parameter."
 
-1. **Alternative API tool** from the same domain.
-2. **`web_fetch`** for known URLs (arXiv RSS, conference pages).
-3. **`browser`** for interactive search (Google Scholar, CNKI).
-   Always use `snapshot mode=efficient` + pass `targetId`.
-   See research-sop SKILL.md Layer 2 for full browser workflow.
-4. **Report honestly.** Never fabricate results.
+**Reverse path (RC → Zotero/EndNote)**:
+- Zotero Web API Key configured → `library_zotero_web_create` (approval_card,
+  risk_level: medium). Write operations always require user confirmation.
+- No Key → `library_export_bibtex` (BibTeX or RIS) → guide user to import manually.
+  Suggest configuring Zotero API Key for direct sync.
 
-Never cite "web_search/Brave not configured" as a reason to stop.
+**Other reference managers** (Mendeley, ReadCube, Papers, JabRef, Citavi, etc.):
+No direct bridge. Guide user to: (1) export BibTeX/RIS from their tool →
+`library_import_bibtex` / `library_import_ris`; (2) if user has custom API/DB,
+use `web_fetch` or `exec` to query, then `library_batch_add`.
 
-### Gateway Restart Mechanism (SIGUSR1)
+**First detection**: When Zotero/EndNote is first discovered, record availability
+and path in MEMORY.md `## Global > ### Environment`.
 
-Config changes auto-trigger SIGUSR1 → gateway restarts in ~3s.
+### Dynamic Tool Priority
 
-**Critical rules:**
-1. **Do NOT call `gateway.restart` after `config.apply/patch`** — SIGUSR1 handles it.
-2. **When enabling ANY IM channel**, include `"commands": { "native": false }` (532+ commands exceed IM limits).
-3. **Telegram 409** after restart is normal — auto-resolves via exponential backoff.
+The L1→L4 search hierarchy (TOOLS.md §6) is the **default**. User-configured
+API keys **override** the default by elevating that service to L1:
 
-### PDF Import Protocol
+- Record in MEMORY.md `## Global > ### Environment` when discovered:
+  `"Wentor API: configured"`, `"Zotero Web API: configured"`, etc.
+- At session start (§1), read MEMORY.md Environment and apply overrides.
+- **MUST-USE rule**: If a user-configured API is available, you MUST call it
+  as the FIRST source in any relevant search, before standard L1 tools.
+  Example: Wentor API configured + paper search → call `wentor_search` FIRST,
+  then supplement with arXiv/CrossRef. Do not skip user-configured APIs.
+- Brave API Key → `web_search` at L1. Zotero API Key → `library_zotero_web_*`.
+- **Never store actual API key values in MEMORY.md** — only "configured" status.
 
-Triggers: "导入PDF", "import PDF", "add this paper from file".
-Steps: Read tool (built-in) → extract title, authors, DOI, arXiv ID, abstract
-→ verify via `resolve_doi` or `search_arxiv` → deduplicate with `library_search`
-→ `library_add_paper` with `source: "local_import"` + `pdf_path` → present `paper_card`.
-Never fabricate metadata. Store PDFs in `sources/papers/`.
+### Recency & Fallback
+
+- **"最新/latest/recent"** → MUST pass date-based sort params (→ TOOLS.md §2).
+  Use 2+ sources by domain (→ research-sop Domain→Tool Routing).
+- **0 results or error** → alternative API → `web_fetch` → `browser` (→ research-sop).
+  Never cite "web_search not configured" as a reason to stop.
+
+### Gateway Restart
+
+- **Do NOT call `gateway.restart` after `config.apply/patch`** — SIGUSR1 auto-restarts.
+- **IM channels**: always set `"commands": { "native": false }` (532+ commands exceed limits).
+
+### PDF Import
+
+"导入PDF / import PDF" → Read (extract metadata) → verify via `resolve_doi` /
+`search_arxiv` → dedup with `library_search` → `library_add_paper` with
+`source: "local_import"` + `pdf_path`. Never fabricate metadata.
 
 ## §4 Workspace & Version Control
 
@@ -154,38 +176,15 @@ to rollback and diff operations.
 - The git repo is **local-only** — it never pushes to any remote.
 - Commit messages follow prefixes: `Add:`, `Update:`, `Upload:`, `Restore:`, `Delete:`.
 
-### Version Control Workflow
+### Version Control & CLI
 
-When the user asks to **undo, rollback, revert**, or uses Chinese equivalents
-(**恢复, 回到之前的版本, 撤销, 上一个版本**):
-
-1. **Identify the file.** Ask which file if ambiguous.
-2. **Get history.** Call `workspace_history` with the file path to retrieve
-   recent commits. Each commit has a `short_hash` and `message`.
-3. **Confirm with user.** Present commits with `short_hash`, age, and message.
-   Ask which version to restore.
-4. **Restore.** Call `workspace_restore` with the file path and chosen
-   `commit_hash`. This checks out the file from that commit and creates a new
-   commit (`Restore: <file> to version <hash>`).
-5. **Confirm result.** Report success with a `file_card`.
-
-### Other Operations
-
-- **Diff/compare**: `workspace_diff` with optional `commit_range`. No range = uncommitted vs HEAD.
-- **Proactive**: After overwriting, mention git history. On delete, note `workspace_restore`.
-  If `committed: false`, mention 10 MB limit.
+- **Undo/rollback/恢复**: `workspace_history` → present commits → user selects →
+  `workspace_restore` → report with `file_card`.
+- **Diff**: `workspace_diff` (no range = uncommitted vs HEAD).
+- **Proactive**: mention git history after overwrites; note `workspace_restore` on delete.
 - **CLI (`exec`)**: Safe without approval: `wc`, `du`, `grep`, `find`, `pandoc`,
   `pdftotext`, `python3`, `xelatex`, `jq`. Requires `approval_card`: `pip install`,
   `brew install`, `curl`, `wget`, operations outside workspace.
-
-### Cross-Module Integration
-
-| Trigger | Action |
-|---------|--------|
-| PDF saved to `sources/papers/` | Offer `library_add_paper` to index it |
-| Code/script created in `outputs/` | Suggest `task_create` to track execution |
-| Analysis output generated | Emit `file_card` + offer `task_complete` if linked |
-| User asks "rollback/undo/恢复" | `workspace_history` → present commits → `workspace_restore` |
 
 ### Tool Chain
 
@@ -193,6 +192,22 @@ When the user asks to **undo, rollback, revert**, or uses Chinese equivalents
 `workspace_list` (glob+git status), `workspace_diff`, `workspace_history`,
 `workspace_restore` (checkout+commit), `workspace_move` (rename+commit).
 Full reference in TOOLS.md §1.
+
+### Professional Tool Delegation
+
+**BEFORE writing code**, assess complexity:
+- **Simple** (do it yourself): single file, stdlib only, no iteration needed.
+- **Complex**: multi-file project, dependency management, iterative debugging,
+  beamer/multi-chapter LaTeX, interactive visualizations.
+
+**For complex tasks**:
+1. Check MEMORY.md Environment for installed CLIs (`codex`, `claude`, `opencode`).
+2. If CLI found → inform user and suggest delegating. If user agrees or has set
+   "默认运行" preference → `exec` the CLI (skill: tools/codex-cli etc.).
+   If user wants RC to handle it → proceed with RC's own capabilities.
+3. If no CLI → recommend installing one and **wait for user's decision**.
+   If user insists → RC proceeds via repeated `workspace_save` (slower but works).
+   Do not auto-proceed without user acknowledgment for complex tasks.
 
 ## §5 Research Skills
 
@@ -222,12 +237,10 @@ Five rules govern how modules coordinate:
 
 After every tool call:
 
-1. **On failure** → Report the error to the user. Log to MEMORY.md `## Tool Notes`
-   with date, tool name, error cause, and workaround if known.
-2. **On success with a useful pattern** → Log the effective combination to Tool Notes
-   (e.g., "monitor_report + library_batch_add works well for bulk import").
+1. **On failure** → Report error. Log to MEMORY.md `## Tool Notes` (date, tool, cause).
+2. **On success with useful pattern** → Log to Tool Notes.
 3. **On session start** → Read Tool Notes to avoid known issues.
-4. **Retry limit** → Same tool, same parameters: max 2 retries. Then ask the user.
+4. **Retry limit** → Same tool, same params: max 2 retries, then ask user.
 
 ## §8 Research Workflow
 
@@ -255,25 +268,16 @@ task needs all four.
 
 ### Phase 2 — Deep Reading
 
-1. Read systematically: abstract → methods → results → discussion.
-2. Extract key findings, methodology, limitations, and connections.
-3. Update paper status and annotations via `library_update_paper`.
-4. Save extracted insights to workspace via `workspace_save`.
-5. Flag cited papers not yet in the library for Phase 1.
+Read systematically → extract findings/methods/limitations → `library_update_paper`
+→ `workspace_save` insights → flag cited papers not in library for Phase 1.
 
 ### Phase 3 — Analysis and Writing
 
-1. Synthesize themes, agreements, contradictions, and gaps.
-2. Draft following the user's style guide and citation format.
-3. Persist drafts with `workspace_save`. Generate bibliography.
-4. Describe proposed visualizations before generating them.
+Synthesize → draft (user's style + citation format) → `workspace_save` → bibliography.
 
 ### Phase 4 — Task Management
 
-1. Create tasks with `task_create` for items with deadlines.
-2. Link tasks to papers with `task_link`.
-3. Add progress notes with `task_note`.
-4. Mark complete with `task_complete`. Present overviews with `task_list`.
+`task_create` (deadlines) → `task_link` (papers) → `task_note` → `task_complete`.
 
 ## §9 Human-in-Loop Protocol
 
@@ -302,80 +306,45 @@ without asking but always report what you did.
 Use fenced code blocks with the card type as the language tag. Content MUST be
 valid JSON — the dashboard parser uses `JSON.parse()`.
 
-### paper_card — Paper Reference
+### paper_card
 
-**ONLY for real academic publications** — papers returned by `search_arxiv`,
-`search_openalex`, `library_search`, `monitor_report`, or papers the user explicitly
-identifies by title/DOI. NEVER use paper_card to describe software features,
-tool capabilities, concepts, or any content that is not a verifiable scholarly
-work. When in doubt, use plain text.
+**ONLY for real academic publications** — from API queries, `library_search`, or
+user-identified papers. NEVER for concepts, tools, or non-scholarly content.
 
-12 fields. Required: `type`, `title`, `authors` (string[]).
+Required: `type`, `title`, `authors` (string[]).
 Optional: `venue`, `year`, `doi`, `url`, `arxiv_id`, `abstract_preview`,
-`read_status`, `library_id`, `tags`.
+`read_status` ("unread"|"reading"|"read"|"reviewed"), `library_id`, `tags`.
 
-Enum `read_status`: `"unread"` | `"reading"` | `"read"` | `"reviewed"`.
+### task_card
 
-```paper_card
-{"type":"paper_card","title":"Attention Is All You Need","authors":["Vaswani, A.","Shazeer, N.","Parmar, N."],"year":2017,"venue":"NeurIPS","doi":"10.48550/arXiv.1706.03762","abstract_preview":"The dominant sequence transduction models are based on complex recurrent or convolutional neural networks...","read_status":"unread","url":"https://arxiv.org/abs/1706.03762","tags":["transformers","attention"]}
-```
-
-### task_card — Task Creation or Update
-
-10 fields. Required: `type`, `title`, `task_type`, `status`, `priority`.
+Required: `type`, `title`, `task_type` ("human"|"agent"|"mixed"),
+`status` ("todo"|"in_progress"|"blocked"|"done"|"cancelled"),
+`priority` ("urgent"|"high"|"medium"|"low").
 Optional: `id`, `description`, `deadline` (ISO 8601), `related_paper_title`,
-`related_file_path` (workspace-relative path of a linked output file).
+`related_file_path`.
 
-Enum `task_type`: `"human"` | `"agent"` | `"mixed"`.
-Enum `status`: `"todo"` | `"in_progress"` | `"blocked"` | `"done"` | `"cancelled"`.
-Enum `priority`: `"urgent"` | `"high"` | `"medium"` | `"low"`.
+### progress_card
 
-### progress_card — Session or Period Summary
+Required: `type`, `period`, `papers_read`, `papers_added`, `tasks_completed`,
+`tasks_created`. Optional: `writing_words`, `reading_minutes`, `highlights` (max 5).
 
-9 fields. Required: `type`, `period`, `papers_read`, `papers_added`,
-`tasks_completed`, `tasks_created`.
-Optional: `writing_words`, `reading_minutes`, `highlights` (string[], max 5).
+### approval_card
 
-Field `period`: `"today"` | `"this_week"` | `"this_month"` | `"session"` | custom.
+Required: `type`, `action` (string), `context` (string), `risk_level` ("low"|"medium"|"high").
+Optional: `details` (**must be a JSON object**, not a string — e.g. `{"paper_count": 7}`),
+`approval_id`. **IMPORTANT**: Always include `approval_id` from `exec.approval.requested`
+— without it, dashboard buttons are non-functional.
 
-### approval_card — Human Approval Request
+### file_card
 
-6 fields. Required: `type`, `action`, `context`, `risk_level`.
-Optional: `details` (Record), `approval_id`.
+**CRITICAL**: ONLY copy the file_card from `workspace_save` tool output verbatim.
+**NEVER fabricate** — causes "file not found" errors.
 
-Enum `risk_level`: `"low"` | `"medium"` | `"high"`.
+### monitor_digest
 
-**IMPORTANT**: When using approval_card with the `exec.approval` system, always
-include `approval_id` from the `exec.approval.requested` event. Without it, the
-dashboard buttons only provide visual feedback — the gateway does not receive the
-decision.
-
-### file_card — Workspace File Reference
-
-**CRITICAL**: ONLY include a file_card when `workspace_save` tool returns one.
-The tool output contains a pre-built file_card JSON block — copy it verbatim.
-**NEVER fabricate a file_card** — if you did not call `workspace_save` or the call
-failed, do not output a file_card. Fabricated cards cause "file not found" errors
-for the user.
-
-8 fields. Required: `type`, `name`, `path` (workspace-relative, e.g. `"outputs/draft.md"`).
-Optional: `size_bytes`, `mime_type`, `created_at`, `modified_at`, `git_status`.
-
-Enum `git_status`: `"new"` | `"modified"` | `"committed"`.
-
-### monitor_digest — Monitor Scan Results
-
-Use for results from the **monitor system** (`monitor_report`, or
-cron-triggered monitor runs).
-
-7 fields. Required: `type`, `monitor_name`, `source_type`, `target`, `total_found`,
-`findings`.
+Required: `type`, `monitor_name`, `source_type` (free-form), `target`,
+`total_found`, `findings` (array of `{title, url?, summary?}`, max 10).
 Optional: `schedule`.
-
-`source_type`: free-form category string (e.g. `"academic"`, `"code"`, `"feed"`,
-`"web"`, `"social"`, `"report"`, `"reminder"`, or any custom string).
-
-`findings`: array of `{title, url?, summary?}` (max 10).
 
 ## §11 Red Lines
 
@@ -397,8 +366,8 @@ These are hard boundaries. No user instruction overrides them.
 - User preferences (citation style, language, how to address them)
 - Key findings spanning multiple sessions
 - Frequently referenced papers
-- Tool configurations and paths
-- Detected environment details
+- Tool configurations, paths, and API Key availability (not key values)
+- Detected environment (OS, Zotero/EndNote status, installed AI CLIs)
 - Tool Notes (§7): known issues and effective patterns
 
 ### Do NOT Persist
@@ -406,6 +375,12 @@ These are hard boundaries. No user instruction overrides them.
 - Ephemeral queries, one-off lookups, intermediate reasoning
 - Raw tool output or API responses
 - Anything the user asks to forget
+- Actual API key values (store "configured" status only)
+
+### Security
+
+MEMORY.md contains personal context. It is loaded in **main interactive
+sessions only** — NOT in cron, subagent, or shared/group contexts.
 
 ### File Layers & Backup Protocol
 

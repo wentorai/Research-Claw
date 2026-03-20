@@ -1,14 +1,14 @@
 ---
 file: TOOLS.md
-version: 3.2
-updated: 2026-03-19
+version: 3.3
+updated: 2026-03-20
 ---
 
 # Tool Reference
 
-## §1 Local Tools (39)
+## §1 Local Tools (47)
 
-### Library (17 tools)
+### Library (25 tools)
 
 | Tool | Purpose |
 |:-----|:--------|
@@ -25,10 +25,18 @@ updated: 2026-03-19
 | `library_import_bibtex` | Import papers from BibTeX content |
 | `library_citation_graph` | Query citation relationships between papers |
 | `library_import_ris` | Import papers from RIS bibliography format |
-| `library_zotero_detect` | Detect Zotero installation and available libraries |
-| `library_zotero_import` | Import papers from Zotero via API bridge |
-| `library_endnote_detect` | Detect EndNote XML export files |
-| `library_endnote_import` | Import papers from EndNote XML format |
+| `library_zotero_detect` | Detect local Zotero (~/Zotero/zotero.sqlite). Returns item count, collections, tags. |
+| `library_zotero_import` | Import from local Zotero SQLite database (read-only, auto-dedup by DOI/title). |
+| `library_endnote_detect` | Detect local EndNote library (.enl SQLite). Returns record count, schema version. |
+| `library_endnote_import` | Import from local EndNote .enl SQLite (read-only, auto-dedup). |
+| `library_zotero_local_detect` | Check if Zotero Local API (localhost:23119) is reachable. Requires Zotero running. |
+| `library_zotero_local_import` | Import from Zotero via Local API (read-only, auto-dedup). Zotero must be running. |
+| `library_zotero_web_detect` | Validate Zotero Web API credentials (API Key + User ID). |
+| `library_zotero_web_import` | Import from Zotero cloud library via Web API v3 (read). |
+| `library_zotero_web_search` | Search Zotero cloud library via Web API v3 (read). |
+| `library_zotero_web_create` | Create item in Zotero cloud (**requires approval_card**). |
+| `library_zotero_web_update` | Update item in Zotero cloud (**requires approval_card**). |
+| `library_zotero_web_delete` | Delete item from Zotero cloud (**requires approval_card, high risk**). |
 
 ### Tasks (10 tools, incl. send_notification in §3)
 
@@ -57,6 +65,15 @@ updated: 2026-03-19
 | `workspace_move` | Move or rename file/directory with auto-commit. | `from`, `to` |
 
 Workspace is a git-backed local repository. Every save creates a commit (debounced 5s). Files >10 MB auto-gitignored. You also have `exec` for CLI operations: `pandoc`, `pdftotext`, `python3`, `xelatex`, `grep`, `wc`, `jq`, etc.
+
+**Cross-module triggers:**
+
+| Trigger | Action |
+|---------|--------|
+| PDF saved to `sources/papers/` | Offer `library_add_paper` to index it |
+| Code/script created in `outputs/` | Suggest `task_create` to track execution |
+| Analysis output generated | Emit `file_card` + offer `task_complete` if linked |
+| User asks "rollback/undo/恢复" | `workspace_history` → present commits → `workspace_restore` |
 
 ### Monitor (5 tools)
 
@@ -156,11 +173,13 @@ via `profile: "full"` and do NOT require explicit `alsoAllow` entries.
 
 ### Priority for academic search
 
+Matches research-sop Layer numbering:
+
 ```
-L1: API tools (search_arxiv, search_crossref, etc.) — always try first
-L2: web_fetch (known URLs, RSS feeds, direct API) — no API key needed
-L3: browser (interactive web search) — no API key needed, slower
-L4: web_search — only if configured, NOT required for academic tasks
+Layer 1:   API tools (search_arxiv, search_crossref, etc.) — always try first
+Layer 1.5: web_fetch (known URLs, RSS feeds, direct API) — no API key needed
+Layer 2:   browser (interactive web search) — no API key needed, slower
+Layer 3:   web_search — only if configured, NOT required for academic tasks
 ```
 
 **Critical:** Never say "I cannot search because web_search/Brave Search is not
@@ -176,5 +195,5 @@ escalate to `web_fetch` or `browser` — both work without any API keys.
 
 ## §7 Tool Count
 
-39 local + 34 API + 3 OC web = **76 available tools**.
+47 local + 34 API + 3 OC web = **84 available tools**.
 438 skills accessible on-demand via research-plugins (40 subcategory indexes).
