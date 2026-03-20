@@ -9,7 +9,7 @@
  * Pattern: follows MonitorPanel (expandable cards + toggle switches)
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { App, Button, Input, Modal, Segmented, Switch, Tag, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined,
@@ -871,6 +871,7 @@ export default function ExtensionsPanel() {
   const { loadSkills, loadChannels, loadPlugins } = useExtensionsStore();
 
   const [activeTab, setActiveTab] = useState<SubTab>('skills');
+  const [isPending, startTransition] = useTransition();
 
   // Load data on connection
   useEffect(() => {
@@ -945,7 +946,7 @@ export default function ExtensionsPanel() {
         <Segmented
           block
           value={activeTab}
-          onChange={(val) => setActiveTab(val as SubTab)}
+          onChange={(val) => startTransition(() => setActiveTab(val as SubTab))}
           options={[
             { label: t('extensions.tabs.skills', 'Skills'), value: 'skills' },
             { label: t('extensions.tabs.channels', 'Channels'), value: 'channels' },
@@ -955,8 +956,21 @@ export default function ExtensionsPanel() {
         />
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      {/* Content — show spinner overlay during tab transition */}
+      <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+        {isPending && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--surface)',
+            zIndex: 1,
+          }}>
+            <LoadingOutlined style={{ fontSize: 24, color: tokens.text.muted }} />
+          </div>
+        )}
         {activeTab === 'skills' && <SkillsTab tokens={tokens} />}
         {activeTab === 'channels' && <ChannelsTab tokens={tokens} />}
         {activeTab === 'plugins' && <PluginsTab tokens={tokens} />}
