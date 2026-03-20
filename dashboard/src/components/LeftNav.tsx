@@ -186,7 +186,7 @@ export default function LeftNav() {
       >
         {collapsed ? (
           <Tooltip title={t('project.switchProject')} placement="right">
-            <Dropdown menu={{ items: projectMenuItems }} trigger={['click']} placement="bottomLeft">
+            <Dropdown menu={{ items: projectMenuItems, style: { maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' } }} trigger={['click']} placement="bottomLeft">
               <Button
                 type="text"
                 icon={<AppstoreOutlined />}
@@ -195,7 +195,7 @@ export default function LeftNav() {
             </Dropdown>
           </Tooltip>
         ) : (
-          <Dropdown menu={{ items: projectMenuItems }} trigger={['click']} placement="bottomLeft">
+          <Dropdown menu={{ items: projectMenuItems, style: { maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' } }} trigger={['click']} placement="bottomLeft">
             <div
               style={{
                 display: 'flex',
