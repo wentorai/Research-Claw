@@ -64,7 +64,7 @@ function usePanelMode(): PanelMode {
   return mode;
 }
 
-const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'tasks', 'monitor', 'settings'];
+const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'tasks', 'monitor', 'extensions', 'settings'];
 
 export default function App() {
   const { t } = useTranslation();
@@ -203,7 +203,7 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
         const num = parseInt(e.key, 10);
-        if (num >= 1 && num <= 5) {
+        if (num >= 1 && num <= 6) {
           e.preventDefault();
           const tab = PANEL_TAB_ORDER[num - 1];
           setRightPanelTab(tab);

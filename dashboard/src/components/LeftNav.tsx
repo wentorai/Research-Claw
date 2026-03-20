@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { Button, Dropdown, Tooltip, Typography, type MenuProps } from 'antd';
 import {
+  ApiOutlined,
   BookOutlined,
   FolderOutlined,
   CheckSquareOutlined,
@@ -30,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'workspace', icon: <FolderOutlined />, labelKey: 'nav.workspace' },
   { key: 'tasks', icon: <CheckSquareOutlined />, labelKey: 'nav.tasks' },
   { key: 'monitor', icon: <EyeOutlined />, labelKey: 'nav.monitor' },
+  { key: 'extensions', icon: <ApiOutlined />, labelKey: 'nav.extensions' },
   { key: 'settings', icon: <SettingOutlined />, labelKey: 'nav.settings' },
 ];
 
