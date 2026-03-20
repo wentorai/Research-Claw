@@ -145,6 +145,20 @@ node -e "
     changed = true;
   }
 
+  // Force gateway auth token to match OPENCLAW_GATEWAY_TOKEN env var.
+  // Without this, stale gateway.auth.token in persisted config overrides env var
+  // → token_mismatch on every connection (P0 bug for v0.5.0→v0.5.6 upgraders).
+  const expectedToken = process.env.OPENCLAW_GATEWAY_TOKEN || 'research-claw';
+  if (!c.gateway.auth) c.gateway.auth = {};
+  if (c.gateway.auth.token !== expectedToken) {
+    c.gateway.auth.token = expectedToken;
+    changed = true;
+  }
+  if (c.gateway.auth.mode && c.gateway.auth.mode !== 'token') {
+    c.gateway.auth.mode = 'token';
+    changed = true;
+  }
+
   // Clean stale plugin entries (wentor-connect is a placeholder, never functional)
   if (c.plugins?.entries?.['wentor-connect']) {
     delete c.plugins.entries['wentor-connect'];
