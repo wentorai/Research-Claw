@@ -4,8 +4,7 @@
  * Talks to OpenClaw gateway RPCs:
  *   - skills.status / skills.update (skill listing + enable/disable)
  *   - channels.status / channels.logout (channel listing + logout)
- *   - config.get / config.patch / config.openFile (plugin management)
- *   - rc.ws.openExternal / rc.ws.openFolder (open skill files)
+ *   - config.get / config.patch (plugin listing + toggle)
  */
 
 import { create } from 'zustand';
