@@ -53,6 +53,7 @@ export interface ZoteroDetectResult {
   available: boolean;
   db_path: string | null;
   storage_path: string | null;
+  environment: 'docker' | 'native';
   stats: {
     total_items: number;
     total_collections: number;
@@ -356,13 +357,14 @@ export class ZoteroBridge {
    * Detect whether a local Zotero installation exists and is accessible.
    * Returns database path, storage path, and basic stats if available.
    */
-  static detect(): ZoteroDetectResult {
-    const zoteroDir = defaultZoteroDir();
-    const dbPath = join(zoteroDir, 'zotero.sqlite');
-    const storagePath = join(zoteroDir, 'storage');
+  static detect(customDbPath?: string): ZoteroDetectResult {
+    const environment: 'docker' | 'native' = existsSync('/.dockerenv') ? 'docker' : 'native';
+
+    const dbPath = customDbPath ?? join(defaultZoteroDir(), 'zotero.sqlite');
+    const storagePath = join(dbPath, '..', 'storage');
 
     if (!existsSync(dbPath)) {
-      return { available: false, db_path: null, storage_path: null, stats: null };
+      return { available: false, db_path: null, storage_path: null, environment, stats: null };
     }
 
     let db: BetterSqlite3.Database | null = null;
@@ -377,6 +379,7 @@ export class ZoteroBridge {
         available: true,
         db_path: dbPath,
         storage_path: existsSync(storagePath) ? storagePath : null,
+        environment,
         stats: {
           total_items: totalItems,
           total_collections: totalCollections,
@@ -384,7 +387,7 @@ export class ZoteroBridge {
         },
       };
     } catch {
-      return { available: false, db_path: dbPath, storage_path: null, stats: null };
+      return { available: false, db_path: dbPath, storage_path: null, environment, stats: null };
     } finally {
       db?.close();
     }
