@@ -15,11 +15,11 @@ import {
   ApiOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  CopyOutlined,
   DownOutlined,
   ExclamationCircleOutlined,
-  FileTextOutlined,
-  FolderOpenOutlined,
   LinkOutlined,
+  LoadingOutlined,
   LogoutOutlined,
   ReloadOutlined,
   SettingOutlined,
@@ -61,7 +61,7 @@ function SkillCard({
 }) {
   const { t } = useTranslation();
   const { message: messageApi } = App.useApp();
-  const { toggleSkill, openSkillFolder, openSkillFile } = useExtensionsStore();
+  const { toggleSkill } = useExtensionsStore();
 
   const isActive = !skill.disabled && skill.eligible;
   const hasMissing =
@@ -84,17 +84,12 @@ function SkillCard({
     [skill.skillKey, toggleSkill, messageApi, t],
   );
 
-  const handleOpenFolder = useCallback(() => {
-    openSkillFolder(skill.baseDir).catch(() => {
-      messageApi.error(t('extensions.skills.openFailed', 'Failed to open'));
-    });
-  }, [skill.baseDir, openSkillFolder, messageApi, t]);
-
-  const handleOpenFile = useCallback(() => {
-    openSkillFile(skill.filePath).catch(() => {
-      messageApi.error(t('extensions.skills.openFailed', 'Failed to open'));
-    });
-  }, [skill.filePath, openSkillFile, messageApi, t]);
+  const handleCopyPath = useCallback((path: string) => {
+    navigator.clipboard.writeText(path).then(
+      () => messageApi.success(t('extensions.skills.pathCopied', 'Path copied')),
+      () => messageApi.error(t('extensions.skills.copyFailed', 'Copy failed')),
+    );
+  }, [messageApi, t]);
 
   // Truncate path for display
   const shortPath = useMemo(() => {
@@ -267,11 +262,11 @@ function SkillCard({
 
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <Button size="small" icon={<FolderOpenOutlined />} onClick={handleOpenFolder}>
-              {t('extensions.skills.openFolder', 'Open Folder')}
+            <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopyPath(skill.filePath)}>
+              {t('extensions.skills.copyFilePath', 'Copy File Path')}
             </Button>
-            <Button size="small" icon={<FileTextOutlined />} onClick={handleOpenFile}>
-              {t('extensions.skills.openFile', 'Open File')}
+            <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopyPath(skill.baseDir)}>
+              {t('extensions.skills.copyDirPath', 'Copy Dir Path')}
             </Button>
           </div>
         </div>
@@ -669,7 +664,18 @@ function SkillsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
     return map;
   }, [filteredSkills]);
 
-  if (skills.length === 0 && !skillsLoading) {
+  if (skillsLoading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 16px' }}>
+        <LoadingOutlined style={{ fontSize: 24, color: tokens.text.muted, display: 'block', marginBottom: 12 }} />
+        <Text style={{ color: tokens.text.muted, fontSize: 13 }}>
+          {t('extensions.loading', 'Loading extensions...')}
+        </Text>
+      </div>
+    );
+  }
+
+  if (skills.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '40px 16px' }}>
         <ApiOutlined style={{ fontSize: 32, color: tokens.text.muted, display: 'block', marginBottom: 12 }} />
@@ -735,7 +741,18 @@ function ChannelsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) 
   const { channels, channelsLoading } = useExtensionsStore();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  if (channels.length === 0 && !channelsLoading) {
+  if (channelsLoading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 16px' }}>
+        <LoadingOutlined style={{ fontSize: 24, color: tokens.text.muted, display: 'block', marginBottom: 12 }} />
+        <Text style={{ color: tokens.text.muted, fontSize: 13 }}>
+          {t('extensions.loading', 'Loading extensions...')}
+        </Text>
+      </div>
+    );
+  }
+
+  if (channels.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '40px 16px' }}>
         <ApiOutlined style={{ fontSize: 32, color: tokens.text.muted, display: 'block', marginBottom: 12 }} />
@@ -772,14 +789,17 @@ function ChannelsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) 
 function PluginsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
   const { t } = useTranslation();
   const { message: messageApi } = App.useApp();
-  const { plugins, pluginsLoaded, openConfigFile } = useExtensionsStore();
+  const { plugins, pluginsLoaded } = useExtensionsStore();
   const [expandedName, setExpandedName] = useState<string | null>(null);
 
-  const handleOpenConfig = useCallback(() => {
-    openConfigFile().catch(() => {
-      messageApi.error(t('extensions.plugins.openConfigFailed', 'Failed to open config file'));
-    });
-  }, [openConfigFile, messageApi, t]);
+  const handleCopyConfigPath = useCallback(() => {
+    // Config path is typically ~/.openclaw/openclaw.json
+    const configPath = '~/.openclaw/openclaw.json';
+    navigator.clipboard.writeText(configPath).then(
+      () => messageApi.success(t('extensions.skills.pathCopied', 'Path copied')),
+      () => messageApi.error(t('extensions.skills.copyFailed', 'Copy failed')),
+    );
+  }, [messageApi, t]);
 
   if (plugins.length === 0 && pluginsLoaded) {
     return (
@@ -808,15 +828,15 @@ function PluginsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
         </div>
       </div>
 
-      {/* Open config button */}
+      {/* Copy config path button */}
       <div style={{ padding: '12px 12px 8px', borderTop: `1px solid ${tokens.border.default}` }}>
         <Button
           block
-          icon={<FileTextOutlined />}
-          onClick={handleOpenConfig}
+          icon={<CopyOutlined />}
+          onClick={handleCopyConfigPath}
           style={{ borderStyle: 'dashed', color: tokens.text.secondary }}
         >
-          {t('extensions.plugins.openConfig', 'Open openclaw.json')}
+          {t('extensions.plugins.copyConfigPath', 'Copy openclaw.json Path')}
         </Button>
       </div>
     </div>

@@ -101,8 +101,6 @@ interface ExtensionsState {
   managedSkillsDir: string;
   loadSkills: () => Promise<void>;
   toggleSkill: (skillKey: string, enabled: boolean) => Promise<void>;
-  openSkillFolder: (baseDir: string) => Promise<void>;
-  openSkillFile: (filePath: string) => Promise<void>;
 
   // Channels
   channels: ChannelEntry[];
@@ -116,7 +114,6 @@ interface ExtensionsState {
   pluginsLoaded: boolean;
   loadPlugins: () => Promise<void>;
   togglePlugin: (name: string, enabled: boolean) => Promise<void>;
-  openConfigFile: () => Promise<void>;
 }
 
 // Prevent double-toggle race
@@ -186,28 +183,6 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
       await get().loadSkills(); // Rollback optimistic
     } finally {
       _inflightSkillOps.delete(skillKey);
-    }
-  },
-
-  openSkillFolder: async (baseDir: string) => {
-    const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
-
-    try {
-      await client.request('rc.ws.openFolder', { path: baseDir });
-    } catch (err) {
-      console.error('[ExtensionsStore] openSkillFolder failed:', err);
-    }
-  },
-
-  openSkillFile: async (filePath: string) => {
-    const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
-
-    try {
-      await client.request('rc.ws.openExternal', { path: filePath });
-    } catch (err) {
-      console.error('[ExtensionsStore] openSkillFile failed:', err);
     }
   },
 
@@ -335,14 +310,4 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
     }
   },
 
-  openConfigFile: async () => {
-    const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
-
-    try {
-      await client.request('config.openFile', {});
-    } catch (err) {
-      console.error('[ExtensionsStore] openConfigFile failed:', err);
-    }
-  },
 }));

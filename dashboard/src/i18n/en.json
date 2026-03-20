@@ -514,8 +514,10 @@
       "path": "Path",
       "key": "Key",
       "requirements": "Requirements",
-      "openFolder": "Open Folder",
-      "openFile": "Open File",
+      "copyFilePath": "Copy File Path",
+      "copyDirPath": "Copy Dir Path",
+      "pathCopied": "Path copied",
+      "copyFailed": "Copy failed",
       "enable": "Enable",
       "disable": "Disable",
       "enableSuccess": "Skill enabled",
@@ -555,8 +557,7 @@
       "empty": "No plugins loaded.",
       "path": "Path",
       "config": "Config",
-      "openConfig": "Open openclaw.json",
-      "openConfigFailed": "Failed to open config file",
+      "copyConfigPath": "Copy openclaw.json Path",
       "toggleFailed": "Failed to toggle plugin",
       "packages": "Installed Skill Packages"
     }

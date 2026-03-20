@@ -514,8 +514,10 @@
       "path": "路径",
       "key": "标识",
       "requirements": "依赖项",
-      "openFolder": "打开文件夹",
-      "openFile": "打开文件",
+      "copyFilePath": "复制文件路径",
+      "copyDirPath": "复制目录路径",
+      "pathCopied": "路径已复制",
+      "copyFailed": "复制失败",
       "enable": "启用",
       "disable": "禁用",
       "enableSuccess": "技能已启用",
@@ -555,8 +557,7 @@
       "empty": "未加载任何插件。",
       "path": "路径",
       "config": "配置",
-      "openConfig": "打开 openclaw.json",
-      "openConfigFailed": "无法打开配置文件",
+      "copyConfigPath": "复制 openclaw.json 路径",
       "toggleFailed": "切换插件状态失败",
       "packages": "已安装技能包"
     }

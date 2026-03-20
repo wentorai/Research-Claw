@@ -116,21 +116,6 @@ describe('toggleSkill', () => {
   });
 });
 
-describe('openSkillFolder', () => {
-  it('calls rc.ws.openFolder RPC', async () => {
-    mockRequest.mockResolvedValueOnce({ ok: true });
-    await useExtensionsStore.getState().openSkillFolder('/some/path');
-    expect(mockRequest).toHaveBeenCalledWith('rc.ws.openFolder', { path: '/some/path' });
-  });
-});
-
-describe('openSkillFile', () => {
-  it('calls rc.ws.openExternal RPC', async () => {
-    mockRequest.mockResolvedValueOnce({ ok: true });
-    await useExtensionsStore.getState().openSkillFile('/some/SKILL.md');
-    expect(mockRequest).toHaveBeenCalledWith('rc.ws.openExternal', { path: '/some/SKILL.md' });
-  });
-});
 
 // ── Channels ─────────────────────────────────────────────────────────────────
 
@@ -235,10 +220,3 @@ describe('togglePlugin', () => {
   });
 });
 
-describe('openConfigFile', () => {
-  it('calls config.openFile RPC', async () => {
-    mockRequest.mockResolvedValueOnce({ ok: true, path: '/path/to/config' });
-    await useExtensionsStore.getState().openConfigFile();
-    expect(mockRequest).toHaveBeenCalledWith('config.openFile', {});
-  });
-});
