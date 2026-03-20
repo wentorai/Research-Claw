@@ -14,6 +14,7 @@
     "workspace": "工作区",
     "tasks": "任务",
     "monitor": "监控",
+    "extensions": "扩展",
     "settings": "设置",
     "collapse": "折叠侧边栏",
     "expand": "展开侧边栏"
@@ -492,5 +493,72 @@
     "downloadFile": "下载文件",
     "downloadFolder": "下载文件夹 (.tar.gz)",
     "bindMountHint": "提示：在 docker-compose.yml 中改为 bind mount，即可直接用文件管理器浏览工作区："
+  },
+  "extensions": {
+    "title": "扩展",
+    "loading": "加载扩展中...",
+    "disconnected": "连接网关后查看扩展",
+    "tabs": {
+      "skills": "技能",
+      "channels": "通道",
+      "plugins": "插件"
+    },
+    "skills": {
+      "title": "技能",
+      "search": "筛选技能...",
+      "empty": "未加载任何技能。",
+      "eligible": "已启用",
+      "disabled": "已禁用",
+      "missingDeps": "缺少依赖",
+      "source": "来源",
+      "path": "路径",
+      "key": "标识",
+      "requirements": "依赖项",
+      "openFolder": "打开文件夹",
+      "openFile": "打开文件",
+      "enable": "启用",
+      "disable": "禁用",
+      "enableSuccess": "技能已启用",
+      "disableSuccess": "技能已禁用",
+      "updateFailed": "更新技能失败",
+      "openFailed": "打开失败",
+      "group": {
+        "local": "科研龙虾本地",
+        "research-plugins": "科研技能库",
+        "managed": "托管技能",
+        "bundled": "OpenClaw 内置"
+      }
+    },
+    "channels": {
+      "title": "通道",
+      "empty": "未配置任何通道。",
+      "emptyHint": "在 openclaw.json 中配置消息通道以启用集成。",
+      "connected": "已连接",
+      "configured": "已配置",
+      "notConfigured": "未配置",
+      "error": "错误",
+      "account": "账户",
+      "lastInbound": "最近收入",
+      "lastOutbound": "最近发出",
+      "mode": "模式",
+      "probe": "探测",
+      "probing": "探测中...",
+      "config": "配置",
+      "logout": "登出",
+      "logoutConfirmTitle": "登出通道",
+      "logoutConfirmContent": "确认登出 {{channel}}？凭证将被清除。",
+      "logoutSuccess": "已登出",
+      "logoutFailed": "登出失败"
+    },
+    "plugins": {
+      "title": "插件",
+      "empty": "未加载任何插件。",
+      "path": "路径",
+      "config": "配置",
+      "openConfig": "打开 openclaw.json",
+      "openConfigFailed": "无法打开配置文件",
+      "toggleFailed": "切换插件状态失败",
+      "packages": "已安装技能包"
+    }
   }
 }

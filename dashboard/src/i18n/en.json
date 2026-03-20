@@ -14,6 +14,7 @@
     "workspace": "Workspace",
     "tasks": "Tasks",
     "monitor": "Monitors",
+    "extensions": "Extensions",
     "settings": "Settings",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar"
@@ -492,5 +493,72 @@
     "downloadFile": "Download File",
     "downloadFolder": "Download Folder (.tar.gz)",
     "bindMountHint": "Tip: change your docker-compose.yml to a bind mount so you can browse workspace files from the host:"
+  },
+  "extensions": {
+    "title": "Extensions",
+    "loading": "Loading extensions...",
+    "disconnected": "Connect to gateway to view extensions",
+    "tabs": {
+      "skills": "Skills",
+      "channels": "Channels",
+      "plugins": "Plugins"
+    },
+    "skills": {
+      "title": "Skills",
+      "search": "Filter skills...",
+      "empty": "No skills loaded.",
+      "eligible": "Active",
+      "disabled": "Disabled",
+      "missingDeps": "Missing dependencies",
+      "source": "Source",
+      "path": "Path",
+      "key": "Key",
+      "requirements": "Requirements",
+      "openFolder": "Open Folder",
+      "openFile": "Open File",
+      "enable": "Enable",
+      "disable": "Disable",
+      "enableSuccess": "Skill enabled",
+      "disableSuccess": "Skill disabled",
+      "updateFailed": "Failed to update skill",
+      "openFailed": "Failed to open",
+      "group": {
+        "local": "Research-Claw Local",
+        "research-plugins": "Research-Plugins",
+        "managed": "Managed Skills",
+        "bundled": "OpenClaw Bundled"
+      }
+    },
+    "channels": {
+      "title": "Channels",
+      "empty": "No channels configured.",
+      "emptyHint": "Configure messaging channels in openclaw.json to enable integrations.",
+      "connected": "Connected",
+      "configured": "Configured",
+      "notConfigured": "Not configured",
+      "error": "Error",
+      "account": "Account",
+      "lastInbound": "Last inbound",
+      "lastOutbound": "Last outbound",
+      "mode": "Mode",
+      "probe": "Probe",
+      "probing": "Probing...",
+      "config": "Config",
+      "logout": "Logout",
+      "logoutConfirmTitle": "Logout from channel",
+      "logoutConfirmContent": "Logout from {{channel}}? Credentials will be cleared.",
+      "logoutSuccess": "Logged out",
+      "logoutFailed": "Logout failed"
+    },
+    "plugins": {
+      "title": "Plugins",
+      "empty": "No plugins loaded.",
+      "path": "Path",
+      "config": "Config",
+      "openConfig": "Open openclaw.json",
+      "openConfigFailed": "Failed to open config file",
+      "toggleFailed": "Failed to toggle plugin",
+      "packages": "Installed Skill Packages"
+    }
   }
 }
