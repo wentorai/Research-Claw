@@ -145,6 +145,19 @@ describe('TaskPanel', () => {
     expect(screen.getByText('tasks.empty')).toBeTruthy();
   });
 
+  it('shows perspective toggle even when tasks list is empty (Issue #10)', async () => {
+    // Bug: switching to "助手任务" with 0 agent tasks hid the Segmented control,
+    // preventing the user from switching back without a page refresh.
+    useTasksStore.setState({ tasks: [], total: 0, perspective: 'agent' });
+    await act(async () => {
+      render(<TaskPanel />);
+    });
+    expect(screen.getByText('tasks.perspective.all')).toBeTruthy();
+    expect(screen.getByText('tasks.perspective.human')).toBeTruthy();
+    expect(screen.getByText('tasks.perspective.agent')).toBeTruthy();
+    expect(screen.getByText('tasks.empty')).toBeTruthy();
+  });
+
   it('renders perspective toggle', () => {
     useTasksStore.setState({
       tasks: [makeTask()],

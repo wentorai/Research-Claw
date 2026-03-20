@@ -1136,40 +1136,6 @@ export default function WorkspacePanel() {
     [uploading, uploadOneFile, loadData, t, message],
   );
 
-  if (!hasLoaded && connState === 'connected' && tree.length === 0) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: 200 }}>
-        <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
-      </div>
-    );
-  }
-
-  if (!loading && tree.length === 0 && commits.length === 0) {
-    return (
-      <div style={{ padding: 24, textAlign: 'center', paddingTop: 60 }}>
-        <FolderOutlined style={{ fontSize: 48, color: tokens.text.muted, opacity: 0.4 }} />
-        <div style={{ marginTop: 16, whiteSpace: 'pre-line' }}>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            {t('workspace.empty')}
-          </Text>
-        </div>
-        <div style={{ marginTop: 24 }}>
-          <Upload
-            accept="*"
-            multiple
-            showUploadList={false}
-            beforeUpload={handleUpload}
-            disabled={uploading}
-          >
-            <Button icon={uploading ? <LoadingOutlined /> : <UploadOutlined />} size="small" loading={uploading}>
-              {t('workspace.upload')}
-            </Button>
-          </Upload>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} onDragEnd={handlePanelDragEnd}>
       <RecentChanges commits={commits} tokens={tokens} hasMore={hasMoreCommits} onLoadMore={loadMoreCommits} loadingMore={loadingMoreCommits} />
@@ -1178,7 +1144,34 @@ export default function WorkspacePanel() {
         <div style={{ borderTop: `1px solid ${tokens.border.default}`, margin: '4px 16px' }} />
       )}
 
-      {tree.length > 0 && (
+      {/* Content area: loading spinner, empty state, or file tree */}
+      {!hasLoaded && connState === 'connected' && tree.length === 0 ? (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, minHeight: 200 }}>
+          <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
+        </div>
+      ) : !loading && tree.length === 0 && commits.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center', paddingTop: 60 }}>
+          <FolderOutlined style={{ fontSize: 48, color: tokens.text.muted, opacity: 0.4 }} />
+          <div style={{ marginTop: 16, whiteSpace: 'pre-line' }}>
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              {t('workspace.empty')}
+            </Text>
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Upload
+              accept="*"
+              multiple
+              showUploadList={false}
+              beforeUpload={handleUpload}
+              disabled={uploading}
+            >
+              <Button icon={uploading ? <LoadingOutlined /> : <UploadOutlined />} size="small" loading={uploading}>
+                {t('workspace.upload')}
+              </Button>
+            </Upload>
+          </div>
+        </div>
+      ) : tree.length > 0 ? (
         <>
           {/* Sticky header: title + [+] + search — stays fixed above scroll */}
           <div style={{ flexShrink: 0, paddingTop: 4 }}>
@@ -1285,7 +1278,7 @@ export default function WorkspacePanel() {
             ) : null}
           </div>
         </>
-      )}
+      ) : null}
 
       {/* System files toggle bar */}
       {!showSystemFiles && hiddenCount > 0 ? (
