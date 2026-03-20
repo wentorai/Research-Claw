@@ -198,7 +198,7 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, [handleResize]);
 
-  // Keyboard shortcut: Ctrl+1-5 to switch panel tabs
+  // Keyboard shortcut: Ctrl+1-6 to switch panel tabs
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {

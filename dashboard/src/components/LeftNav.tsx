@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Input, Tooltip, Typography, type MenuProps } from 'antd';
+import { Button, Dropdown, Input, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined,
   BookOutlined,
