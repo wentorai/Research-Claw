@@ -26,6 +26,14 @@ services:
       - rc-data:/app/.research-claw      # RC plugin SQLite (library, tasks, monitors)
       - rc-workspace:/app/workspace      # Agent workspace (MEMORY.md, USER.md, files)
       - rc-state:/root/.openclaw         # OC state: sessions (chat history!), logs, plugins, credentials
+      # ── Optional: Mount host reference manager databases (read-only) ──
+      # Enables Zotero/EndNote import from Docker. Uncomment for your OS:
+      # macOS / Linux:
+      #   - ~/Zotero:/host/zotero:ro
+      #   - ~/Documents:/host/documents:ro
+      # Windows (WSL2 backend):
+      #   - /mnt/c/Users/YOUR_USER/Zotero:/host/zotero:ro
+      #   - /mnt/c/Users/YOUR_USER/Documents:/host/documents:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:28789/healthz || exit 1"]

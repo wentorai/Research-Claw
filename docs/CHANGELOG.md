@@ -17,6 +17,15 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-03-20 — Dashboard Panel Empty State Fix (Issue #10)
+
+- [2026-03-20] [Dashboard] [Claude] fix: TaskPanel early return on empty state hid Segmented tab control — user trapped on empty "助手任务" tab, required page refresh to escape
+- [2026-03-20] [Dashboard] [Claude] fix: WorkspacePanel early returns on loading/empty hid RecentChanges + upload zone
+- [2026-03-20] [Dashboard] [Claude] pattern: moved empty/loading states from early returns into main layout ternary (consistent with LibraryPanel)
+- [2026-03-20] [Dashboard] [Claude] test: +1 regression test for Issue #10 (perspective='agent' + empty tasks → controls still visible)
+- [2026-03-20] [Infra] [Sylvan] Manual E2E: verified in gateway-served dashboard — pass
+- [2026-03-20] [Infra] [Claude] Tests: 54 files, 1024/1024 pass
+
 ### 2026-03-17/18 — Task Module Enhancements (P0-P3)
 
 - [2026-03-17] [Modules] [Claude] feat: `task_delete` agent tool (#10) — destructive delete with pre-fetch title for confirmation
