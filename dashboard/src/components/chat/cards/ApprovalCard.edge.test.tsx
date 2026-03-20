@@ -13,10 +13,12 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
   }),
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
 }));
 
 // Mock stores
 const mockRequest = vi.fn();
+const mockSend = vi.fn().mockResolvedValue(undefined);
 vi.mock('@/stores/config', () => ({
   useConfigStore: (selector: (s: { theme: string }) => unknown) =>
     selector({ theme: 'dark' }),
@@ -24,6 +26,10 @@ vi.mock('@/stores/config', () => ({
 vi.mock('@/stores/gateway', () => ({
   useGatewayStore: (selector: (s: { client: { request: typeof mockRequest } | null }) => unknown) =>
     selector({ client: { request: mockRequest } }),
+}));
+vi.mock('@/stores/chat', () => ({
+  useChatStore: (selector: (s: { send: typeof mockSend }) => unknown) =>
+    selector({ send: mockSend }),
 }));
 
 const baseApproval: ApprovalCardType = {
@@ -106,9 +112,12 @@ describe('ApprovalCard edge cases', () => {
       <ApprovalCard {...baseApproval} approval_id={undefined} onResolve={onResolve} />,
     );
     fireEvent.click(screen.getByText('card.approval.approve'));
-    // Without approval_id, it calls onResolve directly without gateway
-    expect(onResolve).toHaveBeenCalledWith('allow-once');
+    // Without approval_id, sends chat message via chatSend then calls onResolve
+    await waitFor(() => {
+      expect(onResolve).toHaveBeenCalledWith('allow-once');
+    });
     expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockSend).toHaveBeenCalled();
   });
 
   it('renders details with string values', () => {

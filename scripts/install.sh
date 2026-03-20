@@ -14,6 +14,7 @@
 #   PORT         — gateway port (default: 28789)
 #   BIND         — gateway bind: "loopback" or "lan" (default: auto-detect SSH)
 #   SKIP_START   — set to 1 to install only, don't launch gateway
+#   NPM_REGISTRY — npm registry URL (for slow networks: https://registry.npmmirror.com)
 # ============================================================================
 set -euo pipefail
 
@@ -856,8 +857,15 @@ ensure_native_modules || true
 run_openclaw_plugin_install() {
   local TMP_CFG; TMP_CFG="$(mktemp)"
   echo '{}' > "$TMP_CFG"
-  OPENCLAW_CONFIG_PATH="$TMP_CFG" "$GW_NODE" ./node_modules/openclaw/dist/entry.js plugins install "$@"
-  local RC=$?
+  local -a ENV_ARGS=("OPENCLAW_CONFIG_PATH=$TMP_CFG")
+  [ -n "${NPM_REGISTRY:-}" ] && ENV_ARGS+=("npm_config_registry=$NPM_REGISTRY")
+  local RC=0
+  # Timeout (120s) prevents indefinite hang on slow npm networks (e.g. China)
+  if command -v timeout &>/dev/null; then
+    env "${ENV_ARGS[@]}" timeout 120 "$GW_NODE" ./node_modules/openclaw/dist/entry.js plugins install "$@" || RC=$?
+  else
+    env "${ENV_ARGS[@]}" "$GW_NODE" ./node_modules/openclaw/dist/entry.js plugins install "$@" || RC=$?
+  fi
   rm -f "$TMP_CFG"
   return $RC
 }
@@ -866,6 +874,16 @@ rp_summary() {
   local SKILLS; SKILLS=$(find "$PLUGIN_DIR/skills" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
   [ "$SKILLS" -gt 0 ] 2>/dev/null && echo "${SKILLS} skills" || true
 }
+
+# Trap Ctrl+C during plugin install — exit cleanly instead of continuing to gateway
+_RP_INTERRUPTED=false
+trap '_RP_INTERRUPTED=true' INT
+
+rp_network_hint() {
+  warn "If npm is slow, use a China mirror:"
+  printf "    ${C}NPM_REGISTRY=https://registry.npmmirror.com${N} curl -fsSL https://wentor.ai/install.sh | bash\n"
+}
+
 info "Installing research-plugins..."
 if [ -d "$PLUGIN_DIR" ]; then
   # Update existing: backup → delete → install → restore on failure
@@ -873,7 +891,9 @@ if [ -d "$PLUGIN_DIR" ]; then
   cp -r "$PLUGIN_DIR" "${PLUGIN_DIR}.bak" 2>/dev/null || true
   rm -rf "$PLUGIN_DIR"
   RP_LOG="$(mktemp)"
-  if run_openclaw_plugin_install @wentorai/research-plugins >"$RP_LOG" 2>&1; then
+  RP_EXIT=0
+  run_openclaw_plugin_install @wentorai/research-plugins >"$RP_LOG" 2>&1 || RP_EXIT=$?
+  if [ "$RP_EXIT" -eq 0 ]; then
     rm -rf "${PLUGIN_DIR}.bak"
     NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
     if [ "$CURRENT_VER" = "$NEW_VER" ]; then
@@ -882,7 +902,8 @@ if [ -d "$PLUGIN_DIR" ]; then
       ok "Research-plugins updated: v${CURRENT_VER} → v${NEW_VER}"
     fi
   else
-    # Restore backup on failure
+    # Restore backup on failure (rm partial download first — mv won't overwrite dirs)
+    rm -rf "$PLUGIN_DIR"
     if [ -d "${PLUGIN_DIR}.bak" ]; then
       mv "${PLUGIN_DIR}.bak" "$PLUGIN_DIR"
       warn "research-plugins update failed. Kept existing v${CURRENT_VER}."
@@ -890,23 +911,46 @@ if [ -d "$PLUGIN_DIR" ]; then
       warn "research-plugins update failed. You can retry later:"
       printf "    cd $INSTALL_DIR && npx openclaw plugins install @wentorai/research-plugins\n"
     fi
-    warn "Error details (last 5 lines):"
-    tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
+    if [ "$RP_EXIT" -eq 124 ]; then
+      warn "Download timed out (>120s)."
+    else
+      warn "Error details (last 5 lines):"
+      tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
+    fi
+    rp_network_hint
   fi
   rm -f "$RP_LOG"
 else
   # Fresh install
   RP_LOG="$(mktemp)"
-  if run_openclaw_plugin_install @wentorai/research-plugins >"$RP_LOG" 2>&1; then
+  RP_EXIT=0
+  run_openclaw_plugin_install @wentorai/research-plugins >"$RP_LOG" 2>&1 || RP_EXIT=$?
+  if [ "$RP_EXIT" -eq 0 ]; then
     NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
     RP_S=$(rp_summary); ok "Research-plugins v${NEW_VER}${RP_S:+ ($RP_S)}"
   else
-    warn "research-plugins install failed (offline?). You can retry later:"
-    printf "    cd $INSTALL_DIR && npx openclaw plugins install @wentorai/research-plugins\n"
-    warn "Error details (last 5 lines):"
-    tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
+    if [ "$RP_EXIT" -eq 124 ]; then
+      warn "research-plugins download timed out (>120s)."
+    else
+      warn "research-plugins install failed (offline?). You can retry later:"
+      printf "    cd $INSTALL_DIR && npx openclaw plugins install @wentorai/research-plugins\n"
+      warn "Error details (last 5 lines):"
+      tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
+    fi
+    rp_network_hint
   fi
   rm -f "$RP_LOG"
+fi
+
+# Restore default SIGINT handling
+trap - INT
+if $_RP_INTERRUPTED; then
+  printf "\n"
+  info "Interrupted. Research-plugins can be installed later:"
+  printf "    cd $INSTALL_DIR && npx openclaw plugins install @wentorai/research-plugins\n"
+  info "To start the gateway:"
+  printf "    cd $INSTALL_DIR && bash scripts/run.sh\n"
+  exit 130
 fi
 
 # --- Persist OPENCLAW_CONFIG_PATH in shell profile ---

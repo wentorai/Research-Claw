@@ -1,5 +1,5 @@
 /**
- * Bootstrap Consistency Tests — AGENTS.md v3.3 & TOOLS.md v3.2
+ * Bootstrap Consistency Tests — AGENTS.md v3.4 & TOOLS.md v3.3
  *
  * Validates that the bootstrap files (AGENTS.md, TOOLS.md) accurately
  * reference the tools, RPCs, and capabilities that exist in the
@@ -18,7 +18,7 @@ import * as path from 'node:path';
 // Ground truth: actual tools and RPCs from the plugin source code
 // ---------------------------------------------------------------------------
 
-/** 17 literature agent tools (from literature/tools.ts) — v0.5.0 adds RIS, Zotero, EndNote */
+/** 25 literature agent tools (from literature/tools.ts) — v0.5.0 adds RIS, Zotero, EndNote, Zotero Local/Web API */
 const ACTUAL_LITERATURE_TOOLS = [
   'library_add_paper',
   'library_search',
@@ -37,6 +37,14 @@ const ACTUAL_LITERATURE_TOOLS = [
   'library_zotero_import',
   'library_endnote_detect',
   'library_endnote_import',
+  'library_zotero_local_detect',
+  'library_zotero_local_import',
+  'library_zotero_web_detect',
+  'library_zotero_web_import',
+  'library_zotero_web_search',
+  'library_zotero_web_create',
+  'library_zotero_web_update',
+  'library_zotero_web_delete',
 ] as const;
 
 /** 10 task agent tools (from tasks/tools.ts) — includes task_delete, task_link_file, cron_update_schedule, send_notification */
@@ -73,7 +81,7 @@ const ACTUAL_MONITOR_TOOLS = [
   'monitor_note',
 ] as const;
 
-/** All 39 agent tools (17 + 10 + 7 + 5) — from index.ts registration */
+/** All 47 agent tools (25 + 10 + 7 + 5) — from index.ts registration */
 const ALL_AGENT_TOOLS = [
   ...ACTUAL_LITERATURE_TOOLS,
   ...ACTUAL_TASK_TOOLS,
@@ -196,7 +204,7 @@ function extractBacktickNames(text: string): string[] {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
+describe('Bootstrap file consistency (AGENTS.md v3.4 & TOOLS.md v3.3)', () => {
   // ── Precondition ──────────────────────────────────────────────────────
 
   it('bootstrap files exist and are non-empty', () => {
@@ -294,14 +302,14 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
   describe('TOOLS.md — tool counts', () => {
     it('header claims correct total local tool count', () => {
       // 17 lit + 10 task + 7 ws + 5 monitor = 39
-      expect(ACTUAL_LITERATURE_TOOLS.length).toBe(17);
+      expect(ACTUAL_LITERATURE_TOOLS.length).toBe(25);
       expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(7);
       expect(ACTUAL_TASK_TOOLS.length).toBe(10);
       expect(ACTUAL_MONITOR_TOOLS.length).toBe(5);
     });
 
-    it('TOOLS.md states "Library (17 tools)"', () => {
-      expect(toolsMd).toContain('Library (17 tools)');
+    it('TOOLS.md states "Library (25 tools)"', () => {
+      expect(toolsMd).toContain('Library (25 tools)');
     });
 
     it('TOOLS.md states "Tasks (10 tools, incl. send_notification in §3)"', () => {
@@ -312,18 +320,18 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
       expect(toolsMd).toContain('Workspace (7 tools)');
     });
 
-    it('total local tool count: TOOLS.md says 39, matches actual', () => {
+    it('total local tool count: TOOLS.md says 47, matches actual', () => {
       const stated = toolsMd.match(/§1 Local Tools \((\d+)\)/);
       expect(stated).not.toBeNull();
       const statedCount = parseInt(stated![1], 10);
 
-      // 17 lit + 10 task + 7 ws + 5 monitor = 39
-      expect(statedCount).toBe(39);
-      expect(ALL_AGENT_TOOLS.length).toBe(39);
+      // 25 lit + 10 task + 7 ws + 5 monitor = 47
+      expect(statedCount).toBe(47);
+      expect(ALL_AGENT_TOOLS.length).toBe(47);
     });
 
-    it('TOOLS.md §7 states total tool count (39 local + 34 API + 3 OC web = 76)', () => {
-      expect(toolsMd).toContain('39 local + 34 API + 3 OC web = **76 available tools**');
+    it('TOOLS.md §7 states total tool count (47 local + 34 API + 3 OC web = 84)', () => {
+      expect(toolsMd).toContain('47 local + 34 API + 3 OC web = **84 available tools**');
     });
   });
 
@@ -383,6 +391,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
       'monitor_digest', 'monitor_name', 'source_type', 'total_found',
       // Sort/filter parameter names from Recency Search Protocol
       'sort_by', 'from_year', 'until_year', 'to_year', 'min_date', 'max_date',
+      // Zotero parameter names
+      'db_path',
     ]);
     const agentToolRefs = [
       ...new Set(
@@ -405,6 +415,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
       'search_biorxiv', 'search_medrxiv',
       // OC built-in tools referenced in Search Fallback Protocol
       'sessions_spawn',
+      // Wentor platform API tool (referenced in Dynamic Tool Priority)
+      'wentor_search',
     ]);
 
     it('every tool referenced in AGENTS.md exists in the plugin or is a known external tool', () => {
@@ -432,65 +444,108 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
     });
   });
 
-  // ── AGENTS.md — §3 PDF Import Protocol ────────────────────────────────
+  // ── AGENTS.md — §3 Local Library Bridge & PDF Import ──────────────────
 
-  describe('AGENTS.md — §3 PDF Import Protocol', () => {
-    it('protocol section exists', () => {
-      expect(agentsMd).toContain('### PDF Import Protocol');
+  describe('AGENTS.md — §3 Local Library Bridge (Zotero / EndNote)', () => {
+    it('Local Library Bridge section exists', () => {
+      expect(agentsMd).toContain('### Local Library Bridge (Zotero / EndNote)');
     });
 
-    it('step 1: references Read tool (built-in)', () => {
-      // "Use the built-in Read tool"
-      expect(agentsMd).toMatch(/Read tool/);
+    it('describes Zotero fallback chain (SQLite → Local API → Web API → Format export)', () => {
+      const bridgeSection = agentsMd.slice(
+        agentsMd.indexOf('### Local Library Bridge'),
+        agentsMd.indexOf('### Dynamic Tool Priority'),
+      );
+      expect(bridgeSection).toContain('zotero.sqlite');
+      expect(bridgeSection).toContain('localhost:23119');
+      expect(bridgeSection).toContain('api.zotero.org');
+      expect(bridgeSection).toContain('library_export_bibtex');
     });
 
-    it('step 2: extract metadata mentions DOI, arXiv ID', () => {
-      const protocolSection = agentsMd.slice(
-        agentsMd.indexOf('### PDF Import Protocol'),
+    it('describes EndNote fallback chain', () => {
+      const bridgeSection = agentsMd.slice(
+        agentsMd.indexOf('### Local Library Bridge'),
+        agentsMd.indexOf('### Dynamic Tool Priority'),
+      );
+      expect(bridgeSection).toContain('EndNote');
+      expect(bridgeSection).toContain('.enl');
+    });
+
+    it('describes Docker environment guidance', () => {
+      const bridgeSection = agentsMd.slice(
+        agentsMd.indexOf('### Local Library Bridge'),
+        agentsMd.indexOf('### Dynamic Tool Priority'),
+      );
+      expect(bridgeSection).toContain('Docker');
+      expect(bridgeSection).toContain('library_import_bibtex');
+      expect(bridgeSection).toContain('library_import_ris');
+    });
+
+    it('describes reverse path (RC → Zotero) with approval_card', () => {
+      const bridgeSection = agentsMd.slice(
+        agentsMd.indexOf('### Local Library Bridge'),
+        agentsMd.indexOf('### Dynamic Tool Priority'),
+      );
+      expect(bridgeSection).toContain('library_zotero_web_create');
+      expect(bridgeSection).toContain('approval_card');
+    });
+
+    it('mentions other reference managers fallback (Mendeley, etc.)', () => {
+      const bridgeSection = agentsMd.slice(
+        agentsMd.indexOf('### Local Library Bridge'),
+        agentsMd.indexOf('### Dynamic Tool Priority'),
+      );
+      expect(bridgeSection).toContain('Mendeley');
+      expect(bridgeSection).toContain('library_batch_add');
+    });
+
+    it('mentions first detection recording in MEMORY.md', () => {
+      const bridgeSection = agentsMd.slice(
+        agentsMd.indexOf('### Local Library Bridge'),
+        agentsMd.indexOf('### Dynamic Tool Priority'),
+      );
+      expect(bridgeSection).toContain('MEMORY.md');
+    });
+  });
+
+  describe('AGENTS.md — §3 PDF Import', () => {
+    it('PDF Import section exists', () => {
+      expect(agentsMd).toContain('### PDF Import');
+    });
+
+    it('references Read tool for metadata extraction', () => {
+      const pdfSection = agentsMd.slice(
+        agentsMd.indexOf('### PDF Import'),
         agentsMd.indexOf('## §4'),
       );
-      expect(protocolSection).toContain('DOI');
-      expect(protocolSection).toContain('arXiv ID');
+      expect(pdfSection).toContain('Read');
     });
 
-    it('step 3: verify via API references get_paper or search_arxiv', () => {
-      const protocolSection = agentsMd.slice(
-        agentsMd.indexOf('### PDF Import Protocol'),
+    it('references resolve_doi and search_arxiv for verification', () => {
+      const pdfSection = agentsMd.slice(
+        agentsMd.indexOf('### PDF Import'),
         agentsMd.indexOf('## §4'),
       );
-      expect(protocolSection).toContain('search_arxiv');
+      expect(pdfSection).toContain('resolve_doi');
+      expect(pdfSection).toContain('search_arxiv');
     });
 
-    it('step 4: deduplicate references library_search', () => {
-      const protocolSection = agentsMd.slice(
-        agentsMd.indexOf('### PDF Import Protocol'),
+    it('references library_search for dedup', () => {
+      const pdfSection = agentsMd.slice(
+        agentsMd.indexOf('### PDF Import'),
         agentsMd.indexOf('## §4'),
       );
-      expect(protocolSection).toContain('library_search');
+      expect(pdfSection).toContain('library_search');
     });
 
-    it('step 5: add to library references library_add_paper', () => {
-      const protocolSection = agentsMd.slice(
-        agentsMd.indexOf('### PDF Import Protocol'),
+    it('references library_add_paper with source and pdf_path', () => {
+      const pdfSection = agentsMd.slice(
+        agentsMd.indexOf('### PDF Import'),
         agentsMd.indexOf('## §4'),
       );
-      expect(protocolSection).toContain('library_add_paper');
-    });
-
-    it('step 5: mentions pdf_path parameter', () => {
-      const protocolSection = agentsMd.slice(
-        agentsMd.indexOf('### PDF Import Protocol'),
-        agentsMd.indexOf('## §4'),
-      );
-      expect(protocolSection).toContain('pdf_path');
-    });
-
-    it('step 5: mentions source "local_import"', () => {
-      const protocolSection = agentsMd.slice(
-        agentsMd.indexOf('### PDF Import Protocol'),
-        agentsMd.indexOf('## §4'),
-      );
-      expect(protocolSection).toContain('local_import');
+      expect(pdfSection).toContain('library_add_paper');
+      expect(pdfSection).toContain('local_import');
+      expect(pdfSection).toContain('pdf_path');
     });
 
     it('pdf_path is an actual parameter of library_add_paper', () => {
@@ -501,14 +556,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
     it('source is an actual parameter of library_add_paper', () => {
       // Verified from literature/tools.ts line 54
       expect(true).toBe(true);
-    });
-
-    it('step 6: mentions paper_card output', () => {
-      const protocolSection = agentsMd.slice(
-        agentsMd.indexOf('### PDF Import Protocol'),
-        agentsMd.indexOf('## §4'),
-      );
-      expect(protocolSection).toContain('paper_card');
     });
 
     it('protocol triggers include Chinese and English variants', () => {
@@ -620,23 +667,24 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
       }
     });
 
-    it('mentions commit_range parameter for workspace_diff', () => {
+    it('workspace_diff mentions uncommitted vs HEAD default', () => {
       const wsSection = agentsMd.slice(
         agentsMd.indexOf('## §4 Workspace & Version Control'),
         agentsMd.indexOf('## §5'),
       );
-      expect(wsSection).toContain('commit_range');
+      expect(wsSection).toMatch(/workspace_diff.*uncommitted/s);
     });
 
-    it('mentions commit_hash parameter for workspace_restore', () => {
+    it('workspace_restore mentioned with checkout+commit pattern', () => {
       const wsSection = agentsMd.slice(
         agentsMd.indexOf('## §4 Workspace & Version Control'),
         agentsMd.indexOf('## §5'),
       );
-      expect(wsSection).toContain('commit_hash');
+      expect(wsSection).toContain('workspace_restore');
+      expect(wsSection).toMatch(/checkout.*commit/s);
     });
 
-    it('mentions committed field in workspace_save response', () => {
+    it('mentions committed in context of git tracking', () => {
       const wsSection = agentsMd.slice(
         agentsMd.indexOf('## §4 Workspace & Version Control'),
         agentsMd.indexOf('## §5'),
@@ -644,12 +692,12 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
       expect(wsSection).toContain('committed');
     });
 
-    it('mentions short_hash in workspace_history response', () => {
+    it('tool chain section mentions workspace_save with write+commit and file_card', () => {
       const wsSection = agentsMd.slice(
         agentsMd.indexOf('## §4 Workspace & Version Control'),
         agentsMd.indexOf('## §5'),
       );
-      expect(wsSection).toContain('short_hash');
+      expect(wsSection).toMatch(/workspace_save.*write\+commit.*file_card/s);
     });
 
     it('proactive behaviors mention git history preservation', () => {
@@ -664,8 +712,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
   // ── AGENTS.md — Module Map consistency ────────────────────────────────
 
   describe('AGENTS.md — §2 Module Map', () => {
-    it('states Library has 17 tools', () => {
-      expect(agentsMd).toMatch(/Library\s+\(17 tools\)/);
+    it('states Library has 25 tools', () => {
+      expect(agentsMd).toMatch(/Library\s+\(25 tools\)/);
     });
 
     it('states Tasks has 10 tools', () => {
@@ -772,40 +820,37 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
   // ── Version headers ───────────────────────────────────────────────────
 
   describe('Version metadata', () => {
-    it('AGENTS.md is version 3.3', () => {
-      expect(agentsMd).toMatch(/version:\s*3\.3/);
+    it('AGENTS.md is version 3.4', () => {
+      expect(agentsMd).toMatch(/version:\s*3\.4/);
     });
 
-    it('TOOLS.md is version 3.2', () => {
-      expect(toolsMd).toMatch(/version:\s*3\.2/);
+    it('TOOLS.md is version 3.3', () => {
+      expect(toolsMd).toMatch(/version:\s*3\.3/);
     });
 
-    it('AGENTS.md has 2026-03-19 date', () => {
-      expect(agentsMd).toContain('2026-03-19');
+    it('AGENTS.md has 2026-03-20 date', () => {
+      expect(agentsMd).toContain('2026-03-20');
     });
 
-    it('TOOLS.md has 2026-03-19 date', () => {
-      expect(toolsMd).toContain('2026-03-19');
+    it('TOOLS.md has 2026-03-20 date', () => {
+      expect(toolsMd).toContain('2026-03-20');
     });
   });
 
   // ── AGENTS.md — Output cards ──────────────────────────────────────────
 
   describe('AGENTS.md — output card types', () => {
-    it('defines file_card with git_status field', () => {
-      expect(agentsMd).toContain('file_card');
-      expect(agentsMd).toContain('git_status');
+    it('defines file_card section', () => {
+      expect(agentsMd).toContain('### file_card');
     });
 
-    it('file_card git_status enums include "new", "modified", "committed"', () => {
-      // The card spec in §10 defines: "new" | "modified" | "committed"
+    it('file_card says to copy from workspace_save output verbatim', () => {
       const cardSection = agentsMd.slice(
         agentsMd.indexOf('### file_card'),
-        agentsMd.indexOf('## §11') !== -1 ? agentsMd.indexOf('## §11') : agentsMd.length,
+        agentsMd.indexOf('### monitor_digest'),
       );
-      expect(cardSection).toContain('"new"');
-      expect(cardSection).toContain('"modified"');
-      expect(cardSection).toContain('"committed"');
+      expect(cardSection).toContain('workspace_save');
+      expect(cardSection).toMatch(/[Nn]ever fabricate/i);
     });
   });
 
@@ -879,7 +924,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
       expect(phase3).toContain('workspace_save');
     });
 
-    it('Phase 4 references task_create, task_link, task_note, task_complete, task_list', () => {
+    it('Phase 4 references task_create, task_link, task_note, task_complete', () => {
       const phase4 = agentsMd.slice(
         agentsMd.indexOf('### Phase 4'),
         agentsMd.indexOf('## §9'),
@@ -888,7 +933,6 @@ describe('Bootstrap file consistency (AGENTS.md v3.3 & TOOLS.md v3.2)', () => {
       expect(phase4).toContain('task_link');
       expect(phase4).toContain('task_note');
       expect(phase4).toContain('task_complete');
-      expect(phase4).toContain('task_list');
     });
   });
 
