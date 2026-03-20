@@ -97,16 +97,15 @@ describe('ExtensionsPanel', () => {
     expect(screen.getByText('Connect to gateway to view extensions')).toBeTruthy();
   });
 
-  it('shows loading state', () => {
+  it('shows loading state within skills tab', () => {
     useExtensionsStore.setState({
       skillsLoading: true,
       skillsLoaded: false,
-      channelsLoading: true,
-      channelsLoaded: false,
     });
 
     render(<Wrapper><ExtensionsPanel /></Wrapper>);
 
+    // Loading spinner should appear inside the skills tab content
     expect(screen.getByText('Loading extensions...')).toBeTruthy();
   });
 

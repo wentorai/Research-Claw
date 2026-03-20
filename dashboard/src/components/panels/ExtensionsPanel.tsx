@@ -801,7 +801,18 @@ function PluginsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
     );
   }, [messageApi, t]);
 
-  if (plugins.length === 0 && pluginsLoaded) {
+  if (!pluginsLoaded) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 16px' }}>
+        <LoadingOutlined style={{ fontSize: 24, color: tokens.text.muted, display: 'block', marginBottom: 12 }} />
+        <Text style={{ color: tokens.text.muted, fontSize: 13 }}>
+          {t('extensions.loading', 'Loading extensions...')}
+        </Text>
+      </div>
+    );
+  }
+
+  if (plugins.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '40px 16px' }}>
         <SettingOutlined style={{ fontSize: 32, color: tokens.text.muted, display: 'block', marginBottom: 12 }} />
@@ -850,18 +861,14 @@ export default function ExtensionsPanel() {
   const theme = useConfigStore((s) => s.theme);
   const tokens = getThemeTokens(theme);
   const isConnected = useGatewayStore((s) => s.state === 'connected');
-  const {
-    skills,
-    skillsLoading,
-    skillsLoaded,
-    loadSkills,
-    channels,
-    channelsLoading,
-    channelsLoaded,
-    loadChannels,
-    pluginsLoaded,
-    loadPlugins,
-  } = useExtensionsStore();
+  const skills = useExtensionsStore((s) => s.skills);
+  const channels = useExtensionsStore((s) => s.channels);
+  const skillsLoading = useExtensionsStore((s) => s.skillsLoading);
+  const channelsLoading = useExtensionsStore((s) => s.channelsLoading);
+  const skillsLoaded = useExtensionsStore((s) => s.skillsLoaded);
+  const channelsLoaded = useExtensionsStore((s) => s.channelsLoaded);
+  const pluginsLoaded = useExtensionsStore((s) => s.pluginsLoaded);
+  const { loadSkills, loadChannels, loadPlugins } = useExtensionsStore();
 
   const [activeTab, setActiveTab] = useState<SubTab>('skills');
 
@@ -892,16 +899,6 @@ export default function ExtensionsPanel() {
       <div style={{ padding: 16, textAlign: 'center' }}>
         <Text style={{ color: tokens.text.muted }}>
           {t('extensions.disconnected', 'Connect to gateway to view extensions')}
-        </Text>
-      </div>
-    );
-  }
-
-  if (isLoading && !skillsLoaded && !channelsLoaded) {
-    return (
-      <div style={{ padding: 32, textAlign: 'center' }}>
-        <Text style={{ color: tokens.text.muted }}>
-          {t('extensions.loading', 'Loading extensions...')}
         </Text>
       </div>
     );
