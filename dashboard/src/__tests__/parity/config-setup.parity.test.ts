@@ -778,3 +778,29 @@ describe('Round-trip integrity: extract -> edit -> build -> extract', () => {
     expect(fields2.proxyUrl).toBe('http://127.0.0.1:7890');
   });
 });
+
+// ─── Provider Presets Type Parity ─────────────────────────────────────
+// Verifies that ProviderPreset['api'] includes all protocols the OC gateway supports.
+// Source: @mariozechner/pi-ai/src/types.ts (KnownApi union)
+// Source: openclaw/src/agents/transcript-policy.ts:34-39 (OPENAI_MODEL_APIS)
+describe('ProviderPreset api union — pi-ai KnownApi parity', () => {
+  it('includes openai-responses (OC KnownApi)', () => {
+    // openai-responses is a valid API protocol in OC (used in transcript-policy.ts:37,
+    // model-compat.test.ts:110, etc.). The SettingsPanel and SetupWizard offer it
+    // as a selectable option — the type must include it.
+    type ApiType = (typeof PROVIDER_PRESETS)[number]['api'];
+    const validApis: ApiType[] = [
+      'openai-completions',
+      'openai-codex-responses',
+      'openai-responses',
+      'anthropic-messages',
+      'google-generative-ai',
+      'bedrock-converse-stream',
+      'ollama',
+      'github-copilot',
+    ];
+    // This compile-time check ensures the type union is wide enough.
+    // If 'openai-responses' is not in ProviderPreset['api'], this won't compile.
+    expect(validApis).toContain('openai-responses');
+  });
+});

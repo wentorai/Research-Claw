@@ -38,6 +38,7 @@ export interface ProviderPreset {
   /** API protocol for pi-ai */
   api:
     | 'openai-completions'
+    | 'openai-responses'
     | 'openai-codex-responses'
     | 'anthropic-messages'
     | 'google-generative-ai'

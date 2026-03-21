@@ -335,4 +335,49 @@ export const DELTA_WITH_NORMAL_ANGLES: ChatStreamEvent = {
   },
 };
 
+// ─── Cron Reminder Injection Events ─────────────────────────────────
+// OC's heartbeat-runner injects "A scheduled reminder has been triggered."
+// as a user message when cron fires. Dashboard should hide these.
+// Source: openclaw/src/infra/heartbeat-events-filter.ts:28-37
+
+/** Cron reminder — user message injected by OC heartbeat-runner (non-relay) */
+export const DELTA_CRON_REMINDER: ChatStreamEvent = {
+  runId: 'run-cron-001',
+  sessionKey: 'main',
+  state: 'delta',
+  message: {
+    role: 'user',
+    content: [{
+      type: 'text',
+      text: 'A scheduled reminder has been triggered. The reminder content is:\n\narxiv_daily_scan\n\nHandle this reminder internally. Do not relay it to the user unless explicitly requested.',
+    }],
+  },
+};
+
+/** Cron reminder — final event for the injected user message */
+export const FINAL_CRON_REMINDER: ChatStreamEvent = {
+  runId: 'run-cron-001',
+  sessionKey: 'main',
+  state: 'final',
+  message: {
+    role: 'user',
+    content: [{
+      type: 'text',
+      text: 'A scheduled reminder has been triggered. The reminder content is:\n\narxiv_daily_scan\n\nHandle this reminder internally. Do not relay it to the user unless explicitly requested.',
+    }],
+    timestamp: 1710400020000,
+  },
+};
+
+/** Normal user message — should NOT be filtered */
+export const DELTA_NORMAL_USER: ChatStreamEvent = {
+  runId: 'run-user-001',
+  sessionKey: 'main',
+  state: 'delta',
+  message: {
+    role: 'user',
+    content: [{ type: 'text', text: 'Search for papers about attention mechanisms' }],
+  },
+};
+
 export { TINY_PNG_B64 };
