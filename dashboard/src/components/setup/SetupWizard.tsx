@@ -306,6 +306,7 @@ export default function SetupWizard() {
                 style={{ width: '100%' }}
                 options={[
                   { value: 'openai-completions', label: 'OpenAI Compatible' },
+                  { value: 'openai-responses', label: 'OpenAI Responses' },
                   { value: 'anthropic-messages', label: 'Anthropic Compatible' },
                 ]}
               />

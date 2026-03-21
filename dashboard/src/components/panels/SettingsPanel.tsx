@@ -495,6 +495,7 @@ export default function SettingsPanel() {
             style={{ width: 220 }}
             options={[
               { value: 'openai-completions', label: 'OpenAI Compatible' },
+              { value: 'openai-responses', label: 'OpenAI Responses' },
               { value: 'anthropic-messages', label: 'Anthropic Compatible' },
             ]}
           />
