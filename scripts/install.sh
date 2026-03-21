@@ -617,81 +617,10 @@ node -e "
 " 2>/dev/null || true
 
 if [ -f config/openclaw.json ]; then
-  # Clean stale references from older config versions (preserves user's API keys/model)
-  # Cleans BOTH project config AND global config
-  node -e "
-    const fs = require('fs'), path = require('path');
-    const files = ['config/openclaw.json'];
-    const global_cfg = path.join(process.env.HOME || '', '.openclaw', 'openclaw.json');
-    if (fs.existsSync(global_cfg)) files.push(global_cfg);
-    let anyChanged = false;
-    for (const f of files) {
-      try {
-        let c = JSON.parse(fs.readFileSync(f, 'utf8'));
-        let changed = false;
-
-        // --- Plugin path cleanup: remove node_modules references ---
-        if (c.plugins?.load?.paths) {
-          const before = c.plugins.load.paths.length;
-          c.plugins.load.paths = c.plugins.load.paths.filter(p => !p.includes('node_modules'));
-          if (c.plugins.load.paths.length !== before) changed = true;
-        }
-
-        // --- Remove wentor-connect (placeholder, never functional) ---
-        if (c.plugins?.entries?.['wentor-connect']) {
-          delete c.plugins.entries['wentor-connect'];
-          changed = true;
-        }
-
-        // --- v0.5.6+: ensure plugins.allow lists trusted plugin IDs (OC 2026.3.12+ security) ---
-        const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins'];
-        if (!c.plugins) c.plugins = {};
-        if (!Array.isArray(c.plugins.allow) || !REQUIRED_ALLOW.every(id => c.plugins.allow.includes(id))) {
-          c.plugins.allow = REQUIRED_ALLOW;
-          changed = true;
-        }
-
-        // --- v0.5.6+: disable mDNS/wideArea discovery (OC 2026.3.13 mDNS crash prevention) ---
-        if (!c.discovery) c.discovery = {};
-        if (c.discovery.mdns?.mode !== 'off' || c.discovery.wideArea?.enabled !== false) {
-          c.discovery.mdns = { mode: 'off' };
-          c.discovery.wideArea = { enabled: false };
-          changed = true;
-        }
-
-        // --- Remove stale tool names from alsoAllow ---
-        // Blacklist: tools removed in v0.5.2 (S2 removal + radar→monitor migration)
-        const STALE_TOOLS = ['search_papers', 'get_paper', 'get_citations',
-          'radar_configure', 'radar_get_config', 'radar_scan'];
-        if (c.tools?.alsoAllow) {
-          const before = c.tools.alsoAllow.length;
-          c.tools.alsoAllow = c.tools.alsoAllow.filter(t => !STALE_TOOLS.includes(t));
-          if (c.tools.alsoAllow.length !== before) changed = true;
-        }
-
-        // --- Ensure gateway auth token matches Dashboard DEFAULT_TOKEN ---
-        if (c.gateway?.auth) {
-          if (c.gateway.auth.token && c.gateway.auth.token !== 'research-claw') {
-            c.gateway.auth.token = 'research-claw';
-            changed = true;
-          }
-          if (c.gateway.auth.mode && c.gateway.auth.mode !== 'none' && c.gateway.auth.mode !== 'token') {
-            c.gateway.auth.mode = 'token';
-            changed = true;
-          }
-        }
-
-        if (changed) {
-          const out = JSON.stringify(c, null, 2) + '\n';
-          const t = f + '.tmp.' + process.pid;
-          fs.writeFileSync(t, out);
-          fs.renameSync(t, f);
-          anyChanged = true;
-        }
-      } catch {}
-    }
-    if (anyChanged) console.log('  [config] Cleaned stale config entries');
-  " 2>/dev/null || true
+  # Clean stale references + ensure OC 2026.3.13+ required fields.
+  # Shared logic in ensure-config.cjs — also called by run.sh and docker-entrypoint.sh.
+  GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
+  node scripts/ensure-config.cjs config/openclaw.json ${GLOBAL_CFG:+"$GLOBAL_CFG"} 2>/dev/null || true
 fi
 
 # --- Patch gateway.bind for SSH/headless servers ---

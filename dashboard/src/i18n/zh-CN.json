@@ -79,7 +79,9 @@
       "addedAt": "最近添加",
       "year": "年份",
       "title": "标题"
-    }
+    },
+    "loadMore": "加载更多",
+    "showingCount": "已显示 {{count}} / {{total}} 篇"
   },
   "tasks": {
     "title": "任务",

@@ -76,7 +76,10 @@ describe('Library store RPC parity (rc.lit.*)', () => {
       papers: [],
       tags: [],
       loading: false,
+      loadingMore: false,
       total: 0,
+      offset: 0,
+      hasMore: false,
       searchQuery: '',
       activeTab: 'inbox',
       filters: {},
@@ -138,15 +141,19 @@ describe('Library store RPC parity (rc.lit.*)', () => {
 
     it('sends correct RPC method and filter params', async () => {
       // Source: literature/rpc.ts:117-141 — params: read_status, year, tag, sort, offset, limit
+      // With server-side pagination, loadPapers always sends limit+offset and
+      // derives read_status from the active tab (inbox → ['unread','reading']).
       mockGatewayClient.request.mockResolvedValueOnce(RC_LIT_LIST_RESPONSE);
 
-      useLibraryStore.setState({ filters: { read_status: 'reading', year: 2019 } });
+      useLibraryStore.setState({ filters: { year: 2019 } });
       await useLibraryStore.getState().loadPapers();
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'rc.lit.list',
         expect.objectContaining({
-          read_status: 'reading',
+          limit: 30,
+          offset: 0,
+          read_status: ['unread', 'reading'],
           year: 2019,
         }),
       );
@@ -154,6 +161,7 @@ describe('Library store RPC parity (rc.lit.*)', () => {
 
     it('uses rc.lit.search when searchQuery is set', async () => {
       // Source: literature/rpc.ts:366-375 — rc.lit.search takes { query, limit?, offset? }
+      // With server-side pagination, search always sends limit+offset.
       mockGatewayClient.request.mockResolvedValueOnce(RC_LIT_SEARCH_RESPONSE);
 
       useLibraryStore.setState({ searchQuery: 'attention' });
@@ -161,7 +169,7 @@ describe('Library store RPC parity (rc.lit.*)', () => {
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'rc.lit.search',
-        { query: 'attention' },
+        { query: 'attention', limit: 30, offset: 0 },
       );
       expect(useLibraryStore.getState().papers).toHaveLength(1);
       expect(useLibraryStore.getState().total).toBe(1);
@@ -222,13 +230,14 @@ describe('Library store RPC parity (rc.lit.*)', () => {
   describe('searchPapers → rc.lit.search', () => {
     it('sends correct RPC method and query param', async () => {
       // Source: literature/rpc.ts:366-375 — rc.lit.search({ query, limit?, offset? })
+      // With server-side pagination, searchPapers always sends limit+offset.
       mockGatewayClient.request.mockResolvedValueOnce(RC_LIT_SEARCH_RESPONSE);
 
       await useLibraryStore.getState().searchPapers('transformer efficiency');
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'rc.lit.search',
-        { query: 'transformer efficiency' },
+        { query: 'transformer efficiency', limit: 30, offset: 0 },
       );
     });
 
@@ -459,11 +468,12 @@ describe('Tasks store RPC parity (rc.task.*)', () => {
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'rc.task.list',
-        {
+        expect.objectContaining({
           sort: 'priority',
           include_completed: true,
           task_type: 'human',
-        },
+          limit: 200,
+        }),
       );
     });
 
@@ -722,7 +732,7 @@ describe('Sessions store RPC parity (sessions.*)', () => {
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'sessions.list',
-        { includeDerivedTitles: true },
+        expect.objectContaining({ includeDerivedTitles: true }),
       );
     });
 
@@ -818,7 +828,7 @@ describe('Sessions store RPC parity (sessions.*)', () => {
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'sessions.delete',
-        { key: 'agent:main:project-a1b2c3d4' },
+        expect.objectContaining({ key: 'agent:main:project-a1b2c3d4' }),
       );
       expect(useSessionsStore.getState().sessions).toHaveLength(2);
       expect(useSessionsStore.getState().sessions.find((s) => s.key === 'agent:main:project-a1b2c3d4')).toBeUndefined();

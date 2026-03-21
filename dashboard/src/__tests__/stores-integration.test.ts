@@ -30,7 +30,10 @@ describe('Library store integration', () => {
       papers: [],
       tags: [],
       loading: false,
+      loadingMore: false,
       total: 0,
+      offset: 0,
+      hasMore: false,
       searchQuery: '',
       activeTab: 'inbox',
       filters: {},
@@ -57,21 +60,32 @@ describe('Library store integration', () => {
 
     await useLibraryStore.getState().loadPapers();
 
-    expect(mockGatewayClient.request).toHaveBeenCalledWith('rc.lit.list', {});
+    expect(mockGatewayClient.request).toHaveBeenCalledWith(
+      'rc.lit.list',
+      expect.objectContaining({ limit: 30, offset: 0, read_status: ['unread', 'reading'] }),
+    );
     expect(useLibraryStore.getState().papers).toHaveLength(1);
     expect(useLibraryStore.getState().total).toBe(1);
     expect(useLibraryStore.getState().loading).toBe(false);
   });
 
-  it('loadPapers with status filter sends read_status param', async () => {
+  it('loadPapers with filter passes user filters alongside tab read_status', async () => {
     const { useLibraryStore } = await import('../stores/library');
     mockGatewayClient.request.mockResolvedValueOnce({ items: [], total: 0 });
 
-    await useLibraryStore.getState().loadPapers({ read_status: 'reading' });
+    // read_status in filter is ignored — tab mapping controls it.
+    // But user filters like tags and year are still forwarded.
+    await useLibraryStore.getState().loadPapers({ tags: ['ml'], year: 2024 });
 
     expect(mockGatewayClient.request).toHaveBeenCalledWith(
       'rc.lit.list',
-      expect.objectContaining({ read_status: 'reading' }),
+      expect.objectContaining({
+        limit: 30,
+        offset: 0,
+        read_status: ['unread', 'reading'],
+        tags: ['ml'],
+        year: 2024,
+      }),
     );
   });
 
@@ -108,7 +122,7 @@ describe('Library store integration', () => {
 
     expect(mockGatewayClient.request).toHaveBeenCalledWith(
       'rc.lit.search',
-      { query: 'attention' },
+      expect.objectContaining({ query: 'attention', limit: 30, offset: 0 }),
     );
   });
 
@@ -207,9 +221,10 @@ describe('Library store integration', () => {
     await useLibraryStore.getState().searchPapers('transformers');
 
     expect(useLibraryStore.getState().searchQuery).toBe('transformers');
-    expect(mockGatewayClient.request).toHaveBeenCalledWith('rc.lit.search', {
-      query: 'transformers',
-    });
+    expect(mockGatewayClient.request).toHaveBeenCalledWith(
+      'rc.lit.search',
+      expect.objectContaining({ query: 'transformers', limit: 30, offset: 0 }),
+    );
     expect(useLibraryStore.getState().papers).toHaveLength(1);
   });
 });
@@ -235,10 +250,10 @@ describe('Tasks store integration', () => {
 
     await useTasksStore.getState().loadTasks();
 
-    expect(mockGatewayClient.request).toHaveBeenCalledWith('rc.task.list', {
-      sort: 'deadline',
-      include_completed: false,
-    });
+    expect(mockGatewayClient.request).toHaveBeenCalledWith(
+      'rc.task.list',
+      expect.objectContaining({ sort: 'deadline', include_completed: false, limit: 200 }),
+    );
   });
 
   it('loadTasks with human perspective sends task_type=human', async () => {

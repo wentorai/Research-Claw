@@ -79,7 +79,9 @@
       "addedAt": "Recent",
       "year": "Year",
       "title": "Title"
-    }
+    },
+    "loadMore": "Load more",
+    "showingCount": "Showing {{count}} of {{total}}"
   },
   "tasks": {
     "title": "Tasks",
