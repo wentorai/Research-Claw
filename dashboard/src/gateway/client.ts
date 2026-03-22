@@ -43,9 +43,11 @@ export interface GapInfo {
 export interface GatewayClientOptions {
   url: string;
   token?: string;
+  password?: string;
   clientName?: string;
   clientVersion?: string;
   platform?: string;
+  instanceId?: string;
   onHello?: (hello: HelloOk) => void;
   onEvent?: (event: EventFrame) => void;
   onClose?: (info: CloseInfo) => void;
@@ -347,6 +349,7 @@ export class GatewayClient {
     const role = 'operator';
     const scopes = ['operator.admin', 'operator.approvals', 'operator.pairing'];
     const explicitToken = this.opts.token?.trim() || undefined;
+    const explicitPassword = this.opts.password?.trim() || undefined;
     const platform = this.opts.platform ?? 'browser';
 
     // --- Device token selection (aligned with OC selectConnectAuth) ---
@@ -407,11 +410,12 @@ export class GatewayClient {
 
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    // Build auth field
-    const auth = tokenForAuth || authDeviceToken
+    // Build auth field (aligned with OC gateway.ts:268-275)
+    const auth = tokenForAuth || authDeviceToken || explicitPassword
       ? {
           token: tokenForAuth || undefined,
           deviceToken: authDeviceToken,
+          password: explicitPassword,
         }
       : undefined;
 
@@ -429,6 +433,7 @@ export class GatewayClient {
           platform,
           mode: clientMode,
           displayName: this.opts.clientName ?? 'Research-Claw Dashboard',
+          instanceId: this.opts.instanceId,
         },
         caps: ['tool-events'],
         role,

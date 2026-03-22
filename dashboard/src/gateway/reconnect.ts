@@ -28,10 +28,12 @@ export class ReconnectScheduler {
   }
 
   schedule(fn: () => void): void {
-    this.timer = setTimeout(() => {
-      fn();
-      this.delay = Math.min(this.delay * this.config.multiplier, this.config.maxDelayMs);
-    }, this.delay);
+    const delay = this.delay;
+    // Increase backoff BEFORE timer fires (aligned with OC gateway.ts:214-221).
+    // Ensures the next schedule() call uses the increased delay even if
+    // fn() synchronously triggers another schedule.
+    this.delay = Math.min(this.delay * this.config.multiplier, this.config.maxDelayMs);
+    this.timer = setTimeout(() => fn(), delay);
   }
 
   reset(): void {

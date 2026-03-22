@@ -3,6 +3,9 @@ import { GatewayClient, type CloseInfo, type GapInfo } from '../gateway/client';
 import { useConfigStore } from './config';
 import type { ConnectionState, HelloOk, EventFrame, SessionDefaults } from '../gateway/types';
 
+/** Stable per-tab instance ID for gateway deduplication (aligned with OC clientInstanceId). */
+const _instanceId = crypto.randomUUID();
+
 interface GatewayState {
   client: GatewayClient | null;
   state: ConnectionState;
@@ -40,6 +43,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       clientName: 'research-claw-dashboard',
       clientVersion: '0.5.8',
       platform: 'browser',
+      instanceId: _instanceId,
       onStateChange: (state: ConnectionState) => {
         set({ state, ...(state === 'connected' ? { connectError: null } : {}) });
       },
