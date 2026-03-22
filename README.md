@@ -20,7 +20,7 @@
 
 ---
 
-> Windows 用户 → [Docker 一键部署](#docker-一键部署windows-推荐)（推荐）或 [WSL2 手动安装](docs/WINDOWS_INSTALL.md)
+> Windows 用户 → [Docker 一键部署](#docker-一键安装macos--linux--windows-通用)（推荐）或 [WSL2 手动安装](docs/WINDOWS_INSTALL.md)
 
 ---
 
@@ -256,7 +256,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 curl -fsSL https://wentor.ai/install.sh | bash
 ```
 
-**Docker 一键安装（macOS / Linux / Windows 通用）：**
+#### Docker 一键安装（macOS / Linux / Windows 通用）
 
 先安装 [Docker Desktop](https://docs.docker.com/desktop/)，确保启动后托盘显示 Running，然后：
 

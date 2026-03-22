@@ -20,7 +20,7 @@ You define the question. Research-Claw runs the lab. 24/7 on your machine. Every
 
 ---
 
-> Windows → [Docker One-Click Deploy](#docker-one-click-deploy-windows-recommended) (recommended) or [WSL2 manual install](docs/WINDOWS_INSTALL.md)
+> Windows → [Docker One-Click Deploy](#docker-one-click-macos--linux--windows) (recommended) or [WSL2 manual install](docs/WINDOWS_INSTALL.md)
 
 ---
 
@@ -256,7 +256,7 @@ All platforms require an LLM API key (Anthropic Claude / OpenAI recommended).
 curl -fsSL https://wentor.ai/install.sh | bash
 ```
 
-**Docker one-click (macOS / Linux / Windows):**
+#### Docker one-click (macOS / Linux / Windows)
 
 Install [Docker Desktop](https://docs.docker.com/desktop/) first, make sure it shows Running, then:
 
