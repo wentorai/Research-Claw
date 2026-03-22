@@ -538,12 +538,16 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
       // Porcelain v1: "XY <path>" or "XY <path> -> <original>" for renames
       let filePath = line.substring(3);
 
-      // Handle renamed files: "R  new_path -> old_path"
+      // Handle renamed files: porcelain v1 outputs "R  orig_path -> new_path"
       const arrowIndex = filePath.indexOf(' -> ');
       if (arrowIndex !== -1) {
-        filePath = filePath.substring(0, arrowIndex);
+        filePath = filePath.substring(arrowIndex + 4);
       }
 
+      // Strip git's quoting for paths with spaces/CJK characters
+      if (filePath.startsWith('"') && filePath.endsWith('"')) {
+        filePath = filePath.slice(1, -1).replace(/\\"/g, '"');
+      }
       // Normalize path separators for consistent lookup
       filePath = filePath.replace(/\\/g, '/');
 
