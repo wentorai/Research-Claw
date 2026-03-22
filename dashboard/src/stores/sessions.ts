@@ -70,7 +70,7 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     try {
       const result = await client.request<{ sessions: Session[] }>('sessions.list', {
         includeDerivedTitles: true,
-        limit: 100,
+        limit: 1000,
       });
       const serverSessions = result.sessions ?? [];
       // Ensure the main session is always present in the list

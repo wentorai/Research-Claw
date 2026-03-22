@@ -381,7 +381,7 @@ export class MonitorService {
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-    const limit = Math.min(opts?.limit ?? 100, 100);
+    const limit = Math.min(opts?.limit ?? 500, 500);
     const offset = opts?.offset ?? 0;
 
     const total = (this.db.prepare(`SELECT COUNT(*) AS cnt FROM rc_monitors ${where}`).get(...params) as { cnt: number }).cnt;

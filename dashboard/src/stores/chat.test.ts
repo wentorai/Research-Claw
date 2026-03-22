@@ -433,7 +433,7 @@ describe('Chat store', () => {
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith('chat.history', {
         sessionKey: 'main',
-        limit: 200,
+        limit: 500,
       });
       expect(useChatStore.getState().messages).toHaveLength(2);
     });

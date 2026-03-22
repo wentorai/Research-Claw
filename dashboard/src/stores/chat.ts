@@ -555,7 +555,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     try {
       const result = await client.request<{ messages: ChatMessage[] }>('chat.history', {
         sessionKey: requestedKey,
-        limit: 200,
+        limit: 500,
       });
       // Guard: discard stale response if session changed during the await
       if (get().sessionKey !== requestedKey) return;

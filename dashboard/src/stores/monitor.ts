@@ -60,7 +60,7 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
 
     set({ loading: true });
     try {
-      const result = await client.request<{ items: Monitor[]; total: number }>('rc.monitor.list', {});
+      const result = await client.request<{ items: Monitor[]; total: number }>('rc.monitor.list', { limit: 500 });
       set({ monitors: result.items, loaded: true });
     } catch (err) {
       console.warn('[MonitorStore] loadMonitors failed:', err);
