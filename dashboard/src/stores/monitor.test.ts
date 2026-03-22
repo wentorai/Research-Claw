@@ -42,7 +42,7 @@ describe('loadMonitors', () => {
 
     await useMonitorStore.getState().loadMonitors();
 
-    expect(mockRequest).toHaveBeenCalledWith('rc.monitor.list', { limit: 500 });
+    expect(mockRequest).toHaveBeenCalledWith('rc.monitor.list', { limit: 100 });
     expect(useMonitorStore.getState().monitors).toHaveLength(3);
     expect(useMonitorStore.getState().loaded).toBe(true);
   });
