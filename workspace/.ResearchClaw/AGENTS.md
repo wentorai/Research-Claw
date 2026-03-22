@@ -135,28 +135,42 @@ API keys **override** the default by elevating that service to L1:
 
 ### Channels (IM 通道)
 
-RC Agent 可通过 Telegram / Discord / WeChat (微信) 等 IM 通道接收和回复消息。
-Channels 是 OC 基础设施，RC 完全复用，无需额外插件代码。
+RC Agent 可通过 Telegram / Discord / WeChat / 飞书 / QQ 等 IM 通道接收和回复消息。
+Channels 是 OC 基础设施，RC 完全复用。
 
-**配置要点**:
-- 用户在 `openclaw.json` 的 `channels` 段添加 bot token 即可启用。
-- `openclaw-weixin` 是插件通道，需同时在 `plugins.allow` 中声明。
-- **必须** `"commands": { "native": false }` — RC 注册 530+ 工具，超出 IM 命令菜单上限，
-  不设此项会导致 Telegram 等进入 15 分钟阻塞循环。`sync-global-config.cjs` 在启动时自动修复。
-- Channel 凭据保存在 `~/.openclaw/openclaw-weixin/accounts/` (weixin) 或 config (Telegram/Discord)。
+**连接引导协议** — 当用户要求连接 channel 时:
+
+1. Bot-token 类 (Telegram / Discord / 飞书 / QQ / Slack):
+   - 引导用户在对应平台创建 bot 并获取 token
+   - 用 `config.patch` 写入: `{ channels: { <id>: { token: "...", enabled: true } } }`
+   - Telegram: 告知用户需在 bot 聊天中发送 "/start" 才能收到回复
+   - Discord: 需要 bot token + application ID
+   - `commands.native` 必须为 false (sync-global-config.cjs 自动修复)
+
+2. QR 扫码类 (WeChat / WhatsApp):
+   - 调用 `web.login.start` → 获取 `qrDataUrl` (data:image/png;base64,...)
+   - 在回复中用 markdown image 展示: `![qr](data:image/png;base64,...)`
+   - 提示用户扫码
+   - 调用 `web.login.wait { timeoutMs: 60000 }` 等待连接
+   - 连接成功后 gateway 自动启动 channel
+
+3. 插件通道 (openclaw-weixin 等):
+   - 必须在 `plugins.allow` 中声明 (OC allowlist step 6 拦截 > explicit enable)
+   - 同步修改 4 处: openclaw.json, openclaw.example.json, ensure-config.cjs, config-patch.ts
 
 **通道内行为**:
-- 所有 RC 工具 (library, tasks, workspace, monitor) 在通道会话中**完全可用**。
-- `approval_card` 在通道中降级为文本消息: "需要审批: xxx. 回复 yes/no"。
-- Cron 定时任务投递到通道时，必须显式指定 `delivery.to` (用户 IM ID)。
-- 使用 `media` 参数发送图片/文件时，必须用**绝对路径** (如 `/tmp/photo.png`)。
-- 对方的 ID 格式因通道不同: weixin 用 `xxx@im.wechat`，Telegram 用数字 ID。
+- 所有 RC 工具 (library, tasks, workspace, monitor) 在通道会话中**完全可用**
+- 回复控制在 2000 字符内 (IM 消息限制)
+- 不使用 Markdown 表格 (多数 IM 不渲染)
+- `approval_card` 降级为文本: "需要审批: xxx. 回复 yes/no"
+- 图片通过 media 参数发送，必须用绝对路径
+- 对方 ID 格式因通道不同: weixin 用 `xxx@im.wechat`，Telegram 用数字 ID
 
-**诊断**: 若通道显示 "not configured"，检查:
-1. 插件是否在 `plugins.allow` 列表中 (OC allowlist step 6 拦截 > explicit enable)
+**诊断**: 若通道显示 "not configured" 或 "Error":
+1. 插件是否在 `plugins.allow` 列表中
 2. 凭据文件是否在正确路径 (`accounts/` 子目录)
-3. Gateway 是否在凭据就位后重启过 (channel runtime 启动时缓存 account 状态)
-4. better-sqlite3 ABI 是否匹配 gateway 使用的 Node 版本
+3. Gateway 是否在凭据就位后重启过 (channel runtime 启动时缓存状态)
+4. better-sqlite3 ABI 是否匹配 gateway 的 Node 版本
 
 ### PDF Import
 
