@@ -196,6 +196,7 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
 
     set({ channelsLoading: true });
     try {
+      // Fetch active channels from gateway
       const result = await client.request<{
         ts: number;
         channelOrder: string[];
@@ -214,6 +215,45 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
         defaultAccountId: result.channelDefaultAccountId[id] ?? 'default',
         summary: result.channels[id] ?? {},
       }));
+
+      // Also fetch disabled channels from config — channels.status only returns
+      // enabled channels, so disabled ones vanish from the list. We need them
+      // visible so the user can re-enable them via the Switch.
+      try {
+        const configSnapshot = await client.request<{
+          config?: Record<string, unknown>;
+          resolved?: Record<string, unknown>;
+        }>('config.get', {});
+        const configObj = (configSnapshot.resolved && Object.keys(configSnapshot.resolved).length > 0
+          ? configSnapshot.resolved
+          : configSnapshot.config ?? {}) as Record<string, unknown>;
+        const channelsCfg = configObj.channels as Record<string, unknown> | undefined;
+        if (channelsCfg) {
+          const activeIds = new Set(entries.map((e) => e.id));
+          for (const [id, cfg] of Object.entries(channelsCfg)) {
+            if (activeIds.has(id)) continue;
+            // Only include objects (skip scalar fields like "defaults")
+            if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) continue;
+            const cfgObj = cfg as Record<string, unknown>;
+            // This is a disabled channel — create a placeholder entry
+            entries.push({
+              id,
+              label: id,
+              accounts: [{
+                accountId: 'default',
+                enabled: cfgObj.enabled !== undefined ? Boolean(cfgObj.enabled) : true,
+                configured: !!(cfgObj.token || cfgObj.botToken || cfgObj.appToken),
+                connected: false,
+                running: false,
+              }],
+              defaultAccountId: 'default',
+              summary: { configured: !!(cfgObj.token || cfgObj.botToken || cfgObj.appToken) },
+            });
+          }
+        }
+      } catch {
+        // config.get failed — proceed with active channels only
+      }
 
       set({ channels: entries, channelsLoaded: true });
     } catch (err) {

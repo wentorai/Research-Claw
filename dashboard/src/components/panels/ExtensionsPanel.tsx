@@ -401,26 +401,30 @@ function ChannelCard({
   const isRunning = defaultAccount?.running === true;
   const isEnabled = defaultAccount?.enabled !== false;
 
-  // Status priority: hasError > isConfigured > not configured
-  // hasError = explicit lastError OR (configured + not running + not connected)
-  const derivedDown = isConfigured && !isRunning && !isConnected;
-  const hasError = !!defaultAccount?.lastError || derivedDown;
+  // Status priority: disabled > hasError > connected > configured > not configured
+  // A disabled channel (enabled=false in config) should show as "disabled", not "error"
+  const derivedDown = isEnabled && isConfigured && !isRunning && !isConnected;
+  const hasError = isEnabled && (!!defaultAccount?.lastError || derivedDown);
 
-  const statusColor = hasError
-    ? tokens.accent.red
-    : isConnected
-      ? tokens.accent.green
-      : isConfigured
-        ? tokens.accent.blue
-        : tokens.text.muted;
+  const statusColor = !isEnabled
+    ? tokens.text.muted
+    : hasError
+      ? tokens.accent.red
+      : isConnected
+        ? tokens.accent.green
+        : isConfigured
+          ? tokens.accent.blue
+          : tokens.text.muted;
 
-  const statusText = hasError
-    ? t('extensions.channels.error', 'Error')
-    : isConnected
-      ? t('extensions.channels.connected', 'Connected')
-      : isConfigured
-        ? t('extensions.channels.configured', 'Configured')
-        : t('extensions.channels.notConfigured', 'Not configured');
+  const statusText = !isEnabled
+    ? t('extensions.channels.disabled', 'Disabled')
+    : hasError
+      ? t('extensions.channels.error', 'Error')
+      : isConnected
+        ? t('extensions.channels.connected', 'Connected')
+        : isConfigured
+          ? t('extensions.channels.configured', 'Configured')
+          : t('extensions.channels.notConfigured', 'Not configured');
 
   const errorMessage = defaultAccount?.lastError
     || (derivedDown ? t('extensions.channels.providerDown', 'Provider not running') : '');
@@ -669,6 +673,7 @@ function ChannelCard({
         onCancel={() => setDeleteConfirm(false)}
         okText={t('extensions.channels.confirmDelete', 'Delete')}
         okButtonProps={{ danger: true }}
+        centered
       >
         {t('extensions.channels.deleteConfirmContent', {
           defaultValue: 'Delete {{channel}}? This will remove the channel configuration.',
