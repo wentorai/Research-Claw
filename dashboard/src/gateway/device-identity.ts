@@ -168,6 +168,20 @@ export async function getDeviceIdentity(): Promise<DeviceIdentity | null> {
 }
 
 /**
+ * Normalize device metadata fields before signing.
+ * Aligned with OC's `normalizeDeviceMetadataForAuth()` in
+ * `src/gateway/device-metadata-normalization.ts`:
+ *   trim → toLowerAscii (only A-Z → a-z, no Unicode normalization).
+ * Ensures signatures are deterministic across runtimes (TS/Swift/Kotlin).
+ */
+function normalizeDeviceMetadataForAuth(value?: string | null): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+}
+
+/**
  * Build the v3 signature payload string.
  *
  * Format: `v3|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce|platform|deviceFamily`
@@ -194,7 +208,7 @@ export function buildV3Payload(opts: {
     opts.signedAt.toString(),
     opts.token,
     opts.nonce,
-    opts.platform,
-    opts.deviceFamily,
+    normalizeDeviceMetadataForAuth(opts.platform),
+    normalizeDeviceMetadataForAuth(opts.deviceFamily),
   ].join('|');
 }
