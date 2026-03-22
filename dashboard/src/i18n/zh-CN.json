@@ -300,6 +300,18 @@
     "cancel": "取消",
     "restartConfirmTitle": "重启网关？",
     "restartConfirmContent": "保存后将关闭网关并重启。若重启失败，请手动重启。",
+    "aboutMemory": "记忆",
+    "aboutBrowser": "浏览器",
+    "aboutEnabled": "已启用",
+    "aboutDisabled": "未启用",
+    "imageGenEnabled": "图像生成",
+    "imageGenHint": "通过 LLM 提供商生成图像（如 OpenAI gpt-image-1）。学术作图优先使用 wentor_plot。",
+    "imageGenModel": "模型",
+    "webSearch": "网页搜索",
+    "webSearchHint": "需要搜索提供商 API 密钥",
+    "webSearchProvider": "搜索提供商",
+    "webSearchApiKey": "API 密钥",
+    "webSearchPriorityHint": "网页搜索优先级 L3 — 智能体优先使用学术 API（arXiv、OpenAlex 等）。",
     "aboutGithub": "在 GitHub 上查看"
   },
   "setup": {

@@ -40,6 +40,14 @@ export interface ConfigPatchInput {
   apiKeyConfigured?: boolean;
   /** Same hint for the vision provider */
   visionApiKeyConfigured?: boolean;
+  /** Image generation model (optional, format: "provider/model") */
+  imageGenEnabled?: boolean;
+  imageGenModel?: string;
+  /** Web search provider (optional, needs API key) */
+  webSearchEnabled?: boolean;
+  webSearchProvider?: string;
+  webSearchApiKey?: string;
+  webSearchApiKeyConfigured?: boolean;
 }
 
 export interface ExtractedConfig {
@@ -60,6 +68,14 @@ export interface ExtractedConfig {
   visionApiKeyConfigured: boolean;
   visionApi: string;
   proxyUrl: string;
+  /** Image generation model (format: "provider/model", empty if not configured) */
+  imageGenEnabled: boolean;
+  imageGenModel: string;
+  /** Web search provider config */
+  webSearchEnabled: boolean;
+  webSearchProvider: string;
+  webSearchApiKey: string;
+  webSearchApiKeyConfigured: boolean;
 }
 
 function cleanUrl(url: string): string {
@@ -358,10 +374,52 @@ export function buildSaveConfig(
     imageModel: { primary: visionRef },
   };
 
+  // --- Image generation model ---
+  if (input.imageGenEnabled !== undefined) {
+    if (input.imageGenEnabled && input.imageGenModel) {
+      defaults.imageGenerationModel = { primary: input.imageGenModel };
+    } else {
+      delete defaults.imageGenerationModel;
+    }
+  }
+
   // --- Build full config ---
   const result: Record<string, unknown> = { ...base };
   result.agents = { ...existingAgents, defaults };
   result.models = { providers };
+
+  // --- Web search ---
+  if (input.webSearchEnabled !== undefined) {
+    const existingTools = result.tools as Record<string, unknown> | undefined;
+    if (input.webSearchEnabled && input.webSearchProvider) {
+      const searchEntry: Record<string, unknown> = {
+        provider: input.webSearchProvider,
+      };
+      if (input.webSearchApiKey) {
+        searchEntry.apiKey = input.webSearchApiKey;
+      } else {
+        // Preserve existing key via sentinel
+        const existingWeb = existingTools?.web as Record<string, unknown> | undefined;
+        const existingSearch = existingWeb?.search as Record<string, unknown> | undefined;
+        const existingKey = existingSearch?.apiKey;
+        if (typeof existingKey === 'string' && existingKey.length > 0) {
+          searchEntry.apiKey = existingKey;
+        } else if (input.webSearchApiKeyConfigured) {
+          searchEntry.apiKey = REDACTED_SENTINEL;
+        }
+      }
+      result.tools = {
+        ...existingTools,
+        web: { ...(existingTools?.web as Record<string, unknown> | undefined), search: searchEntry },
+      };
+    } else {
+      // Disable: remove web.search but keep other web config (web.fetch)
+      if (existingTools?.web) {
+        const { search: _removed, ...restWeb } = existingTools.web as Record<string, unknown>;
+        result.tools = { ...existingTools, web: Object.keys(restWeb).length ? restWeb : undefined };
+      }
+    }
+  }
 
   if (input.proxyUrl !== undefined) {
     result.env = {
@@ -397,6 +455,12 @@ export function extractConfigFields(
     visionApiKeyConfigured: false,
     visionApi: 'openai-completions',
     proxyUrl: '',
+    imageGenEnabled: false,
+    imageGenModel: '',
+    webSearchEnabled: false,
+    webSearchProvider: '',
+    webSearchApiKey: '',
+    webSearchApiKeyConfigured: false,
   };
   if (!config) return empty;
 
@@ -461,6 +525,18 @@ export function extractConfigFields(
     return raw;
   })();
 
+  // --- Image generation model ---
+  const imageGenModelDef = defaults?.imageGenerationModel as { primary?: string } | undefined;
+  const imageGenPrimary = imageGenModelDef?.primary ?? '';
+  const imageGenEnabled = !!imageGenPrimary;
+
+  // --- Web search ---
+  const toolsConfig = config.tools as Record<string, unknown> | undefined;
+  const webConfig = toolsConfig?.web as Record<string, unknown> | undefined;
+  const searchConfig = webConfig?.search as Record<string, unknown> | undefined;
+  const webSearchEnabled = !!searchConfig?.provider;
+  const webSearchApiKeyRaw = searchConfig?.apiKey;
+
   return {
     provider: textProviderKey,
     baseUrl: displayBaseUrl,
@@ -478,6 +554,12 @@ export function extractConfigFields(
     visionApiKeyConfigured: typeof visionApiKeyRaw === 'string' && visionApiKeyRaw.length > 0,
     visionApi: (visionProviderDef?.api as string) ?? (textProviderDef?.api as string) ?? 'openai-completions',
     proxyUrl,
+    imageGenEnabled,
+    imageGenModel: imageGenPrimary,
+    webSearchEnabled,
+    webSearchProvider: (searchConfig?.provider as string) ?? '',
+    webSearchApiKey: deRedact(webSearchApiKeyRaw),
+    webSearchApiKeyConfigured: typeof webSearchApiKeyRaw === 'string' && webSearchApiKeyRaw.length > 0,
   };
 }
 
