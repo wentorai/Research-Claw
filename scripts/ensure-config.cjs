@@ -20,7 +20,7 @@
 
 const fs = require('fs');
 
-const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins'];
+const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins', 'openclaw-weixin'];
 const STALE_TOOLS = [
   'search_papers', 'get_paper', 'get_citations',
   'radar_configure', 'radar_get_config', 'radar_scan',

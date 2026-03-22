@@ -201,6 +201,7 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
   skills: { load: { extraDirs: ['./skills'] } },
   plugins: {
     enabled: true,
+    allow: ['research-claw-core', 'research-plugins', 'openclaw-weixin'],
     load: { paths: ['./extensions/research-claw-core'] },
     entries: {
       'research-claw-core': {
@@ -212,6 +213,7 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
           heartbeatDeadlineWarningHours: 48,
         },
       },
+      'openclaw-weixin': { enabled: true },
     },
   },
   tools: {
