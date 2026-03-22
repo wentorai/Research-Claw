@@ -20,7 +20,7 @@ You define the question. Research-Claw runs the lab. 24/7 on your machine. Every
 
 ---
 
-> Windows → [Docker One-Click Deploy](#docker-one-click-macos--linux--windows) (recommended) or [WSL2 manual install](docs/WINDOWS_INSTALL.md)
+> Windows → [Docker One-Click Deploy](#docker-one-click-macos--linux--windows) (recommended) or [WSL2 manual install](WINDOWS_INSTALL.md)
 
 ---
 

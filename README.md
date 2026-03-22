@@ -20,7 +20,7 @@
 
 ---
 
-> Windows 用户 → [Docker 一键部署](#docker-一键安装macos--linux--windows-通用)（推荐）或 [WSL2 手动安装](docs/WINDOWS_INSTALL.md)
+> Windows 用户 → [Docker 一键部署](#docker-一键安装macos--linux--windows-通用)（推荐）或 [WSL2 手动安装](WINDOWS_INSTALL.md)
 
 ---
 

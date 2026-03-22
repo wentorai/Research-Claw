@@ -10,7 +10,7 @@ First public release. Research-Claw runs entirely on your machine — no data le
 curl -fsSL https://raw.githubusercontent.com/wentorai/research-claw/main/scripts/install.sh | bash
 ```
 
-Windows: [Manual Install Guide](docs/WINDOWS_INSTALL.md) | Recommended: use WSL2
+Windows: [Manual Install Guide](WINDOWS_INSTALL.md) | Recommended: use WSL2
 
 ## What's Included
 
@@ -82,4 +82,4 @@ Commercial use requires a separate license. Converts to Apache 2.0 on 2030-03-12
 
 - Website: https://wentor.ai
 - User Guide: [Research-Claw-Guide.md](../Research-Claw-Guide.md)
-- Windows Install: [docs/WINDOWS_INSTALL.md](docs/WINDOWS_INSTALL.md)
+- Windows Install: [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md)
