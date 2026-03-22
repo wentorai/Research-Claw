@@ -134,8 +134,8 @@ importers:
         specifier: ^22.0.0
         version: 22.19.15
       openclaw:
-        specifier: 2026.3.8
-        version: 2026.3.8(@modelcontextprotocol/sdk@1.27.1(zod@4.3.6))(@napi-rs/canvas@0.1.96)(@types/express@5.0.6)(hono@4.12.7)(node-llama-cpp@3.16.2(typescript@5.9.3))
+        specifier: 2026.3.13
+        version: 2026.3.13(patch_hash=jr2uzvyphy2mlji7fml7y3a6ya)(@napi-rs/canvas@0.1.96)(@types/express@5.0.6)(node-llama-cpp@3.16.2(typescript@5.9.3))
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -10284,7 +10284,7 @@ snapshots:
       '@tokenizer/token': 0.3.0
       content-type: 1.0.5
       debug: 4.4.3
-      file-type: 21.3.1
+      file-type: 21.3.3
       media-typer: 1.1.0
       strtok3: 10.3.4
       token-types: 6.1.2
