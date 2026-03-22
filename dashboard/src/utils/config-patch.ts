@@ -382,14 +382,19 @@ export function buildSaveConfig(
     const existingTools = result.tools as Record<string, unknown> | undefined;
     if (input.webSearchEnabled && input.webSearchProvider) {
       const prov = input.webSearchProvider;
-      const searchEntry: Record<string, unknown> = { provider: prov };
+      const existingWeb = existingTools?.web as Record<string, unknown> | undefined;
+      const existingSearch = existingWeb?.search as Record<string, unknown> | undefined;
+
+      // Merge with existing search config to preserve user's manual fields
+      // (maxResults, cacheTtlMinutes, provider sub-object extra fields, etc.)
+      const searchEntry: Record<string, unknown> = {
+        ...existingSearch,
+        provider: prov,
+      };
 
       // Resolve the API key (new input or preserved existing)
       const resolveKey = (): string | undefined => {
         if (input.webSearchApiKey) return input.webSearchApiKey;
-        const existingWeb = existingTools?.web as Record<string, unknown> | undefined;
-        const existingSearch = existingWeb?.search as Record<string, unknown> | undefined;
-        // Try provider-specific path first, then top-level
         const scopedExisting = (existingSearch?.[prov] as Record<string, unknown> | undefined)?.apiKey;
         if (typeof scopedExisting === 'string' && scopedExisting.length > 0) return scopedExisting;
         const topExisting = existingSearch?.apiKey;
@@ -405,12 +410,13 @@ export function buildSaveConfig(
         if (key) searchEntry.apiKey = key;
       } else {
         // grok/kimi/perplexity/gemini read from search.<provider>.apiKey
-        if (key) searchEntry[prov] = { apiKey: key };
+        const existingSub = (existingSearch?.[prov] as Record<string, unknown> | undefined) ?? {};
+        searchEntry[prov] = key ? { ...existingSub, apiKey: key } : existingSub;
       }
 
       result.tools = {
         ...existingTools,
-        web: { ...(existingTools?.web as Record<string, unknown> | undefined), search: searchEntry },
+        web: { ...existingWeb, search: searchEntry },
       };
     } else {
       // Disable: remove web.search but keep other web config (web.fetch)
