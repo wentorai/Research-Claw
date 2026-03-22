@@ -295,10 +295,12 @@ export default function SetupWizard() {
       }));
 
   const visionPreset = getPreset(visionProvider);
-  const visionModelOptions = visionPreset.models.map((m) => ({
-    value: m.id,
-    label: `${m.id} — ${m.name}`,
-  }));
+  const visionModelOptions = visionPreset.models
+    .filter((m) => m.input?.includes('image'))
+    .map((m) => ({
+      value: m.id,
+      label: `${m.id} — ${m.name}`,
+    }));
 
   // Whether vision uses a different provider (show separate baseUrl/apiKey)
   const visionSeparateProvider = visionProvider !== provider;

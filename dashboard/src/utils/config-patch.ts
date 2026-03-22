@@ -175,8 +175,6 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
       subagents: { announceTimeoutMs: 480000 },
       memorySearch: {
         enabled: true,
-        provider: 'auto',
-        fallback: 'none',
         sources: ['memory'],
       },
     },
