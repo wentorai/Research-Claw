@@ -107,6 +107,8 @@ interface ExtensionsState {
   channelsLoaded: boolean;
   loadChannels: (probe?: boolean) => Promise<void>;
   logoutChannel: (channelId: string, accountId?: string) => Promise<void>;
+  enableChannel: (channelId: string, enabled: boolean) => Promise<void>;
+  deleteChannel: (channelId: string) => Promise<void>;
 
   // Plugins
   plugins: PluginEntry[];
@@ -234,6 +236,66 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
       await get().loadChannels();
     } catch (err) {
       console.error('[ExtensionsStore] logoutChannel failed:', err);
+      throw err;
+    }
+  },
+
+  enableChannel: async (channelId: string, enabled: boolean) => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) return;
+
+    try {
+      // Get baseHash for config.patch
+      const snapshot = await client.request<{ hash?: string }>('config.get', {});
+      const baseHash = snapshot.hash ?? undefined;
+
+      const patch = {
+        channels: { [channelId]: { enabled } },
+      };
+
+      await client.request('config.patch', {
+        raw: JSON.stringify(patch),
+        ...(baseHash ? { baseHash } : {}),
+        note: `${enabled ? 'Enable' : 'Disable'} channel ${channelId}`,
+      });
+
+      // Gateway auto-restarts via SIGUSR1 — wait for it to settle, then reload
+      setTimeout(() => {
+        get().loadChannels();
+      }, 3000);
+    } catch (err) {
+      console.error('[ExtensionsStore] enableChannel failed:', err);
+      throw err;
+    }
+  },
+
+  deleteChannel: async (channelId: string) => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) return;
+
+    try {
+      // Get baseHash for config.patch
+      const snapshot = await client.request<{ hash?: string }>('config.get', {});
+      const baseHash = snapshot.hash ?? undefined;
+
+      // JSON merge patch: null = delete key
+      const patch = {
+        channels: { [channelId]: null },
+      };
+
+      await client.request('config.patch', {
+        raw: JSON.stringify(patch),
+        ...(baseHash ? { baseHash } : {}),
+        note: `Delete channel ${channelId}`,
+      });
+
+      // Gateway auto-restarts via SIGUSR1 — wait for it to settle, then reload
+      setTimeout(() => {
+        get().loadChannels();
+      }, 3000);
+    } catch (err) {
+      console.error('[ExtensionsStore] deleteChannel failed:', err);
+      throw err;
     }
   },
 
