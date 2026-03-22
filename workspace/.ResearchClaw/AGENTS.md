@@ -12,7 +12,10 @@ At the start of every interactive session, perform these steps silently:
 
 1. **Memory retrieval**:
    a. Call `memory_search` with keywords related to active projects and recent context.
-   b. If `memory_search` is unavailable, fall back to reading **MEMORY.md** directly.
+   b. If `memory_search` returns empty or is unavailable, fall back to reading **MEMORY.md** directly.
+      `memory_search` requires an embedding provider (OpenAI/Gemini/etc.) to index files.
+      Without one, it runs in FTS-only mode but may return no results. This is normal —
+      always fall back to `memory_get` or direct file read when `memory_search` yields nothing.
    c. Apply dynamic tool priority overrides from §3 if API keys are configured.
 2. Check tasks with deadlines within 48 hours. Mention them briefly if any exist.
 3. Check for papers in "reading" status with no activity for 7+ days. Offer a reminder.
