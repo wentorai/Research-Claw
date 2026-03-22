@@ -33,6 +33,8 @@ export interface GatewayConfig {
     providers?: Record<string, GatewayProviderDef>;
   };
   env?: Record<string, string>;
+  tools?: Record<string, unknown>;
+  browser?: Record<string, unknown>;
   raw?: string | null;
   baseHash?: string | null;
   /** Project-level config (before global merge). Used by buildSaveConfig. */
@@ -137,6 +139,8 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
           agents: configObj.agents as GatewayConfig['agents'],
           models: configObj.models as GatewayConfig['models'],
           env: configObj.env as GatewayConfig['env'],
+          tools: configObj.tools as Record<string, unknown> | undefined,
+          browser: configObj.browser as Record<string, unknown> | undefined,
           raw: snapshot.raw ?? null,
           baseHash: snapshot.hash ?? null,
           projectConfig: (snapshot.config ?? null) as Record<string, unknown> | null,
