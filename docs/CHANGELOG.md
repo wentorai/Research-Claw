@@ -17,6 +17,20 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-03-22 — Dashboard Data Integrity & Performance Sprint
+
+- [2026-03-22] [Dashboard] [Claude] feat: Tasks panel server-side pagination — `PAGE_SIZE=50`, `loadMoreTasks()`, "加载更多" button, hidden during search
+- [2026-03-22] [Dashboard] [Claude] fix: ErrorBoundary retry button did nothing — added `retryCount` key to force React remount of child tree
+- [2026-03-22] [Modules] [Claude] perf: workspace git N+1 → batch — single `git status --porcelain` replaces per-file spawns
+- [2026-03-22] [Modules] [Claude] perf: workspace git history — `Promise.all` parallelizes `git log` + `git rev-list`
+- [2026-03-22] [Modules] [Claude] perf: workspace file status 5s TTL cache with mutation invalidation
+- [2026-03-22] [Modules] [Claude] fix: git batch status rename path parsing — was taking orig path, now correctly takes destination
+- [2026-03-22] [Modules] [Claude] fix: git batch status quoted paths — strip git's quoting for CJK/space filenames
+- [2026-03-22] [Dashboard] [Claude] fix: Monitor store sends explicit `limit: 500` (backend cap raised 100→500)
+- [2026-03-22] [Dashboard] [Claude] fix: Sessions store `limit: 100→1000`, Chat history `limit: 200→500`
+- [2026-03-22] [Infra] [Claude] script: added `scripts/seed-mock-tasks.sh` for testing task pagination
+- [2026-03-22] [Infra] [Claude] Tests: 58 files, 1084 tests all pass
+
 ### 2026-03-22 — Dashboard ↔ OC Protocol Alignment (Phase 2)
 
 - [2026-03-22] [Dashboard] [Claude] fix(P1-8): scopes 对齐 OC — `[admin, approvals, pairing]` 替换旧 `[read, write, admin]`
