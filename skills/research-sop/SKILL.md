@@ -144,6 +144,7 @@ Know what each tool CAN and CANNOT filter. This determines routing.
 | **Economics** | `search_crossref(journal=...)` | `search_arxiv` | Top-5: AER, QJE, JPE, Econometrica, REStud — all in CrossRef |
 | **Social Sciences** | `search_osf_preprints(socarxiv)` + `search_crossref` | `search_arxiv` | SocArXiv for preprints |
 | **Psychology** | `search_osf_preprints(psyarxiv)` + `search_pubmed` | — | PsyArXiv + PubMed |
+| **Environmental Sci / Toxicology** | `search_crossref` + `search_openalex` | `search_arxiv` | PFAS, microplastics, EDCs, pollution — use `search_pubmed` for health-effects angle |
 | **Chemistry** | `search_crossref` | — | ChemRxiv blocked; use CrossRef + browser |
 | **Engineering** | `search_osf_preprints(engrxiv)` + `search_crossref` | — | |
 | **Earth Sciences** | `search_osf_preprints(eartharxiv)` + `search_crossref` | — | |
@@ -201,7 +202,34 @@ you **MUST** override default relevance sorting with date-based sorting.
    → Offer Layer 2 Browser or web_fetch (direct URL) as alternative
    → Do NOT blindly retry the same source
    → Do NOT cite "web_search not configured" as a blocker
+
+6. Multi-concept intersection query?
+   (e.g., "PFAS + microplastics + EDCs + machine learning")
+   → Follow Multi-Concept Query Decomposition below.
 ```
+
+### Multi-Concept Query Decomposition
+
+When the user's topic spans **multiple distinct concepts** (e.g., "PFAS / microplastics /
+EDCs + machine learning"), a single combined query returns noisy results because text-based
+search engines (CrossRef, arXiv) match ANY keyword, not the intersection.
+
+**Decomposition strategy:**
+
+1. **Identify the anchor concept** — the methodological or thematic constant
+   (e.g., "machine learning").
+2. **Split domain-specific concepts** into separate sub-queries, each paired with
+   the anchor: `"PFAS machine learning"`, `"microplastics machine learning"`,
+   `"endocrine disruptors machine learning"`.
+3. **Run each sub-query independently** on the appropriate L1 tool(s) for the domain.
+4. **Merge and deduplicate** results by DOI / title before presenting to the user.
+5. **Use filters** (`from_year`, `has_abstract: true`, `sort: "published"`) on each
+   sub-query to further reduce noise.
+
+**Anti-patterns to avoid:**
+- Concatenating all keywords into one query string (`"PFAS microplastics EDCs machine learning"`)
+- Using arXiv for non-CS/physics/math domains just because "machine learning" appears in the topic
+- Reporting noisy results without filtering — always rate relevance before presenting
 
 ### L1 → L2 Escalation Rules
 
