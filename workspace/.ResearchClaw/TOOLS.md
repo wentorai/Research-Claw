@@ -1,7 +1,7 @@
 ---
 file: TOOLS.md
-version: 3.3
-updated: 2026-03-20
+version: 3.4
+updated: 2026-03-22
 ---
 
 # Tool Reference
@@ -160,7 +160,17 @@ Tools always take priority over skill guidance.
 - **Export formats:** BibTeX (.bib), RIS (.ris), CSV (.csv), JSON, Markdown
 - **Import formats:** PDF, BibTeX (.bib), RIS (.ris), CSV, DOI list
 
-## §6 OpenClaw Inherited Web Tools
+## §6 Memory (OC built-in)
+
+| Tool | Purpose |
+|:-----|:--------|
+| `memory_search` | BM25 full-text search across MEMORY.md and memory/*.md. Use for retrieving past context, preferences, decisions. |
+| `memory_get` | Read a specific memory file or line range by path. |
+
+These tools are indexed automatically by OpenClaw. When an embedding provider is available,
+search upgrades to hybrid (vector + text). Otherwise operates as text-only (FTS).
+
+## §7 OpenClaw Inherited Web Tools
 
 These tools come from OpenClaw core (not research-plugins). They are always available
 via `profile: "full"` and do NOT require explicit `alsoAllow` entries.
@@ -193,7 +203,7 @@ escalate to `web_fetch` or `browser` — both work without any API keys.
 - Google Scholar: use `browser` instead (requires JS interaction)
 - PubMed RSS: `https://pubmed.ncbi.nlm.nih.gov/rss/search/...`
 
-## §7 Tool Count
+## §8 Tool Count
 
-47 local + 34 API + 3 OC web = **84 available tools**.
+47 local + 2 memory + 34 API + 3 OC web = **86 available tools**.
 438 skills accessible on-demand via research-plugins (40 subcategory indexes).

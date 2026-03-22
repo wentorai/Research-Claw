@@ -270,7 +270,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.5 & TOOLS.md v3.3)', () => {
       // Allow a few known non-tool identifiers that look like tool names.
       // API tools from research-plugins (external plugin, not in core ALL_AGENT_TOOLS)
       const KNOWN_NON_TOOLS = new Set([
-        'web_search', 'web_fetch',
+        'web_search', 'web_fetch', 'memory_search', 'memory_get',
         // Original 5 modules
         'search_openalex', 'get_work', 'get_author_openalex',
         'search_crossref', 'resolve_doi',
@@ -330,8 +330,8 @@ describe('Bootstrap file consistency (AGENTS.md v3.5 & TOOLS.md v3.3)', () => {
       expect(ALL_AGENT_TOOLS.length).toBe(47);
     });
 
-    it('TOOLS.md §7 states total tool count (47 local + 34 API + 3 OC web = 84)', () => {
-      expect(toolsMd).toContain('47 local + 34 API + 3 OC web = **84 available tools**');
+    it('TOOLS.md §8 states total tool count (47 local + 2 memory + 34 API + 3 OC web = 86)', () => {
+      expect(toolsMd).toContain('47 local + 2 memory + 34 API + 3 OC web = **86 available tools**');
     });
   });
 
@@ -414,7 +414,7 @@ describe('Bootstrap file consistency (AGENTS.md v3.5 & TOOLS.md v3.3)', () => {
       'search_europe_pmc', 'search_inspire', 'search_zenodo',
       'search_biorxiv', 'search_medrxiv',
       // OC built-in tools referenced in Search Fallback Protocol
-      'sessions_spawn',
+      'sessions_spawn', 'memory_search', 'memory_get',
       // Wentor platform API tool (referenced in Dynamic Tool Priority)
       'wentor_search',
     ]);
@@ -819,20 +819,20 @@ describe('Bootstrap file consistency (AGENTS.md v3.5 & TOOLS.md v3.3)', () => {
   // ── Version headers ───────────────────────────────────────────────────
 
   describe('Version metadata', () => {
-    it('AGENTS.md is version 3.5', () => {
-      expect(agentsMd).toMatch(/version:\s*3\.5/);
+    it('AGENTS.md is version 3.6', () => {
+      expect(agentsMd).toMatch(/version:\s*3\.6/);
     });
 
-    it('TOOLS.md is version 3.3', () => {
-      expect(toolsMd).toMatch(/version:\s*3\.3/);
+    it('TOOLS.md is version 3.4', () => {
+      expect(toolsMd).toMatch(/version:\s*3\.4/);
     });
 
-    it('AGENTS.md has 2026-03-20 date', () => {
-      expect(agentsMd).toContain('2026-03-20');
+    it('AGENTS.md has 2026-03-22 date', () => {
+      expect(agentsMd).toContain('2026-03-22');
     });
 
-    it('TOOLS.md has 2026-03-20 date', () => {
-      expect(toolsMd).toContain('2026-03-20');
+    it('TOOLS.md has 2026-03-22 date', () => {
+      expect(toolsMd).toContain('2026-03-22');
     });
   });
 
@@ -1017,8 +1017,9 @@ describe('Bootstrap file consistency (AGENTS.md v3.5 & TOOLS.md v3.3)', () => {
         '## §3 Special Tools',
         '## §4 Research Skills',
         '## §5 Citation & Export',
-        '## §6 OpenClaw Inherited Web Tools',
-        '## §7 Tool Count',
+        '## §6 Memory (OC built-in)',
+        '## §7 OpenClaw Inherited Web Tools',
+        '## §8 Tool Count',
       ];
       for (const section of expectedSections) {
         expect(toolsMd).toContain(section);
