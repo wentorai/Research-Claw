@@ -40,9 +40,13 @@ export interface ConfigPatchInput {
   apiKeyConfigured?: boolean;
   /** Same hint for the vision provider */
   visionApiKeyConfigured?: boolean;
-  /** Image generation model (optional, format: "provider/model") */
+  /** Image generation (optional, imageGenModel format: "provider/model") */
   imageGenEnabled?: boolean;
   imageGenModel?: string;
+  imageGenProvider?: string;
+  imageGenBaseUrl?: string;
+  imageGenApiKey?: string;
+  imageGenApiKeyConfigured?: boolean;
   /** Web search provider (optional, needs API key) */
   webSearchEnabled?: boolean;
   webSearchProvider?: string;
@@ -378,6 +382,29 @@ export function buildSaveConfig(
   if (input.imageGenEnabled !== undefined) {
     if (input.imageGenEnabled && input.imageGenModel) {
       defaults.imageGenerationModel = { primary: input.imageGenModel };
+
+      // Add image gen provider entry if it differs from text/vision providers
+      const igProviderKey = input.imageGenModel.includes('/')
+        ? input.imageGenModel.split('/')[0]
+        : undefined;
+      if (igProviderKey && !providers[igProviderKey]) {
+        const igEntry: Record<string, unknown> = {
+          baseUrl: cleanUrl(input.imageGenBaseUrl || ''),
+          api: 'openai-completions',
+          models: [resolveModelDef(igProviderKey, input.imageGenModel.split('/').slice(1).join('/'))],
+        };
+        if (input.imageGenApiKey) {
+          igEntry.apiKey = input.imageGenApiKey;
+        } else {
+          const existing = resolveExistingApiKey(currentConfig, igProviderKey);
+          if (existing) {
+            igEntry.apiKey = existing;
+          } else if (input.imageGenApiKeyConfigured) {
+            igEntry.apiKey = REDACTED_SENTINEL;
+          }
+        }
+        providers[igProviderKey] = igEntry;
+      }
     } else {
       delete defaults.imageGenerationModel;
     }

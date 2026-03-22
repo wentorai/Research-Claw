@@ -17,7 +17,7 @@ import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
 import { useUiStore } from '../../stores/ui';
 import { getThemeTokens } from '../../styles/theme';
-import { buildSaveConfig, extractConfigFields } from '../../utils/config-patch';
+import { REDACTED_SENTINEL, buildSaveConfig, extractConfigFields } from '../../utils/config-patch';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
 
 const { Text } = Typography;
@@ -222,7 +222,11 @@ export default function SettingsPanel() {
 
   // --- Image generation ---
   const [imageGenEnabled, setImageGenEnabled] = useState(false);
+  const [imageGenProvider, setImageGenProvider] = useState('');
   const [imageGenModel, setImageGenModel] = useState('');
+  const [imageGenBaseUrl, setImageGenBaseUrl] = useState('');
+  const [imageGenApiKey, setImageGenApiKey] = useState('');
+  const [imageGenApiKeyConfigured, setImageGenApiKeyConfigured] = useState(false);
 
   // --- Web search ---
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
@@ -270,6 +274,16 @@ export default function SettingsPanel() {
       setApiKeyConfigured(false);
     }
   };
+
+  const handleImageGenProviderChange = (id: string) => {
+    setImageGenProvider(id);
+    const preset = getPreset(id);
+    if (preset.baseUrl) setImageGenBaseUrl(preset.baseUrl);
+    if (preset.models.length > 0) setImageGenModel(preset.models[0].id);
+  };
+
+  const imageGenSeparateProvider = imageGenProvider && imageGenProvider !== provider &&
+    !(visionEnabled && imageGenProvider === visionProvider);
 
   const handleVisionProviderChange = (id: string) => {
     setVisionProvider(id);
@@ -344,7 +358,26 @@ export default function SettingsPanel() {
     }
 
     setImageGenEnabled(fields.imageGenEnabled);
-    setImageGenModel(fields.imageGenModel);
+    if (fields.imageGenEnabled && fields.imageGenModel.includes('/')) {
+      const [igp, ...igmParts] = fields.imageGenModel.split('/');
+      setImageGenProvider(detectPresetFromProvider(igp, ''));
+      setImageGenModel(igmParts.join('/'));
+      // Try to extract baseUrl/apiKey from the provider entry if it exists
+      const providers = (gatewayConfig as Record<string, unknown>)?.models as Record<string, unknown> | undefined;
+      const igProviderDef = (providers?.providers as Record<string, Record<string, unknown>> | undefined)?.[igp];
+      if (igProviderDef) {
+        setImageGenBaseUrl((igProviderDef.baseUrl as string) ?? '');
+        const igKeyRaw = igProviderDef.apiKey;
+        setImageGenApiKey(typeof igKeyRaw === 'string' && igKeyRaw !== REDACTED_SENTINEL ? igKeyRaw : '');
+        setImageGenApiKeyConfigured(typeof igKeyRaw === 'string' && igKeyRaw.length > 0);
+      }
+    } else {
+      setImageGenProvider('');
+      setImageGenModel('');
+      setImageGenBaseUrl('');
+      setImageGenApiKey('');
+      setImageGenApiKeyConfigured(false);
+    }
 
     setWebSearchEnabled(fields.webSearchEnabled);
     setWebSearchProvider(fields.webSearchProvider);
@@ -431,7 +464,13 @@ export default function SettingsPanel() {
               apiKeyConfigured,
               visionApiKeyConfigured,
               imageGenEnabled,
-              imageGenModel: imageGenEnabled ? imageGenModel.trim() || undefined : undefined,
+              imageGenModel: imageGenEnabled && imageGenProvider && imageGenModel
+                ? `${imageGenProvider}/${imageGenModel.trim()}`
+                : undefined,
+              imageGenProvider: imageGenEnabled ? imageGenProvider : undefined,
+              imageGenBaseUrl: imageGenEnabled && imageGenSeparateProvider ? imageGenBaseUrl.trim() || undefined : undefined,
+              imageGenApiKey: imageGenEnabled && imageGenSeparateProvider ? (imageGenApiKey.trim() || undefined) : undefined,
+              imageGenApiKeyConfigured,
               webSearchEnabled,
               webSearchProvider: webSearchEnabled ? webSearchProvider : undefined,
               webSearchApiKey: webSearchEnabled ? (webSearchApiKey.trim() || undefined) : undefined,
@@ -454,7 +493,7 @@ export default function SettingsPanel() {
         }
       },
     });
-  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, imageGenEnabled, imageGenModel, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, t, modal, message]);
+  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, imageGenEnabled, imageGenProvider, imageGenModel, imageGenBaseUrl, imageGenApiKey, imageGenApiKeyConfigured, imageGenSeparateProvider, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, t, modal, message]);
 
   const handleSavePrompt = useCallback(() => {
     message.success(t('settings.saved'));
@@ -675,15 +714,65 @@ export default function SettingsPanel() {
       </SettingRow>
 
       {imageGenEnabled && (
-        <SettingRow label={t('settings.imageGenModel')}>
-          <Input
-            value={imageGenModel}
-            onChange={(e) => setImageGenModel(e.target.value)}
-            size="small"
-            style={{ width: 220 }}
-            placeholder="openai/gpt-image-1"
-          />
-        </SettingRow>
+        <>
+          <SettingRow label={t('settings.imageGenProvider')}>
+            <Select
+              showSearch
+              value={imageGenProvider || undefined}
+              onChange={handleImageGenProviderChange}
+              size="small"
+              style={{ width: 220 }}
+              filterOption={providerFilterOption}
+              placeholder={t('settings.imageGenProvider')}
+              options={PROVIDER_PRESETS.map((p) => {
+                const lbl = p.id === 'custom' ? t('setup.providerCustom') : p.label;
+                return { value: p.id, label: lbl, title: lbl as string };
+              })}
+            />
+          </SettingRow>
+
+          <SettingRow label={t('settings.imageGenModel')}>
+            <AutoComplete
+              value={imageGenModel}
+              onChange={setImageGenModel}
+              options={getPreset(imageGenProvider || provider).models.map((m) => ({
+                value: m.id,
+                label: `${m.id} — ${m.name}`,
+              }))}
+              allowClear
+              size="small"
+              style={{ width: 220 }}
+              placeholder="gpt-image-1"
+              filterOption={(input, option) =>
+                (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+            />
+          </SettingRow>
+
+          {imageGenSeparateProvider && (
+            <>
+              <SettingRow label={t('settings.imageGenBaseUrl')}>
+                <Input
+                  value={imageGenBaseUrl}
+                  onChange={(e) => setImageGenBaseUrl(e.target.value)}
+                  size="small"
+                  style={{ width: 220 }}
+                  placeholder="https://api.openai.com/v1"
+                />
+              </SettingRow>
+
+              <SettingRow label={t('settings.imageGenApiKey')}>
+                <Input
+                  value={imageGenApiKey}
+                  onChange={(e) => setImageGenApiKey(e.target.value)}
+                  size="small"
+                  style={{ width: 220 }}
+                  placeholder={imageGenApiKeyConfigured ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder')}
+                />
+              </SettingRow>
+            </>
+          )}
+        </>
       )}
 
       {/* ── Web Search (optional) ── */}
@@ -712,11 +801,12 @@ export default function SettingsPanel() {
               placeholder={t('settings.webSearchProvider')}
               options={[
                 { value: 'brave', label: 'Brave Search' },
-                { value: 'tavily', label: 'Tavily' },
+                { value: 'gemini', label: 'Gemini (Google Search)' },
+                { value: 'grok', label: 'Grok (xAI)' },
+                { value: 'kimi', label: 'Kimi (Moonshot)' },
                 { value: 'perplexity', label: 'Perplexity' },
-                { value: 'google', label: 'Google' },
-                { value: 'kimi', label: 'Kimi' },
                 { value: 'firecrawl', label: 'Firecrawl' },
+                { value: 'tavily', label: 'Tavily' },
               ]}
             />
           </SettingRow>
