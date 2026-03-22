@@ -986,6 +986,19 @@ fi
 # Apply to current session so the gateway startup below uses it
 export OPENCLAW_CONFIG_PATH="$INSTALL_DIR/config/openclaw.json"
 
+# --- Chrome/Chromium check (browser tool requires it) ---
+if [ "$(uname)" = "Darwin" ]; then
+  if ! [ -d "/Applications/Google Chrome.app" ] && ! [ -d "/Applications/Chromium.app" ]; then
+    printf "\n  ${Y}NOTE:${N} Chrome/Chromium not found. The ${B}browser${N} tool will not work.\n"
+    printf "        Install: ${C}https://www.google.com/chrome/${N}\n"
+  fi
+else
+  if ! command -v google-chrome &>/dev/null && ! command -v chromium &>/dev/null && ! command -v chromium-browser &>/dev/null; then
+    printf "\n  ${Y}NOTE:${N} Chrome/Chromium not found. The ${B}browser${N} tool will not work.\n"
+    printf "        Install: ${C}https://www.google.com/chrome/${N}\n"
+  fi
+fi
+
 # --- Done ---
 printf "\n  ${G}${B}Ready!${N}\n\n"
 printf "  ${B}Dashboard:${N}  ${C}${DASHBOARD_URL}${N}\n"

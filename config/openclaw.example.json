@@ -133,9 +133,12 @@
   },
   "channels": {
     "telegram": {
-      "commands": {
-        "native": false
-      }
+      "botToken": "<YOUR_TELEGRAM_BOT_TOKEN>",
+      "commands": { "native": false }
+    },
+    "discord": {
+      "botToken": "<YOUR_DISCORD_BOT_TOKEN>",
+      "commands": { "native": false }
     }
   },
   "cron": {
