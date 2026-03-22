@@ -17,7 +17,7 @@ import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
 import { useUiStore } from '../../stores/ui';
 import { getThemeTokens } from '../../styles/theme';
-import { REDACTED_SENTINEL, buildSaveConfig, extractConfigFields } from '../../utils/config-patch';
+import { buildSaveConfig, extractConfigFields } from '../../utils/config-patch';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
 
 const { Text } = Typography;
@@ -220,14 +220,6 @@ export default function SettingsPanel() {
   const [proxyEnabled, setProxyEnabled] = useState(false);
   const [proxyUrl, setProxyUrl] = useState('http://127.0.0.1:7890');
 
-  // --- Image generation ---
-  const [imageGenEnabled, setImageGenEnabled] = useState(false);
-  const [imageGenProvider, setImageGenProvider] = useState('');
-  const [imageGenModel, setImageGenModel] = useState('');
-  const [imageGenBaseUrl, setImageGenBaseUrl] = useState('');
-  const [imageGenApiKey, setImageGenApiKey] = useState('');
-  const [imageGenApiKeyConfigured, setImageGenApiKeyConfigured] = useState(false);
-
   // --- Web search ---
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [webSearchProvider, setWebSearchProvider] = useState('');
@@ -274,25 +266,6 @@ export default function SettingsPanel() {
       setApiKeyConfigured(false);
     }
   };
-
-  // Image generation providers (distinct from text LLM providers)
-  const IMAGE_GEN_PROVIDERS = [
-    { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-image-1' },
-    { id: 'google', label: 'Google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-3.1-flash-image-preview' },
-    { id: 'fal', label: 'fal', baseUrl: 'https://fal.run', defaultModel: 'fal-ai/flux/dev' },
-  ];
-
-  const handleImageGenProviderChange = (id: string) => {
-    setImageGenProvider(id);
-    const igp = IMAGE_GEN_PROVIDERS.find((p) => p.id === id);
-    if (igp) {
-      setImageGenBaseUrl(igp.baseUrl);
-      setImageGenModel(igp.defaultModel);
-    }
-  };
-
-  const imageGenSeparateProvider = imageGenProvider && imageGenProvider !== provider &&
-    !(visionEnabled && imageGenProvider === visionProvider);
 
   const handleVisionProviderChange = (id: string) => {
     setVisionProvider(id);
@@ -364,28 +337,6 @@ export default function SettingsPanel() {
       setProxyUrl(fields.proxyUrl);
     } else {
       setProxyEnabled(false);
-    }
-
-    setImageGenEnabled(fields.imageGenEnabled);
-    if (fields.imageGenEnabled && fields.imageGenModel.includes('/')) {
-      const [igp, ...igmParts] = fields.imageGenModel.split('/');
-      setImageGenProvider(detectPresetFromProvider(igp, ''));
-      setImageGenModel(igmParts.join('/'));
-      // Try to extract baseUrl/apiKey from the provider entry if it exists
-      const providers = (gatewayConfig as Record<string, unknown>)?.models as Record<string, unknown> | undefined;
-      const igProviderDef = (providers?.providers as Record<string, Record<string, unknown>> | undefined)?.[igp];
-      if (igProviderDef) {
-        setImageGenBaseUrl((igProviderDef.baseUrl as string) ?? '');
-        const igKeyRaw = igProviderDef.apiKey;
-        setImageGenApiKey(typeof igKeyRaw === 'string' && igKeyRaw !== REDACTED_SENTINEL ? igKeyRaw : '');
-        setImageGenApiKeyConfigured(typeof igKeyRaw === 'string' && igKeyRaw.length > 0);
-      }
-    } else {
-      setImageGenProvider('');
-      setImageGenModel('');
-      setImageGenBaseUrl('');
-      setImageGenApiKey('');
-      setImageGenApiKeyConfigured(false);
     }
 
     setWebSearchEnabled(fields.webSearchEnabled);
@@ -472,14 +423,6 @@ export default function SettingsPanel() {
               proxyUrl: proxyEnabled ? proxyUrl.trim() : '',
               apiKeyConfigured,
               visionApiKeyConfigured,
-              imageGenEnabled,
-              imageGenModel: imageGenEnabled && imageGenProvider && imageGenModel
-                ? `${imageGenProvider}/${imageGenModel.trim()}`
-                : undefined,
-              imageGenProvider: imageGenEnabled ? imageGenProvider : undefined,
-              imageGenBaseUrl: imageGenEnabled && imageGenSeparateProvider ? imageGenBaseUrl.trim() || undefined : undefined,
-              imageGenApiKey: imageGenEnabled && imageGenSeparateProvider ? (imageGenApiKey.trim() || undefined) : undefined,
-              imageGenApiKeyConfigured,
               webSearchEnabled,
               webSearchProvider: webSearchEnabled ? webSearchProvider : undefined,
               webSearchApiKey: webSearchEnabled ? (webSearchApiKey.trim() || undefined) : undefined,
@@ -502,7 +445,7 @@ export default function SettingsPanel() {
         }
       },
     });
-  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, imageGenEnabled, imageGenProvider, imageGenModel, imageGenBaseUrl, imageGenApiKey, imageGenApiKeyConfigured, imageGenSeparateProvider, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, t, modal, message]);
+  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, t, modal, message]);
 
   const handleSavePrompt = useCallback(() => {
     message.success(t('settings.saved'));
@@ -700,73 +643,6 @@ export default function SettingsPanel() {
                   size="small"
                   style={{ width: 220 }}
                   placeholder={visionApiKeyConfigured && !visionApiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder')}
-                />
-              </SettingRow>
-            </>
-          )}
-        </>
-      )}
-
-      {/* ── Image Generation (optional) ── */}
-      <Divider style={{ margin: '4px 0 8px' }} />
-
-      <SettingRow label={t('settings.imageGenEnabled')} description={t('settings.imageGenHint')}>
-        <Segmented
-          value={imageGenEnabled ? 'on' : 'off'}
-          onChange={(v) => setImageGenEnabled(v === 'on')}
-          options={[
-            { label: 'OFF', value: 'off' },
-            { label: 'ON', value: 'on' },
-          ]}
-          size="small"
-        />
-      </SettingRow>
-
-      {imageGenEnabled && (
-        <>
-          <SettingRow label={t('settings.imageGenProvider')}>
-            <Select
-              value={imageGenProvider || undefined}
-              onChange={handleImageGenProviderChange}
-              size="small"
-              style={{ width: 220 }}
-              placeholder={t('settings.imageGenProvider')}
-              options={IMAGE_GEN_PROVIDERS.map((p) => ({
-                value: p.id,
-                label: p.label,
-              }))}
-            />
-          </SettingRow>
-
-          <SettingRow label={t('settings.imageGenModel')}>
-            <Input
-              value={imageGenModel}
-              onChange={(e) => setImageGenModel(e.target.value)}
-              size="small"
-              style={{ width: 220 }}
-              placeholder={IMAGE_GEN_PROVIDERS.find((p) => p.id === imageGenProvider)?.defaultModel ?? 'gpt-image-1'}
-            />
-          </SettingRow>
-
-          {imageGenSeparateProvider && (
-            <>
-              <SettingRow label={t('settings.imageGenBaseUrl')}>
-                <Input
-                  value={imageGenBaseUrl}
-                  onChange={(e) => setImageGenBaseUrl(e.target.value)}
-                  size="small"
-                  style={{ width: 220 }}
-                  placeholder="https://api.openai.com/v1"
-                />
-              </SettingRow>
-
-              <SettingRow label={t('settings.imageGenApiKey')}>
-                <Input
-                  value={imageGenApiKey}
-                  onChange={(e) => setImageGenApiKey(e.target.value)}
-                  size="small"
-                  style={{ width: 220 }}
-                  placeholder={imageGenApiKeyConfigured ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder')}
                 />
               </SettingRow>
             </>
