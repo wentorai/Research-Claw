@@ -14,6 +14,7 @@
  *   3. Stale plugin entries (wentor-connect placeholder)
  *   4. Stale tool names in tools.alsoAllow
  *   5. gateway.auth.token alignment with Dashboard DEFAULT_TOKEN
+ *   6. channels.discord.botToken → token (fix stale example config key)
  */
 'use strict';
 
@@ -83,7 +84,19 @@ function ensureConfig(filePath) {
     }
   }
 
-  // 6. Remove node_modules references from plugin load paths
+  // 6. channels.discord: rename botToken → token (example config had wrong key;
+  //    OC Discord schema always used `token`, but strict validation was silent before 2026.3.13)
+  if (c.channels?.discord?.botToken && !c.channels.discord.token) {
+    c.channels.discord.token = c.channels.discord.botToken;
+    delete c.channels.discord.botToken;
+    changed = true;
+  } else if (c.channels?.discord?.botToken) {
+    // token already exists, just remove the stale key
+    delete c.channels.discord.botToken;
+    changed = true;
+  }
+
+  // 7. Remove node_modules references from plugin load paths
   if (c.plugins?.load?.paths) {
     const before = c.plugins.load.paths.length;
     c.plugins.load.paths = c.plugins.load.paths.filter(p => !p.includes('node_modules'));

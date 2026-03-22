@@ -137,7 +137,7 @@
       "commands": { "native": false }
     },
     "discord": {
-      "botToken": "<YOUR_DISCORD_BOT_TOKEN>",
+      "token": "<YOUR_DISCORD_BOT_TOKEN>",
       "commands": { "native": false }
     }
   },

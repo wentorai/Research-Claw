@@ -389,6 +389,9 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   git rebase --abort 2>/dev/null || true
   git merge --abort 2>/dev/null || true
   git reset --hard HEAD 2>/dev/null || true
+  # Remove untracked files that may conflict with incoming changes.
+  # Gitignored files (config, data, node_modules, workspace runtime) are preserved.
+  git clean -fd 2>/dev/null || true
   if ! (git pull --rebase --autostash 2>/dev/null || git pull); then
     warn "git pull failed. Possible causes:"
     warn "  - Network issue (try again later)"
