@@ -68,7 +68,7 @@ Existing installations: re-run the install script. It detects and upgrades in-pl
 
 ## Full Changelog
 
-See [docs/sop/CHANGELOG.md](docs/sop/CHANGELOG.md) for the complete operation log.
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for the operation log.
 
 ## Links
 

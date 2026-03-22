@@ -31,7 +31,7 @@ Existing installations: re-run the install script. It will detect and upgrade in
 
 ## Full Changelog
 
-See [docs/sop/CHANGELOG.md](docs/sop/CHANGELOG.md) for the complete operation log.
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for the operation log.
 
 ## Links
 

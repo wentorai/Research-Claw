@@ -81,5 +81,5 @@ Commercial use requires a separate license. Converts to Apache 2.0 on 2030-03-12
 ## Links
 
 - Website: https://wentor.ai
-- User Guide: [Research-Claw-Guide.md](../Research-Claw-Guide.md)
+- User Guide: [README.md](README.md)
 - Windows Install: [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md)

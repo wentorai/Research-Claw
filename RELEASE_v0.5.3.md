@@ -59,4 +59,4 @@ User data files (USER.md, MEMORY.md) are automatically preserved during upgrade.
 - Website: https://wentor.ai
 - GitHub: https://github.com/wentorai/Research-Claw
 - Research Plugins: https://www.npmjs.com/package/@wentorai/research-plugins
-- v0.5.2 Release Notes: [RELEASE_v0.5.2.md](RELEASE_v0.5.2.md)
+- Previous: [RELEASE_v0.5.1.md](RELEASE_v0.5.1.md)

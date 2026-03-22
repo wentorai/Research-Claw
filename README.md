@@ -133,10 +133,10 @@ curl -fsSL https://wentor.ai/install.sh | bash
 | **文献库** | 全文检索 · 标签 · 批注 · 引用图谱 · 阅读统计 |
 | **任务** | Agent / Human 任务分层 · 四级优先级 · 48h 截止日期预警 |
 | **工作区** | 文件操作与版本历史，Git 追踪每一次变更 |
-| **雷达** | 追踪关键词 / 学者 / 期刊 · 自动化任务配置 · IM 推送 |
+| **监控** | 追踪关键词 / 学者 / 期刊 · 自动化任务配置 · IM 推送 |
 | **设置** | Setup Wizard · 所有配置在浏览器完成，无需编辑文件 |
 
-技术规格：React 18 + Vite 6 + Ant Design 5 + Zustand 5，中英双语（245 i18n keys），1029 单元测试，TypeScript 零报错，响应式支持桌面 / 平板 / 浮窗三种模式。
+技术规格：React 18 + Vite 6 + Ant Design 5 + Zustand 5，中英双语（469 i18n keys），1084 单元测试，TypeScript 零报错，响应式支持桌面 / 平板 / 浮窗三种模式。
 
 ---
 
@@ -175,13 +175,13 @@ curl -fsSL https://wentor.ai/install.sh | bash
 │       ├─ AGENTS.md                    Ant Design 5 + Zustand 5      │
 │       ├─ TOOLS.md                     21 卡片类型 · 6 面板            │
 │       ├─ HEARTBEAT.md                 WebSocket RPC v3 客户端        │
-│       └─ (8 bootstrap files)          245 i18n keys (EN + ZH-CN)    │
+│       └─ (8 bootstrap files)          469 i18n keys (EN + ZH-CN)    │
 │                                             │                       │
 │   L1  extensions/                           │ ws://127.0.0.1:28789  │
 │       └─ research-claw-core                 │                       │
-│          ├─ 28 tools                        │                       │
-│          ├─ 52 WS RPC interfaces            │                       │
-│          └─ 13 SQLite tables + FTS5         ▼                       │
+│          ├─ 38 tools                        │                       │
+│          ├─ 79 WS RPC interfaces            │                       │
+│          └─ 16 SQLite tables + FTS5         ▼                       │
 │       ╔═══════════════════════════════════════════════════╗         │
 │       ║           OpenClaw  (npm dependency)              ║         │
 │       ║         Gateway · WS RPC v3 · Port 28789          ║         │

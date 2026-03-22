@@ -87,7 +87,7 @@ wsl --install -d Ubuntu-24.04
 
 ### 前置：开启 systemd
 
-科研龙虾的后台功能（定时任务、雷达扫描、Gateway 自启动）依赖 systemd。
+科研龙虾的后台功能（定时任务、监控扫描、Gateway 自启动）依赖 systemd。
 
 在 Ubuntu 终端中检查：
 

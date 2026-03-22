@@ -133,10 +133,10 @@ We built a purpose-designed Dashboard for academic workflows — the most comple
 | **Library** | Full-text search · Tags · Annotations · Citation graph · Reading stats |
 | **Tasks** | Agent / Human task layers · 4-level priority · 48h deadline alerts |
 | **Workspace** | File ops with version history, every change Git-tracked |
-| **Radar** | Keyword / author / journal tracking · Automation tasks · IM push |
+| **Monitor** | Keyword / author / journal tracking · Automation tasks · IM push |
 | **Settings** | Setup Wizard · All config in the browser, no file editing needed |
 
-Tech: React 18 + Vite 6 + Ant Design 5 + Zustand 5 · Bilingual EN/ZH-CN (245 i18n keys) · 1029 unit tests · TypeScript zero errors · Responsive desktop / tablet / overlay layout.
+Tech: React 18 + Vite 6 + Ant Design 5 + Zustand 5 · Bilingual EN/ZH-CN (469 i18n keys) · 1084 unit tests · TypeScript zero errors · Responsive desktop / tablet / overlay layout.
 
 ---
 
@@ -175,13 +175,13 @@ Research-Claw comes with **438 academic skills** built-in (auto-configured durin
 │       ├─ AGENTS.md                    Ant Design 5 + Zustand 5      │
 │       ├─ TOOLS.md                     21 card types · 6 panels      │
 │       ├─ HEARTBEAT.md                 WebSocket RPC v3 client       │
-│       └─ (8 bootstrap files)          245 i18n keys (EN + ZH-CN)    │
+│       └─ (8 bootstrap files)          469 i18n keys (EN + ZH-CN)    │
 │                                             │                       │
 │   L1  extensions/                           │ ws://127.0.0.1:28789  │
 │       └─ research-claw-core                 │                       │
-│          ├─ 28 tools                        │                       │
-│          ├─ 52 WS RPC interfaces            │                       │
-│          └─ 13 SQLite tables + FTS5         ▼                       │
+│          ├─ 38 tools                        │                       │
+│          ├─ 79 WS RPC interfaces            │                       │
+│          └─ 16 SQLite tables + FTS5         ▼                       │
 │       ╔═══════════════════════════════════════════════════╗         │
 │       ║           OpenClaw  (npm dependency)              ║         │
 │       ║         Gateway · WS RPC v3 · Port 28789          ║         │
