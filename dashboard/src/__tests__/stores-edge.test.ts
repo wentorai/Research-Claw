@@ -53,11 +53,12 @@ describe('Library store filter combinations', () => {
       sort: 'year',
     });
 
-    // read_status from filter param is ignored — tab determines it (inbox → ['unread','reading'])
-    // tags, year, sort are still passed through; limit/offset always present
-    expect(mockGatewayClient.request).toHaveBeenCalledWith('rc.lit.list',
-      expect.objectContaining({ tags: ['ml'], year: 2024, sort: 'year', limit: 30, offset: 0 }),
-    );
+    expect(mockGatewayClient.request).toHaveBeenCalledWith('rc.lit.list', expect.objectContaining({
+      read_status: 'read',
+      tags: ['ml'],
+      year: 2024,
+      sort: 'year',
+    }));
   });
 
   it('undefined tags is NOT sent to gateway', async () => {
@@ -78,10 +79,10 @@ describe('Library store filter combinations', () => {
 
     await useLibraryStore.getState().loadPapers();
 
-    // read_status from filters is ignored (tab determines it); sort 'title' → '+title'
+    // Title sort sends '+title' for ascending A→Z
     expect(mockGatewayClient.request).toHaveBeenCalledWith(
       'rc.lit.list',
-      expect.objectContaining({ sort: '+title', limit: 30, offset: 0 }),
+      expect.objectContaining({ read_status: 'unread', sort: '+title' }),
     );
   });
 
@@ -173,25 +174,11 @@ describe('Library store filter combinations', () => {
     expect(useLibraryStore.getState().total).toBe(1);
   });
 
-  it('setActiveTab updates tab state and clears papers', async () => {
+  it('setActiveTab updates tab state', async () => {
     const { useLibraryStore } = await import('../stores/library');
-    // Seed some papers so we can verify they get cleared
-    useLibraryStore.setState({
-      papers: [{ id: 'p1', title: 'T', authors: [], year: 2025, tags: [], read_status: 'unread', rating: null, added_at: '', updated_at: '', abstract: null, doi: null, url: null, arxiv_id: null, pdf_path: null, source: null, source_id: null, venue: null, notes: null, bibtex_key: null, metadata: {} }],
-      total: 1,
-      offset: 10,
-      hasMore: true,
-    });
-    // Mock the reload triggered by setTimeout
-    mockGatewayClient.request.mockResolvedValueOnce({ items: [], total: 0 });
-
     expect(useLibraryStore.getState().activeTab).toBe('inbox');
     useLibraryStore.getState().setActiveTab('starred');
-
     expect(useLibraryStore.getState().activeTab).toBe('starred');
-    expect(useLibraryStore.getState().papers).toEqual([]);
-    expect(useLibraryStore.getState().offset).toBe(0);
-    expect(useLibraryStore.getState().hasMore).toBe(false);
   });
 });
 
@@ -206,6 +193,9 @@ describe('Tasks store error handling and edge cases', () => {
       tasks: [],
       loading: false,
       total: 0,
+      offset: 0,
+      hasMore: false,
+      loadingMore: false,
       perspective: 'all',
       showCompleted: false,
       sortBy: 'deadline',

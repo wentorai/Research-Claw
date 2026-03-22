@@ -79,9 +79,7 @@
       "addedAt": "Recent",
       "year": "Year",
       "title": "Title"
-    },
-    "loadMore": "Load more",
-    "showingCount": "Showing {{count}} of {{total}}"
+    }
   },
   "tasks": {
     "title": "Tasks",
@@ -158,6 +156,8 @@
       "humanPrompt": "Based on the current progress and available information, please provide completion suggestions for task \"{{title}}\". Include: recommended next steps, resources that may be needed, and guidance on how to complete this task efficiently.",
       "mixedPrompt": "Report on the current status of task \"{{title}}\". How is the part I am responsible for progressing? What is the completion status of the part you are handling? What should each of us do next?"
     },
+    "loadMore": "Load more",
+    "showingCount": "Showing {{count}} of {{total}}",
     "gantt": {
       "title": "Gantt View",
       "open": "Gantt View",
@@ -330,14 +330,7 @@
     "restartHint": "After saving, the gateway will restart automatically. The dashboard reconnects on its own.",
     "start": "Start Research-Claw",
     "configuring": "Configuring...",
-    "skipToDashboard": "Skip to Dashboard \u2192",
-    "ollamaNoApiKey": "No API key required (local model)",
-    "ollamaDetectModels": "Detect Models",
-    "ollamaDetecting": "Detecting...",
-    "ollamaDetected": "{{count}} model(s) detected",
-    "ollamaDetectFailed": "Cannot connect to Ollama. Please ensure Ollama is running.",
-    "ollamaNoModels": "Ollama is running but no models installed. Run: ollama pull <model>",
-    "ollamaBaseUrlHint": "Default: http://127.0.0.1:11434 — change if Ollama runs on another host"
+    "skipToDashboard": "Skip to Dashboard \u2192"
   },
   "boot": {
     "connecting": "Connecting to gateway...",

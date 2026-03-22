@@ -1,4 +1,4 @@
-import React, { Component, type ErrorInfo } from 'react';
+import React, { Component, type ErrorInfo, Fragment } from 'react';
 import { Button, Typography } from 'antd';
 import { WarningOutlined } from '@ant-design/icons';
 import i18n from '../i18n';
@@ -15,12 +15,14 @@ interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
   showDetails: boolean;
+  /** Incremented on retry to force-remount children via React key */
+  retryCount: number;
 }
 
 export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, error: null, showDetails: false };
+    this.state = { hasError: false, error: null, showDetails: false, retryCount: 0 };
   }
 
   static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
@@ -32,7 +34,12 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
   }
 
   handleRetry = (): void => {
-    this.setState({ hasError: false, error: null, showDetails: false });
+    this.setState((prev) => ({
+      hasError: false,
+      error: null,
+      showDetails: false,
+      retryCount: prev.retryCount + 1,
+    }));
   };
 
   handleToggleDetails = (): void => {
@@ -41,7 +48,9 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
 
   render(): React.ReactNode {
     if (!this.state.hasError) {
-      return this.props.children;
+      // Key changes on retry, forcing React to remount the entire child tree.
+      // This ensures useEffect mount hooks re-fire and stale component state is discarded.
+      return <Fragment key={this.state.retryCount}>{this.props.children}</Fragment>;
     }
 
     if (this.props.fallback) {

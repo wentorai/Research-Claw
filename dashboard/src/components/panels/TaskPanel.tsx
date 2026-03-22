@@ -200,11 +200,15 @@ export default function TaskPanel() {
 
   const tasks = useTasksStore((s) => s.tasks);
   const loading = useTasksStore((s) => s.loading);
+  const total = useTasksStore((s) => s.total);
+  const hasMore = useTasksStore((s) => s.hasMore);
+  const loadingMore = useTasksStore((s) => s.loadingMore);
   const perspective = useTasksStore((s) => s.perspective);
   const setPerspective = useTasksStore((s) => s.setPerspective);
   const showCompleted = useTasksStore((s) => s.showCompleted);
   const toggleCompleted = useTasksStore((s) => s.toggleCompleted);
   const loadTasks = useTasksStore((s) => s.loadTasks);
+  const loadMoreTasks = useTasksStore((s) => s.loadMoreTasks);
   const loadTaskDetail = useTasksStore((s) => s.loadTaskDetail);
   const connState = useGatewayStore((s) => s.state);
   const send = useChatStore((s) => s.send);
@@ -469,6 +473,28 @@ export default function TaskPanel() {
                 },
               ]}
             />
+          </div>
+        )}
+
+        {/* Load more + showing count (hidden when search is active) */}
+        {!debouncedQuery && tasks.length > 0 && (
+          <div style={{ padding: '12px 16px', textAlign: 'center' }}>
+            {hasMore && (
+              <Button
+                type="link"
+                size="small"
+                loading={loadingMore}
+                onClick={loadMoreTasks}
+                data-testid="task-load-more"
+              >
+                {t('tasks.loadMore')}
+              </Button>
+            )}
+            <div>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {t('tasks.showingCount', { count: tasks.length, total })}
+              </Text>
+            </div>
           </div>
         )}
 

@@ -77,6 +77,10 @@ export interface GitTracker {
   getDiff(path?: string, fromCommit?: string, toCommit?: string): Promise<DiffResult>;
   restoreFile(path: string, commitHash: string): Promise<RestoreResult>;
   getFileStatus(path: string): Promise<GitFileStatus>;
+  /** Batch-fetch git status for ALL files in one `git status --porcelain` call. */
+  getAllFileStatuses(): Promise<Map<string, GitFileStatus>>;
+  /** Invalidate the batch status cache (call after workspace mutations). */
+  invalidateStatusCache(): void;
   destroy(): void;
 }
 
@@ -245,6 +249,10 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
   let debounceResolvers: Array<(result: CommitResult) => void> = [];
   let destroyed = false;
 
+  // -- Batch status cache ---------------------------------------------------
+  const STATUS_CACHE_TTL_MS = 5_000;
+  let statusCache: { map: Map<string, GitFileStatus>; timestamp: number } | null = null;
+
   // -----------------------------------------------------------------------
   // Core helper: run a git command
   // -----------------------------------------------------------------------
@@ -391,6 +399,9 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
         ? { committed: true, hash }
         : { committed: false };
 
+      // Invalidate status cache after a commit changes file states
+      statusCache = null;
+
       // Resolve all callers that were waiting on this debounce window
       for (const r of resolvers) r(result);
 
@@ -478,6 +489,68 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
       insertions: insertMatch ? parseInt(insertMatch[1]!, 10) : 0,
       deletions: deleteMatch ? parseInt(deleteMatch[1]!, 10) : 0,
     };
+  }
+
+  // -----------------------------------------------------------------------
+  // Batch status helper — parse `git status --porcelain` into a Map
+  // -----------------------------------------------------------------------
+
+  /**
+   * Parse XY status codes from `git status --porcelain` into GitFileStatus.
+   *
+   * Porcelain format: `XY <path>` where X = index, Y = worktree.
+   * Renamed entries use `XY <to> -> <from>` but --porcelain v1 shows the
+   * destination path (which is what we want for lookup).
+   */
+  function parseStatusCode(indexCode: string, worktreeCode: string): GitFileStatus {
+    if (indexCode === '?' && worktreeCode === '?') return 'untracked';
+    if (indexCode === 'A' || worktreeCode === 'A') return 'new';
+    if (indexCode === 'D' || worktreeCode === 'D') return 'deleted';
+    if (indexCode === 'R' || worktreeCode === 'R') return 'modified';
+    if (indexCode === 'C' || worktreeCode === 'C') return 'new';
+    if (indexCode === 'M' && worktreeCode === ' ') return 'modified';
+    if (worktreeCode === 'M') return 'modified';
+    if (indexCode !== ' ' && indexCode !== '?' && worktreeCode === ' ') return 'modified';
+    return 'modified';
+  }
+
+  /**
+   * Run `git status --porcelain` once and parse all results into a Map.
+   * Files not present in the output are 'committed' (tracked + clean).
+   */
+  async function batchGetAllStatuses(): Promise<Map<string, GitFileStatus>> {
+    const map = new Map<string, GitFileStatus>();
+
+    let output: string;
+    try {
+      output = await execGit(['status', '--porcelain']);
+    } catch {
+      return map;
+    }
+
+    if (!output.trim()) return map;
+
+    for (const line of output.split('\n')) {
+      if (line.length < 3) continue;
+
+      const indexCode = line.charAt(0);
+      const worktreeCode = line.charAt(1);
+      // Porcelain v1: "XY <path>" or "XY <path> -> <original>" for renames
+      let filePath = line.substring(3);
+
+      // Handle renamed files: "R  new_path -> old_path"
+      const arrowIndex = filePath.indexOf(' -> ');
+      if (arrowIndex !== -1) {
+        filePath = filePath.substring(0, arrowIndex);
+      }
+
+      // Normalize path separators for consistent lookup
+      filePath = filePath.replace(/\\/g, '/');
+
+      map.set(filePath, parseStatusCode(indexCode, worktreeCode));
+    }
+
+    return map;
   }
 
   // -----------------------------------------------------------------------
@@ -649,27 +722,28 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
         logArgs.push('--', validatedRelPath);
       }
 
-      let logOutput: string;
-      try {
-        logOutput = await execGit(logArgs);
-      } catch {
-        return { commits: [], total: 0, has_more: false };
-      }
-
-      const commits = parseLogOutput(logOutput, delim);
-
-      // Get total commit count
+      // Run git log and rev-list --count in parallel for speed
       const countArgs: string[] = ['rev-list', '--count', 'HEAD'];
       if (validatedRelPath !== undefined) {
         countArgs.push('--', validatedRelPath);
       }
 
+      const [logResult, countResult] = await Promise.allSettled([
+        execGit(logArgs),
+        execGit(countArgs),
+      ]);
+
+      // Parse log output
+      if (logResult.status === 'rejected') {
+        return { commits: [], total: 0, has_more: false };
+      }
+      const logOutput = logResult.value;
+      const commits = parseLogOutput(logOutput, delim);
+
+      // Parse count output
       let total = commits.length;
-      try {
-        const countOutput = await execGit(countArgs);
-        total = parseInt(countOutput.trim(), 10) || commits.length;
-      } catch {
-        // Fall back to commits.length
+      if (countResult.status === 'fulfilled') {
+        total = parseInt(countResult.value.trim(), 10) || commits.length;
       }
 
       return {
@@ -813,6 +887,9 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
       // Checkout the file from that commit
       await execGit(['checkout', commitHash, '--', rel]);
 
+      // Invalidate status cache after restoring a file
+      statusCache = null;
+
       // Auto-commit the restored file
       const restoreMsg = `Restore: ${basename(rel)} to version ${shortHash}`;
       await execGit(['add', '--', rel]);
@@ -874,6 +951,30 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
       if (indexCode !== ' ' && indexCode !== '?' && worktreeCode === ' ') return 'modified'; // staged → modified
 
       return 'modified';
+    },
+
+    // -------------------------------------------------------------------
+    // getAllFileStatuses() — batch version of getFileStatus()
+    // -------------------------------------------------------------------
+    async getAllFileStatuses(): Promise<Map<string, GitFileStatus>> {
+      // Return cached result if still valid
+      if (statusCache && (Date.now() - statusCache.timestamp) < STATUS_CACHE_TTL_MS) {
+        return statusCache.map;
+      }
+
+      const map = await batchGetAllStatuses();
+
+      // Cache the result
+      statusCache = { map, timestamp: Date.now() };
+
+      return map;
+    },
+
+    // -------------------------------------------------------------------
+    // invalidateStatusCache()
+    // -------------------------------------------------------------------
+    invalidateStatusCache(): void {
+      statusCache = null;
     },
 
     // -------------------------------------------------------------------

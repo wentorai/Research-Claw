@@ -67,15 +67,21 @@ export interface TaskPatch {
   notes?: string | null;
 }
 
+const TASKS_PAGE_SIZE = 50;
+
 interface TasksState {
   tasks: Task[];
   loading: boolean;
   total: number;
+  offset: number;
+  hasMore: boolean;
+  loadingMore: boolean;
   perspective: 'all' | 'human' | 'agent';
   showCompleted: boolean;
   sortBy: 'deadline' | 'priority' | 'created_at';
 
   loadTasks: () => Promise<void>;
+  loadMoreTasks: () => Promise<void>;
   loadTaskDetail: (id: string) => Promise<TaskWithDetails | null>;
   setPerspective: (p: 'all' | 'human' | 'agent') => void;
   toggleCompleted: () => void;
@@ -90,6 +96,9 @@ export const useTasksStore = create<TasksState>()((set, get) => ({
   tasks: [],
   loading: false,
   total: 0,
+  offset: 0,
+  hasMore: false,
+  loadingMore: false,
   perspective: 'all',
   showCompleted: false,
   sortBy: 'deadline',
@@ -107,13 +116,49 @@ export const useTasksStore = create<TasksState>()((set, get) => ({
       const params: Record<string, unknown> = {
         sort: sortBy,
         include_completed: showCompleted,
+        limit: TASKS_PAGE_SIZE,
+        offset: 0,
       };
       if (perspective === 'human') params.task_type = 'human';
       if (perspective === 'agent') params.task_type = 'agent';
       const result = await client.request<{ items: Task[]; total: number }>('rc.task.list', params);
-      set({ tasks: result.items, total: result.total, loading: false });
+      set({
+        tasks: result.items,
+        total: result.total,
+        offset: result.items.length,
+        hasMore: result.items.length >= TASKS_PAGE_SIZE,
+        loading: false,
+      });
     } catch {
       set({ loading: false });
+    }
+  },
+
+  loadMoreTasks: async () => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) return;
+    const { hasMore, loadingMore, offset, perspective, showCompleted, sortBy } = get();
+    if (!hasMore || loadingMore) return;
+    set({ loadingMore: true });
+    try {
+      const params: Record<string, unknown> = {
+        sort: sortBy,
+        include_completed: showCompleted,
+        limit: TASKS_PAGE_SIZE,
+        offset,
+      };
+      if (perspective === 'human') params.task_type = 'human';
+      if (perspective === 'agent') params.task_type = 'agent';
+      const result = await client.request<{ items: Task[]; total: number }>('rc.task.list', params);
+      set((s) => ({
+        tasks: [...s.tasks, ...result.items],
+        total: result.total,
+        offset: s.offset + result.items.length,
+        hasMore: result.items.length >= TASKS_PAGE_SIZE,
+        loadingMore: false,
+      }));
+    } catch {
+      set({ loadingMore: false });
     }
   },
 
@@ -129,11 +174,11 @@ export const useTasksStore = create<TasksState>()((set, get) => ({
   },
 
   setPerspective: (p: 'all' | 'human' | 'agent') => {
-    set({ perspective: p });
+    set({ perspective: p, offset: 0, hasMore: false });
   },
 
   toggleCompleted: () => {
-    set((s) => ({ showCompleted: !s.showCompleted }));
+    set((s) => ({ showCompleted: !s.showCompleted, offset: 0, hasMore: false }));
   },
 
   completeTask: async (id: string) => {

@@ -79,9 +79,7 @@
       "addedAt": "最近添加",
       "year": "年份",
       "title": "标题"
-    },
-    "loadMore": "加载更多",
-    "showingCount": "已显示 {{count}} / {{total}} 篇"
+    }
   },
   "tasks": {
     "title": "任务",
@@ -158,6 +156,8 @@
       "humanPrompt": "基于当前进展和已有信息，请给出任务「{{title}}」的完成建议。包括：推荐的下一步操作、可能需要的资源、以及如何高效完成此任务的指导。",
       "mixedPrompt": "请汇报任务「{{title}}」的当前状态。我负责的部分进展如何？你负责的部分完成度如何？下一步我们各自需要做什么？"
     },
+    "loadMore": "加载更多",
+    "showingCount": "已显示 {{count}} / {{total}} 项",
     "gantt": {
       "title": "甘特图",
       "open": "甘特图",
@@ -330,14 +330,7 @@
     "restartHint": "保存后 gateway 将自动重启，仪表盘会自动重连。",
     "start": "启动科研龙虾",
     "configuring": "配置中...",
-    "skipToDashboard": "跳过，进入 Dashboard \u2192",
-    "ollamaNoApiKey": "无需 API 密钥（本地模型）",
-    "ollamaDetectModels": "检测模型",
-    "ollamaDetecting": "检测中...",
-    "ollamaDetected": "检测到 {{count}} 个模型",
-    "ollamaDetectFailed": "无法连接 Ollama，请确保 Ollama 已启动。",
-    "ollamaNoModels": "Ollama 已运行但未安装模型。请运行：ollama pull <model>",
-    "ollamaBaseUrlHint": "默认：http://127.0.0.1:11434 — 如 Ollama 运行在其他主机可修改"
+    "skipToDashboard": "跳过，进入 Dashboard \u2192"
   },
   "boot": {
     "connecting": "正在连接网关...",

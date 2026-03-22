@@ -62,30 +62,22 @@ describe('Library store integration', () => {
 
     expect(mockGatewayClient.request).toHaveBeenCalledWith(
       'rc.lit.list',
-      expect.objectContaining({ limit: 30, offset: 0, read_status: ['unread', 'reading'] }),
+      expect.objectContaining({ limit: 30, offset: 0 }),
     );
     expect(useLibraryStore.getState().papers).toHaveLength(1);
     expect(useLibraryStore.getState().total).toBe(1);
     expect(useLibraryStore.getState().loading).toBe(false);
   });
 
-  it('loadPapers with filter passes user filters alongside tab read_status', async () => {
+  it('loadPapers with status filter sends read_status param', async () => {
     const { useLibraryStore } = await import('../stores/library');
     mockGatewayClient.request.mockResolvedValueOnce({ items: [], total: 0 });
 
-    // read_status in filter is ignored — tab mapping controls it.
-    // But user filters like tags and year are still forwarded.
-    await useLibraryStore.getState().loadPapers({ tags: ['ml'], year: 2024 });
+    await useLibraryStore.getState().loadPapers({ read_status: 'reading' });
 
     expect(mockGatewayClient.request).toHaveBeenCalledWith(
       'rc.lit.list',
-      expect.objectContaining({
-        limit: 30,
-        offset: 0,
-        read_status: ['unread', 'reading'],
-        tags: ['ml'],
-        year: 2024,
-      }),
+      expect.objectContaining({ read_status: 'reading' }),
     );
   });
 
@@ -238,6 +230,9 @@ describe('Tasks store integration', () => {
       tasks: [],
       loading: false,
       total: 0,
+      offset: 0,
+      hasMore: false,
+      loadingMore: false,
       perspective: 'all',
       showCompleted: false,
       sortBy: 'deadline',
@@ -253,6 +248,8 @@ describe('Tasks store integration', () => {
     expect(mockGatewayClient.request).toHaveBeenCalledWith('rc.task.list', {
       sort: 'deadline',
       include_completed: false,
+      limit: 50,
+      offset: 0,
     });
   });
 

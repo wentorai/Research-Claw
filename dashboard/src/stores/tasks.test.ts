@@ -50,6 +50,9 @@ function resetStore() {
     tasks: [],
     loading: false,
     total: 0,
+    offset: 0,
+    hasMore: false,
+    loadingMore: false,
     perspective: 'all',
     showCompleted: false,
     sortBy: 'deadline',
@@ -76,6 +79,8 @@ describe('TasksStore', () => {
       expect(mockRequest).toHaveBeenCalledWith('rc.task.list', {
         sort: 'deadline',
         include_completed: false,
+        limit: 50,
+        offset: 0,
       });
     });
 
@@ -88,6 +93,8 @@ describe('TasksStore', () => {
       expect(mockRequest).toHaveBeenCalledWith('rc.task.list', {
         sort: 'deadline',
         include_completed: false,
+        limit: 50,
+        offset: 0,
         task_type: 'human',
       });
     });
@@ -101,6 +108,8 @@ describe('TasksStore', () => {
       expect(mockRequest).toHaveBeenCalledWith('rc.task.list', {
         sort: 'deadline',
         include_completed: false,
+        limit: 50,
+        offset: 0,
         task_type: 'agent',
       });
     });
@@ -124,6 +133,8 @@ describe('TasksStore', () => {
       expect(mockRequest).toHaveBeenCalledWith('rc.task.list', {
         sort: 'deadline',
         include_completed: true,
+        limit: 50,
+        offset: 0,
       });
     });
 
@@ -136,6 +147,8 @@ describe('TasksStore', () => {
       expect(state.tasks).toHaveLength(3);
       expect(state.total).toBe(3);
       expect(state.loading).toBe(false);
+      expect(state.offset).toBe(3);
+      expect(state.hasMore).toBe(false); // 3 < 50
       expect(state.tasks[0].title).toBe('Read Vaswani et al. 2017 — Attention Is All You Need');
       expect(state.tasks[0].task_type).toBe('human');
       expect(state.tasks[1].task_type).toBe('agent');
@@ -353,12 +366,83 @@ describe('TasksStore', () => {
     });
   });
 
+  // ── loadMoreTasks ──────────────────────────────────────────────────
+
+  describe('loadMoreTasks — paginated append', () => {
+    it('sends rc.task.list with current offset', async () => {
+      useTasksStore.setState({
+        tasks: RC_TASK_LIST_RESPONSE.items,
+        total: 60,
+        offset: 3,
+        hasMore: true,
+        loadingMore: false,
+      });
+      mockRequest.mockResolvedValue({ items: [RC_TASK_LIST_RESPONSE.items[0]], total: 60 });
+
+      await useTasksStore.getState().loadMoreTasks();
+
+      expect(mockRequest).toHaveBeenCalledWith('rc.task.list', expect.objectContaining({
+        limit: 50,
+        offset: 3,
+      }));
+    });
+
+    it('appends items to existing tasks', async () => {
+      const existingTasks = [RC_TASK_LIST_RESPONSE.items[0]];
+      useTasksStore.setState({
+        tasks: existingTasks,
+        total: 60,
+        offset: 1,
+        hasMore: true,
+        loadingMore: false,
+      });
+      const newItems = [RC_TASK_LIST_RESPONSE.items[1], RC_TASK_LIST_RESPONSE.items[2]];
+      mockRequest.mockResolvedValue({ items: newItems, total: 60 });
+
+      await useTasksStore.getState().loadMoreTasks();
+
+      const state = useTasksStore.getState();
+      expect(state.tasks).toHaveLength(3);
+      expect(state.offset).toBe(3);
+      expect(state.total).toBe(60);
+    });
+
+    it('does nothing when hasMore is false', async () => {
+      useTasksStore.setState({ hasMore: false, loadingMore: false });
+
+      await useTasksStore.getState().loadMoreTasks();
+
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when already loading more', async () => {
+      useTasksStore.setState({ hasMore: true, loadingMore: true });
+
+      await useTasksStore.getState().loadMoreTasks();
+
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+
+    it('sets loadingMore=false on error', async () => {
+      useTasksStore.setState({ hasMore: true, loadingMore: false, offset: 50 });
+      mockRequest.mockRejectedValue(new Error('network error'));
+
+      await useTasksStore.getState().loadMoreTasks();
+
+      expect(useTasksStore.getState().loadingMore).toBe(false);
+    });
+  });
+
   // ── setPerspective / toggleCompleted ────────────────────────────────
 
   describe('setPerspective and toggleCompleted', () => {
-    it('setPerspective updates state', () => {
+    it('setPerspective updates state and resets pagination', () => {
+      useTasksStore.setState({ offset: 100, hasMore: true });
+
       useTasksStore.getState().setPerspective('human');
       expect(useTasksStore.getState().perspective).toBe('human');
+      expect(useTasksStore.getState().offset).toBe(0);
+      expect(useTasksStore.getState().hasMore).toBe(false);
 
       useTasksStore.getState().setPerspective('agent');
       expect(useTasksStore.getState().perspective).toBe('agent');
@@ -367,11 +451,14 @@ describe('TasksStore', () => {
       expect(useTasksStore.getState().perspective).toBe('all');
     });
 
-    it('toggleCompleted flips showCompleted', () => {
+    it('toggleCompleted flips showCompleted and resets pagination', () => {
+      useTasksStore.setState({ offset: 100, hasMore: true });
       expect(useTasksStore.getState().showCompleted).toBe(false);
 
       useTasksStore.getState().toggleCompleted();
       expect(useTasksStore.getState().showCompleted).toBe(true);
+      expect(useTasksStore.getState().offset).toBe(0);
+      expect(useTasksStore.getState().hasMore).toBe(false);
 
       useTasksStore.getState().toggleCompleted();
       expect(useTasksStore.getState().showCompleted).toBe(false);

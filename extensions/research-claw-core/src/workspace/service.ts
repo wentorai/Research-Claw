@@ -598,7 +598,18 @@ export class WorkspaceService {
 
     const hideSystem = !includeHidden;
     const counter = { hidden: 0 };
-    const nodes = await this.walkDirectory(startDir, maxDepth, 0, hideSystem, counter);
+
+    // Batch-fetch all git statuses in ONE git command instead of per-file
+    let statusMap: Map<string, GitFileStatus> | null = null;
+    if (this.tracker) {
+      try {
+        statusMap = await this.tracker.getAllFileStatuses();
+      } catch {
+        // Git status unavailable — fall through to per-file or skip
+      }
+    }
+
+    const nodes = await this.walkDirectory(startDir, maxDepth, 0, hideSystem, counter, statusMap);
 
     return {
       tree: nodes,
@@ -609,6 +620,8 @@ export class WorkspaceService {
 
   /**
    * Recursively walk a directory, building TreeNode structures.
+   *
+   * @param statusMap  - Pre-fetched batch git status map (null = no git / fallback to per-file)
    */
   private async walkDirectory(
     dir: string,
@@ -616,6 +629,7 @@ export class WorkspaceService {
     currentDepth: number,
     hideSystem: boolean = true,
     counter: { hidden: number } = { hidden: 0 },
+    statusMap: Map<string, GitFileStatus> | null = null,
   ): Promise<TreeNode[]> {
     let entries: fs.Dirent[];
     try {
@@ -672,6 +686,7 @@ export class WorkspaceService {
           currentDepth + 1,
           hideSystem,
           counter,
+          statusMap,
         );
       }
 
@@ -693,9 +708,12 @@ export class WorkspaceService {
 
       const mime = getMimeType(entry.name);
 
-      // Get git status if tracker is available
+      // Get git status: use batch map (O(1) lookup) or fall back to per-file call
       let gitStatus: GitFileStatus | undefined;
-      if (this.tracker) {
+      if (statusMap) {
+        // Batch map: files present have a status; absent = tracked + clean
+        gitStatus = statusMap.get(relativePath) ?? 'committed';
+      } else if (this.tracker) {
         try {
           gitStatus = await this.tracker.getFileStatus(relativePath);
         } catch {
@@ -872,6 +890,9 @@ export class WorkspaceService {
     let commitHash: string | undefined;
 
     if (this.tracker) {
+      // Invalidate batch status cache — file state has changed
+      this.tracker.invalidateStatusCache();
+
       try {
         const prefix = isNew ? 'Add' : 'Update';
         const filename = path.basename(filePath);
@@ -1010,6 +1031,9 @@ export class WorkspaceService {
     }
 
     try {
+      // Invalidate batch status cache — file state will change
+      this.tracker.invalidateStatusCache();
+
       const result = await this.tracker.restoreFile(filePath, commitHash);
 
       return {
@@ -1078,6 +1102,9 @@ export class WorkspaceService {
     // Auto-commit the deletion if git tracking is enabled
     let committed = false;
     if (this.tracker) {
+      // Invalidate batch status cache — file state has changed
+      this.tracker.invalidateStatusCache();
+
       try {
         const filename = path.basename(filePath);
         const result = await this.tracker.commitFile(filePath, `Delete: ${filename}`);
@@ -1128,6 +1155,9 @@ export class WorkspaceService {
     // Auto-commit if git tracking is enabled
     let committed = false;
     if (this.tracker) {
+      // Invalidate batch status cache — file state has changed
+      this.tracker.invalidateStatusCache();
+
       try {
         // Stage both old (deleted) and new (added) paths
         const result = await this.tracker.commitFile(
