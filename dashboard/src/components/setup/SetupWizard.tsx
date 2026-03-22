@@ -376,10 +376,10 @@ export default function SetupWizard() {
               onChange={handleProviderChange}
               style={{ width: '100%' }}
               filterOption={providerFilterOption}
-              options={PROVIDER_PRESETS.map((p) => ({
-                value: p.id,
-                label: p.id === 'custom' ? t('setup.providerCustom') : p.label,
-              }))}
+              options={PROVIDER_PRESETS.map((p) => {
+                const lbl = p.id === 'custom' ? t('setup.providerCustom') : p.label;
+                return { value: p.id, label: lbl, title: lbl as string };
+              })}
             />
           </div>
 
