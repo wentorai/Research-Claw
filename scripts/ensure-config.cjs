@@ -141,6 +141,17 @@ function ensureConfig(filePath) {
   if (!c.ui) { c.ui = { assistant: { name: 'Research-Claw' } }; changed = true; }
   if (!c.skills) { c.skills = { load: { extraDirs: ['./skills'] } }; changed = true; }
   if (!c.cron) { c.cron = { enabled: true }; changed = true; }
+
+  // 10. Heartbeat — ensure lightContext is true to minimize token cost
+  if (!c.agents) c.agents = {};
+  if (!c.agents.defaults) c.agents.defaults = {};
+  if (!c.agents.defaults.heartbeat) {
+    c.agents.defaults.heartbeat = { every: '30m', lightContext: true };
+    changed = true;
+  } else if (c.agents.defaults.heartbeat.lightContext !== true) {
+    c.agents.defaults.heartbeat.lightContext = true;
+    changed = true;
+  }
   if (!c.plugins.entries) {
     c.plugins.entries = {
       'research-claw-core': { enabled: true, config: { dbPath: '.research-claw/library.db', autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48 } },

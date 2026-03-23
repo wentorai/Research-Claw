@@ -339,6 +339,65 @@ describe('buildSaveConfig', () => {
     expect((defaults.model as Record<string, string>).primary).toBe('openai/gpt-4o');
   });
 
+  it('writes heartbeat enabled with interval', () => {
+    const config = buildSaveConfig(null, {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      textModel: 'gpt-4o',
+      heartbeatEnabled: true,
+      heartbeatInterval: '1h',
+    });
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    const hb = defaults.heartbeat as Record<string, unknown>;
+    expect(hb.every).toBe('1h');
+    expect(hb.lightContext).toBe(true);
+  });
+
+  it('writes heartbeat disabled as every: "0m"', () => {
+    const config = buildSaveConfig(null, {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      textModel: 'gpt-4o',
+      heartbeatEnabled: false,
+      heartbeatInterval: '30m',
+    });
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    const hb = defaults.heartbeat as Record<string, unknown>;
+    expect(hb.every).toBe('0m');
+    expect(hb.lightContext).toBe(true);
+  });
+
+  it('preserves existing heartbeat fields when merging new interval', () => {
+    const existing = {
+      agents: {
+        defaults: {
+          heartbeat: { every: '30m', target: 'last', activeHours: { start: '08:00', end: '22:00' } },
+        },
+      },
+    };
+
+    const config = buildSaveConfig(existing, {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      textModel: 'gpt-4o',
+      heartbeatEnabled: true,
+      heartbeatInterval: '2h',
+    });
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    const hb = defaults.heartbeat as Record<string, unknown>;
+    expect(hb.every).toBe('2h');
+    expect(hb.lightContext).toBe(true);
+    // Preserved from existing
+    expect(hb.target).toBe('last');
+    expect(hb.activeHours).toEqual({ start: '08:00', end: '22:00' });
+  });
+
   // --- New tests: sentinel round-trip ---
 
   it('preserves redacted sentinel when no new key is provided', () => {
@@ -705,6 +764,61 @@ describe('extractConfigFields', () => {
     const fields = extractConfigFields(config);
     expect(fields.provider).toBe('openrouter');
     expect(fields.textModel).toBe('google/gemini-3.1-pro-preview');
+  });
+
+  it('extracts heartbeat enabled with custom interval', () => {
+    const config = {
+      agents: {
+        defaults: {
+          model: { primary: 'openai/gpt-4o' },
+          heartbeat: { every: '1h', lightContext: true },
+        },
+      },
+      models: {
+        providers: {
+          openai: { baseUrl: 'https://api.openai.com/v1' },
+        },
+      },
+    };
+
+    const fields = extractConfigFields(config);
+    expect(fields.heartbeatEnabled).toBe(true);
+    expect(fields.heartbeatInterval).toBe('1h');
+  });
+
+  it('extracts heartbeat disabled (every: "0m")', () => {
+    const config = {
+      agents: {
+        defaults: {
+          model: { primary: 'openai/gpt-4o' },
+          heartbeat: { every: '0m' },
+        },
+      },
+      models: {
+        providers: {
+          openai: { baseUrl: 'https://api.openai.com/v1' },
+        },
+      },
+    };
+
+    const fields = extractConfigFields(config);
+    expect(fields.heartbeatEnabled).toBe(false);
+    expect(fields.heartbeatInterval).toBe('30m'); // default fallback
+  });
+
+  it('defaults heartbeat to enabled/30m when no heartbeat config', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'openai/gpt-4o' } } },
+      models: {
+        providers: {
+          openai: { baseUrl: 'https://api.openai.com/v1' },
+        },
+      },
+    };
+
+    const fields = extractConfigFields(config);
+    expect(fields.heartbeatEnabled).toBe(true);
+    expect(fields.heartbeatInterval).toBe('30m');
   });
 
   it('vision not enabled when imageModel equals text model', () => {

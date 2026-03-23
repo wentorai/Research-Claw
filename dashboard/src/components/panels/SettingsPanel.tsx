@@ -226,6 +226,10 @@ export default function SettingsPanel() {
   const [webSearchApiKey, setWebSearchApiKey] = useState('');
   const [webSearchApiKeyConfigured, setWebSearchApiKeyConfigured] = useState(false);
 
+  // --- Heartbeat ---
+  const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
+  const [heartbeatInterval, setHeartbeatInterval] = useState('30m');
+
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
@@ -346,6 +350,9 @@ export default function SettingsPanel() {
     setWebSearchApiKey(fields.webSearchApiKey);
     setWebSearchApiKeyConfigured(fields.webSearchApiKeyConfigured);
 
+    setHeartbeatEnabled(fields.heartbeatEnabled);
+    setHeartbeatInterval(fields.heartbeatInterval);
+
     setRestarting(false);
   }, [gatewayConfig]);
 
@@ -429,6 +436,8 @@ export default function SettingsPanel() {
               webSearchProvider: webSearchEnabled ? webSearchProvider : undefined,
               webSearchApiKey: webSearchEnabled ? (webSearchApiKey.trim() || undefined) : undefined,
               webSearchApiKeyConfigured,
+              heartbeatEnabled,
+              heartbeatInterval,
             },
           );
 
@@ -447,7 +456,7 @@ export default function SettingsPanel() {
         }
       },
     });
-  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, t, modal, message]);
+  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, t, modal, message]);
 
   const handleSavePrompt = useCallback(() => {
     message.success(t('settings.saved'));
@@ -727,6 +736,39 @@ export default function SettingsPanel() {
             size="small"
             style={{ width: 220 }}
             placeholder="http://127.0.0.1:7890"
+          />
+        </SettingRow>
+      )}
+
+      {/* ── Heartbeat section ── */}
+      <Divider style={{ margin: '4px 0 8px' }} />
+
+      <SettingRow label={t('settings.heartbeat')} description={t('settings.heartbeatHint')}>
+        <Segmented
+          value={heartbeatEnabled ? 'on' : 'off'}
+          onChange={(v) => setHeartbeatEnabled(v === 'on')}
+          options={[
+            { label: 'OFF', value: 'off' },
+            { label: 'ON', value: 'on' },
+          ]}
+          size="small"
+        />
+      </SettingRow>
+
+      {heartbeatEnabled && (
+        <SettingRow label={t('settings.heartbeatInterval')}>
+          <Select
+            value={heartbeatInterval}
+            onChange={setHeartbeatInterval}
+            size="small"
+            style={{ width: 220 }}
+            options={[
+              { value: '15m', label: t('settings.heartbeatInterval15m') },
+              { value: '30m', label: t('settings.heartbeatInterval30m') },
+              { value: '1h', label: t('settings.heartbeatInterval1h') },
+              { value: '2h', label: t('settings.heartbeatInterval2h') },
+              { value: '4h', label: t('settings.heartbeatInterval4h') },
+            ]}
           />
         </SettingRow>
       )}

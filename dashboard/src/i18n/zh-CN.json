@@ -313,6 +313,14 @@
     "webSearchProvider": "搜索提供商",
     "webSearchApiKey": "API 密钥",
     "webSearchPriorityHint": "网页搜索优先级 L3 — 智能体优先使用学术 API（arXiv、OpenAlex 等）。",
+    "heartbeat": "心跳检查",
+    "heartbeatHint": "定期后台检查（截止日期、阅读提醒等）。使用轻量上下文以减少 token 消耗。",
+    "heartbeatInterval": "检查间隔",
+    "heartbeatInterval15m": "每 15 分钟",
+    "heartbeatInterval30m": "每 30 分钟（默认）",
+    "heartbeatInterval1h": "每 1 小时",
+    "heartbeatInterval2h": "每 2 小时",
+    "heartbeatInterval4h": "每 4 小时",
     "aboutGithub": "在 GitHub 上查看"
   },
   "setup": {

@@ -45,6 +45,10 @@ export interface ConfigPatchInput {
   webSearchProvider?: string;
   webSearchApiKey?: string;
   webSearchApiKeyConfigured?: boolean;
+  /** Heartbeat enabled (false → every: "0m") */
+  heartbeatEnabled?: boolean;
+  /** Heartbeat interval string (e.g. "30m", "1h") */
+  heartbeatInterval?: string;
 }
 
 export interface ExtractedConfig {
@@ -70,6 +74,10 @@ export interface ExtractedConfig {
   webSearchProvider: string;
   webSearchApiKey: string;
   webSearchApiKeyConfigured: boolean;
+  /** Whether heartbeat is enabled */
+  heartbeatEnabled: boolean;
+  /** Current heartbeat interval (e.g. "30m", "1h") */
+  heartbeatInterval: string;
 }
 
 function cleanUrl(url: string): string {
@@ -173,6 +181,7 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
       compaction: { mode: 'safeguard' },
       thinkingDefault: 'medium',
       subagents: { announceTimeoutMs: 480000 },
+      heartbeat: { every: '30m', lightContext: true },
       memorySearch: {
         enabled: true,
         sources: ['memory'],
@@ -378,6 +387,16 @@ export function buildSaveConfig(
     imageModel: { primary: visionRef },
   };
 
+  // --- Heartbeat ---
+  if (input.heartbeatEnabled !== undefined) {
+    const existingHeartbeat = (existingDefaults?.heartbeat as Record<string, unknown> | undefined) ?? {};
+    defaults.heartbeat = {
+      ...existingHeartbeat,
+      every: input.heartbeatEnabled ? (input.heartbeatInterval || '30m') : '0m',
+      lightContext: true, // Always true for RC to minimize token cost
+    };
+  }
+
   // --- Build full config ---
   const result: Record<string, unknown> = { ...base };
   result.agents = { ...existingAgents, defaults };
@@ -477,6 +496,8 @@ export function extractConfigFields(
     webSearchProvider: '',
     webSearchApiKey: '',
     webSearchApiKeyConfigured: false,
+    heartbeatEnabled: true,
+    heartbeatInterval: '30m',
   };
   if (!config) return empty;
 
@@ -553,6 +574,12 @@ export function extractConfigFields(
     : undefined;
   const webSearchApiKeyRaw = wsScopedKey ?? searchConfig?.apiKey;
 
+  // --- Heartbeat ---
+  const heartbeatDef = defaults?.heartbeat as Record<string, unknown> | undefined;
+  const heartbeatEvery = (heartbeatDef?.every as string) ?? '30m';
+  const heartbeatEnabled = heartbeatEvery !== '0m';
+  const heartbeatInterval = heartbeatEnabled ? heartbeatEvery : '30m';
+
   return {
     provider: textProviderKey,
     baseUrl: displayBaseUrl,
@@ -574,6 +601,8 @@ export function extractConfigFields(
     webSearchProvider: (searchConfig?.provider as string) ?? '',
     webSearchApiKey: deRedact(webSearchApiKeyRaw),
     webSearchApiKeyConfigured: typeof webSearchApiKeyRaw === 'string' && webSearchApiKeyRaw.length > 0,
+    heartbeatEnabled,
+    heartbeatInterval,
   };
 }
 

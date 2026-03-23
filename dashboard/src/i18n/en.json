@@ -313,6 +313,14 @@
     "webSearchProvider": "Search Provider",
     "webSearchApiKey": "API Key",
     "webSearchPriorityHint": "Web search is L3 priority — the agent prefers academic API tools (arXiv, OpenAlex, etc.) first.",
+    "heartbeat": "Heartbeat",
+    "heartbeatHint": "Periodic background checks (deadlines, reading reminders). Uses lightweight context to minimize token cost.",
+    "heartbeatInterval": "Check Interval",
+    "heartbeatInterval15m": "Every 15 min",
+    "heartbeatInterval30m": "Every 30 min (default)",
+    "heartbeatInterval1h": "Every 1 hour",
+    "heartbeatInterval2h": "Every 2 hours",
+    "heartbeatInterval4h": "Every 4 hours",
     "aboutGithub": "View on GitHub"
   },
   "setup": {

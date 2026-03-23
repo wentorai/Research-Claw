@@ -25,6 +25,10 @@
       "thinkingDefault": "medium",
       "subagents": {
         "announceTimeoutMs": 480000
+      },
+      "heartbeat": {
+        "every": "30m",
+        "lightContext": true
       }
     }
   },
