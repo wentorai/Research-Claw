@@ -138,13 +138,6 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
         const resolved = snapshot.resolved as Record<string, unknown> | undefined;
         const hasConfig = config && Object.keys(config).length > 0;
         const configObj = (hasConfig ? config : resolved ?? {}) as Record<string, unknown>;
-        // Debug: trace which config source was used and what it contains
-        console.log('[config] config.get response keys:', Object.keys(snapshot));
-        console.log('[config] snapshot.config keys:', config ? Object.keys(config) : 'UNDEFINED');
-        console.log('[config] snapshot.resolved keys:', resolved ? Object.keys(resolved) : 'UNDEFINED');
-        console.log('[config] using:', hasConfig ? 'config' : 'resolved',
-          '| agents:', !!configObj.agents, '| models:', !!configObj.models,
-          '| models.providers:', !!(configObj.models as Record<string, unknown> | undefined)?.providers);
         const gc: GatewayConfig = {
           agents: configObj.agents as GatewayConfig['agents'],
           models: configObj.models as GatewayConfig['models'],
@@ -212,16 +205,10 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
         }
       }
 
-      // Fast path: if gateway is connected and config clearly has NO model providers,
-      // this is a genuine cold start — show wizard immediately instead of retrying.
-      if (gwConnected && gatewayConfig && !gatewayConfig.models?.providers) {
-        console.log('[config] No model providers configured — showing setup wizard',
-          { models: gatewayConfig.models, agents: gatewayConfig.agents, raw: typeof gatewayConfig.raw });
-        set({ bootState: 'needs_setup', _configRetryCount: 0 });
-        return;
-      }
-
-      // Level 3: Retry — gateway may not have fully loaded its config yet (race condition).
+      // Level 3: Retry — gateway may not have fully loaded its config yet, or the
+      // config was being written (ensure-config.cjs, wizard) when we read it.
+      // Always retry before falling through to wizard, even when models.providers
+      // appears empty — a transient invalid config should not skip retries.
       if (_configRetryCount < CONFIG_RETRY_MAX) {
         console.log(`[config] Validation failed, retry ${_configRetryCount + 1}/${CONFIG_RETRY_MAX}`,
           { gwConnected, hasConfig: !!gatewayConfig, agents: !!gatewayConfig?.agents, models: !!gatewayConfig?.models });
@@ -229,11 +216,10 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
         setTimeout(() => {
           get().loadGatewayConfig();
         }, CONFIG_RETRY_DELAY_MS);
-        // Keep current bootState (pending or needs_setup) while retrying
         return;
       }
 
-      // All levels exhausted — genuinely needs setup
+      // All retries exhausted — genuinely needs setup
       console.warn('[config] All validation levels exhausted — showing setup wizard',
         { gwConnected, config: gatewayConfig });
       set({ bootState: 'needs_setup', _configRetryCount: 0 });
