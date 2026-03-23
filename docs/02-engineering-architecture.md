@@ -2,7 +2,7 @@
 
 > **Research-Claw (科研龙虾) — Engineering Architecture**
 >
-> Status: DRAFT v1.0 | Last updated: 2026-03-11
+> Status: HISTORICAL (pre-redesign, 2026-03-11). Prompt architecture superseded by `docs/research-claw/PROMPT-ARCHITECTURE-REDESIGN.md` | Last updated: 2026-03-11
 >
 > OpenClaw base: `2026.3.8` (commit `62d5df28d`) | Protocol: v3
 

@@ -1,5 +1,6 @@
 # S4 — Prompt & Behavior Development SOP
 
+> **HISTORICAL** (pre-redesign). Superseded by `docs/research-claw/PROMPT-ARCHITECTURE-REDESIGN.md`
 > Development standards and operation log for bootstrap files, agent prompts, and behavior tuning
 > Covers: 04 (Prompt Design Framework) + workspace/ bootstrap files
 

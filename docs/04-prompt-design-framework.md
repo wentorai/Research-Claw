@@ -1,6 +1,6 @@
 # C4 — Bootstrap File System: Prompt Design Framework
 
-> **Status:** Draft v1.0
+> **Status:** HISTORICAL (pre-redesign, 2026-03-11). Superseded by `docs/research-claw/PROMPT-ARCHITECTURE-REDESIGN.md`
 > **Updated:** 2026-03-11
 > **Cross-refs:** `01` (message card types), `02` (bootstrap loading mechanics), `03d` (markdown conventions)
 
