@@ -17,6 +17,18 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-03-23 — Gateway Connection Liveness + Config Sync Fix
+
+- [2026-03-23] [Dashboard] [Claude] feat: tick watchdog — port OC client.ts:659-681, 检测 zombie connection (30s tick, 60s timeout → close 4000 → 自动重连)
+- [2026-03-23] [Dashboard] [Claude] feat: page visibility recovery — tab 切回时调 `checkTickLiveness()`, 绕过 Chrome 后台 timer 节流
+- [2026-03-23] [Dashboard] [Claude] feat: stale stream watchdog — setInterval(15s) 替代 setTimeout, 追踪 `_lastDeltaAt`, 工具执行保护
+- [2026-03-23] [Dashboard] [Claude] feat: connection status banner — reconnecting 黄色 / disconnected 红色提示条
+- [2026-03-23] [Dashboard] [Claude] fix(P0): config.get 字段偏好反转 — 从 `resolved` (缺 runtime defaults) 改为 `config` (完整)
+- [2026-03-23] [Dashboard] [Claude] fix(P0): 删除 wizard fast-path — "No providers → wizard" 不再跳过 5 次 retry, 防止瞬态空配置误触发
+- [2026-03-23] [Dashboard] [Claude] refactor: stale timer require → static import (tool-stream 无循环依赖)
+- [2026-03-23] [Infra] [Claude] doc: 新增 `docs/踩坑记录/dashboard-gateway-liveness-and-config.md`
+- [2026-03-23] [Infra] [Claude] Tests: 9 new gateway client tests (tick watchdog + visibility), 473 total pass
+
 ### 2026-03-22 — Dashboard Data Integrity & Performance Sprint
 
 - [2026-03-22] [Dashboard] [Claude] feat: Tasks panel server-side pagination — `PAGE_SIZE=50`, `loadMoreTasks()`, "加载更多" button, hidden during search
