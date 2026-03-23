@@ -160,6 +160,12 @@ export class GatewayClient {
   // Aligned with OC gateway.ts deviceTokenRetryBudgetUsed pattern.
   private pendingDeviceTokenRetry = false;
   private deviceTokenRetryBudgetUsed = false;
+  // Tick-based connection liveness detection (aligned with OC client.ts:137-140).
+  // Gateway broadcasts 'tick' events every tickIntervalMs. If none arrive within
+  // 2x the interval, the connection is presumed dead (zombie) and closed.
+  private lastTick: number | null = null;
+  private tickIntervalMs = 30_000;
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: GatewayClientOptions) {
     this.opts = opts;
@@ -179,6 +185,7 @@ export class GatewayClient {
       this.ws = null;
     }
     this.intentionalClose = false;
+    this.stopTickWatch();
     // Preserve 'reconnecting' state so the close handler continues the retry loop
     if (this.state !== 'reconnecting') {
       this.setState('connecting');
@@ -215,6 +222,7 @@ export class GatewayClient {
       const connectError = this.pendingConnectError;
       this.pendingConnectError = undefined;
       this.ws = null;
+      this.stopTickWatch();
 
       // Reject all pending requests
       for (const [id, entry] of this.pending) {
@@ -264,6 +272,7 @@ export class GatewayClient {
   disconnect(): void {
     this.intentionalClose = true;
     this.reconnector.cancel();
+    this.stopTickWatch();
     this.pendingConnectError = undefined;
     this.pendingDeviceTokenRetry = false;
     this.deviceTokenRetryBudgetUsed = false;
@@ -458,6 +467,11 @@ export class GatewayClient {
         this.setState('connected');
         this.reconnector.reset();
         this.lastSeq = 0;
+        // Tick-based liveness detection (aligned with OC client.ts:404-409)
+        this.tickIntervalMs = typeof hello.policy?.tickIntervalMs === 'number'
+          ? hello.policy.tickIntervalMs : 30_000;
+        this.lastTick = Date.now();
+        this.startTickWatch();
         // Reset retry state on successful connect
         this.pendingDeviceTokenRetry = false;
         this.deviceTokenRetryBudgetUsed = false;
@@ -568,6 +582,10 @@ export class GatewayClient {
       }
       this.lastSeq = frame.seq;
     }
+    // Update tick liveness timestamp (aligned with OC client.ts:578-580)
+    if (frame.event === 'tick') {
+      this.lastTick = Date.now();
+    }
 
     const handlers = this.eventHandlers.get(frame.event);
     if (handlers) {
@@ -576,6 +594,33 @@ export class GatewayClient {
       }
     }
     this.opts.onEvent?.(frame);
+  }
+
+  // ---- Tick watchdog (aligned with OC client.ts:659-681) ----
+  // Gateway broadcasts 'tick' events every tickIntervalMs (default 30s).
+  // If no tick arrives within 2x the interval, the connection is presumed
+  // dead (zombie) and closed with code 4000 to trigger automatic reconnect.
+
+  private startTickWatch(): void {
+    this.stopTickWatch();
+    const interval = Math.max(this.tickIntervalMs, 1000);
+    this.tickTimer = setInterval(() => {
+      if (!this.lastTick) return;
+      const gap = Date.now() - this.lastTick;
+      if (gap > this.tickIntervalMs * 2) {
+        console.warn(
+          `[GatewayClient] Tick timeout: ${gap}ms since last tick (threshold: ${this.tickIntervalMs * 2}ms)`,
+        );
+        this.ws?.close(4000, 'tick timeout');
+      }
+    }, interval);
+  }
+
+  private stopTickWatch(): void {
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
   }
 
   private setState(state: ConnectionState): void {

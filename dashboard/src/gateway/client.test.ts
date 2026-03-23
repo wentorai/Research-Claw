@@ -86,8 +86,9 @@ describe('GatewayClient', () => {
     }
   }
 
-  // Helper to complete the connect handshake
-  async function completeHandshake(client: GatewayClient) {
+  // Helper to complete the connect handshake.
+  // Accepts optional helloOverrides to customize the hello-ok payload (e.g. policy.tickIntervalMs).
+  async function completeHandshake(client: GatewayClient, helloOverrides?: Record<string, unknown>) {
     client.connect();
     await vi.advanceTimersByTimeAsync(1); // Let microtask fire onopen
 
@@ -103,7 +104,7 @@ describe('GatewayClient', () => {
     const sentFrame = JSON.parse(mockWsInstance.send.mock.calls[0][0]);
     expect(sentFrame.method).toBe('connect');
 
-    // Server responds with hello-ok
+    // Server responds with hello-ok (includes policy for tick watchdog)
     serverSend({
       type: 'res',
       id: sentFrame.id,
@@ -113,6 +114,8 @@ describe('GatewayClient', () => {
         protocol: 3,
         server: { version: '1.0.0', connId: 'conn-123' },
         features: { methods: ['health'], events: [] },
+        policy: { tickIntervalMs: 30_000 },
+        ...helloOverrides,
       },
     });
   }
@@ -502,6 +505,125 @@ describe('GatewayClient', () => {
 
       // Should not attempt reconnect
       expect(states.filter(s => s === 'reconnecting')).toHaveLength(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tick watchdog — aligned with OC client.ts:659-681
+  // Gateway broadcasts 'tick' events every tickIntervalMs. The client closes
+  // with code 4000 ("tick timeout") if no tick arrives within 2x the interval,
+  // triggering automatic reconnect. This detects zombie/half-open connections
+  // that the browser's WebSocket layer cannot detect natively.
+  //
+  // Source: openclaw/src/gateway/client.ts:659-681 (startTickWatch)
+  //         openclaw/src/gateway/client.ts:578-580 (tick event → lastTick)
+  //         openclaw/src/gateway/client.ts:404-409 (hello → tickIntervalMs)
+  //         openclaw/src/gateway/server-maintenance.ts:58-63 (tick broadcast)
+  //         openclaw/src/gateway/server-constants.ts:33 (TICK_INTERVAL_MS = 30_000)
+  // ---------------------------------------------------------------------------
+  describe('Tick watchdog (aligned with OC client.ts:659-681)', () => {
+    it('closes with code 4000 when no tick arrives within 2x tickIntervalMs', async () => {
+      const onClose = vi.fn();
+      const client = new GatewayClient({
+        url: 'ws://test:28789',
+        onStateChange: () => {},
+        onClose,
+      });
+      // tickIntervalMs=1000 → check every 1s, timeout at 2s
+      await completeHandshake(client, { policy: { tickIntervalMs: 1000 } });
+      mockWsInstance.close.mockClear();
+
+      // At T+1000: gap ≈ 1000 ≤ 2000 → OK
+      // At T+2000: gap ≈ 2000 ≤ 2000 → OK (not strictly >)
+      // At T+3000: gap ≈ 3000 > 2000 → CLOSE
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(mockWsInstance.close).toHaveBeenCalledWith(4000, 'tick timeout');
+    });
+
+    it('regular tick events prevent timeout', async () => {
+      const client = new GatewayClient({
+        url: 'ws://test:28789',
+        onStateChange: () => {},
+      });
+      await completeHandshake(client, { policy: { tickIntervalMs: 1000 } });
+      mockWsInstance.close.mockClear();
+
+      // Send ticks every 800ms — always within the 2s window
+      for (let t = 0; t < 5; t++) {
+        await vi.advanceTimersByTimeAsync(800);
+        serverSend({ type: 'event', event: 'tick', payload: { ts: Date.now() }, seq: t + 1 });
+      }
+
+      // Total advanced: 4000ms — would have timed out at 3000ms without ticks
+      expect(mockWsInstance.close).not.toHaveBeenCalled();
+      expect(client.isConnected).toBe(true);
+      client.disconnect();
+    });
+
+    it('uses default 30s when hello has no policy.tickIntervalMs', async () => {
+      const client = new GatewayClient({
+        url: 'ws://test:28789',
+        onStateChange: () => {},
+      });
+      await completeHandshake(client, { policy: undefined });
+      mockWsInstance.close.mockClear();
+
+      // With 30s default: check at 30s, gap=30s ≤ 60s → no close
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(mockWsInstance.close).not.toHaveBeenCalled();
+
+      client.disconnect();
+    });
+
+    it('tick watchdog is cleaned up on disconnect', async () => {
+      const client = new GatewayClient({
+        url: 'ws://test:28789',
+        onStateChange: () => {},
+      });
+      await completeHandshake(client, { policy: { tickIntervalMs: 1000 } });
+
+      client.disconnect();
+      mockWsInstance.close.mockClear();
+
+      // Advance way past timeout — timer was cleared, no further close calls
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockWsInstance.close).not.toHaveBeenCalled();
+    });
+
+    it('triggers reconnect after tick timeout', async () => {
+      const states: ConnectionState[] = [];
+      const client = new GatewayClient({
+        url: 'ws://test:28789',
+        onStateChange: (s) => states.push(s),
+      });
+      await completeHandshake(client, { policy: { tickIntervalMs: 1000 } });
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(states).toContain('reconnecting');
+    });
+
+    it('respects policy.tickIntervalMs from hello response', async () => {
+      const client = new GatewayClient({
+        url: 'ws://test:28789',
+        onStateChange: () => {},
+      });
+      // Use a 5s interval → check every 5s, timeout at 10s
+      await completeHandshake(client, { policy: { tickIntervalMs: 5000 } });
+      mockWsInstance.close.mockClear();
+
+      // At 5000ms: first check, gap=5000 ≤ 10000 → no close
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockWsInstance.close).not.toHaveBeenCalled();
+
+      // At 10000ms: second check, gap=10000 ≤ 10000 → no close (not strictly >)
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockWsInstance.close).not.toHaveBeenCalled();
+
+      // At 15000ms: third check, gap=15000 > 10000 → CLOSE
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockWsInstance.close).toHaveBeenCalledWith(4000, 'tick timeout');
     });
   });
 });
