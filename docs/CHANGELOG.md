@@ -17,6 +17,14 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-03-23 — Heartbeat Token Cost Fix + Settings UI
+
+- [2026-03-23] [Dashboard] [Claude] feat: Settings panel heartbeat controls — ON/OFF toggle + interval selector (15m/30m/1h/2h/4h)
+- [2026-03-23] [Dashboard] [Claude] fix(P0): heartbeat `lightContext: true` as RC default — reduces each heartbeat turn from full bootstrap (~10K tokens) to HEARTBEAT.md only (~2K tokens)
+- [2026-03-23] [Dashboard] [Claude] feat: config-patch.ts heartbeat round-trip — extractConfigFields reads `agents.defaults.heartbeat`, buildSaveConfig writes with `lightContext: true` always enforced
+- [2026-03-23] [Infra] [Claude] feat: ensure-config.cjs migration — existing users auto-receive `lightContext: true` on next startup; user's disabled (`every: "0m"`) setting preserved
+- [2026-03-23] [Infra] [Claude] Tests: 7 new heartbeat config tests (build/extract/disable/merge), 1018 total pass
+
 ### 2026-03-23 — Gateway Connection Liveness + Config Sync Fix
 
 - [2026-03-23] [Dashboard] [Claude] feat: tick watchdog — port OC client.ts:659-681, 检测 zombie connection (30s tick, 60s timeout → close 4000 → 自动重连)
