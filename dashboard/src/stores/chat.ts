@@ -75,7 +75,6 @@ function startStaleStreamWatchdog(get: () => ChatState) {
         streamText: null,
         runId: null,
         _streamStartedAt: null, _lastDeltaAt: null,
-        _lastDeltaAt: null,
       });
       useChatStore.getState().loadHistory();
     }
@@ -358,7 +357,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   _pendingGapReload: false,
   _pendingUserMsgs: _restoredPendingMsgs,
   _streamStartedAt: null, _lastDeltaAt: null,
-  _lastDeltaAt: null,
 
   onGapDetected: () => {
     if (!get().streaming && !get().sending) {
