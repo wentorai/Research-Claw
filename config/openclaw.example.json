@@ -50,8 +50,7 @@
         "http://127.0.0.1:5175",
         "http://localhost:5175"
       ],
-      "dangerouslyDisableDeviceAuth": true,
-      "dangerouslyAllowHostHeaderOriginFallback": true
+      "dangerouslyDisableDeviceAuth": true
     },
     "auth": {
       "mode": "none"
