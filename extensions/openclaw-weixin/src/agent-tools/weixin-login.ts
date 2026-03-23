@@ -5,12 +5,12 @@ import {
   waitForWeixinLogin,
 } from "../auth/login-qr.js";
 import { loadWeixinAccount, DEFAULT_BASE_URL } from "../auth/accounts.js";
+import { renderQrDataUrl } from "../util/qr-image.js";
 
 /**
  * Raw JSON Schema for the tool parameters.
  * Cannot use @sinclair/typebox here — it lives in OC's node_modules which is
- * outside this plugin's module resolution path. jiti resolves from the file's
- * location, not the OC process root.
+ * outside this plugin's module resolution path.
  */
 const PARAMETERS_SCHEMA = {
   type: "object",
@@ -25,12 +25,12 @@ const PARAMETERS_SCHEMA = {
 
 /**
  * Agent tool for WeChat QR-code login.
- * Mirrors the WhatsApp `whatsapp_login` tool pattern from OC core.
  *
- * Usage flow (from agent):
- *   1. Call weixin_login { action: "start" } → returns QR code URL
- *   2. Display QR as markdown image: ![qr](url)
- *   3. Call weixin_login { action: "wait" } → blocks until user scans or timeout
+ * Two-step flow:
+ *   1. weixin_login { action: "start" } → returns inline QR code image (data URL)
+ *   2. weixin_login { action: "wait" } → blocks until user scans or timeout
+ *
+ * The agent MUST display the QR image from step 1, then IMMEDIATELY call step 2.
  */
 export function createWeixinLoginTool() {
   return {
@@ -38,7 +38,7 @@ export function createWeixinLoginTool() {
     name: "weixin_login",
     ownerOnly: true,
     description:
-      "Generate a WeChat QR code for linking, or wait for the scan to complete.",
+      "Connect WeChat: action='start' generates an inline QR code image, action='wait' blocks until user scans. You MUST call start first, display the returned QR image to the user, then IMMEDIATELY call wait.",
     parameters: PARAMETERS_SCHEMA,
     execute: async (_toolCallId: string, args: unknown) => {
       const typedArgs = args as {
@@ -58,7 +58,7 @@ export function createWeixinLoginTool() {
         const result = await waitForWeixinLogin({
           sessionKey,
           apiBaseUrl: savedBaseUrl || DEFAULT_BASE_URL,
-          timeoutMs: typedArgs.timeoutMs,
+          timeoutMs: typedArgs.timeoutMs ?? 120_000,
           botType: DEFAULT_ILINK_BOT_TYPE,
         });
         return {
@@ -79,19 +79,22 @@ export function createWeixinLoginTool() {
         timeoutMs: typedArgs.timeoutMs,
       });
 
-      if (!result.qrcodeUrl) {
+      if (!result.qrcode) {
         return {
           content: [{ type: "text" as const, text: result.message }],
           details: { qr: false },
         };
       }
 
+      // Generate inline data URL so the dashboard can render it as <img>
+      const qrDataUrl = renderQrDataUrl(result.qrcodeUrl || result.qrcode);
+
       const text = [
         result.message,
         "",
-        "打开微信扫描以下二维码：",
+        `![weixin-qr](${qrDataUrl})`,
         "",
-        `![weixin-qr](${result.qrcodeUrl})`,
+        "IMPORTANT: Now call weixin_login with action='wait' to await the scan result.",
       ].join("\n");
       return {
         content: [{ type: "text" as const, text }],

@@ -117,6 +117,9 @@ async function pollQRStatus(apiBaseUrl: string, qrcode: string): Promise<StatusR
 }
 
 export type WeixinQrStartResult = {
+  /** Raw QR code data string (for rendering to image locally). */
+  qrcode?: string;
+  /** HTTPS URL to the iLink QR page (may not render as <img>). */
   qrcodeUrl?: string;
   message: string;
   sessionKey: string;
@@ -182,6 +185,7 @@ export async function startWeixinLoginWithQr(opts: {
     activeLogins.set(sessionKey, login);
 
     return {
+      qrcode: qrResponse.qrcode,
       qrcodeUrl: qrResponse.qrcode_img_content,
       message: "使用微信扫描以下二维码，以完成连接。",
       sessionKey,
