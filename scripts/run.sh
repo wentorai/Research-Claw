@@ -57,6 +57,12 @@ fi
 # Without this, it reads ~/.openclaw/openclaw.json which has no RC settings.
 export OPENCLAW_CONFIG_PATH="$(pwd)/config/openclaw.json"
 
+# --- Ensure config has all OC 2026.3.13+ required fields ---
+# MUST run BEFORE path resolution so that newly added relative paths
+# (e.g. ./extensions/openclaw-weixin) get converted to absolute below.
+GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
+node "$(dirname "$0")/ensure-config.cjs" "$OPENCLAW_CONFIG_PATH" ${GLOBAL_CFG:+"$GLOBAL_CFG"} 2>/dev/null || true
+
 # --- Resolve relative paths in config to absolute ---
 # OpenClaw's agent runner calls process.chdir(workspace/) during runs (attempt.ts:774).
 # config.get re-reads config from disk and validates paths relative to CWD.
@@ -84,12 +90,6 @@ if (cfg.agents?.defaults?.workspace && !path.isAbsolute(cfg.agents.defaults.work
 }
 if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); console.log('[run] Config paths resolved to absolute'); }
 "
-
-# --- Ensure config has all OC 2026.3.13+ required fields ---
-# Shared with install.sh and docker-entrypoint.sh via ensure-config.cjs.
-# Covers: plugins.allow, discovery.mdns/wideArea off, stale cleanup.
-GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
-node "$(dirname "$0")/ensure-config.cjs" "$OPENCLAW_CONFIG_PATH" ${GLOBAL_CFG:+"$GLOBAL_CFG"} 2>/dev/null || true
 
 # --- Detect the correct Node for the gateway ---
 # Priority: conda openclaw env (has matching ABI for better-sqlite3) → system node

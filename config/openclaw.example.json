@@ -143,20 +143,7 @@
     "restart": true,
     "ownerDisplay": "raw"
   },
-  "channels": {
-    "telegram": {
-      "botToken": "<YOUR_TELEGRAM_BOT_TOKEN>",
-      "commands": {
-        "native": false
-      }
-    },
-    "discord": {
-      "token": "<YOUR_DISCORD_BOT_TOKEN>",
-      "commands": {
-        "native": false
-      }
-    }
-  },
+  "channels": {},
   "cron": {
     "enabled": true
   }

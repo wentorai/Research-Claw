@@ -104,12 +104,16 @@ function ensureConfig(filePath) {
   }
 
   // 8. plugins.load.paths — ensure openclaw-weixin is discoverable
+  // Match by directory suffix, not exact string — paths may be absolute from a previous run.
   if (!c.plugins.load) c.plugins.load = {};
   if (!Array.isArray(c.plugins.load.paths)) c.plugins.load.paths = [];
-  const REQUIRED_LOAD_PATHS = ['./extensions/research-claw-core', './extensions/openclaw-weixin'];
-  for (const p of REQUIRED_LOAD_PATHS) {
-    if (!c.plugins.load.paths.includes(p)) {
-      c.plugins.load.paths.push(p);
+  const REQUIRED_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin'];
+  for (const dir of REQUIRED_DIRS) {
+    const alreadyPresent = c.plugins.load.paths.some(p =>
+      p === './' + dir || p.endsWith('/' + dir)
+    );
+    if (!alreadyPresent) {
+      c.plugins.load.paths.push('./' + dir);
       changed = true;
     }
   }
