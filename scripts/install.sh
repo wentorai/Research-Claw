@@ -467,8 +467,23 @@ fi
 # --- [6/8] Install + build ---
 # Put $GW_NODE first in PATH so pnpm compiles native modules (better-sqlite3)
 # for the gateway's Node, not the system Node. This avoids ABI mismatch entirely.
+#
+# In curl|bash, stdin is the pipe (exhausted after bash reads the script).
+# pnpm may prompt to recreate node_modules after lockfile changes, but reads
+# EOF from stdin and defaults to "no" → ERR_PNPM_ABORTED_REMOVE_MODULES_DIR.
+# Fix: pipe `yes` in non-interactive mode to auto-accept pnpm prompts.
+_pnpm_install() {
+  if [ -t 0 ]; then
+    PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install "$@"
+  else
+    # `echo y` sends a single "y\n" and exits 0 cleanly.
+    # Using `yes` instead would cause SIGPIPE (exit 141) when pnpm closes stdin,
+    # and `set -o pipefail` would treat the entire pipeline as failed.
+    echo y | PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install "$@"
+  fi
+}
 info "Installing dependencies..."
-if ! (PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install --frozen-lockfile 2>/dev/null || PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install); then
+if ! (_pnpm_install --frozen-lockfile 2>/dev/null || _pnpm_install); then
   die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
 fi
 ok "Dependencies installed"
@@ -735,7 +750,7 @@ ensure_native_modules() {
   # Use $GW_NODE_DIR in PATH so native modules compile for the correct Node
   info "Rebuild failed — clean reinstalling dependencies..."
   rm -rf node_modules
-  if ! (PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install --frozen-lockfile 2>/dev/null || PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install); then
+  if ! (_pnpm_install --frozen-lockfile 2>/dev/null || _pnpm_install); then
     die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
   fi
   # Rebuild dashboard after clean install
@@ -1053,6 +1068,7 @@ done) &
 
 STOP=false
 trap 'STOP=true' INT TERM
+trap - ERR  # Clear ERR trap — restart loop handles errors internally (macOS bash 3.2 compat)
 set +e
 
 cd "$INSTALL_DIR"
@@ -1062,27 +1078,46 @@ cd "$INSTALL_DIR"
 # OPENCLAW_CONFIG_PATH already exported at line 651 (shell profile section)
 # using $INSTALL_DIR which is absolute ($HOME/research-claw by default).
 
-# Resolve relative paths in config to absolute (prevents CWD drift during agent runs).
+# Resolve relative paths to absolute AND rebase stale absolute paths from other
+# installations (e.g., dev ~/Downloads/wentor/research-claw → installed ~/research-claw).
+# This happens when the config was written by run.sh in a different directory and
+# survives across git pull (config is gitignored).
 "$GW_NODE" -e "
 const fs = require('fs'), path = require('path');
 const f = process.env.OPENCLAW_CONFIG_PATH;
 const cfg = JSON.parse(fs.readFileSync(f, 'utf8'));
 const root = process.cwd();
-const abs = p => path.isAbsolute(p) ? p : path.resolve(root, p);
+const fix = p => {
+  if (!path.isAbsolute(p)) return { v: path.resolve(root, p), c: true };
+  if (p.startsWith(root + '/') || p === root) return { v: p, c: false };
+  // Absolute path outside our root — try to rebase via basename match
+  const name = path.basename(p);
+  const parent = path.basename(path.dirname(p));
+  const candidate = path.join(root, parent, name);
+  try { fs.accessSync(candidate); return { v: candidate, c: true }; } catch {}
+  return { v: p, c: false };
+};
 let changed = false;
-if (cfg.plugins?.load?.paths?.some(p => !path.isAbsolute(p))) {
-  cfg.plugins.load.paths = cfg.plugins.load.paths.map(abs); changed = true;
+if (cfg.plugins?.load?.paths) {
+  cfg.plugins.load.paths = cfg.plugins.load.paths.map(p => { const r = fix(p); if (r.c) changed = true; return r.v; });
 }
-if (cfg.skills?.load?.extraDirs?.some(p => !path.isAbsolute(p))) {
-  cfg.skills.load.extraDirs = cfg.skills.load.extraDirs.map(abs); changed = true;
+if (cfg.skills?.load?.extraDirs) {
+  cfg.skills.load.extraDirs = cfg.skills.load.extraDirs.map(p => { const r = fix(p); if (r.c) changed = true; return r.v; });
 }
-if (cfg.gateway?.controlUi?.root && !path.isAbsolute(cfg.gateway.controlUi.root)) {
-  cfg.gateway.controlUi.root = abs(cfg.gateway.controlUi.root); changed = true;
+if (cfg.gateway?.controlUi?.root) {
+  const r = fix(cfg.gateway.controlUi.root); if (r.c) { cfg.gateway.controlUi.root = r.v; changed = true; }
 }
-if (cfg.agents?.defaults?.workspace && !path.isAbsolute(cfg.agents.defaults.workspace)) {
-  cfg.agents.defaults.workspace = abs(cfg.agents.defaults.workspace); changed = true;
+if (cfg.agents?.defaults?.workspace) {
+  const r = fix(cfg.agents.defaults.workspace); if (r.c) { cfg.agents.defaults.workspace = r.v; changed = true; }
 }
-if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); }
+if (cfg.plugins?.entries) {
+  for (const e of Object.values(cfg.plugins.entries)) {
+    if (e?.config?.dbPath && !path.isAbsolute(e.config.dbPath)) {
+      e.config.dbPath = path.resolve(root, e.config.dbPath); changed = true;
+    }
+  }
+}
+if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); console.log('[config] Rebased paths to ' + root); }
 "
 
 # Token auth — matches Dashboard's DEFAULT_TOKEN ('research-claw').
