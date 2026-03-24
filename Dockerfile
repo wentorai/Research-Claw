@@ -49,30 +49,25 @@ RUN npx playwright-core@1.58.2 install --with-deps chromium \
 # ── Miniforge3 (scientific Python) ───────────────────────────────────
 # Provides conda + Python for agent's system.run data analysis/visualization.
 # Installed to /opt/miniforge3 — does not conflict with system python3.
-ARG TARGETARCH
 RUN ARCH="$(uname -m)" \
     && curl -fsSL "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${ARCH}.sh" \
        -o /tmp/miniforge.sh \
     && bash /tmp/miniforge.sh -b -p /opt/miniforge3 \
-    && rm /tmp/miniforge.sh \
-    && /opt/miniforge3/bin/conda config --system --set auto_activate_base true
+    && rm /tmp/miniforge.sh
 
-# Configure conda mirror (China mainland; overseas builds override CONDA_MIRROR)
-RUN /opt/miniforge3/bin/conda config --system --prepend channels ${CONDA_MIRROR}/pkgs/main/ \
-    && /opt/miniforge3/bin/conda config --system --prepend channels ${CONDA_MIRROR}/cloud/conda-forge/ \
-    && /opt/miniforge3/bin/conda config --system --set show_channel_urls yes \
-    || true
-
-# Install scientific Python packages in one layer for caching
-RUN /opt/miniforge3/bin/conda install -y \
+# Install scientific Python packages via pip (more reliable in Docker than conda).
+# Miniforge provides the base Python; pip handles package installation.
+# China mirror: pip defaults to TUNA via PIP_INDEX_URL if NPM_REGISTRY is npmmirror.
+# Verify with a test import to catch silent install failures.
+RUN PIP_INDEX_URL="$(echo ${NPM_REGISTRY} | grep -q npmmirror && echo https://pypi.tuna.tsinghua.edu.cn/simple || echo https://pypi.org/simple)" \
+    && /opt/miniforge3/bin/pip install --no-cache-dir -i "$PIP_INDEX_URL" \
       numpy pandas scipy matplotlib seaborn plotly \
       scikit-learn statsmodels \
       openpyxl xlsxwriter tabulate \
       requests beautifulsoup4 \
       networkx sympy biopython \
       nbformat jupyter-core \
-    && /opt/miniforge3/bin/conda clean -afy \
-    && find /opt/miniforge3 -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+    && /opt/miniforge3/bin/python3 -c "import numpy; print(f'numpy {numpy.__version__} OK')"
 
 ENV PATH="/opt/miniforge3/bin:$PATH"
 
