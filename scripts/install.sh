@@ -406,6 +406,13 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   [ -f "$_RC_BAK/BOOTSTRAP.md.done" ] && cp "$_RC_BAK/BOOTSTRAP.md.done" "$RC_DIR/BOOTSTRAP.md.done"
   rm -rf "$_RC_BAK"
 
+  # Invalidate pnpm's "already up to date" cache after git pull.
+  # Scenario: a previous pnpm install was aborted (e.g., "Proceed?" prompt got EOF)
+  # but .modules.yaml was already written. Next run: pnpm sees hash match → skips
+  # install → stale packages remain (e.g., sass-embedded instead of sass).
+  # Deleting .modules.yaml forces pnpm to re-verify all packages against the lockfile.
+  rm -f node_modules/.modules.yaml 2>/dev/null || true
+
   ok "Updated"
 else
   info "Cloning to $INSTALL_DIR ..."
