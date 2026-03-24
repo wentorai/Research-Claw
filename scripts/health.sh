@@ -9,7 +9,7 @@ echo "=== Research-Claw Health Check ==="
 echo "Gateway: $BASE"
 
 # HTTP healthz endpoint
-if RESP=$(curl -sf "$BASE/healthz" 2>/dev/null); then
+if RESP=$(curl -sf --noproxy '*' "$BASE/healthz" 2>/dev/null); then
   echo "[OK] HTTP healthz responsive"
   echo "     $RESP"
 else
@@ -29,7 +29,7 @@ if command -v nc &>/dev/null; then
 fi
 
 # Dashboard UI
-if curl -sf "$BASE/" > /dev/null 2>/dev/null; then
+if curl -sf --noproxy '*' "$BASE/" > /dev/null 2>/dev/null; then
   echo "[OK] Dashboard UI accessible"
 else
   echo "[WARN] Dashboard UI not responding (gateway may still be starting)"

@@ -37,7 +37,7 @@ services:
       #   - /mnt/c/Users/YOUR_USER/Documents:/host/documents:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:28789/healthz || exit 1"]
+      test: ["CMD-SHELL", "curl -sf --noproxy '*' http://127.0.0.1:28789/healthz || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -1055,7 +1055,7 @@ printf "  ${D}Press Ctrl+C to stop${N}\n\n"
 # Open browser when ready (background)
 # healthz always checks via loopback (works for both bind modes)
 (for _ in $(seq 1 30); do
-  if curl -sf "http://127.0.0.1:$PORT/healthz" &>/dev/null; then
+  if curl -sf --noproxy '*' "http://127.0.0.1:$PORT/healthz" &>/dev/null; then
     if [ "$RC_OS" = mac ]; then
       open "$DASHBOARD_URL" 2>/dev/null || true
     else
