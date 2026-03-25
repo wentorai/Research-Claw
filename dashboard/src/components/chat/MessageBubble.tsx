@@ -6,6 +6,7 @@ import { CopyOutlined, CheckOutlined, CodeOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ChatMessage } from '../../gateway/types';
 import { useGatewayStore } from '../../stores/gateway';
+import { sanitizeUserMessage } from '../../utils/sanitize-message';
 import CodeBlock from './CodeBlock';
 
 const { Text } = Typography;
@@ -53,31 +54,7 @@ function extractImages(message: ChatMessage): ImageBlock[] {
   return images;
 }
 
-/**
- * Strip context metadata injected by Research-Claw's before_prompt_build hook.
- * History messages from the gateway include lines like:
- *   [Research-Claw] Library: 0 papers (0 unread)
- *   [Thu 2026-03-12 10:25 GMT+8] actual message
- * We extract only the user's original text.
- */
-function stripUserMetaPrefix(raw: string): string {
-  const lines = raw.split('\n');
-  const cleaned: string[] = [];
-  for (const line of lines) {
-    // Skip [Research-Claw] context lines
-    if (/^\[Research-Claw\]/.test(line.trim())) continue;
-    // Strip leading timestamp tag: [Thu 2026-03-12 10:25 GMT+8]
-    const tsMatch = line.match(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}\s+GMT[+-]\d+\]\s*(.*)/);
-    if (tsMatch) {
-      if (tsMatch[1].length > 0) cleaned.push(tsMatch[1]);
-      continue;
-    }
-    // Skip empty lines that were between meta lines
-    if (line.trim() === '' && cleaned.length === 0) continue;
-    cleaned.push(line);
-  }
-  return cleaned.join('\n').trim();
-}
+// stripUserMetaPrefix replaced by unified sanitizeUserMessage() in utils/sanitize-message.ts
 
 /**
  * Strip leaked model control tokens from assistant text.
@@ -262,7 +239,7 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
     const raw = extractRawText();
     const msg = messageRef.current;
     const copyText = msg.role === 'user'
-      ? stripUserMetaPrefix(raw)
+      ? sanitizeUserMessage(raw)
       : stripModelSpecialTokens(stripThinkingTags(raw));
     navigator.clipboard.writeText(stripImageMarkers(copyText)).then(() => {
       setCopied('visible');
@@ -311,7 +288,7 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
   // For user messages: strip meta prefix
   // For assistant messages: strip thinking tags from displayed text
   // Source: message-extract.ts:10-11 — if (role === "assistant") return stripThinkingTags(text);
-  const preText = isUser ? stripUserMetaPrefix(rawText) : stripModelSpecialTokens(stripThinkingTags(rawText));
+  const preText = isUser ? sanitizeUserMessage(rawText) : stripModelSpecialTokens(stripThinkingTags(rawText));
 
   // Strip [rc-image:...] markers from display (images rendered separately)
   const text = stripImageMarkers(preText);
@@ -325,6 +302,75 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
   const contentImages = extractImages(message);
   const wsImages = useWorkspaceImages(rawText);
   const images = contentImages.length > 0 ? contentImages : wsImages;
+
+  // ── System message rendering (slash command results) ──
+  // Centered, muted styling matching OC's injectCommandResult pattern.
+  if (message.role === 'system') {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          marginBottom: 16,
+        }}
+      >
+        <Text
+          type="secondary"
+          style={{
+            fontSize: 11,
+            marginBottom: 4,
+            fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
+          }}
+        >
+          {t('chat.system')}
+        </Text>
+        <div
+          style={{
+            padding: '10px 14px',
+            borderRadius: 12,
+            border: '1px dashed var(--border, rgba(255, 255, 255, 0.18))',
+            background: 'var(--surface, rgba(255, 255, 255, 0.04))',
+            maxWidth: '85%',
+            fontSize: 13,
+            lineHeight: 1.5,
+            overflow: 'hidden',
+            wordBreak: 'break-word',
+          }}
+          className="markdown-body"
+        >
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              code: ({ className, children, ...props }) => {
+                const isInline = !className;
+                if (isInline) {
+                  return (
+                    <code
+                      style={{
+                        background: 'var(--surface-active)',
+                        padding: '2px 4px',
+                        borderRadius: 3,
+                        fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
+                        fontSize: '0.9em',
+                      }}
+                      {...props}
+                    >
+                      {children}
+                    </code>
+                  );
+                }
+                return <CodeBlock className={className}>{children}</CodeBlock>;
+              },
+              pre: ({ children }) => <>{children}</>,
+            }}
+          >
+            {text}
+          </ReactMarkdown>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

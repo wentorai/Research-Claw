@@ -10,6 +10,8 @@ import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
 import { primaryModelSupportsVision, hasImageModelConfigured } from './config';
 import i18n from '../i18n';
+import { sanitizeUserMessage, CRON_REMINDER_RE } from '../utils/sanitize-message';
+import { parseSlashCommand, executeSlashCommand } from '../utils/slash-commands';
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 
@@ -110,55 +112,14 @@ function isSilentReply(text: string | undefined): boolean {
   return text !== undefined && SILENT_REPLY_PATTERN.test(text);
 }
 
-/** Roles that should be displayed in the chat UI. */
-const VISIBLE_ROLES = new Set(['user', 'assistant']);
-const CRON_REMINDER_RE = /A scheduled reminder has been triggered\b/i;
+/** Roles that should be displayed in the chat UI (includes 'system' for slash command results). */
+const VISIBLE_ROLES = new Set(['user', 'assistant', 'system']);
 
 function isCronReminderInjection(text: string): boolean {
   return CRON_REMINDER_RE.test(text);
 }
 
-/**
- * Strip system-injected context that OpenClaw stores inside user messages.
- *
- * Our `before_prompt_build` hook returns `{ prependContext }` which OpenClaw
- * persists as part of the user message. On history reload, these lines pollute
- * the displayed message. Two patterns are stripped:
- *
- *   1. `[Research-Claw] ...` header lines + their `  - ...` continuations
- *   2. `System: ...` lines (exec events, run commands, etc.)
- */
-function stripInjectedContext(text: string): string {
-  // Hide cron-injected reminder template messages from chat UI.
-  if (isCronReminderInjection(text)) {
-    return '';
-  }
-
-  const lines = text.split('\n');
-  const cleaned: string[] = [];
-  let inRcBlock = false;
-
-  for (const line of lines) {
-    if (line.startsWith('[Research-Claw]')) {
-      inRcBlock = true;
-      continue;
-    }
-    // Indented continuation of an [Research-Claw] block
-    if (inRcBlock && /^\s{2,}-\s/.test(line)) {
-      continue;
-    }
-    inRcBlock = false;
-
-    // All System: prefixed lines (exec events, run commands, etc.)
-    if (/^System:\s/.test(line)) {
-      continue;
-    }
-
-    cleaned.push(line);
-  }
-
-  return cleaned.join('\n').trim();
-}
+// stripInjectedContext replaced by unified sanitizeUserMessage() in utils/sanitize-message.ts
 
 function isVisibleRole(role: string): boolean {
   return VISIBLE_ROLES.has(role);
@@ -389,6 +350,50 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       return;
     }
 
+    // ── Slash command interception ──
+    // Intercept executeLocal commands client-side (like OC native UI does)
+    // instead of sending them as chat messages to the agent.
+    // Source: openclaw/ui/src/ui/app-chat.ts:212-236
+    const parsed = parseSlashCommand(trimmed);
+    if (parsed?.command.executeLocal) {
+      try {
+        const result = await executeSlashCommand(
+          client, get().sessionKey, parsed.command.name, parsed.args,
+        );
+
+        // Handle side effects BEFORE injecting the system message, so that
+        // refresh-action commands (e.g. /compact) don't lose the result.
+        // loadHistory() replaces messages[] — we must inject the system
+        // message AFTER it runs, not before.
+        switch (result.action) {
+          case 'refresh':
+            await get().loadHistory();
+            get().loadSessionUsage();
+            break;
+          case 'stop':
+            get().abort();
+            break;
+          case 'new-session':
+            useSessionsStore.getState().createSession();
+            break;
+          case 'clear':
+            set({ messages: [] });
+            break;
+        }
+
+        // Display command input as user message + result as system message
+        // (appended after side effects so they survive loadHistory refresh)
+        if (result.content) {
+          const userMsg: ChatMessage = { role: 'user', text: trimmed, timestamp: Date.now() };
+          const sysMsg: ChatMessage = { role: 'system', text: result.content, timestamp: Date.now() };
+          set((s) => ({ messages: [...s.messages, userMsg, sysMsg] }));
+        }
+      } catch (err) {
+        set({ lastError: err instanceof Error ? err.message : i18n.t('chat.commandFailed') });
+      }
+      return; // Don't send to agent
+    }
+
     // Build user message — include content blocks for display when attachments present
     const userMessage: ChatMessage = {
       role: 'user',
@@ -593,13 +598,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // Filter out toolResult messages — they are tool internals, not user-visible.
       // This matches OpenClaw Lit UI behavior (chat.ts:566).
       const visible = (result.messages ?? []).filter((m) => isVisibleRole(m.role));
-      // Strip system-injected context from user messages (before_prompt_build prependContext,
-      // exec event lines, etc.) and drop messages that become empty after stripping.
+      // Strip system-injected context and channel relay attribution from user messages.
+      // Uses unified sanitizeUserMessage() which handles all known injection patterns:
+      // [Research-Claw] blocks, System: lines, channel attributions (ou_xxx:, [System:], etc.)
       const cleaned = visible
         .map((m) => {
           if (m.role !== 'user') return m;
           const rawText = extractText(m);
-          const stripped = stripInjectedContext(rawText);
+          const stripped = sanitizeUserMessage(rawText);
           if (!stripped) return null;
           // Preserve image content blocks from history (don't wipe content)
           // Only set text override; keep original content for image rendering

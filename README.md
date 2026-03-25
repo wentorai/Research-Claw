@@ -8,7 +8,7 @@
 
 你做导师，科研龙虾做团队。24/7 本地运行，一切产出专属于你。
 
-[![Version](https://img.shields.io/badge/version-v0.5.9-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
+[![Version](https://img.shields.io/badge/version-v0.5.10-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
@@ -46,9 +46,13 @@ curl -fsSL https://wentor.ai/install.sh | bash
 
 <div align="center">
 
+[📖 使用指南（飞书文档）](https://thesisagent.feishu.cn/docx/EN1Odi3dMoAPW2xkwWVcCAybnFg)
+
 扫码加入**科研龙虾 · WentorOS** 微信群
 
 <img src="assets/community-qr.jpg" width="260" alt="微信群二维码" />
+
+本群仅用于开发者与贡献者交流讨论。如有问题请直接提 [Issue](https://github.com/wentorai/Research-Claw/issues)
 
 </div>
 
@@ -339,6 +343,23 @@ pnpm backup         # 备份数据库
 ```
 
 > `pnpm serve` 是推荐的日常启动方式。修改 API Key / 模型等配置后，网关会自动重启，无需手动操作。
+
+### 斜杠命令
+
+在对话输入框中输入 `/` 即可触发命令联想菜单，支持键盘导航（↑↓ 选择，Enter 确认，Esc 关闭）。
+
+| 命令 | 说明 |
+|:--|:--|
+| `/compact` | 压缩会话上下文（解决 token 超限问题） |
+| `/model [name]` | 查看或切换当前模型 |
+| `/think [level]` | 设置思考级别（off / low / medium / high） |
+| `/fast [on\|off]` | 切换快速模式 |
+| `/verbose [on\|off\|full]` | 切换详细模式 |
+| `/usage` | 查看当前会话 Token 用量 |
+| `/help` | 显示所有可用命令 |
+| `/stop` | 停止当前运行 |
+| `/clear` | 清空聊天记录 |
+| `/new` | 开始新会话 |
 
 ### 更新
 

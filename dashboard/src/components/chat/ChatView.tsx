@@ -47,6 +47,7 @@ export default function ChatView() {
   // 2. Skip assistant messages with no visible text (tool-call-only turns)
   const messages = rawMessages.filter((m) => {
     if (m.role === 'user') return true;
+    if (m.role === 'system') return true; // Slash command results
     if (m.role !== 'assistant') return false;
     return extractVisibleText(m).trim().length > 0 || hasImageContent(m);
   });

@@ -714,7 +714,7 @@ RC_DIR="workspace/.ResearchClaw"
 
 info "Building..."
 BUILD_LOG="$(mktemp)"
-if "$PNPM_BIN" build >"$BUILD_LOG" 2>&1; then
+if PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build >"$BUILD_LOG" 2>&1; then
   tail -3 "$BUILD_LOG"
 else
   tail -20 "$BUILD_LOG"
@@ -727,7 +727,7 @@ ok "Build complete"
 # --- Verify dashboard build ---
 if [ ! -d "dashboard/dist" ] || [ ! -f "dashboard/dist/index.html" ]; then
   warn "Dashboard build missing. Rebuilding..."
-  "$PNPM_BIN" build:dashboard 2>&1 | tail -3 || true
+  PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build:dashboard 2>&1 | tail -3 || true
   if [ ! -f "dashboard/dist/index.html" ]; then
     warn "Dashboard build failed. The gateway will start but the web UI may not load."
     warn "Try: cd $INSTALL_DIR && pnpm build:dashboard"
@@ -763,7 +763,7 @@ ensure_native_modules() {
 
   # Attempt 1: targeted rebuild (fast, works for simple ABI mismatch)
   info "Native module ABI mismatch — rebuilding better-sqlite3..."
-  "$PNPM_BIN" rebuild better-sqlite3 2>&1 | tail -3 || true
+  PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" rebuild better-sqlite3 2>&1 | tail -3 || true
   if test_sqlite3; then
     ok "Native modules rebuilt for $("$GW_NODE" -v)"
     return 0
@@ -777,7 +777,7 @@ ensure_native_modules() {
     die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
   fi
   # Rebuild dashboard after clean install
-  "$PNPM_BIN" build 2>&1 | tail -3 || true
+  PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build 2>&1 | tail -3 || true
 
   if test_sqlite3; then
     ok "Native modules OK (clean install)"

@@ -43,7 +43,30 @@
     "imageNotSupported": "Current model does not support image input. Please enable a separate vision model in Settings, or switch to a model that supports images (e.g. Claude, GPT-4o).",
     "bgWorking": "Working in background...",
     "refresh": "Refresh chat",
-    "copyRaw": "Copy source (thinking + markdown)"
+    "copyRaw": "Copy source (thinking + markdown)",
+    "system": "System",
+    "commandFailed": "Command failed"
+  },
+  "slashCmd": {
+    "newSession": "Starting new session...",
+    "stopping": "Stopping current run...",
+    "cleared": "Chat history cleared.",
+    "compactSuccess": "Context compacted successfully.",
+    "compactFailed": "Compaction failed",
+    "currentModel": "Current model",
+    "modelSet": "Model set to `{{model}}`.",
+    "failedModel": "Failed to get model info",
+    "currentThinking": "Current thinking level",
+    "thinkingSet": "Thinking level set to **{{level}}**.",
+    "fastMode": "Fast mode",
+    "fastEnabled": "Fast mode enabled.",
+    "fastDisabled": "Fast mode disabled.",
+    "verboseLevel": "Verbose level",
+    "verboseSet": "Verbose mode set to **{{level}}**.",
+    "invalidLevel": "Unrecognized value \"{{value}}\". Valid options: {{options}}.",
+    "failedGeneric": "Operation failed",
+    "noSession": "No active session.",
+    "sessionUsage": "Session Usage"
   },
   "library": {
     "title": "Literature Library",
@@ -378,7 +401,7 @@
     "tokensOut": "Out",
     "heartbeat": "Heartbeat",
     "version": "v{{version}}",
-    "versionFallback": "v0.5.9",
+    "versionFallback": "v0.5.10",
     "modelDefault": "(default)",
     "modelNA": "N/A"
   },

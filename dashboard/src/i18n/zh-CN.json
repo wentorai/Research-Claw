@@ -43,7 +43,30 @@
     "imageNotSupported": "当前模型不支持图片处理。请在设置中启用独立视觉模型，或切换到支持图片的主模型（如 Claude、GPT-4o）。",
     "bgWorking": "正在后台工作...",
     "refresh": "刷新对话",
-    "copyRaw": "复制原文（思维链 + Markdown）"
+    "copyRaw": "复制原文（思维链 + Markdown）",
+    "system": "系统",
+    "commandFailed": "命令执行失败"
+  },
+  "slashCmd": {
+    "newSession": "正在创建新会话...",
+    "stopping": "正在停止当前运行...",
+    "cleared": "聊天记录已清空。",
+    "compactSuccess": "上下文压缩成功。",
+    "compactFailed": "压缩失败",
+    "currentModel": "当前模型",
+    "modelSet": "模型已设置为 `{{model}}`。",
+    "failedModel": "获取模型信息失败",
+    "currentThinking": "当前思考级别",
+    "thinkingSet": "思考级别已设置为 **{{level}}**。",
+    "fastMode": "快速模式",
+    "fastEnabled": "快速模式已启用。",
+    "fastDisabled": "快速模式已关闭。",
+    "verboseLevel": "详细级别",
+    "verboseSet": "详细模式已设置为 **{{level}}**。",
+    "invalidLevel": "无法识别的值 \"{{value}}\"。有效选项: {{options}}。",
+    "failedGeneric": "操作失败",
+    "noSession": "无活跃会话。",
+    "sessionUsage": "会话用量"
   },
   "library": {
     "title": "文献库",
@@ -378,7 +401,7 @@
     "tokensOut": "输出",
     "heartbeat": "心跳",
     "version": "v{{version}}",
-    "versionFallback": "v0.5.9",
+    "versionFallback": "v0.5.10",
     "modelDefault": "（默认）",
     "modelNA": "N/A"
   },

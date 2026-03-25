@@ -6,6 +6,7 @@ import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
 import { useToolStreamStore } from '../../stores/tool-stream';
 import type { ChatAttachment } from '../../gateway/types';
+import SlashCommandMenu, { useSlashCommandMenu } from './SlashCommandMenu';
 
 const DRAFT_STORAGE_PREFIX = 'rc-chat-draft:';
 
@@ -64,6 +65,18 @@ export default function MessageInput() {
     useToolStreamStore.getState().clearAll();
     loadHistory();
   }, [loadHistory]);
+
+  // Slash command autocomplete menu
+  const slashMenu = useSlashCommandMenu(text, (completed) => {
+    setText(completed);
+    // Focus textarea and move cursor to end
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+      // Auto-resize after setting text
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+    }
+  });
 
   const processFiles = useCallback(
     (files: FileList | File[]) => {
@@ -160,6 +173,8 @@ export default function MessageInput() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Do not intercept Enter during IME composition (e.g. Chinese pinyin input)
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    // Let slash command menu handle navigation keys first
+    if (slashMenu.handleKeyDown(e)) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -230,9 +245,10 @@ export default function MessageInput() {
         </div>
       )}
 
-      {/* Input row */}
+      {/* Input row — position:relative for the slash command menu overlay */}
       <div
         style={{
+          position: 'relative',
           display: 'flex',
           alignItems: 'flex-end',
           gap: 8,
@@ -243,6 +259,14 @@ export default function MessageInput() {
           transition: 'border-color 0.15s ease',
         }}
       >
+        {/* Slash command autocomplete menu — floats above input */}
+        <SlashCommandMenu
+          commands={slashMenu.commands}
+          activeIndex={slashMenu.activeIndex}
+          onSelect={slashMenu.handleSelect}
+          onHover={slashMenu.setActiveIndex}
+          visible={slashMenu.visible}
+        />
         {/* Refresh button — reloads chat history without losing draft.
           * Matches OC chat view's onRefresh (app-render.ts:1386-1388). */}
         <Tooltip title={t('chat.refresh')}>

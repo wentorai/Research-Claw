@@ -1,7 +1,7 @@
 {
   "id": "wentor-connect",
   "name": "Wentor Connect",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "description": "PLACEHOLDER — Wentor platform account & skills sync. Deferred to post-MVP.",
   "main": "dist/index.js"
 }

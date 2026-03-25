@@ -5,7 +5,7 @@
 CONFIG_DIR=/app/config
 CONFIG_FILE=$CONFIG_DIR/openclaw.json
 CONFIG_VERSION_FILE=$CONFIG_DIR/.config-version
-IMAGE_VERSION="0.5.9"
+IMAGE_VERSION="0.5.10"
 PORT=${PORT:-28789}
 
 # --- One-time migration: v0.5.3 fixed volume mount from /root → /app ---
