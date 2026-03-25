@@ -63,7 +63,4 @@ node_modules/
 .env.*
 
 # Auto-added: file exceeds size limit
-uploads/cpolar
-
-# Auto-added: file exceeds size limit
-uploads/AdsPower-Global-7.7.18-arm64.dmg
+/uploads/*
