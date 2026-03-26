@@ -14,6 +14,7 @@ import ChatView from './components/chat/ChatView';
 import RightPanel from './components/RightPanel';
 import StatusBar from './components/StatusBar';
 import SetupWizard from './components/setup/SetupWizard';
+import CronEventListener from './components/CronEventListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 
@@ -111,6 +112,13 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [bootState, setBootState]);
 
+  // Expose gateway client for console smoke tests (e.g. SMOKE-TEST-CRON-NOTIFICATION.md)
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__RC_CLIENT__ = client;
+    }
+  }, [client]);
+
   // Subscribe to chat events
   useEffect(() => {
     if (!client) return;
@@ -177,11 +185,31 @@ export default function App() {
   // Chrome throttles background tab timers to ≥1min, so the tick watchdog
   // interval may not fire in time. On tab resume, immediately check whether
   // the last tick is stale and force reconnect if so.
+  //
+  // Layer 1 fix (#33): when connection is alive (background < 60s), still
+  // refresh messages — events may have been dropped by session-key filters
+  // or lost during browser JS throttling. 5s debounce prevents RPC spam
+  // from rapid tab switching.
   useEffect(() => {
+    let lastVisibilitySyncAt = 0;
+    const VISIBILITY_SYNC_DEBOUNCE_MS = 5_000;
+
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
       const { client: c } = useGatewayStore.getState();
-      c?.checkTickLiveness(); // closes socket + triggers reconnect if stale
+      const wasStale = c?.checkTickLiveness(); // closes socket + triggers reconnect if stale
+
+      // If connection is alive, proactively sync current session messages.
+      // The reconnect path (wasStale=true) already calls loadHistory via onHello.
+      if (!wasStale && c?.isConnected) {
+        const now = Date.now();
+        if (now - lastVisibilitySyncAt >= VISIBILITY_SYNC_DEBOUNCE_MS) {
+          lastVisibilitySyncAt = now;
+          setTimeout(() => {
+            useChatStore.getState().loadHistory();
+          }, 300);
+        }
+      }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -329,6 +357,7 @@ export default function App() {
   return (
     <ConfigProvider theme={antdTheme}>
       <AntdApp>
+      <CronEventListener />
       <div
         style={{
           height: '100vh',

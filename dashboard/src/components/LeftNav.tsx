@@ -14,12 +14,17 @@ import {
   DeleteOutlined,
   EditOutlined,
   SearchOutlined,
+  ClockCircleOutlined,
+  RightOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUiStore, type PanelTab } from '../stores/ui';
 import { useSessionsStore, MAIN_SESSION_KEY } from '../stores/sessions';
+import { normalizeSessionKey } from '../utils/session-key';
 
 const { Text } = Typography;
+
 
 interface NavItem {
   key: PanelTab;
@@ -98,6 +103,11 @@ export default function LeftNav() {
 
   const [sessionSearch, setSessionSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const cronFolded = useUiStore((s) => s.cronSessionsFolded);
+  const setCronSessionsFolded = useUiStore((s) => s.setCronSessionsFolded);
+  const toggleCronFold = useCallback(() => {
+    setCronSessionsFolded(!cronFolded);
+  }, [cronFolded, setCronSessionsFolded]);
 
   // Reset search when dropdown closes
   const handleDropdownOpenChange = useCallback((open: boolean) => {
@@ -105,14 +115,44 @@ export default function LeftNav() {
     if (!open) setSessionSearch('');
   }, []);
 
-  const filteredSessions = useMemo(() => {
-    const list = sessions.slice(0, 30);
-    if (!sessionSearch.trim()) return list;
-    const q = sessionSearch.toLowerCase();
-    return list.filter((s) => {
-      const name = getSessionName(s, t).toLowerCase();
-      return name.includes(q);
-    });
+  // Layer 3 (#33): separate user sessions from cron sessions, dedup cron by name
+  const { userSessions: filteredSessions, cronSessions: filteredCronSessions } = useMemo(() => {
+    const list = sessions.slice(0, 100);
+    const q = sessionSearch.trim().toLowerCase();
+
+    const isCronSession = (key: string) => {
+      const bare = normalizeSessionKey(key);
+      return bare.toLowerCase().startsWith('cron:');
+    };
+
+    const user: typeof list = [];
+    const cron: typeof list = [];
+    for (const s of list) {
+      if (isCronSession(s.key)) {
+        cron.push(s);
+      } else {
+        user.push(s);
+      }
+    }
+
+    // Dedup cron sessions: group by display name, keep only the latest per group
+    const cronByName = new Map<string, (typeof list)[0]>();
+    for (const s of cron) {
+      const name = getSessionName(s, t);
+      const existing = cronByName.get(name);
+      if (!existing || (s.updatedAt ?? 0) > (existing.updatedAt ?? 0)) {
+        cronByName.set(name, s);
+      }
+    }
+    const dedupedCron = [...cronByName.values()];
+
+    // Apply search filter
+    if (q) {
+      const matchUser = user.filter((s) => getSessionName(s, t).toLowerCase().includes(q));
+      const matchCron = dedupedCron.filter((s) => getSessionName(s, t).toLowerCase().includes(q));
+      return { userSessions: matchUser, cronSessions: matchCron };
+    }
+    return { userSessions: user.slice(0, 30), cronSessions: dedupedCron };
   }, [sessions, sessionSearch, t]);
 
   const projectDropdownRender = useCallback(() => (
@@ -138,7 +178,7 @@ export default function LeftNav() {
           onChange={(e) => setSessionSearch(e.target.value)}
           allowClear
           autoFocus
-          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; e.stopPropagation(); }}
         />
       </div>
 
@@ -198,10 +238,66 @@ export default function LeftNav() {
             </div>
           );
         })}
-        {filteredSessions.length === 0 && (
+        {filteredSessions.length === 0 && filteredCronSessions.length === 0 && (
           <div style={{ padding: '8px 12px', color: 'var(--text-tertiary)', fontSize: 12, textAlign: 'center' }}>
             {t('project.noResults', 'No matching sessions')}
           </div>
+        )}
+
+        {/* Layer 3 (#33): collapsible cron session group */}
+        {filteredCronSessions.length > 0 && (
+          <>
+            <div
+              onClick={toggleCronFold}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                cursor: 'pointer',
+                color: 'var(--text-secondary)',
+                fontSize: 12,
+                userSelect: 'none',
+                borderTop: filteredSessions.length > 0 ? '1px solid var(--border)' : undefined,
+                marginTop: filteredSessions.length > 0 ? 4 : 0,
+                paddingTop: filteredSessions.length > 0 ? 8 : 6,
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--surface-hover)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+            >
+              {cronFolded
+                ? <RightOutlined style={{ fontSize: 9 }} />
+                : <DownOutlined style={{ fontSize: 9 }} />}
+              <ClockCircleOutlined style={{ fontSize: 11 }} />
+              <span style={{ flex: 1 }}>{t('cron.cronSessions')} ({filteredCronSessions.length})</span>
+            </div>
+            {!cronFolded && filteredCronSessions.map((session) => {
+              const isActive = session.key === activeSessionKey;
+              const name = getSessionName(session, t);
+              return (
+                <div
+                  key={session.key}
+                  onClick={() => { switchSession(session.key); setDropdownOpen(false); }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '5px 12px 5px 28px',
+                    cursor: 'pointer',
+                    background: isActive ? 'var(--surface-active)' : 'transparent',
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--surface-hover)'; }}
+                  onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <div style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: isActive ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
+                  <span style={{ flex: 1, fontWeight: isActive ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-secondary)' }}>
+                    {name}
+                  </span>
+                </div>
+              );
+            })}
+          </>
         )}
       </div>
 
@@ -228,7 +324,7 @@ export default function LeftNav() {
       </div>
     </div>
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [filteredSessions, activeSessionKey, sessionSearch, t]);
+  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, t]);
 
   const activeSessionLabel = useMemo(() => {
     const session = sessions.find((s) => s.key === activeSessionKey);

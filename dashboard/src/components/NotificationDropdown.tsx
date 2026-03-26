@@ -11,6 +11,8 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUiStore } from '../stores/ui';
+import { useSessionsStore } from '../stores/sessions';
+import { normalizeSessionKey } from '../utils/session-key';
 import { useConfigStore } from '../stores/config';
 import { getThemeTokens } from '../styles/theme';
 import type { Notification as AppNotification } from '../stores/ui';
@@ -62,11 +64,27 @@ function NotificationItem({
       onMouseLeave={() => setHovered(false)}
       onClick={() => {
         if (!item.read) onMarkRead(item.id);
+        // Layer 2 (#33): navigate to target session when notification has targetSessionKey
+        if (item.targetSessionKey) {
+          // Auto-expand cron fold group if navigating to a cron session
+          const bare = normalizeSessionKey(item.targetSessionKey);
+          if (bare.toLowerCase().startsWith('cron:')) {
+            useUiStore.getState().setCronSessionsFolded(false);
+          }
+          useSessionsStore.getState().switchSession(item.targetSessionKey);
+        }
       }}
       onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && !item.read) {
+        if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onMarkRead(item.id);
+          if (!item.read) onMarkRead(item.id);
+          if (item.targetSessionKey) {
+            const bare = normalizeSessionKey(item.targetSessionKey);
+            if (bare.toLowerCase().startsWith('cron:')) {
+              useUiStore.getState().setCronSessionsFolded(false);
+            }
+            useSessionsStore.getState().switchSession(item.targetSessionKey);
+          }
         }
       }}
       style={{

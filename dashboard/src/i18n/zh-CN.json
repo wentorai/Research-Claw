@@ -524,6 +524,11 @@
     "noNotifications": "暂无通知",
     "newNotification": "新通知"
   },
+  "cron": {
+    "taskCompleted": "定时任务已完成",
+    "viewResult": "查看结果",
+    "cronSessions": "定时任务"
+  },
   "project": {
     "newProject": "新建项目...",
     "switchProject": "切换项目",

@@ -524,6 +524,11 @@
     "noNotifications": "No notifications yet",
     "newNotification": "New notification"
   },
+  "cron": {
+    "taskCompleted": "Scheduled task completed",
+    "viewResult": "View Result",
+    "cronSessions": "Scheduled Tasks"
+  },
   "project": {
     "newProject": "New Project...",
     "switchProject": "Switch Project",

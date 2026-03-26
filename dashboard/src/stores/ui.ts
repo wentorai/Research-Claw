@@ -15,6 +15,8 @@ export interface Notification {
   chatMessageId?: string;
   /** Stable key for deduplication — same dedupKey won't create a second notification. */
   dedupKey?: string;
+  /** Session key to navigate to when the notification is clicked (Layer 2, #33). */
+  targetSessionKey?: string;
 }
 
 // ── Persist read state across refreshes via localStorage ──────────────
@@ -25,6 +27,7 @@ const PANEL_TAB_STORAGE = 'rc-right-panel-tab';
 const PANEL_OPEN_STORAGE = 'rc-right-panel-open';
 const LEFT_NAV_COLLAPSED_STORAGE = 'rc-left-nav-collapsed';
 const SHOW_SYSTEM_FILES_STORAGE = 'rc-show-system-files';
+const CRON_FOLD_STORAGE = 'rc-cron-sessions-folded';
 
 const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'extensions', 'settings']);
 
@@ -83,6 +86,9 @@ interface UiState {
   /** Whether to show system files (.ResearchClaw/, MEMORY.md, etc.) in workspace tree. */
   showSystemFiles: boolean;
 
+  /** Whether cron sessions are folded in the session list (Layer 3, #33). */
+  cronSessionsFolded: boolean;
+
   setRightPanelTab: (tab: PanelTab) => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
@@ -100,6 +106,7 @@ interface UiState {
   requestWorkspacePreview: (path: string) => void;
   clearPendingPreview: () => void;
   setShowSystemFiles: (show: boolean) => void;
+  setCronSessionsFolded: (folded: boolean) => void;
 }
 
 export const useUiStore = create<UiState>()((set, get) => ({
@@ -113,6 +120,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   workspaceRefreshKey: 0,
   pendingPreviewPath: null,
   showSystemFiles: loadBoolean(SHOW_SYSTEM_FILES_STORAGE, false),
+  cronSessionsFolded: loadBoolean(CRON_FOLD_STORAGE, true),
 
   setRightPanelTab: (tab: PanelTab) => {
     try { localStorage.setItem(PANEL_TAB_STORAGE, tab); } catch { /* non-fatal */ }
@@ -218,6 +226,11 @@ export const useUiStore = create<UiState>()((set, get) => ({
   setShowSystemFiles: (show: boolean) => {
     try { localStorage.setItem(SHOW_SYSTEM_FILES_STORAGE, String(show)); } catch { /* non-fatal */ }
     set({ showSystemFiles: show });
+  },
+
+  setCronSessionsFolded: (folded: boolean) => {
+    try { localStorage.setItem(CRON_FOLD_STORAGE, String(folded)); } catch { /* non-fatal */ }
+    set({ cronSessionsFolded: folded });
   },
 
   checkNotifications: async () => {
