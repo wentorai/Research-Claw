@@ -11,6 +11,7 @@ import { useUiStore } from './ui';
 import { primaryModelSupportsVision, hasImageModelConfigured } from './config';
 import i18n from '../i18n';
 import { sanitizeUserMessage, CRON_REMINDER_RE } from '../utils/sanitize-message';
+import { sanitizeAssistantMessage } from '../utils/sanitize-assistant-message';
 import { parseSlashCommand, executeSlashCommand } from '../utils/slash-commands';
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
@@ -211,44 +212,7 @@ function extractCardNotifications(text: string): void {
 }
 
 /**
- * Strip leaked model control tokens from assistant text.
- * Source: openclaw/src/agents/pi-embedded-utils.ts:49-60 (stripModelSpecialTokens)
- *
- * Models like GLM-5 and DeepSeek sometimes leak internal delimiters:
- *   - ASCII pipes: <|assistant|>, <|tool_call_result_begin|>, <|end|>
- *   - Full-width pipes: <｜begin▁of▁sentence｜> (U+FF5C, used by DeepSeek)
- */
-const MODEL_SPECIAL_TOKEN_RE = /<[|｜][^|｜]*[|｜]>/g;
-
-function stripModelSpecialTokens(text: string): string {
-  if (!text) return text;
-  if (!MODEL_SPECIAL_TOKEN_RE.test(text)) return text;
-  MODEL_SPECIAL_TOKEN_RE.lastIndex = 0;
-  return text.replace(MODEL_SPECIAL_TOKEN_RE, ' ').replace(/  +/g, ' ').trim();
-}
-
-/**
- * Regex matching `<think>`, `<thinking>`, `<thought>`, `<antthinking>` tags and their content.
- * Source: openclaw/src/shared/text/reasoning-tags.ts:7 (THINKING_TAG_RE)
- * Source: openclaw/ui/src/ui/chat/message-extract.ts:66
- *
- * We use a simpler approach than OpenClaw's full state-machine (which also handles
- * code-region awareness) since chat messages rarely contain code fences with these tags.
- */
-const THINK_TAG_RE = /<\s*(?:think(?:ing)?|thought|antthinking)\b[^<>]*>[\s\S]*?<\s*\/\s*(?:think(?:ing)?|thought|antthinking)\s*>/gi;
-
-/**
- * Strip thinking/reasoning tags from text.
- * Matches OpenClaw behavior: message-extract.ts:10-11
- *   if (role === "assistant") return stripThinkingTags(text);
- */
-function stripThinkingTags(text: string): string {
-  THINK_TAG_RE.lastIndex = 0;
-  return text.replace(THINK_TAG_RE, '').trimStart();
-}
-
-/**
- * Extract raw text from a ChatMessage, then strip thinking tags for assistant messages.
+ * Extract raw text from a ChatMessage, then sanitize for assistant messages.
  * Source: openclaw/ui/src/ui/chat/message-extract.ts:18-26 (extractText)
  * Source: openclaw/ui/src/ui/chat/message-extract.ts:85-109 (extractRawText — only joins type:'text' blocks)
  */
@@ -269,10 +233,11 @@ function extractText(msg: ChatMessage): string {
     raw = '';
   }
 
-  // For assistant messages, strip thinking tags + model control tokens from text
-  // Source: message-extract.ts:10-11, pi-embedded-utils.ts:49-60
+  // For assistant messages, apply unified sanitization pipeline.
+  // Strips all internal scaffolding: thinking tags, final tags, memory tags, model tokens.
+  // Source: sanitize-assistant-message.ts (centralized pipeline)
   if (msg.role === 'assistant') {
-    return stripModelSpecialTokens(stripThinkingTags(raw));
+    return sanitizeAssistantMessage(raw);
   }
 
   return raw;

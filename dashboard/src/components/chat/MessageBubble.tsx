@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import type { ChatMessage } from '../../gateway/types';
 import { useGatewayStore } from '../../stores/gateway';
 import { sanitizeUserMessage } from '../../utils/sanitize-message';
+import { sanitizeAssistantMessage, sanitizeAssistantRawCopy } from '../../utils/sanitize-assistant-message';
 import CodeBlock from './CodeBlock';
 
 const { Text } = Typography;
@@ -55,43 +56,19 @@ function extractImages(message: ChatMessage): ImageBlock[] {
 }
 
 // stripUserMetaPrefix replaced by unified sanitizeUserMessage() in utils/sanitize-message.ts
-
-/**
- * Strip leaked model control tokens from assistant text.
- * Source: openclaw/src/agents/pi-embedded-utils.ts:49-60 (stripModelSpecialTokens)
- */
-const MODEL_SPECIAL_TOKEN_RE = /<[|｜][^|｜]*[|｜]>/g;
-
-function stripModelSpecialTokens(text: string): string {
-  if (!text) return text;
-  if (!MODEL_SPECIAL_TOKEN_RE.test(text)) return text;
-  MODEL_SPECIAL_TOKEN_RE.lastIndex = 0;
-  return text.replace(MODEL_SPECIAL_TOKEN_RE, ' ').replace(/  +/g, ' ').trim();
-}
-
-/**
- * Regex matching `<think>`, `<thinking>`, `<thought>`, `<antthinking>` tags and their content.
- * Source: openclaw/src/shared/text/reasoning-tags.ts:7 (THINKING_TAG_RE)
- * Source: openclaw/ui/src/ui/chat/message-extract.ts:66
- */
-const THINK_TAG_RE = /<\s*(?:think(?:ing)?|thought|antthinking)\b[^<>]*>[\s\S]*?<\s*\/\s*(?:think(?:ing)?|thought|antthinking)\s*>/gi;
+// stripThinkingTags, stripModelSpecialTokens, stripFinalTags, stripMemoryTags
+//   → consolidated into sanitize-assistant-message.ts (unified pipeline)
 
 /**
  * Regex for extracting thinking content from `<think>` tags (captures inner content).
  * Source: openclaw/ui/src/ui/chat/message-extract.ts:65-68
  *   rawText.matchAll(/<\s*think(?:ing)?\s*>([\s\S]*?)<\s*\/\s*think(?:ing)?\s*>/gi)
+ *
+ * NOTE: This is a CAPTURING regex for extractThinking(), distinct from the
+ * STRIPPING regex in sanitize-assistant-message.ts. Kept here because
+ * extractThinking is a rendering concern, not sanitization.
  */
 const THINK_EXTRACT_RE = /<\s*think(?:ing)?\s*>([\s\S]*?)<\s*\/\s*think(?:ing)?\s*>/gi;
-
-/**
- * Strip thinking/reasoning tags from text, returning clean text for display.
- * Source: openclaw/ui/src/ui/chat/message-extract.ts:10-11
- *   if (role === "assistant") return stripThinkingTags(text);
- */
-function stripThinkingTags(text: string): string {
-  THINK_TAG_RE.lastIndex = 0;
-  return text.replace(THINK_TAG_RE, '').trimStart();
-}
 
 /**
  * Extract thinking content from a message.
@@ -233,14 +210,14 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
           : '');
   }, []);
 
-  /** Copy visible text (stripped thinking tags, cleaned). */
+  /** Copy visible text (all internal scaffolding stripped). */
   const handleCopy = useCallback(() => {
     if (copied) return;
     const raw = extractRawText();
     const msg = messageRef.current;
     const copyText = msg.role === 'user'
       ? sanitizeUserMessage(raw)
-      : stripModelSpecialTokens(stripThinkingTags(raw));
+      : sanitizeAssistantMessage(raw);
     navigator.clipboard.writeText(stripImageMarkers(copyText)).then(() => {
       setCopied('visible');
       setTimeout(() => setCopied(false), 2000);
@@ -263,8 +240,8 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
         thinkingPrefix = `<thinking>\n${parts.join('\n')}\n</thinking>\n\n`;
       }
     }
-    // Keep thinking tags in text (don't strip), only strip leaked model tokens + image markers
-    const cleanedRaw = stripModelSpecialTokens(raw);
+    // Keep thinking tags in text; strip final/memory/model tokens + image markers
+    const cleanedRaw = sanitizeAssistantRawCopy(raw);
     const fullText = thinkingPrefix + stripImageMarkers(cleanedRaw);
     navigator.clipboard.writeText(fullText).then(() => {
       setCopied('raw');
@@ -285,10 +262,9 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
             .join('')
         : '');
 
-  // For user messages: strip meta prefix
-  // For assistant messages: strip thinking tags from displayed text
-  // Source: message-extract.ts:10-11 — if (role === "assistant") return stripThinkingTags(text);
-  const preText = isUser ? sanitizeUserMessage(rawText) : stripModelSpecialTokens(stripThinkingTags(rawText));
+  // For user messages: strip channel injections (sanitize-message.ts)
+  // For assistant messages: strip all internal scaffolding (sanitize-assistant-message.ts)
+  const preText = isUser ? sanitizeUserMessage(rawText) : sanitizeAssistantMessage(rawText);
 
   // Strip [rc-image:...] markers from display (images rendered separately)
   const text = stripImageMarkers(preText);

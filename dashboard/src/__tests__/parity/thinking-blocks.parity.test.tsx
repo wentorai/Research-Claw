@@ -34,6 +34,15 @@ import {
   DELTA_WITH_THINKING_BLOCK,
   FINAL_WITH_THINKING,
   FINAL_WITH_THINK_TAGS,
+  MSG_FINAL_TAGS_IN_TEXT,
+  MSG_FINAL_TAGS_WITH_WHITESPACE,
+  MSG_FINAL_TAGS_IN_TEXT_FIELD,
+  DELTA_WITH_FINAL_TAGS,
+  FINAL_WITH_FINAL_TAGS,
+  MSG_RELEVANT_MEMORIES_BLOCK,
+  MSG_RELEVANT_MEMORIES_UNDERSCORE,
+  MSG_COMBINED_ALL_SCAFFOLDING,
+  MSG_MODEL_TOKENS_AND_FINAL,
 } from '../../__fixtures__/gateway-payloads/thinking-blocks';
 
 // Mock i18n
@@ -308,6 +317,138 @@ describe('Thinking block parity with OpenClaw native UI', () => {
       expect(lastMsg.text).not.toContain('<think>');
       expect(lastMsg.text).not.toContain('</think>');
       expect(lastMsg.text).toContain('BERT uses masked language modeling');
+    });
+  });
+
+  describe('<final> tag stripping — reasoning-tags.ts:37-55', () => {
+    /**
+     * <final> tags are stripped but inner content is PRESERVED.
+     * Bug: After page refresh, <final> tags leaked into displayed text.
+     */
+    it('strips <final>...</final> tags but preserves inner content', () => {
+      render(<MessageBubble message={MSG_FINAL_TAGS_IN_TEXT} />);
+
+      expect(screen.getByText(/不客气！如果有任何需要帮忙的，随时告诉我。/)).toBeInTheDocument();
+
+      const mainTextElements = document.querySelectorAll('.markdown-body');
+      for (const el of mainTextElements) {
+        expect(el.textContent).not.toContain('<final>');
+        expect(el.textContent).not.toContain('</final>');
+      }
+    });
+
+    it('strips <final> tags and trims surrounding whitespace', () => {
+      render(<MessageBubble message={MSG_FINAL_TAGS_WITH_WHITESPACE} />);
+
+      expect(screen.getByText(/Hello there/)).toBeInTheDocument();
+
+      const mainTextElements = document.querySelectorAll('.markdown-body');
+      for (const el of mainTextElements) {
+        expect(el.textContent).not.toContain('<final>');
+        expect(el.textContent).not.toContain('</final>');
+      }
+    });
+
+    it('strips <final> tags from text field (not content array)', () => {
+      render(<MessageBubble message={MSG_FINAL_TAGS_IN_TEXT_FIELD} />);
+
+      expect(screen.getByText(/Here is your analysis of the paper/)).toBeInTheDocument();
+      expect(screen.queryByText(/<final>/)).toBeNull();
+    });
+  });
+
+  describe('<relevant-memories> tag stripping — assistant-visible-text.ts:7-41', () => {
+    it('strips <relevant-memories> blocks (entire content hidden)', () => {
+      render(<MessageBubble message={MSG_RELEVANT_MEMORIES_BLOCK} />);
+
+      expect(screen.getByText(/Based on your previous interest/)).toBeInTheDocument();
+
+      const mainTextElements = document.querySelectorAll('.markdown-body');
+      for (const el of mainTextElements) {
+        expect(el.textContent).not.toContain('relevant-memories');
+        expect(el.textContent).not.toContain('User prefers dark mode');
+      }
+    });
+
+    it('strips <relevant_memories> (underscore variant)', () => {
+      render(<MessageBubble message={MSG_RELEVANT_MEMORIES_UNDERSCORE} />);
+
+      expect(screen.getByText(/Here is your summary/)).toBeInTheDocument();
+
+      const mainTextElements = document.querySelectorAll('.markdown-body');
+      for (const el of mainTextElements) {
+        expect(el.textContent).not.toContain('relevant_memories');
+        expect(el.textContent).not.toContain('Internal memory note');
+      }
+    });
+  });
+
+  describe('combined scaffolding — full pipeline', () => {
+    it('strips thinking + memory + final in one message', () => {
+      render(<MessageBubble message={MSG_COMBINED_ALL_SCAFFOLDING} />);
+
+      // Only the <final> content should be visible
+      expect(screen.getByText(/significant correlation/)).toBeInTheDocument();
+
+      const mainTextElements = document.querySelectorAll('.markdown-body');
+      for (const el of mainTextElements) {
+        expect(el.textContent).not.toContain('<think>');
+        expect(el.textContent).not.toContain('analyze this carefully');
+        expect(el.textContent).not.toContain('relevant-memories');
+        expect(el.textContent).not.toContain('data scientist');
+        expect(el.textContent).not.toContain('<final>');
+      }
+    });
+
+    it('strips model tokens + final tags together', () => {
+      render(<MessageBubble message={MSG_MODEL_TOKENS_AND_FINAL} />);
+
+      expect(screen.getByText(/Here is the answer to your question/)).toBeInTheDocument();
+
+      const mainTextElements = document.querySelectorAll('.markdown-body');
+      for (const el of mainTextElements) {
+        expect(el.textContent).not.toContain('<|assistant|>');
+        expect(el.textContent).not.toContain('<|end|>');
+        expect(el.textContent).not.toContain('<final>');
+      }
+    });
+  });
+
+  describe('Streaming deltas strip <final> tags — chat store extractText', () => {
+    beforeEach(() => {
+      useChatStore.setState({
+        messages: [],
+        streaming: false,
+        streamText: null,
+        runId: 'run-final-001',
+        sessionKey: 'main',
+        lastError: null,
+        tokensIn: 0,
+        tokensOut: 0,
+        sending: false,
+      });
+    });
+
+    it('strips <final> tags from streaming delta text', () => {
+      useChatStore.getState().handleChatEvent(DELTA_WITH_FINAL_TAGS);
+
+      const { streamText } = useChatStore.getState();
+      expect(streamText).not.toBeNull();
+      expect(streamText).toContain('I found several relevant papers');
+      expect(streamText).not.toContain('<final>');
+      expect(streamText).not.toContain('</final>');
+    });
+
+    it('stores clean text (no final tags) in final message', () => {
+      useChatStore.setState({ runId: 'run-final-002' });
+      useChatStore.getState().handleChatEvent(FINAL_WITH_FINAL_TAGS);
+
+      const { messages } = useChatStore.getState();
+      const lastMsg = messages[messages.length - 1];
+      expect(lastMsg).toBeDefined();
+      expect(lastMsg.text).not.toContain('<final>');
+      expect(lastMsg.text).not.toContain('</final>');
+      expect(lastMsg.text).toContain('transformer architecture revolutionized NLP');
     });
   });
 });
