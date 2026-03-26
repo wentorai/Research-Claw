@@ -112,11 +112,10 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [bootState, setBootState]);
 
-  // Expose gateway client for console smoke tests (e.g. SMOKE-TEST-CRON-NOTIFICATION.md)
+  // Expose gateway client for console smoke tests (e.g. SMOKE-TEST-CRON-NOTIFICATION.md).
+  // RC is a local-only tool — no security concern exposing the client on window.
   useEffect(() => {
-    if (import.meta.env.DEV) {
-      (window as unknown as Record<string, unknown>).__RC_CLIENT__ = client;
-    }
+    (window as unknown as Record<string, unknown>).__RC_CLIENT__ = client;
   }, [client]);
 
   // Subscribe to chat events
