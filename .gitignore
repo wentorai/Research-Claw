@@ -60,10 +60,15 @@ dashboard/test-image-send.mjs
 extensions/*/package-lock.json
 
 # Workspace runtime data
-# L1 system prompts (AGENTS, HEARTBEAT) are git-tracked and force-updated.
-# L3 user-owned files (SOUL, IDENTITY, TOOLS, USER) are gitignored — initialized
-# from .example templates at startup, never overwritten by upgrades.
-# L2 onboarding (BOOTSTRAP) is gitignored — one-time init from .example.
+# All prompt files live in workspace/.ResearchClaw/ (loaded via agent:bootstrap hook).
+# Root-level copies are OC defaults — not RC content — and must not be tracked.
+# Only workspace/AGENTS.md (pointer to .ResearchClaw/) is git-tracked at root.
+workspace/SOUL.md
+workspace/IDENTITY.md
+workspace/TOOLS.md
+workspace/HEARTBEAT.md
+workspace/USER.md
+workspace/MEMORY.md
 workspace/.ResearchClaw/SOUL.md
 workspace/.ResearchClaw/IDENTITY.md
 workspace/.ResearchClaw/TOOLS.md
@@ -71,8 +76,6 @@ workspace/.ResearchClaw/USER.md
 workspace/.ResearchClaw/BOOTSTRAP.md
 workspace/.ResearchClaw/BOOTSTRAP.md.done
 workspace/.ResearchClaw/*_backup_*.md
-workspace/MEMORY.md
-workspace/USER.md
 workspace/.openclaw/
 workspace/memory/
 workspace/sources/
