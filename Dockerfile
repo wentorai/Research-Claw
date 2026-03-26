@@ -108,10 +108,14 @@ RUN mkdir -p /defaults && \
 # 烘焙配置模板 + 系统提示词到 /defaults/，entrypoint 会同步到 volume
 RUN mkdir -p /defaults/bootstrap-prompts && \
     cp config/openclaw.example.json /defaults/openclaw.example.json && \
-    cp workspace/.ResearchClaw/AGENTS.md workspace/.ResearchClaw/SOUL.md \
-       workspace/.ResearchClaw/TOOLS.md workspace/.ResearchClaw/IDENTITY.md \
+    # L1 system prompts (force-updated on every container start)
+    cp workspace/.ResearchClaw/AGENTS.md \
        workspace/.ResearchClaw/HEARTBEAT.md /defaults/bootstrap-prompts/ && \
-    cp workspace/.ResearchClaw/BOOTSTRAP.md.example \
+    # L3 user-owned + L2 onboarding templates (copied only if missing)
+    cp workspace/.ResearchClaw/SOUL.md.example \
+       workspace/.ResearchClaw/IDENTITY.md.example \
+       workspace/.ResearchClaw/TOOLS.md.example \
+       workspace/.ResearchClaw/BOOTSTRAP.md.example \
        workspace/.ResearchClaw/USER.md.example /defaults/bootstrap-prompts/ && \
     cp workspace/MEMORY.md.example /defaults/bootstrap-prompts/ && \
     cp workspace/USER.md.example /defaults/bootstrap-prompts/ws-USER.md.example

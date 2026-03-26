@@ -60,8 +60,13 @@ dashboard/test-image-send.mjs
 extensions/*/package-lock.json
 
 # Workspace runtime data
-# L1 system prompts (AGENTS/SOUL/TOOLS/IDENTITY/HEARTBEAT) are git-tracked and force-updated.
-# L2/L3 runtime files are gitignored — initialized from .example templates at startup.
+# L1 system prompts (AGENTS, HEARTBEAT) are git-tracked and force-updated.
+# L3 user-owned files (SOUL, IDENTITY, TOOLS, USER) are gitignored — initialized
+# from .example templates at startup, never overwritten by upgrades.
+# L2 onboarding (BOOTSTRAP) is gitignored — one-time init from .example.
+workspace/.ResearchClaw/SOUL.md
+workspace/.ResearchClaw/IDENTITY.md
+workspace/.ResearchClaw/TOOLS.md
 workspace/.ResearchClaw/USER.md
 workspace/.ResearchClaw/BOOTSTRAP.md
 workspace/.ResearchClaw/BOOTSTRAP.md.done

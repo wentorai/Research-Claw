@@ -23,8 +23,10 @@ fi
 
 # 2. Initialize L2/L3 bootstrap runtime files from .example templates
 RC_DIR="workspace/.ResearchClaw"
-[ ! -f "$RC_DIR/USER.md" ] && [ -f "$RC_DIR/USER.md.example" ] && \
-  cp "$RC_DIR/USER.md.example" "$RC_DIR/USER.md" && echo "[OK] USER.md initialized"
+for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
+  [ ! -f "$RC_DIR/$f" ] && [ -f "$RC_DIR/$f.example" ] && \
+    cp "$RC_DIR/$f.example" "$RC_DIR/$f" && echo "[OK] $f initialized"
+done
 [ ! -f "workspace/MEMORY.md" ] && [ -f "workspace/MEMORY.md.example" ] && \
   cp "workspace/MEMORY.md.example" "workspace/MEMORY.md" && echo "[OK] MEMORY.md initialized"
 [ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ -f "$RC_DIR/BOOTSTRAP.md.example" ] && \

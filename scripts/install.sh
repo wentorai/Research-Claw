@@ -375,12 +375,14 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   cd "$INSTALL_DIR"
 
   # --- Preserve user data files before git operations ---
-  # USER.md, MEMORY.md, BOOTSTRAP.md.done are agent-maintained (L2/L3 layer).
-  # git reset --hard would destroy them if they were still tracked (migration from pre-0.5.1).
-  # After migration they become gitignored, but we still backup for safety.
+  # L3 user-owned (SOUL, IDENTITY, TOOLS, USER) + L2 sentinel (BOOTSTRAP.md.done)
+  # + workspace-level files are gitignored, but we backup for safety in case of
+  # migration from older versions where they were still tracked.
   RC_DIR="workspace/.ResearchClaw"
   _RC_BAK="$(mktemp -d)"
-  [ -f "$RC_DIR/USER.md" ] && cp "$RC_DIR/USER.md" "$_RC_BAK/USER.md"
+  for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
+    [ -f "$RC_DIR/$f" ] && cp "$RC_DIR/$f" "$_RC_BAK/$f"
+  done
   [ -f "workspace/MEMORY.md" ] && cp "workspace/MEMORY.md" "$_RC_BAK/MEMORY.md"
   [ -f "workspace/USER.md" ] && cp "workspace/USER.md" "$_RC_BAK/WS_USER.md"
   [ -f "$RC_DIR/BOOTSTRAP.md.done" ] && cp "$RC_DIR/BOOTSTRAP.md.done" "$_RC_BAK/BOOTSTRAP.md.done"
@@ -400,7 +402,9 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   fi
 
   # --- Restore user data files ---
-  [ -f "$_RC_BAK/USER.md" ] && cp "$_RC_BAK/USER.md" "$RC_DIR/USER.md"
+  for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
+    [ -f "$_RC_BAK/$f" ] && cp "$_RC_BAK/$f" "$RC_DIR/$f"
+  done
   [ -f "$_RC_BAK/MEMORY.md" ] && cp "$_RC_BAK/MEMORY.md" "workspace/MEMORY.md"
   [ -f "$_RC_BAK/WS_USER.md" ] && cp "$_RC_BAK/WS_USER.md" "workspace/USER.md"
   [ -f "$_RC_BAK/BOOTSTRAP.md.done" ] && cp "$_RC_BAK/BOOTSTRAP.md.done" "$RC_DIR/BOOTSTRAP.md.done"
@@ -703,8 +707,10 @@ DASHBOARD_URL="http://$DASHBOARD_IP:$PORT"
 
 # --- Initialize L2/L3 bootstrap runtime files from .example templates ---
 RC_DIR="workspace/.ResearchClaw"
-[ ! -f "$RC_DIR/USER.md" ] && [ -f "$RC_DIR/USER.md.example" ] && \
-  cp "$RC_DIR/USER.md.example" "$RC_DIR/USER.md"
+for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
+  [ ! -f "$RC_DIR/$f" ] && [ -f "$RC_DIR/$f.example" ] && \
+    cp "$RC_DIR/$f.example" "$RC_DIR/$f"
+done
 [ ! -f "workspace/MEMORY.md" ] && [ -f "workspace/MEMORY.md.example" ] && \
   cp "workspace/MEMORY.md.example" "workspace/MEMORY.md"
 [ ! -f "workspace/USER.md" ] && [ -f "workspace/USER.md.example" ] && \

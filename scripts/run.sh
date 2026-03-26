@@ -110,11 +110,13 @@ echo "[run] Config: $OPENCLAW_CONFIG_PATH"
 "$GW_NODE" "$(dirname "$0")/sync-global-config.cjs" 2>/dev/null || true
 
 # --- Initialize L2/L3 bootstrap runtime files from .example templates ---
-# L1 (AGENTS, SOUL, TOOLS, IDENTITY, HEARTBEAT) are git-tracked and always up-to-date.
-# L2 (BOOTSTRAP.md) and L3 (USER.md, MEMORY.md) are gitignored — only copy if missing.
+# L1 (AGENTS, HEARTBEAT) are git-tracked and always up-to-date.
+# L3 (SOUL, IDENTITY, TOOLS, USER) and L2 (BOOTSTRAP) are gitignored — only copy if missing.
 RC_DIR="workspace/.ResearchClaw"
-[ ! -f "$RC_DIR/USER.md" ] && [ -f "$RC_DIR/USER.md.example" ] && \
-  cp "$RC_DIR/USER.md.example" "$RC_DIR/USER.md" && echo "[run] USER.md initialized from template"
+for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
+  [ ! -f "$RC_DIR/$f" ] && [ -f "$RC_DIR/$f.example" ] && \
+    cp "$RC_DIR/$f.example" "$RC_DIR/$f" && echo "[run] $f initialized from template"
+done
 [ ! -f "workspace/MEMORY.md" ] && [ -f "workspace/MEMORY.md.example" ] && \
   cp "workspace/MEMORY.md.example" "workspace/MEMORY.md" && echo "[run] MEMORY.md initialized from template"
 [ ! -f "workspace/USER.md" ] && [ -f "workspace/USER.md.example" ] && \
