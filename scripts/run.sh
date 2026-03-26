@@ -138,6 +138,24 @@ trap 'STOP=true' INT TERM
 
 while true; do
   echo "[run] Starting Research-Claw gateway..."
+
+  # Export HTTP(S)_PROXY from OpenClaw config so child processes (minimax-oauth-proxy)
+  # can tunnel through the user's proxy (typically Clash at :7890).
+  # The proxy uses HTTP CONNECT tunnels — Node's native https.request() ignores env vars,
+  # but our proxy reads them explicitly.
+  _PROXY_VAL=$("$GW_NODE" -e "
+    try {
+      const c = JSON.parse(require('fs').readFileSync(process.env.OPENCLAW_CONFIG_PATH, 'utf8'));
+      const p = c?.env?.HTTPS_PROXY || c?.env?.HTTP_PROXY || c?.env?.vars?.HTTPS_PROXY || c?.env?.vars?.HTTP_PROXY || '';
+      if (p) process.stdout.write(p);
+    } catch {}
+  " 2>/dev/null)
+  if [ -n "$_PROXY_VAL" ]; then
+    export HTTP_PROXY="$_PROXY_VAL"
+    export HTTPS_PROXY="$_PROXY_VAL"
+    echo "[run] Proxy: $HTTPS_PROXY"
+  fi
+
   # MiniMax OAuth (sk-cp-...) compatibility:
   # Start a local proxy that forwards requests to MiniMax with Authorization: Bearer <token>.
   # It is a no-op unless models.providers.minimax.apiKey starts with "sk-cp-".

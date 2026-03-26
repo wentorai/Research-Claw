@@ -19,6 +19,7 @@
     "defaults": {
       "workspace": "./workspace",
       "skipBootstrap": true,
+      "timeoutSeconds": 900,
       "compaction": {
         "mode": "safeguard"
       },
