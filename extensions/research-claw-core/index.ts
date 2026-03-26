@@ -160,6 +160,22 @@ const plugin: PluginDefinition = {
         api.logger.error(`Workspace init failed: ${err instanceof Error ? err.message : String(err)}`);
       });
 
+      // Safety net: checkpoint WAL on process exit (last-resort).
+      // The service stop() callback handles clean shutdown via OC's close chain.
+      // This 'exit' handler catches edge cases where process.exit() is called
+      // before stop() runs (e.g., uncaught exception handler).
+      // NOTE: Do NOT register SIGTERM/SIGINT here — that would preempt
+      // OpenClaw's own graceful shutdown sequence (channel teardown, WS drain).
+      // SIGKILL durability is handled by synchronous=FULL in connection.ts.
+      process.once('exit', () => {
+        try {
+          if (_dbManager?.isOpen()) {
+            _dbManager.db.pragma('wal_checkpoint(TRUNCATE)');
+            _dbManager.close();
+          }
+        } catch { /* best-effort on exit */ }
+      });
+
       _initialized = true;
     }
 

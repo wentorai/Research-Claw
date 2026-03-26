@@ -39,7 +39,7 @@ export interface DatabaseManager {
  *     journal_mode  = WAL      (concurrent reads + writes)
  *     foreign_keys  = ON       (enforce FK constraints)
  *     busy_timeout  = 5000     (wait up to 5 s on lock)
- *     synchronous   = NORMAL   (balanced durability / speed)
+ *     synchronous   = FULL     (WAL frames fsynced — survives SIGKILL)
  *     cache_size    = -8000    (8 MB page cache)
  *     temp_store    = MEMORY   (temp tables in RAM)
  */
@@ -56,7 +56,7 @@ export function createDatabaseManager(dbPath: string): DatabaseManager {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
-  db.pragma('synchronous = NORMAL');
+  db.pragma('synchronous = FULL');
   db.pragma('cache_size = -8000');
   db.pragma('temp_store = MEMORY');
 

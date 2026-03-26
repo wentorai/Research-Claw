@@ -15,7 +15,9 @@ if [ -f "$PIDFILE" ]; then
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
     echo "[run] Another run.sh is already running (PID $OLD_PID). Stopping it first..."
     kill "$OLD_PID" 2>/dev/null || true
-    sleep 2
+    # Give the gateway enough time for clean shutdown (WAL checkpoint, WS drain)
+    # before forced kill. 10s is sufficient for the full close sequence.
+    sleep 10
     kill -9 "$OLD_PID" 2>/dev/null || true
   fi
 fi
