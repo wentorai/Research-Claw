@@ -26,6 +26,7 @@ PNPM_VERSION=9
 ISSUES_URL="https://github.com/wentorai/Research-Claw/issues"
 RC_PNPM_PREFIX="${RC_PNPM_PREFIX:-$INSTALL_DIR/.tools/pnpm}"
 PNPM_BIN=""
+UPDATE_FAILED=false
 
 # --- Colors (disabled in pipes) ---
 if [ -t 1 ] && [ -t 2 ]; then
@@ -398,7 +399,20 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     warn "git pull failed. Possible causes:"
     warn "  - Network issue (try again later)"
     warn "  - VPN/proxy interference (try disabling VPN or switching to direct connection)"
-    die "Update failed. Try manually: cd $INSTALL_DIR && git pull"
+    # --- Graceful fallback: start existing installation if runnable ---
+    if [ -f "node_modules/openclaw/dist/entry.js" ]; then
+      # Revert any partial changes from interrupted rebase/pull
+      git rebase --abort 2>/dev/null || true
+      git merge --abort 2>/dev/null || true
+      git reset --hard HEAD 2>/dev/null || true
+      printf "\n"
+      warn "更新失败，请检查网络情况或联系开发人员 help@wentor.ai"
+      warn "Update failed. Will start with existing local installation."
+      printf "\n"
+      UPDATE_FAILED=true
+    else
+      die "Update failed. No runnable installation found. Try: cd $INSTALL_DIR && git pull"
+    fi
   fi
 
   # --- Restore user data files ---
@@ -410,14 +424,16 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   [ -f "$_RC_BAK/BOOTSTRAP.md.done" ] && cp "$_RC_BAK/BOOTSTRAP.md.done" "$RC_DIR/BOOTSTRAP.md.done"
   rm -rf "$_RC_BAK"
 
-  # Invalidate pnpm's "already up to date" cache after git pull.
-  # Scenario: a previous pnpm install was aborted (e.g., "Proceed?" prompt got EOF)
-  # but .modules.yaml was already written. Next run: pnpm sees hash match → skips
-  # install → stale packages remain (e.g., sass-embedded instead of sass).
-  # Deleting .modules.yaml forces pnpm to re-verify all packages against the lockfile.
-  rm -f node_modules/.modules.yaml 2>/dev/null || true
+  if ! $UPDATE_FAILED; then
+    # Invalidate pnpm's "already up to date" cache after git pull.
+    # Scenario: a previous pnpm install was aborted (e.g., "Proceed?" prompt got EOF)
+    # but .modules.yaml was already written. Next run: pnpm sees hash match → skips
+    # install → stale packages remain (e.g., sass-embedded instead of sass).
+    # Deleting .modules.yaml forces pnpm to re-verify all packages against the lockfile.
+    rm -f node_modules/.modules.yaml 2>/dev/null || true
 
-  ok "Updated"
+    ok "Updated"
+  fi
 else
   info "Cloning to $INSTALL_DIR ..."
   if ! git clone --depth 1 "$REPO" "$INSTALL_DIR" 2>&1; then
@@ -493,11 +509,13 @@ _pnpm_install() {
     echo y | PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install "$@"
   fi
 }
-info "Installing dependencies..."
-if ! (_pnpm_install --frozen-lockfile 2>/dev/null || _pnpm_install); then
-  die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
+if ! $UPDATE_FAILED; then
+  info "Installing dependencies..."
+  if ! (_pnpm_install --frozen-lockfile 2>/dev/null || _pnpm_install); then
+    die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
+  fi
+  ok "Dependencies installed"
 fi
-ok "Dependencies installed"
 
 # --- Ensure `openclaw` CLI is in PATH ---
 # The agent's system.run tool spawns a new shell that doesn't inherit
@@ -718,27 +736,29 @@ done
 [ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ -f "$RC_DIR/BOOTSTRAP.md.example" ] && \
   cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md"
 
-info "Building..."
-BUILD_LOG="$(mktemp)"
-if PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build >"$BUILD_LOG" 2>&1; then
-  tail -3 "$BUILD_LOG"
-else
-  tail -20 "$BUILD_LOG"
-  rm -f "$BUILD_LOG"
-  die "Build failed. Try: cd $INSTALL_DIR && pnpm build"
-fi
-rm -f "$BUILD_LOG"
-ok "Build complete"
-
-# --- Verify dashboard build ---
-if [ ! -d "dashboard/dist" ] || [ ! -f "dashboard/dist/index.html" ]; then
-  warn "Dashboard build missing. Rebuilding..."
-  PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build:dashboard 2>&1 | tail -3 || true
-  if [ ! -f "dashboard/dist/index.html" ]; then
-    warn "Dashboard build failed. The gateway will start but the web UI may not load."
-    warn "Try: cd $INSTALL_DIR && pnpm build:dashboard"
+if ! $UPDATE_FAILED; then
+  info "Building..."
+  BUILD_LOG="$(mktemp)"
+  if PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build >"$BUILD_LOG" 2>&1; then
+    tail -3 "$BUILD_LOG"
   else
-    ok "Dashboard rebuilt"
+    tail -20 "$BUILD_LOG"
+    rm -f "$BUILD_LOG"
+    die "Build failed. Try: cd $INSTALL_DIR && pnpm build"
+  fi
+  rm -f "$BUILD_LOG"
+  ok "Build complete"
+
+  # --- Verify dashboard build ---
+  if [ ! -d "dashboard/dist" ] || [ ! -f "dashboard/dist/index.html" ]; then
+    warn "Dashboard build missing. Rebuilding..."
+    PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build:dashboard 2>&1 | tail -3 || true
+    if [ ! -f "dashboard/dist/index.html" ]; then
+      warn "Dashboard build failed. The gateway will start but the web UI may not load."
+      warn "Try: cd $INSTALL_DIR && pnpm build:dashboard"
+    else
+      ok "Dashboard rebuilt"
+    fi
   fi
 fi
 
@@ -831,7 +851,15 @@ ensure_native_modules() {
   return 1
 }
 
-ensure_native_modules || true
+if ! $UPDATE_FAILED; then
+  ensure_native_modules || true
+else
+  # Quick smoke test — warn if native modules are broken (no rebuild, just diagnostic)
+  if ! test_sqlite3; then
+    warn "Native module (better-sqlite3) may be corrupted. Gateway may fail to start."
+    warn "Fix: cd $INSTALL_DIR && pnpm install && pnpm build"
+  fi
+fi
 
 # --- [8/8] Register research-plugins (skills + agent tools) ---
 # Installed via OpenClaw's plugin system (npm pack → ~/.openclaw/extensions/).
@@ -860,6 +888,8 @@ rp_summary() {
   local SKILLS; SKILLS=$(find "$PLUGIN_DIR/skills" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
   [ "$SKILLS" -gt 0 ] 2>/dev/null && echo "${SKILLS} skills" || true
 }
+
+if ! $UPDATE_FAILED; then
 
 # Trap Ctrl+C during plugin install — exit cleanly instead of continuing to gateway
 _RP_INTERRUPTED=false
@@ -939,6 +969,8 @@ if $_RP_INTERRUPTED; then
   printf "    cd $INSTALL_DIR && bash scripts/run.sh\n"
   exit 130
 fi
+
+fi  # end: if ! $UPDATE_FAILED (skip build/install/plugins)
 
 # --- Persist OPENCLAW_CONFIG_PATH in shell profile ---
 # Ensures `openclaw config set/get` always targets the RC project config,
@@ -1051,6 +1083,10 @@ printf "\n  ${G}${B}Ready!${N}\n\n"
 printf "  ${B}Dashboard:${N}  ${C}${DASHBOARD_URL}${N}\n"
 printf "  ${B}Location:${N}   $INSTALL_DIR\n"
 printf "  ${B}Start:${N}      cd $INSTALL_DIR && bash scripts/run.sh\n"
+if $UPDATE_FAILED; then
+  printf "  ${Y}NOTE:${N}     Running with previous version (update failed).\n"
+  printf "            Retry later: ${C}curl -fsSL https://wentor.ai/install.sh | bash${N}\n"
+fi
 if [ "$GATEWAY_BIND" = "lan" ]; then
   printf "  ${Y}NOTE:${N}     Gateway bound to LAN — accessible from other devices on your network.\n"
 fi
