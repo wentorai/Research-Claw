@@ -2,7 +2,7 @@
  * Integration Tests: Issues 6, 7, 8
  *
  * Issue 6: Settings save confirmation dialog (Modal.confirm before config.apply)
- * Issue 7: Version v0.5.10 + glow header + GitHub link
+ * Issue 7: Version v0.5.11 + glow header + GitHub link
  * Issue 8: Notification system (Channel A polling, Channel B card extraction, dedup, read persistence)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -262,10 +262,10 @@ describe('Issue 6: Settings save confirmation dialog', () => {
 });
 
 // ============================================================
-// Issue 7: Version v0.5.10 + GitHub link
+// Issue 7: Version v0.5.11 + GitHub link
 // ============================================================
 
-describe('Issue 7: Version v0.5.10 and GitHub link', () => {
+describe('Issue 7: Version v0.5.11 and GitHub link', () => {
   beforeEach(() => {
     useGatewayStore.setState({
       client: createMockClient(),
@@ -279,11 +279,11 @@ describe('Issue 7: Version v0.5.10 and GitHub link', () => {
     });
   });
 
-  it('renders "Research-Claw v0.5.10" text in the about section', () => {
+  it('renders "Research-Claw v0.5.11" text in the about section', () => {
     render(<SettingsPanel />);
 
     // The glowing header should contain the version string
-    expect(screen.getByText('Research-Claw v0.5.10')).toBeInTheDocument();
+    expect(screen.getByText('Research-Claw v0.5.11')).toBeInTheDocument();
   });
 
   it('renders a link to the GitHub repository', () => {
@@ -316,21 +316,21 @@ describe('Issue 7: Version v0.5.10 and GitHub link', () => {
     }
   });
 
-  it('contains v0.5.10 in the glow header (info row removed to avoid duplication)', () => {
+  it('contains v0.5.11 in the glow header (info row removed to avoid duplication)', () => {
     render(<SettingsPanel />);
 
     // Version is shown only in the glow header, not as a separate info row
-    expect(screen.getByText('Research-Claw v0.5.10')).toBeInTheDocument();
+    expect(screen.getByText('Research-Claw v0.5.11')).toBeInTheDocument();
   });
 
-  it('diagnostics copy text contains v0.5.10', () => {
-    // Verify by reading the source — the diagnostics array includes 'Research-Claw v0.5.10'
+  it('diagnostics copy text contains v0.5.11', () => {
+    // Verify by reading the source — the diagnostics array includes 'Research-Claw v0.5.11'
     // This is a structural test: the AboutSection handleCopyDiagnostics builds the string
-    // with a hardcoded 'Research-Claw v0.5.10' on line 71 of SettingsPanel.tsx.
+    // with a hardcoded 'Research-Claw v0.5.11' on line 71 of SettingsPanel.tsx.
     // We verify the rendered component has the version header which uses the same string.
     render(<SettingsPanel />);
 
-    const versionHeader = screen.getByText('Research-Claw v0.5.10');
+    const versionHeader = screen.getByText('Research-Claw v0.5.11');
     expect(versionHeader).toBeInTheDocument();
 
     // The version header should be styled with the red glow color

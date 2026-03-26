@@ -83,7 +83,7 @@ function AboutSection() {
 
   const handleCopyDiagnostics = async () => {
     const diagnostics = [
-      `Research-Claw v0.5.10`,
+      `Research-Claw v0.5.11`,
       `Powered by OpenClaw ${serverVersion ?? 'unknown'}`,
       `Gateway: ws://127.0.0.1:28789`,
       `Platform: ${navigator.platform}`,
@@ -188,7 +188,7 @@ function AboutSection() {
               letterSpacing: 1,
             }}
           >
-            Research-Claw v0.5.10
+            Research-Claw v0.5.11
           </span>
         </a>
       </div>
