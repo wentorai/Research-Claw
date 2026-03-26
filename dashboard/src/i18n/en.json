@@ -356,7 +356,8 @@
     "restartConfirm": "Restart Research-Claw?",
     "restartConfirmDesc": "All active conversations will be interrupted. The gateway will recover automatically in a few seconds.",
     "restartSuccess": "Restart signal sent",
-    "restartFailed": "Restart failed — please restart manually"
+    "restartFailed": "Restart failed — please restart manually",
+    "reconnected": "Reconnected — config applied successfully"
   },
   "setup": {
     "title": "Welcome to Research-Claw",

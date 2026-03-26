@@ -356,7 +356,8 @@
     "restartConfirm": "确认重启科研龙虾？",
     "restartConfirmDesc": "所有进行中的对话将中断，网关将在数秒后自动恢复。",
     "restartSuccess": "重启信号已发送",
-    "restartFailed": "重启失败 — 请手动重启"
+    "restartFailed": "重启失败 — 请手动重启",
+    "reconnected": "重连成功 — 配置已生效"
   },
   "setup": {
     "title": "欢迎使用科研龙虾",

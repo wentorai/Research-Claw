@@ -133,7 +133,7 @@ function resolveModelDef(provider: string, modelId: string): Record<string, unkn
     name: modelId,
     reasoning: known?.reasoning ?? false,
     input: known?.input ?? ['text', 'image'],
-    contextWindow: known?.contextWindow ?? 128_000,
+    contextWindow: known?.contextWindow ?? 32_000,
     maxTokens: known?.maxTokens ?? 16_384,
   };
 }

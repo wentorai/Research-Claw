@@ -306,6 +306,7 @@ export default function SettingsPanel() {
 
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const restartSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Controls whether the next gatewayConfig change should sync into form fields.
   // True on mount (initial load) and after explicit refresh / save-restart.
@@ -427,8 +428,10 @@ export default function SettingsPanel() {
     setHeartbeatEnabled(fields.heartbeatEnabled);
     setHeartbeatInterval(fields.heartbeatInterval);
 
+    if (restarting) message.success(t('settings.reconnected'));
     setRestarting(false);
-  }, [gatewayConfig]);
+    if (restartSafetyTimerRef.current) { clearTimeout(restartSafetyTimerRef.current); restartSafetyTimerRef.current = null; }
+  }, [gatewayConfig]); // eslint-disable-line react-hooks/exhaustive-deps -- restarting read intentionally not a dep
 
   const handleRefresh = useCallback(() => {
     syncNeeded.current = true;
@@ -523,6 +526,12 @@ export default function SettingsPanel() {
           message.success(t('settings.saved'));
           syncNeeded.current = true;
           setRestarting(true);
+          // Safety timeout: reset after 15s if gateway never reconnects with new config.
+          if (restartSafetyTimerRef.current) clearTimeout(restartSafetyTimerRef.current);
+          restartSafetyTimerRef.current = setTimeout(() => {
+            setRestarting(false);
+            restartSafetyTimerRef.current = null;
+          }, 15_000);
         } catch {
           message.error(t('settings.saveFailed'));
         } finally {
@@ -854,7 +863,7 @@ export default function SettingsPanel() {
         <Text type="secondary" style={{ fontSize: 11, flex: 1 }}>
           {t('settings.restartHint')}
         </Text>
-        <Button type="primary" size="small" onClick={handleSave} loading={saving} style={{ flexShrink: 0 }}>
+        <Button type="primary" size="small" onClick={handleSave} loading={saving || restarting} disabled={restarting} style={{ flexShrink: 0 }}>
           {restarting ? t('setup.gatewayRestarting') : t('settings.save')}
         </Button>
       </div>
