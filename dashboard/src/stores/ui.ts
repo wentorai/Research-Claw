@@ -19,8 +19,10 @@ export interface Notification {
   targetSessionKey?: string;
 }
 
-// ── Persist read state across refreshes via localStorage ──────────────
+// ── Persist notification + read state across refreshes via localStorage ──
 
+const NOTIFICATIONS_STORAGE = 'rc-notifications';
+const MAX_NOTIFICATIONS = 50;
 const READ_KEYS_STORAGE = 'rc-read-dedup-keys';
 const MAX_READ_KEYS = 200;
 const PANEL_TAB_STORAGE = 'rc-right-panel-tab';
@@ -69,6 +71,34 @@ function saveReadKeys(keys: Set<string>): void {
   } catch { /* storage full — non-fatal */ }
 }
 
+function loadNotifications(): Notification[] {
+  try {
+    const raw = localStorage.getItem(NOTIFICATIONS_STORAGE);
+    if (raw) {
+      const arr = JSON.parse(raw) as Notification[];
+      // Validate: must be array of objects with required fields
+      if (Array.isArray(arr) && arr.every((n) => n && typeof n === 'object' && n.id && n.timestamp && n.title)) {
+        return arr.slice(0, MAX_NOTIFICATIONS);
+      }
+    }
+  } catch { /* ignore corrupt data */ }
+  return [];
+}
+
+function saveNotifications(notifications: Notification[]): void {
+  try {
+    localStorage.setItem(
+      NOTIFICATIONS_STORAGE,
+      JSON.stringify(notifications.slice(0, MAX_NOTIFICATIONS)),
+    );
+  } catch { /* storage full — non-fatal */ }
+}
+
+/** Sort notifications by timestamp descending (newest first). Direct string comparison — ISO 8601 is lexicographically sortable. */
+function sortByTimestampDesc(a: Notification, b: Notification): number {
+  return b.timestamp > a.timestamp ? 1 : b.timestamp < a.timestamp ? -1 : 0;
+}
+
 interface UiState {
   rightPanelTab: PanelTab;
   rightPanelOpen: boolean;
@@ -109,13 +139,15 @@ interface UiState {
   setCronSessionsFolded: (folded: boolean) => void;
 }
 
+const _initNotifications = loadNotifications();
+
 export const useUiStore = create<UiState>()((set, get) => ({
   rightPanelTab: loadPanelTab(),
   rightPanelOpen: loadBoolean(PANEL_OPEN_STORAGE, true),
   rightPanelWidth: 360,
   leftNavCollapsed: loadBoolean(LEFT_NAV_COLLAPSED_STORAGE, false),
-  notifications: [],
-  unreadCount: 0,
+  notifications: _initNotifications,
+  unreadCount: _initNotifications.filter((n) => !n.read).length,
   agentStatus: 'disconnected',
   workspaceRefreshKey: 0,
   pendingPreviewPath: null,
@@ -174,10 +206,16 @@ export const useUiStore = create<UiState>()((set, get) => ({
       timestamp: new Date().toISOString(),
       read: alreadyRead,
     };
-    set((s) => ({
-      notifications: [notification, ...s.notifications].slice(0, 50),
-      unreadCount: alreadyRead ? s.unreadCount : s.unreadCount + 1,
-    }));
+    set((s) => {
+      const next = [notification, ...s.notifications]
+        .sort(sortByTimestampDesc)
+        .slice(0, MAX_NOTIFICATIONS);
+      saveNotifications(next);
+      return {
+        notifications: next,
+        unreadCount: alreadyRead ? s.unreadCount : s.unreadCount + 1,
+      };
+    });
   },
 
   markNotificationRead: (id: string) => {
@@ -188,8 +226,10 @@ export const useUiStore = create<UiState>()((set, get) => ({
         keys.add(found.dedupKey);
         saveReadKeys(keys);
       }
+      const next = s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n));
+      saveNotifications(next);
       return {
-        notifications: s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
+        notifications: next,
         unreadCount: found ? s.unreadCount - 1 : s.unreadCount,
       };
     });
@@ -201,13 +241,15 @@ export const useUiStore = create<UiState>()((set, get) => ({
       if (n.dedupKey && !n.read) keys.add(n.dedupKey);
     }
     saveReadKeys(keys);
-    set((s) => ({
-      notifications: s.notifications.map((n) => ({ ...n, read: true })),
-      unreadCount: 0,
-    }));
+    set((s) => {
+      const next = s.notifications.map((n) => ({ ...n, read: true }));
+      saveNotifications(next);
+      return { notifications: next, unreadCount: 0 };
+    });
   },
 
   clearNotifications: () => {
+    saveNotifications([]);
     set({ notifications: [], unreadCount: 0 });
   },
 

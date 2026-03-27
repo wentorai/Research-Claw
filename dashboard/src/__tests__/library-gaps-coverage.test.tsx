@@ -728,12 +728,11 @@ describe('Component: inbox tab renders server-returned papers directly', () => {
 // =========================================================================
 // 10. Component: pending and saved counts in tab labels
 // =========================================================================
-describe('Component: tab labels do not show counts', () => {
+describe('Component: tab labels show server-side counts from loadStats', () => {
   beforeEach(resetStores);
 
-  it('tab labels are plain text without count suffixes', async () => {
-    // With server-side pagination, the component no longer computes client-side
-    // counts. Tab labels are just the plain i18n key without "(N)" suffixes.
+  it('tab labels show counts from rc.lit.stats when available', async () => {
+    // loadStats is called on mount → sets tabCounts → labels include "(N)".
     const papers = [
       makePaper({ id: 'p1', read_status: 'unread', rating: null }),
       makePaper({ id: 'p2', read_status: 'reading', rating: 5 }),
@@ -749,19 +748,52 @@ describe('Component: tab labels do not show counts', () => {
     setupMethodRouter({
       'rc.lit.list': { items: papers, total: 2 },
       'rc.lit.tags': [],
+      'rc.lit.stats': { total: 2, by_status: { unread: 1, reading: 1 }, starred_count: 1 },
     });
 
     await act(async () => {
       render(<LibraryPanel />);
     });
 
-    // Tab labels are plain i18n keys, no count suffixes
+    // Tab labels include counts from stats
+    expect(screen.getByText('library.inbox (2)')).toBeInTheDocument();
+    expect(screen.getByText('library.starred (1)')).toBeInTheDocument();
+    expect(screen.getByText('library.archive (0)')).toBeInTheDocument();
+  });
+
+  it('tab labels are plain text when stats RPC fails', async () => {
+    const papers = [
+      makePaper({ id: 'p1', read_status: 'unread', rating: null }),
+    ];
+
+    useLibraryStore.setState({
+      papers,
+      tags: [],
+      total: 1,
+      activeTab: 'inbox',
+      tabCounts: null,
+    });
+
+    setupMethodRouter({
+      'rc.lit.list': { items: papers, total: 1 },
+      'rc.lit.tags': [],
+    });
+
+    // Make stats fail so tabCounts stays null
+    const origImpl = mockGatewayClient.request.getMockImplementation()!;
+    mockGatewayClient.request.mockImplementation((method: string, ...args: unknown[]) => {
+      if (method === 'rc.lit.stats') return Promise.reject(new Error('stats unavailable'));
+      return origImpl(method, ...args);
+    });
+
+    await act(async () => {
+      render(<LibraryPanel />);
+    });
+
+    // Without stats, labels are plain i18n keys
     expect(screen.getByText('library.inbox')).toBeInTheDocument();
     expect(screen.getByText('library.starred')).toBeInTheDocument();
     expect(screen.getByText('library.archive')).toBeInTheDocument();
-    // Old count-based labels should NOT exist
-    expect(screen.queryByText(/library\.inbox \(\d+\)/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/library\.starred \(\d+\)/)).not.toBeInTheDocument();
   });
 });
 

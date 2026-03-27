@@ -9,6 +9,8 @@
 
 import { useEffect } from 'react';
 import { App, Button } from 'antd';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../stores/gateway';
 import { useSessionsStore } from '../stores/sessions';
@@ -50,7 +52,30 @@ export default function CronEventListener() {
       notification.info({
         key: toastKey,
         message: jobName,
-        description: evt.summary?.slice(0, 200),
+        description: evt.summary ? (
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ children }) => <span style={{ display: 'block', margin: 0 }}>{children}</span>,
+              ul: ({ children }) => <ul style={{ margin: '2px 0', paddingLeft: 16 }}>{children}</ul>,
+              ol: ({ children }) => <ol style={{ margin: '2px 0', paddingLeft: 16 }}>{children}</ol>,
+              li: ({ children }) => <li style={{ margin: 0 }}>{children}</li>,
+              code: ({ children }) => (
+                <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 3px', borderRadius: 2, fontSize: '0.9em' }}>
+                  {children}
+                </code>
+              ),
+              pre: ({ children }) => <>{children}</>,
+              a: ({ href, children }) => (
+                <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-secondary, #3B82F6)' }}>
+                  {children}
+                </a>
+              ),
+            }}
+          >
+            {evt.summary.slice(0, 200)}
+          </ReactMarkdown>
+        ) : undefined,
         duration: 5,
         placement: 'topRight',
         btn: targetSessionKey ? (

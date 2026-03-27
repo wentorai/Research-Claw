@@ -489,11 +489,16 @@ interface Notification {
   id: string;
   type: 'deadline' | 'heartbeat' | 'system' | 'error';
   title: string;
-  body?: string;
-  timestamp: string;
+  body?: string;           // May contain markdown (rendered via ReactMarkdown in bell panel + toast)
+  timestamp: string;       // Set once at creation (new Date().toISOString()), immutable thereafter
   read: boolean;
   chatMessageId?: string;  // Link to chat message
+  dedupKey?: string;       // Stable key for deduplication — same dedupKey won't create a second notification
+  targetSessionKey?: string; // Session key to navigate to when clicked (Layer 2, #33)
 }
+
+// Notifications are persisted to localStorage ('rc-notifications') and sorted by timestamp descending.
+// Read state is separately persisted via 'rc-read-dedup-keys' for cross-refresh dedup.
 ```
 
 ### 4.8 Cron Store

@@ -17,6 +17,20 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-03-27 — Notification Subsystem Bugfixes + Test Suite Cleanup
+
+- [2026-03-27] [Dashboard] [Claude] fix(P0): notification timestamps reset to "just now" on page refresh — full `Notification[]` now persisted to `localStorage` (`rc-notifications`); timestamp set once at creation, immutable
+- [2026-03-27] [Dashboard] [Claude] fix: notification body markdown not rendered — added `ReactMarkdown + remarkGfm` to bell panel (hover-expand) and cron toast description
+- [2026-03-27] [Dashboard] [Claude] fix: notification sort order undefined — explicit `timestamp` descending sort after every mutation
+- [2026-03-27] [Dashboard] [Claude] fix: notification timestamp display uses inline function instead of shared `relativeTime` utility — replaced with i18n-aware `utils/relativeTime.ts`
+- [2026-03-27] [Dashboard] [Claude] fix: ReactMarkdown missing `<a>` override — links in notifications now open `target="_blank"` (prevents Electron navigation hijack)
+- [2026-03-27] [Dashboard] [Claude] fix: `localeCompare` on ISO timestamps may misbehave on Windows locale — replaced with direct string comparison
+- [2026-03-27] [Dashboard] [Claude] fix: `loadNotifications` validation didn't guard against non-object array elements — added `typeof n === 'object'` check
+- [2026-03-27] [Infra] [Claude] fix: bootstrap-consistency.test.ts rewritten for AGENTS.md v4.0 / TOOLS.md v4.0 (was v3.3/v3.5 — 66 failures)
+- [2026-03-27] [Infra] [Claude] fix: integration-library.test.tsx — deletePaper now triggers 3 RPCs (delete + tags + stats), updated mock and assertion
+- [2026-03-27] [Infra] [Claude] fix: library-gaps-coverage.test.tsx — tab labels show server-side counts from `loadStats`, updated expectations
+- [2026-03-27] [Infra] [Claude] Tests: 60 files, 1116 tests all pass (was 68 failures across 3 files)
+
 ### 2026-03-23 — Heartbeat Token Cost Fix + Settings UI
 
 - [2026-03-23] [Dashboard] [Claude] feat: Settings panel heartbeat controls — ON/OFF toggle + interval selector (15m/30m/1h/2h/4h)

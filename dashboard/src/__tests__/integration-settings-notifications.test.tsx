@@ -709,3 +709,167 @@ describe('Issue 8: Read state persistence via localStorage', () => {
     expect(storedKeys.length).toBeLessThanOrEqual(200);
   });
 });
+
+// ============================================================
+// Notification persistence, timestamps, and sort order
+// ============================================================
+
+describe('Notification persistence to localStorage', () => {
+  it('persists notifications to localStorage on addNotification', () => {
+    useUiStore.getState().addNotification({
+      type: 'system',
+      title: 'Persist me',
+      body: 'test body',
+      dedupKey: 'persist:add:1',
+    });
+
+    const raw = localStorage.getItem('rc-notifications');
+    expect(raw).not.toBeNull();
+    const stored = JSON.parse(raw!) as Array<{ title: string; body: string; dedupKey: string }>;
+    expect(stored).toHaveLength(1);
+    expect(stored[0].title).toBe('Persist me');
+    expect(stored[0].body).toBe('test body');
+    expect(stored[0].dedupKey).toBe('persist:add:1');
+  });
+
+  it('survives simulated page refresh — notifications restore from localStorage', () => {
+    // Step 1: add a notification (persists to localStorage)
+    useUiStore.getState().addNotification({
+      type: 'system',
+      title: 'Survive refresh',
+      dedupKey: 'persist:refresh:1',
+    });
+
+    const ts = useUiStore.getState().notifications[0].timestamp;
+
+    // Step 2: simulate page refresh by resetting store state
+    useUiStore.setState({ notifications: [], unreadCount: 0 });
+
+    // Step 3: restore from localStorage (what loadNotifications does on init)
+    const raw = localStorage.getItem('rc-notifications');
+    const restored = JSON.parse(raw!) as Array<{ title: string; timestamp: string; dedupKey: string }>;
+    expect(restored).toHaveLength(1);
+    expect(restored[0].title).toBe('Survive refresh');
+    expect(restored[0].timestamp).toBe(ts);
+    expect(restored[0].dedupKey).toBe('persist:refresh:1');
+  });
+
+  it('timestamp is immutable — set once at creation, not updated on re-poll', () => {
+    useUiStore.getState().addNotification({
+      type: 'deadline',
+      title: 'Fixed time',
+      dedupKey: 'persist:immutable:1',
+    });
+
+    const originalTs = useUiStore.getState().notifications[0].timestamp;
+
+    // Simulate a later poll trying to re-add the same notification
+    useUiStore.getState().addNotification({
+      type: 'deadline',
+      title: 'Fixed time (re-polled)',
+      dedupKey: 'persist:immutable:1',
+    });
+
+    // Should still have the original notification with original timestamp
+    const { notifications } = useUiStore.getState();
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].timestamp).toBe(originalTs);
+    expect(notifications[0].title).toBe('Fixed time'); // not overwritten
+  });
+
+  it('persists read state changes to localStorage', () => {
+    useUiStore.getState().addNotification({
+      type: 'system',
+      title: 'Mark me',
+      dedupKey: 'persist:read:1',
+    });
+
+    const id = useUiStore.getState().notifications[0].id;
+    useUiStore.getState().markNotificationRead(id);
+
+    const raw = localStorage.getItem('rc-notifications');
+    const stored = JSON.parse(raw!) as Array<{ read: boolean }>;
+    expect(stored[0].read).toBe(true);
+  });
+
+  it('clearNotifications clears localStorage', () => {
+    useUiStore.getState().addNotification({
+      type: 'system',
+      title: 'Will be cleared',
+      dedupKey: 'persist:clear:1',
+    });
+
+    expect(localStorage.getItem('rc-notifications')).not.toBeNull();
+
+    useUiStore.getState().clearNotifications();
+
+    const raw = localStorage.getItem('rc-notifications');
+    expect(raw).toBe('[]');
+  });
+
+  it('handles corrupt localStorage gracefully — addNotification still works', () => {
+    // Write corrupt data to simulate damaged localStorage
+    localStorage.setItem('rc-notifications', 'not-valid-json{{{');
+
+    // Adding a new notification should not crash, even with corrupt persisted data
+    useUiStore.getState().addNotification({
+      type: 'system',
+      title: 'After corruption',
+      dedupKey: 'persist:corrupt:1',
+    });
+
+    const { notifications } = useUiStore.getState();
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].title).toBe('After corruption');
+
+    // localStorage should now be clean (overwritten by saveNotifications)
+    const raw = localStorage.getItem('rc-notifications');
+    const stored = JSON.parse(raw!) as Array<{ title: string }>;
+    expect(stored).toHaveLength(1);
+    expect(stored[0].title).toBe('After corruption');
+  });
+});
+
+describe('Notification sort order — timestamp descending', () => {
+  it('sorts notifications newest-first by timestamp', () => {
+    // Use a definitely-past timestamp so new Date() will always be newer
+    const older = {
+      id: 'old-1',
+      type: 'system' as const,
+      title: 'Older',
+      timestamp: '2020-01-01T00:00:00.000Z',
+      read: false,
+    };
+
+    // Pre-set store with the old notification
+    useUiStore.setState({ notifications: [older], unreadCount: 1 });
+
+    // Add via addNotification — the new one gets new Date() which is definitely after 2020
+    useUiStore.getState().addNotification({
+      type: 'deadline',
+      title: 'Latest',
+      dedupKey: 'sort:latest',
+    });
+
+    const { notifications } = useUiStore.getState();
+    expect(notifications.length).toBe(2);
+    // The latest-added notification should be first (newest timestamp)
+    expect(notifications[0].title).toBe('Latest');
+    expect(notifications[1].title).toBe('Older');
+  });
+
+  it('maintains descending order in persisted localStorage', () => {
+    // Add notifications in rapid succession
+    useUiStore.getState().addNotification({ type: 'system', title: 'A', dedupKey: 'sort:a' });
+    useUiStore.getState().addNotification({ type: 'system', title: 'B', dedupKey: 'sort:b' });
+    useUiStore.getState().addNotification({ type: 'system', title: 'C', dedupKey: 'sort:c' });
+
+    const raw = localStorage.getItem('rc-notifications');
+    const stored = JSON.parse(raw!) as Array<{ timestamp: string }>;
+
+    // Verify descending order
+    for (let i = 0; i < stored.length - 1; i++) {
+      expect(stored[i].timestamp >= stored[i + 1].timestamp).toBe(true);
+    }
+  });
+});

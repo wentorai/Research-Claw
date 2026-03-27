@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import { Badge, Button, Dropdown, Empty, Typography } from 'antd';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   BellOutlined,
   ClockCircleOutlined,
@@ -15,6 +17,7 @@ import { useSessionsStore } from '../stores/sessions';
 import { normalizeSessionKey } from '../utils/session-key';
 import { useConfigStore } from '../stores/config';
 import { getThemeTokens } from '../styles/theme';
+import { relativeTime } from '../utils/relativeTime';
 import type { Notification as AppNotification } from '../stores/ui';
 
 const { Text } = Typography;
@@ -34,24 +37,15 @@ function getNotificationIcon(type: AppNotification['type'], tokens: ReturnType<t
   }
 }
 
-function relativeTimestamp(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 function NotificationItem({
   item,
   tokens,
+  locale,
   onMarkRead,
 }: {
   item: AppNotification;
   tokens: ReturnType<typeof getThemeTokens>;
+  locale: string;
   onMarkRead: (id: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -119,22 +113,59 @@ function NotificationItem({
         >
           {item.title}
         </Text>
-        {item.body && (
-          <Text
+        {item.body && (hovered ? (
+          <div
             style={{
               fontSize: 12,
               color: tokens.text.secondary,
-              display: 'block',
               marginTop: 2,
               lineHeight: '16px',
-              whiteSpace: hovered ? 'normal' : undefined,
-              wordBreak: hovered ? 'break-word' : undefined,
+              wordBreak: 'break-word',
             }}
-            ellipsis={!hovered}
+            className="notification-markdown-body"
+          >
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                p: ({ children }) => <span style={{ display: 'block', margin: 0 }}>{children}</span>,
+                ul: ({ children }) => <ul style={{ margin: '2px 0', paddingLeft: 16 }}>{children}</ul>,
+                ol: ({ children }) => <ol style={{ margin: '2px 0', paddingLeft: 16 }}>{children}</ol>,
+                li: ({ children }) => <li style={{ margin: 0 }}>{children}</li>,
+                code: ({ children }) => (
+                  <code style={{ background: 'var(--surface-active, rgba(255,255,255,0.08))', padding: '1px 3px', borderRadius: 2, fontSize: '0.9em' }}>
+                    {children}
+                  </code>
+                ),
+                pre: ({ children }) => <>{children}</>,
+                h1: ({ children }) => <strong>{children}</strong>,
+                h2: ({ children }) => <strong>{children}</strong>,
+                h3: ({ children }) => <strong>{children}</strong>,
+                a: ({ href, children }) => (
+                  <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-secondary, #3B82F6)' }}>
+                    {children}
+                  </a>
+                ),
+              }}
+            >
+              {item.body}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <div
+            style={{
+              fontSize: 12,
+              color: tokens.text.secondary,
+              marginTop: 2,
+              lineHeight: '16px',
+              overflow: 'hidden',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical' as const,
+            }}
           >
             {item.body}
-          </Text>
-        )}
+          </div>
+        ))}
         <Text
           style={{
             fontSize: 11,
@@ -143,7 +174,7 @@ function NotificationItem({
             marginTop: 3,
           }}
         >
-          {relativeTimestamp(item.timestamp)}
+          {relativeTime(item.timestamp, locale)}
         </Text>
       </div>
 
@@ -167,6 +198,7 @@ function NotificationItem({
 export default function NotificationDropdown() {
   const { t } = useTranslation();
   const theme = useConfigStore((s) => s.theme);
+  const locale = useConfigStore((s) => s.locale);
   const tokens = useMemo(() => getThemeTokens(theme), [theme]);
   const notifications = useUiStore((s) => s.notifications);
   const unreadCount = useUiStore((s) => s.unreadCount);
@@ -257,6 +289,7 @@ export default function NotificationDropdown() {
               key={item.id}
               item={item}
               tokens={tokens}
+              locale={locale}
               onMarkRead={markRead}
             />
           ))}

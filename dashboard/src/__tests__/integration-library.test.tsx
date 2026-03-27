@@ -277,7 +277,7 @@ describe('Issue 1: deletePaper triggers loadTags after successful delete', () =>
     expect(calls).not.toContain('rc.lit.tags');
   });
 
-  it('tracks the exact sequence of RPC calls: delete then tags', async () => {
+  it('tracks the exact sequence of RPC calls: delete then tags then stats', async () => {
     useLibraryStore.setState({
       papers: [makePaper()],
       tags: [makeTag()],
@@ -286,18 +286,20 @@ describe('Issue 1: deletePaper triggers loadTags after successful delete', () =>
 
     mockGatewayClient.request.mockResolvedValueOnce({}); // delete
     mockGatewayClient.request.mockResolvedValueOnce([]); // tags
+    mockGatewayClient.request.mockResolvedValueOnce({ total: 0, by_status: {}, starred_count: 0 }); // stats
 
     await act(async () => {
       await useLibraryStore.getState().deletePaper('p1');
     });
 
     await waitFor(() => {
-      expect(mockGatewayClient.request).toHaveBeenCalledTimes(2);
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(3);
     });
 
     const callOrder = mockGatewayClient.request.mock.calls.map((c: unknown[]) => c[0]);
     expect(callOrder[0]).toBe('rc.lit.delete');
     expect(callOrder[1]).toBe('rc.lit.tags');
+    expect(callOrder[2]).toBe('rc.lit.stats');
   });
 });
 
