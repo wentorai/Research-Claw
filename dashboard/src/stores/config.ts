@@ -60,6 +60,10 @@ interface ConfigState {
   /** Internal retry counter for config loading after reconnect */
   _configRetryCount: number;
 
+  /** True when config.apply succeeded and we're waiting for gateway restart + reconnect.
+   *  Persisted to sessionStorage so it survives page refresh. */
+  pendingConfigRestart: boolean;
+
   setTheme: (t: 'dark' | 'light') => void;
   setLocale: (l: 'en' | 'zh-CN') => void;
   setSystemPromptAppend: (v: string) => void;
@@ -67,6 +71,7 @@ interface ConfigState {
   loadGatewayConfig: () => Promise<void>;
   evaluateConfig: () => void;
   setBootState: (s: BootState) => void;
+  setPendingConfigRestart: (v: boolean) => void;
 }
 
 function loadFromStorage(): { theme: 'dark' | 'light'; locale: 'en' | 'zh-CN'; systemPromptAppend: string } {
@@ -91,6 +96,18 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
     gatewayConfig: null,
     gatewayConfigLoading: false,
     _configRetryCount: 0,
+    pendingConfigRestart: (() => {
+      try { return sessionStorage.getItem('rc:pending-config-restart') === '1'; }
+      catch { return false; }
+    })(),
+
+    setPendingConfigRestart: (v: boolean) => {
+      try {
+        if (v) sessionStorage.setItem('rc:pending-config-restart', '1');
+        else sessionStorage.removeItem('rc:pending-config-restart');
+      } catch { /* non-fatal */ }
+      set({ pendingConfigRestart: v });
+    },
 
     setTheme: (t: 'dark' | 'light') => {
       document.documentElement.setAttribute('data-theme', t);

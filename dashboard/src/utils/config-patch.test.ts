@@ -445,7 +445,7 @@ describe('buildSaveConfig', () => {
 
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
     const models = providers.openrouter.models as Array<{ id: string; contextWindow: number; maxTokens: number }>;
-    expect(models[0].contextWindow).toBe(128_000);
+    expect(models[0].contextWindow).toBe(32_000);
     expect(models[0].maxTokens).toBe(16_384);
   });
 

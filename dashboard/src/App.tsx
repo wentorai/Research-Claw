@@ -15,6 +15,7 @@ import RightPanel from './components/RightPanel';
 import StatusBar from './components/StatusBar';
 import SetupWizard from './components/setup/SetupWizard';
 import CronEventListener from './components/CronEventListener';
+import ConfigRestartListener from './components/ConfigRestartListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 
@@ -357,6 +358,7 @@ export default function App() {
     <ConfigProvider theme={antdTheme}>
       <AntdApp>
       <CronEventListener />
+      <ConfigRestartListener />
       <div
         style={{
           height: '100vh',

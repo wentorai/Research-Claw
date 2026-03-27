@@ -72,7 +72,6 @@ function AboutSection() {
 
   // Reset restarting state when gateway reconnects with fresh config
   const gatewayConfigForReset = useConfigStore((s) => s.gatewayConfig);
-  const restartNonceRef = useRef(0);
   const configSeenAtStartRef = useRef<unknown>(null);
   useEffect(() => {
     if (restarting && gatewayConfigForReset && gatewayConfigForReset !== configSeenAtStartRef.current) {
@@ -305,8 +304,7 @@ export default function SettingsPanel() {
   const [heartbeatInterval, setHeartbeatInterval] = useState('30m');
 
   const [saving, setSaving] = useState(false);
-  const [restarting, setRestarting] = useState(false);
-  const restartSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRestart = useConfigStore((s) => s.pendingConfigRestart);
 
   // Controls whether the next gatewayConfig change should sync into form fields.
   // True on mount (initial load) and after explicit refresh / save-restart.
@@ -428,10 +426,7 @@ export default function SettingsPanel() {
     setHeartbeatEnabled(fields.heartbeatEnabled);
     setHeartbeatInterval(fields.heartbeatInterval);
 
-    if (restarting) message.success(t('settings.reconnected'));
-    setRestarting(false);
-    if (restartSafetyTimerRef.current) { clearTimeout(restartSafetyTimerRef.current); restartSafetyTimerRef.current = null; }
-  }, [gatewayConfig]); // eslint-disable-line react-hooks/exhaustive-deps -- restarting read intentionally not a dep
+  }, [gatewayConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefresh = useCallback(() => {
     syncNeeded.current = true;
@@ -525,13 +520,7 @@ export default function SettingsPanel() {
 
           message.success(t('settings.saved'));
           syncNeeded.current = true;
-          setRestarting(true);
-          // Safety timeout: reset after 15s if gateway never reconnects with new config.
-          if (restartSafetyTimerRef.current) clearTimeout(restartSafetyTimerRef.current);
-          restartSafetyTimerRef.current = setTimeout(() => {
-            setRestarting(false);
-            restartSafetyTimerRef.current = null;
-          }, 15_000);
+          useConfigStore.getState().setPendingConfigRestart(true);
         } catch {
           message.error(t('settings.saveFailed'));
         } finally {
@@ -863,8 +852,8 @@ export default function SettingsPanel() {
         <Text type="secondary" style={{ fontSize: 11, flex: 1 }}>
           {t('settings.restartHint')}
         </Text>
-        <Button type="primary" size="small" onClick={handleSave} loading={saving || restarting} disabled={restarting} style={{ flexShrink: 0 }}>
-          {restarting ? t('setup.gatewayRestarting') : t('settings.save')}
+        <Button type="primary" size="small" onClick={handleSave} loading={saving || pendingRestart} disabled={pendingRestart} style={{ flexShrink: 0 }}>
+          {pendingRestart ? t('setup.gatewayRestarting') : t('settings.save')}
         </Button>
       </div>
 
