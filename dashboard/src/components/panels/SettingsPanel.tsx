@@ -307,16 +307,35 @@ export default function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
   // Ref mirror of `restarting` — synchronously current, immune to React batching.
-  // Used inside the gatewayConfig sync effect to decide whether to show the
-  // "reconnected" toast (reading state inside an effect with different deps is
-  // unreliable when multiple re-renders happen between set and read).
   const restartingRef = useRef(false);
   const restartSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // DEBUG: mount ID to detect unmount/remount
+  const mountIdRef = useRef(Math.random().toString(36).slice(2, 8));
 
   // Controls whether the next gatewayConfig change should sync into form fields.
   // True on mount (initial load) and after explicit refresh / save-restart.
   // Prevents WebSocket reconnections from overwriting in-progress user edits.
   const syncNeeded = useRef(true);
+
+  // DEBUG: render log (after all refs declared)
+  console.debug(`[SettingsPanel RENDER] mount=${mountIdRef.current} restarting=${restarting} restartingRef=${restartingRef.current} syncNeeded=${syncNeeded.current}`);
+
+  // DEBUG: expose refs to browser console for live inspection
+  // Usage: __RC_DEBUG.settingsPanel in console
+  useEffect(() => {
+    (window as never as Record<string, unknown>).__RC_DEBUG = {
+      ...(window as never as Record<string, unknown>).__RC_DEBUG as object,
+      settingsPanel: {
+        mountId: mountIdRef.current,
+        get restartingRef() { return restartingRef.current; },
+        get syncNeeded() { return syncNeeded.current; },
+        get restarting() { return restarting; },
+        get safetyTimer() { return restartSafetyTimerRef.current !== null; },
+        // Manual trigger: __RC_DEBUG.settingsPanel.fireToast()
+        fireToast: () => { message.success('DEBUG toast test'); },
+      },
+    };
+  });
 
   const isOpenAICodexOAuth = provider === 'openai-codex';
   const [oauthModalOpen, setOauthModalOpen] = useState(false);
@@ -391,8 +410,10 @@ export default function SettingsPanel() {
   // Sync form fields from gateway config — only when explicitly requested
   // (initial mount, manual refresh, or post-save restart).
   useEffect(() => {
+    console.debug(`[SettingsPanel SYNC-EFFECT] mount=${mountIdRef.current} guard: gatewayConfig=${!!gatewayConfig} syncNeeded=${syncNeeded.current} restartingRef=${restartingRef.current}`);
     if (!gatewayConfig || !syncNeeded.current) return;
     syncNeeded.current = false;
+    console.debug(`[SettingsPanel SYNC-EFFECT] mount=${mountIdRef.current} PASSED GUARD — will sync fields, restartingRef=${restartingRef.current}`);
 
     const fields = extractConfigFields(gatewayConfig as unknown as Record<string, unknown>);
     setBaseUrl(fields.baseUrl);
@@ -433,7 +454,12 @@ export default function SettingsPanel() {
     setHeartbeatEnabled(fields.heartbeatEnabled);
     setHeartbeatInterval(fields.heartbeatInterval);
 
-    if (restartingRef.current) message.success(t('settings.reconnected'));
+    if (restartingRef.current) {
+      console.debug(`[SettingsPanel TOAST] mount=${mountIdRef.current} FIRING reconnected toast`);
+      message.success(t('settings.reconnected'));
+    } else {
+      console.debug(`[SettingsPanel SYNC-EFFECT] mount=${mountIdRef.current} restartingRef=false, NO toast`);
+    }
     restartingRef.current = false;
     setRestarting(false);
     if (restartSafetyTimerRef.current) { clearTimeout(restartSafetyTimerRef.current); restartSafetyTimerRef.current = null; }
@@ -533,6 +559,7 @@ export default function SettingsPanel() {
           syncNeeded.current = true;
           restartingRef.current = true;
           setRestarting(true);
+          console.debug(`[SettingsPanel SAVE] mount=${mountIdRef.current} SET restartingRef=true syncNeeded=true`);
           // Safety timeout: reset after 15s if gateway never reconnects with new config.
           if (restartSafetyTimerRef.current) clearTimeout(restartSafetyTimerRef.current);
           restartSafetyTimerRef.current = setTimeout(() => {
