@@ -306,6 +306,11 @@ export default function SettingsPanel() {
 
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  // Ref mirror of `restarting` — synchronously current, immune to React batching.
+  // Used inside the gatewayConfig sync effect to decide whether to show the
+  // "reconnected" toast (reading state inside an effect with different deps is
+  // unreliable when multiple re-renders happen between set and read).
+  const restartingRef = useRef(false);
   const restartSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Controls whether the next gatewayConfig change should sync into form fields.
@@ -428,10 +433,11 @@ export default function SettingsPanel() {
     setHeartbeatEnabled(fields.heartbeatEnabled);
     setHeartbeatInterval(fields.heartbeatInterval);
 
-    if (restarting) message.success(t('settings.reconnected'));
+    if (restartingRef.current) message.success(t('settings.reconnected'));
+    restartingRef.current = false;
     setRestarting(false);
     if (restartSafetyTimerRef.current) { clearTimeout(restartSafetyTimerRef.current); restartSafetyTimerRef.current = null; }
-  }, [gatewayConfig]); // eslint-disable-line react-hooks/exhaustive-deps -- restarting read intentionally not a dep
+  }, [gatewayConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefresh = useCallback(() => {
     syncNeeded.current = true;
@@ -525,10 +531,12 @@ export default function SettingsPanel() {
 
           message.success(t('settings.saved'));
           syncNeeded.current = true;
+          restartingRef.current = true;
           setRestarting(true);
           // Safety timeout: reset after 15s if gateway never reconnects with new config.
           if (restartSafetyTimerRef.current) clearTimeout(restartSafetyTimerRef.current);
           restartSafetyTimerRef.current = setTimeout(() => {
+            restartingRef.current = false;
             setRestarting(false);
             restartSafetyTimerRef.current = null;
           }, 15_000);
