@@ -142,6 +142,7 @@ function resetStores() {
   useLibraryStore.setState({
     papers: [],
     tags: [],
+    collections: [],
     loading: false,
     loadingMore: false,
     total: 0,
@@ -174,10 +175,11 @@ describe('Issue 1: deletePaper triggers loadTags after successful delete', () =>
       total: 1,
     });
 
-    // First call: rc.lit.delete resolves OK
+    // delete → loadTags → loadCollections → loadStats
     mockGatewayClient.request.mockResolvedValueOnce({});
-    // Second call: rc.lit.tags (triggered by loadTags after delete)
     mockGatewayClient.request.mockResolvedValueOnce([]);
+    mockGatewayClient.request.mockResolvedValueOnce([]);
+    mockGatewayClient.request.mockResolvedValueOnce({ by_status: {}, starred_count: 0 });
 
     await act(async () => {
       await useLibraryStore.getState().deletePaper('p1');
@@ -206,10 +208,10 @@ describe('Issue 1: deletePaper triggers loadTags after successful delete', () =>
       total: 1,
     });
 
-    // rc.lit.delete succeeds
     mockGatewayClient.request.mockResolvedValueOnce({});
-    // rc.lit.tags returns empty (last paper with that tag was deleted)
     mockGatewayClient.request.mockResolvedValueOnce([]);
+    mockGatewayClient.request.mockResolvedValueOnce([]);
+    mockGatewayClient.request.mockResolvedValueOnce({ by_status: {}, starred_count: 0 });
 
     await act(async () => {
       await useLibraryStore.getState().deletePaper('p1');
@@ -232,11 +234,11 @@ describe('Issue 1: deletePaper triggers loadTags after successful delete', () =>
       total: 2,
     });
 
-    // rc.lit.delete succeeds
     mockGatewayClient.request.mockResolvedValueOnce({});
-    // rc.lit.tags returns updated tag with count=1
     const updatedTag = makeTag({ name: 'ml', paper_count: 1 });
     mockGatewayClient.request.mockResolvedValueOnce([updatedTag]);
+    mockGatewayClient.request.mockResolvedValueOnce([]);
+    mockGatewayClient.request.mockResolvedValueOnce({ by_status: {}, starred_count: 0 });
 
     await act(async () => {
       await useLibraryStore.getState().deletePaper('p1');
@@ -277,7 +279,7 @@ describe('Issue 1: deletePaper triggers loadTags after successful delete', () =>
     expect(calls).not.toContain('rc.lit.tags');
   });
 
-  it('tracks the exact sequence of RPC calls: delete then tags then stats', async () => {
+  it('tracks the exact sequence of RPC calls: delete → tags → collections → stats', async () => {
     useLibraryStore.setState({
       papers: [makePaper()],
       tags: [makeTag()],
@@ -286,6 +288,7 @@ describe('Issue 1: deletePaper triggers loadTags after successful delete', () =>
 
     mockGatewayClient.request.mockResolvedValueOnce({}); // delete
     mockGatewayClient.request.mockResolvedValueOnce([]); // tags
+    mockGatewayClient.request.mockResolvedValueOnce([]); // collections.list
     mockGatewayClient.request.mockResolvedValueOnce({ total: 0, by_status: {}, starred_count: 0 }); // stats
 
     await act(async () => {
@@ -293,13 +296,14 @@ describe('Issue 1: deletePaper triggers loadTags after successful delete', () =>
     });
 
     await waitFor(() => {
-      expect(mockGatewayClient.request).toHaveBeenCalledTimes(3);
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(4);
     });
 
     const callOrder = mockGatewayClient.request.mock.calls.map((c: unknown[]) => c[0]);
     expect(callOrder[0]).toBe('rc.lit.delete');
     expect(callOrder[1]).toBe('rc.lit.tags');
-    expect(callOrder[2]).toBe('rc.lit.stats');
+    expect(callOrder[2]).toBe('rc.lit.collections.list');
+    expect(callOrder[3]).toBe('rc.lit.stats');
   });
 });
 
@@ -313,8 +317,9 @@ describe('Issue 2: Filtered empty state shows clear filter button', () => {
 
   /**
    * Helper: set up mockGatewayClient.request to respond based on RPC method name.
-   * LibraryPanel's useEffect fires loadPapers() + loadTags() on mount when
-   * connState === 'connected', so we must handle these automatic calls properly.
+   * LibraryPanel's useEffect fires loadPapers(), loadTags(), loadCollections(),
+   * and loadStats() on mount when connState === 'connected', so we must handle
+   * these automatic calls properly.
    */
   function setupMethodRouter(responses: Record<string, unknown>) {
     mockGatewayClient.request.mockImplementation((method: string) => {

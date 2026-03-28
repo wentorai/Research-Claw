@@ -71,6 +71,13 @@ outputs/
 - **Proactive**: Mention git history after overwrites. Note `workspace_restore`
   on delete.
 
+## Write Discipline
+
+- **Pre-check mandatory**: Before any `workspace_save` (overwrite), you MUST call `workspace_read` or `workspace_list` to verify existence and content to prevent accidental data loss.
+- **Append vs. Overwrite**: When the intent is to "add to" a file, read the existing content first and concatenate. **Never** overwrite a multi-section file with only the new snippet.
+- **Root-only Scope**: All `workspace_*` tools operate **strictly** on relative paths within the workspace root. 
+- **Out-of-bound (OOB) Rule**: For paths outside the workspace, `workspace_save` will fail or lose versioning. Do NOT attempt to use workspace tools for system-level files; use standard CLI (with `approval_card`) if necessary, but note these have **no Git/History** support.
+
 ## CLI Execution Safety
 
 **Safe without approval** (no `approval_card` needed):

@@ -956,7 +956,11 @@ export default function WorkspacePanel() {
     try {
       console.log('[WorkspacePanel] loading tree & history');
       const [treeResult, historyResult] = await Promise.all([
-        client.request<{ tree: TreeNode[]; workspace_root: string; hidden_count: number }>('rc.ws.tree', { depth: 3, includeHidden: showSystemFiles }),
+        client.request<{ tree: TreeNode[]; workspace_root: string; hidden_count: number }>('rc.ws.tree', {
+          // Increase depth so nested outputs (e.g. outputs/ppt/YYYY-MM-DD/*.pptx) are visible.
+          depth: 5,
+          includeHidden: showSystemFiles,
+        }),
         client.request<{ commits: CommitEntry[]; total: number; has_more: boolean }>('rc.ws.history', { limit: 5 }),
       ]);
       setTree(treeResult.tree);

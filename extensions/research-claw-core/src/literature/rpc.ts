@@ -404,7 +404,8 @@ export function registerLiteratureRpc(registerMethod: RegisterMethod, service: L
       const query = requireString(params, 'query');
       const limit = optionalNumber(params, 'limit');
       const offset = optionalNumber(params, 'offset');
-      return service.search(query, limit, offset);
+      const collection_id = optionalString(params, 'collection_id');
+      return service.search(query, limit, offset, collection_id);
     } catch (err) {
       throw classifyError(err);
     }

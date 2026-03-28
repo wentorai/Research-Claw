@@ -32,6 +32,9 @@ import { registerWorkspaceRpc } from './src/workspace/rpc.js';
 import { MonitorService } from './src/monitor/service.js';
 import { registerMonitorRpc } from './src/monitor/rpc.js';
 import { createMonitorTools } from './src/monitor/tools.js';
+import { PptService } from './src/ppt/service.js';
+import { registerPptRpc } from './src/ppt/rpc.js';
+import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
@@ -41,6 +44,7 @@ interface PluginConfig {
   autoTrackGit?: boolean;
   defaultCitationStyle?: string;
   heartbeatDeadlineWarningHours?: number;
+  pptRoot?: string;
   workspace?: {
     root?: string;
     commitDebounceMs?: number;
@@ -110,6 +114,27 @@ let _monitorService: InstanceType<typeof MonitorService> | null = null;
 let _wsService: InstanceType<typeof WorkspaceService> | null = null;
 let _wsConfig: WorkspaceConfig | null = null;
 let _wsInitPromise: Promise<void> | null = null;
+let _pptService: InstanceType<typeof PptService> | null = null;
+
+function resolvePptRoot(api: PluginApi, cfg: PluginConfig): string {
+  // Prefer a repo checked out at RC root: ./ppt-master (submodule or clone).
+  // Keep backward compatibility: ./integrations/ppt-master.
+  const userProvided = cfg.pptRoot ? api.resolvePath(cfg.pptRoot) : null;
+  const candidates = [
+    userProvided,
+    api.resolvePath('ppt-master'),
+    api.resolvePath('integrations/ppt-master'),
+  ].filter(Boolean) as string[];
+
+  for (const root of candidates) {
+    // "pptRoot" must contain the skill scripts at skills/ppt-master/scripts/.
+    const pm = path.join(root, 'skills', 'ppt-master', 'scripts', 'project_manager.py');
+    const svg = path.join(root, 'skills', 'ppt-master', 'scripts', 'svg_to_pptx.py');
+    if (fs.existsSync(pm) && fs.existsSync(svg)) return root;
+  }
+  // Fall back to the first candidate even if incomplete, so status() can show what's missing.
+  return candidates[0] ?? api.resolvePath('integrations/ppt-master');
+}
 
 // ── Plugin definition ──────────────────────────────────────────────────
 
@@ -153,6 +178,11 @@ const plugin: PluginDefinition = {
         gitAuthorEmail: cfg.workspace?.gitAuthorEmail ?? 'research-claw@wentor.ai',
       };
       _wsService = new WorkspaceService(_wsConfig);
+      _pptService = new PptService({
+        pptRoot: resolvePptRoot(api, cfg),
+        workspaceRoot: _wsConfig.root,
+        repoRoot: api.resolvePath('.'),
+      });
 
       // Fire-and-forget: scaffold directories + git tracker in background.
       // MUST NOT await — OC plugin loader does not support async register().
@@ -186,6 +216,7 @@ const plugin: PluginDefinition = {
     const heartbeatService = _heartbeatService!;
     const monitorService = _monitorService!;
     const wsService = _wsService!;
+    const pptService = _pptService!;
     const wsConfig = _wsConfig!;
 
     // ── 3. Register database lifecycle service ───────────────────────
@@ -214,6 +245,7 @@ const plugin: PluginDefinition = {
         _heartbeatService = null;
         _monitorService = null;
         _wsService = null;
+        _pptService = null;
         _wsConfig = null;
         _wsInitPromise = null;
         _initialized = false;
@@ -231,6 +263,9 @@ const plugin: PluginDefinition = {
       api.registerTool(tool);
     }
     for (const tool of createMonitorTools(monitorService)) {
+      api.registerTool(tool);
+    }
+    for (const tool of createPptTools(pptService)) {
       api.registerTool(tool);
     }
 
@@ -265,6 +300,7 @@ const plugin: PluginDefinition = {
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
     registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
     registerMonitorRpc(registerMethod, monitorService);   // 12 methods
+    registerPptRpc(registerMethod, pptService);           // 3 methods
 
     // Heartbeat RPC (2 methods)
     registerMethod('rc.heartbeat.status', () => {

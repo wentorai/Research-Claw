@@ -34,6 +34,7 @@ describe('LibraryPanel', () => {
     useLibraryStore.setState({
       papers: [],
       tags: [],
+      collections: [],
       loading: false,
       total: 0,
       searchQuery: '',

@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MenuProps } from 'antd';
 import { Button, Input, Segmented, Select, Spin, Tag, Tooltip, Typography, Dropdown, message } from 'antd';
 import {
   BookOutlined,
   CloseCircleOutlined,
   EllipsisOutlined,
   FilePdfOutlined,
+  FolderAddOutlined,
   LoadingOutlined,
   SearchOutlined,
   StarFilled,
@@ -12,7 +14,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { List as VirtualList } from 'react-window';
-import { useLibraryStore, type Paper, type PaperFilter, type ReadStatus } from '../../stores/library';
+import { useLibraryStore, type Paper, type PaperFilter, type ReadStatus, type LibraryCollection } from '../../stores/library';
 import { useGatewayStore } from '../../stores/gateway';
 import { useChatStore } from '../../stores/chat';
 import { getThemeTokens } from '../../styles/theme';
@@ -83,6 +85,8 @@ function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
   const activeTab = useLibraryStore((s) => s.activeTab);
   const ratePaper = useLibraryStore((s) => s.ratePaper);
   const deletePaper = useLibraryStore((s) => s.deletePaper);
+  const collections = useLibraryStore((s) => s.collections);
+  const addPaperToCollection = useLibraryStore((s) => s.addPaperToCollection);
   const send = useChatStore((s) => s.send);
 
   const authorsText = useMemo(() => {
@@ -169,8 +173,31 @@ function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
     }
   };
 
-  const handleStarClick = () => {
+  const handleStarClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
     ratePaper(paper.id, paper.rating ? 0 : 5);
+  };
+
+  const collectionMenuItems: MenuProps['items'] = useMemo(() => {
+    if (collections.length === 0) {
+      return [{ key: '_empty', label: t('library.noCollectionsYet'), disabled: true }];
+    }
+    return collections.map((c: LibraryCollection) => ({
+      key: c.id,
+      label: typeof c.paper_count === 'number' ? `${c.name} (${c.paper_count})` : c.name,
+    }));
+  }, [collections, t]);
+
+  const handleCollectionMenuClick: MenuProps['onClick'] = async ({ key, domEvent }) => {
+    domEvent?.stopPropagation();
+    if (key === '_empty') return;
+    try {
+      await addPaperToCollection(paper.id, key);
+      const name = collections.find((c) => c.id === key)?.name ?? key;
+      message.success(t('library.addedToCollection', { name }));
+    } catch {
+      message.error(t('library.addToCollectionFailed'));
+    }
   };
 
   return (
@@ -243,12 +270,28 @@ function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
           }
           style={{ padding: 0, width: 24, height: 24 }}
         />
+        <Dropdown
+          menu={{ items: collectionMenuItems, onClick: handleCollectionMenuClick }}
+          trigger={['click']}
+          placement="bottomRight"
+        >
+          <Tooltip title={t('library.addToCollectionTooltip')}>
+            <Button
+              type="text"
+              size="small"
+              icon={<FolderAddOutlined style={{ color: tokens.text.muted, fontSize: 14 }} />}
+              style={{ padding: 0, width: 24, height: 24 }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </Tooltip>
+        </Dropdown>
         <Dropdown menu={{ items: menuItems }} trigger={['click']} placement="bottomRight">
           <Button
             type="text"
             size="small"
             icon={<EllipsisOutlined style={{ color: tokens.text.muted, fontSize: 14 }} />}
             style={{ padding: 0, width: 24, height: 24 }}
+            onClick={(e) => e.stopPropagation()}
           />
         </Dropdown>
       </div>
@@ -273,9 +316,11 @@ export default function LibraryPanel() {
   const loadPapers = useLibraryStore((s) => s.loadPapers);
   const loadMorePapers = useLibraryStore((s) => s.loadMorePapers);
   const loadTags = useLibraryStore((s) => s.loadTags);
+  const loadCollections = useLibraryStore((s) => s.loadCollections);
   const loadStats = useLibraryStore((s) => s.loadStats);
   const tabCounts = useLibraryStore((s) => s.tabCounts);
   const tags = useLibraryStore((s) => s.tags);
+  const collections = useLibraryStore((s) => s.collections);
   const filters = useLibraryStore((s) => s.filters);
   const setFilters = useLibraryStore((s) => s.setFilters);
 
@@ -290,9 +335,10 @@ export default function LibraryPanel() {
   // Load data when gateway connection is established (or re-established)
   useEffect(() => {
     if (connState === 'connected') {
-      console.log('[LibraryPanel] connected → loading papers, tags & stats');
+      console.log('[LibraryPanel] connected → loading papers, tags, collections & stats');
       loadPapers();
       loadTags();
+      loadCollections();
       loadStats();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -368,10 +414,32 @@ export default function LibraryPanel() {
     [tags, visibleTagNames],
   );
 
-  const hasActiveFilter = selectedTags.length > 0 || !!filters.read_status || !!filters.year;
+  const hasActiveFilter =
+    selectedTags.length > 0 || !!filters.read_status || !!filters.year || !!filters.collection_id;
 
   // Global empty state only on inbox — archive/starred tabs are implicitly filtered
   const isGlobalEmpty = !loading && papers.length === 0 && !searchQuery && !hasActiveFilter && activeTab === 'inbox';
+
+  const collectionOptions = useMemo(
+    () =>
+      collections.map((c: LibraryCollection) => ({
+        value: c.id,
+        label: typeof c.paper_count === 'number' ? `${c.name} (${c.paper_count})` : c.name,
+      })),
+    [collections],
+  );
+
+  const handleCollectionSelect = useCallback(
+    (value: string | null) => {
+      if (!value) {
+        setFilters({ collection_id: undefined });
+      } else {
+        setFilters({ collection_id: value });
+      }
+      loadPapers();
+    },
+    [setFilters, loadPapers],
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -389,6 +457,23 @@ export default function LibraryPanel() {
           size="small"
         />
       </div>
+
+      {activeTab === 'starred' && (
+        <div style={{ padding: '0 16px 8px' }}>
+          <Select
+            size="small"
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder={t('library.selectCollection')}
+            value={filters.collection_id ?? undefined}
+            onChange={(v) => handleCollectionSelect(v ?? null)}
+            style={{ width: '100%' }}
+            options={collectionOptions}
+            notFoundContent={collections.length === 0 ? t('library.noCollectionsYet') : undefined}
+          />
+        </div>
+      )}
 
       {/* Search */}
       <div style={{ padding: '4px 16px 8px' }}>
@@ -482,14 +567,19 @@ export default function LibraryPanel() {
                 {t('library.emptyFiltered')}
               </Text>
             </div>
-            {(selectedTags.length > 0 || searchQuery) && (
+            {(selectedTags.length > 0 || searchQuery || filters.collection_id) && (
               <Button
                 size="small"
                 type="link"
                 onClick={() => {
                   setSelectedTags([]);
                   setSearchQuery('');
-                  setFilters({});
+                  setFilters({
+                    tags: undefined,
+                    read_status: undefined,
+                    year: undefined,
+                    collection_id: undefined,
+                  });
                   loadPapers();
                 }}
                 style={{ marginTop: 8 }}
