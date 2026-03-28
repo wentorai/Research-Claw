@@ -78,7 +78,7 @@ export class GatewayClient {
           type: 'hello-ok',
           protocol: 3,
           server: { version: '0.0.0-mock', connId: 'mock-conn-id' },
-          features: { methods: ['health', 'chat.send', 'chat.abort', 'chat.history'], events: [] },
+          features: { methods: ['health', 'chat.send', 'chat.abort', 'chat.history', 'sessions.reset'], events: [] },
         };
         this.opts.onHello?.(hello);
       });
@@ -107,6 +107,10 @@ export class GatewayClient {
     }
     if (method === 'chat.history') {
       return { messages: [] } as T;
+    }
+    if (method === 'sessions.reset') {
+      const p = (params as { key?: string } | undefined) ?? {};
+      return { ok: true, key: p.key ?? 'main' } as T;
     }
 
     throw new GatewayRequestError({ code: 'METHOD_NOT_FOUND', message: `No mock for ${method}` });

@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "WentorOS\u00b7\u79d1\u7814\u9f99\u867e",
+    "name": "WentorOS·科研龙虾",
     "tagline": "AI 驱动的学术科研助手"
   },
   "topbar": {
@@ -42,6 +42,9 @@
     "thinkingLabel": "思考过程",
     "imageNotSupported": "当前模型不支持图片处理。请在设置中启用独立视觉模型，或切换到支持图片的主模型（如 Claude、GPT-4o）。",
     "bgWorking": "正在后台工作...",
+    "activityHistory": "活动日志",
+    "noActivityYet": "暂无活动",
+    "clear": "清空",
     "refresh": "刷新对话",
     "copyRaw": "复制原文（思维链 + Markdown）",
     "system": "系统",
@@ -51,6 +54,7 @@
     "newSession": "正在创建新会话...",
     "stopping": "正在停止当前运行...",
     "cleared": "聊天记录已清空。",
+    "clearFailed": "网关未能重置会话记录，仅清除了当前界面，刷新后可能仍会看到旧消息",
     "compactSuccess": "上下文压缩成功。",
     "compactFailed": "压缩失败",
     "currentModel": "当前模型",
@@ -73,6 +77,11 @@
     "inbox": "收件箱",
     "archive": "归档",
     "starred": "收藏",
+    "selectCollection": "按收藏集浏览（显示集内全部论文）",
+    "noCollectionsYet": "暂无收藏集。可通过助手使用 library_manage_collection 等工具创建。",
+    "addToCollectionTooltip": "加入收藏集",
+    "addedToCollection": "已加入「{{name}}」",
+    "addToCollectionFailed": "加入收藏集失败",
     "movedToArchive": "已移至归档",
     "undo": "撤销",
     "search": "搜索论文...",
@@ -388,7 +397,7 @@
     "start": "启动科研龙虾",
     "configuring": "配置中...",
     "configureFailed": "配置失败 — 请检查 API 地址和密钥后重试",
-    "skipToDashboard": "跳过，进入 Dashboard \u2192"
+    "skipToDashboard": "跳过，进入 Dashboard →"
   },
   "boot": {
     "connecting": "正在连接网关...",
@@ -528,7 +537,8 @@
   "cron": {
     "taskCompleted": "定时任务已完成",
     "viewResult": "查看结果",
-    "cronSessions": "定时任务"
+    "cronSessions": "定时任务",
+    "deleteSessionConfirm": "删除该定时任务，并删除该会话的聊天记录？"
   },
   "project": {
     "newProject": "新建项目...",
@@ -554,8 +564,12 @@
     "closePanel": "关闭面板"
   },
   "docker": {
-    "openFile": { "title": "无法直接打开文件" },
-    "openFolder": { "title": "无法直接打开目录" },
+    "openFile": {
+      "title": "无法直接打开文件"
+    },
+    "openFolder": {
+      "title": "无法直接打开目录"
+    },
     "description": "Research-Claw 运行在 Docker 容器中，文件无法用宿主机应用直接打开。",
     "downloadFile": "下载文件",
     "downloadFolder": "下载文件夹 (.tar.gz)",
@@ -570,7 +584,37 @@
     "tabs": {
       "skills": "技能",
       "channels": "通道",
-      "plugins": "插件"
+      "plugins": "插件",
+      "ppt": "PPT"
+    },
+    "ppt": {
+      "hint": "通过 rc.ppt.* 方法初始化并导出 PPT Master 项目。",
+      "checkStatus": "检查状态",
+      "statusOk": "ppt-master 集成已就绪",
+      "statusWarn": "ppt-master 集成路径不完整",
+      "actionFailed": "操作失败",
+      "root": "根目录",
+      "exists": "是否存在",
+      "initTitle": "初始化项目",
+      "projectName": "项目名",
+      "format": "画布格式（如 ppt169）",
+      "initBtn": "初始化",
+      "initOk": "项目初始化完成",
+      "exportTitle": "导出项目",
+      "projectPath": "项目路径（如 projects/demo-deck）",
+      "stage": "阶段（默认 final）",
+      "exportBtn": "导出",
+      "exportOk": "导出完成",
+      "refreshOutputsBtn": "刷新输出列表",
+      "outputFileSelect": "从工作区 outputs 选择文件",
+      "refreshSourcesBtn": "刷新源文件列表",
+      "sourceFileSelect": "从工作区 outputs 选择源文件",
+      "generateFromSourceOk": "已提交 PPT 生成请求",
+      "outputHint": "生成完成后打开 workspace/outputs/ppt/ 下最新的 PPTX。",
+      "openBtn": "打开输出文件",
+      "openOk": "已打开输出文件",
+      "openDockerFallback": "Docker 环境下无法直接打开，请使用结果中的容器路径。",
+      "lastResult": "最近结果"
     },
     "skills": {
       "title": "技能",

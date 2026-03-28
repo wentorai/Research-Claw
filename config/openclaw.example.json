@@ -88,7 +88,8 @@
           "dbPath": ".research-claw/library.db",
           "autoTrackGit": true,
           "defaultCitationStyle": "apa",
-          "heartbeatDeadlineWarningHours": 48
+          "heartbeatDeadlineWarningHours": 48,
+          "pptRoot": "integrations/ppt-master"
         }
       },
       "openclaw-weixin": {
@@ -124,6 +125,8 @@
       "workspace_diff",
       "workspace_history",
       "workspace_restore",
+      "ppt_init",
+      "ppt_export",
       "search_openalex",
       "get_work",
       "get_author_openalex",

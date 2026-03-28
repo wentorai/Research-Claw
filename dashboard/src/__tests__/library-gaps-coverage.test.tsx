@@ -151,6 +151,7 @@ function resetStores() {
   useLibraryStore.setState({
     papers: [],
     tags: [],
+    collections: [],
     loading: false,
     loadingMore: false,
     total: 0,
@@ -743,11 +744,13 @@ describe('Component: tab labels show server-side counts from loadStats', () => {
       tags: [],
       total: 2,
       activeTab: 'inbox',
+      tabCounts: null,
     });
 
     setupMethodRouter({
       'rc.lit.list': { items: papers, total: 2 },
       'rc.lit.tags': [],
+      'rc.lit.collections.list': [],
       'rc.lit.stats': { total: 2, by_status: { unread: 1, reading: 1 }, starred_count: 1 },
     });
 
@@ -777,6 +780,7 @@ describe('Component: tab labels show server-side counts from loadStats', () => {
     setupMethodRouter({
       'rc.lit.list': { items: papers, total: 1 },
       'rc.lit.tags': [],
+      'rc.lit.collections.list': [],
     });
 
     // Make stats fail so tabCounts stays null
@@ -1179,7 +1183,13 @@ describe('i18n: library keys completeness', () => {
 
     // All keys used in LibraryPanel
     expect(lib.inbox).toBeDefined();
+    expect(lib.archive).toBeDefined();
     expect(lib.starred).toBeDefined();
+    expect(lib.selectCollection).toBeDefined();
+    expect(lib.noCollectionsYet).toBeDefined();
+    expect(lib.addToCollectionTooltip).toBeDefined();
+    expect(lib.addedToCollection).toBeDefined();
+    expect(lib.addToCollectionFailed).toBeDefined();
     expect(lib.search).toBeDefined();
     expect(lib.empty).toBeDefined();
     expect(lib.emptyFiltered).toBeDefined();
@@ -1203,7 +1213,13 @@ describe('i18n: library keys completeness', () => {
     const lib = (zhCN.default ?? zhCN).library;
 
     expect(lib.inbox).toBeDefined();
+    expect(lib.archive).toBeDefined();
     expect(lib.starred).toBeDefined();
+    expect(lib.selectCollection).toBeDefined();
+    expect(lib.noCollectionsYet).toBeDefined();
+    expect(lib.addToCollectionTooltip).toBeDefined();
+    expect(lib.addedToCollection).toBeDefined();
+    expect(lib.addToCollectionFailed).toBeDefined();
     expect(lib.search).toBeDefined();
     expect(lib.empty).toBeDefined();
     expect(lib.emptyFiltered).toBeDefined();

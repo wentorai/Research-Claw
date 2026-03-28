@@ -21,6 +21,7 @@
 const fs = require('fs');
 
 const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins', 'openclaw-weixin'];
+const REQUIRED_TOOLS = ['ppt_init', 'ppt_export'];
 const STALE_TOOLS = [
   'search_papers', 'get_paper', 'get_citations',
   'radar_configure', 'radar_get_config', 'radar_scan',
@@ -70,6 +71,12 @@ function ensureConfig(filePath) {
     const before = c.tools.alsoAllow.length;
     c.tools.alsoAllow = c.tools.alsoAllow.filter(t => !STALE_TOOLS.includes(t));
     if (c.tools.alsoAllow.length !== before) changed = true;
+    for (const tool of REQUIRED_TOOLS) {
+      if (!c.tools.alsoAllow.includes(tool)) {
+        c.tools.alsoAllow.push(tool);
+        changed = true;
+      }
+    }
   }
 
   // 5. gateway.auth.token must match Dashboard's DEFAULT_TOKEN
@@ -154,7 +161,7 @@ function ensureConfig(filePath) {
   }
   if (!c.plugins.entries) {
     c.plugins.entries = {
-      'research-claw-core': { enabled: true, config: { dbPath: '.research-claw/library.db', autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48 } },
+      'research-claw-core': { enabled: true, config: { dbPath: '.research-claw/library.db', autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' } },
       'openclaw-weixin': { enabled: true },
     };
     changed = true;

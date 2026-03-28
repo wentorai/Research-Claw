@@ -32,14 +32,32 @@ export interface AgentActivity {
   startedAt: number;
 }
 
+export interface ActivityLogEntry {
+  id: string;
+  ts: number;
+  sessionKey: string;
+  runId: string | null;
+  toolCallId: string | null;
+  scope: 'foreground' | 'background';
+  status: string;
+  text: string;
+  durationMs?: number;
+  detail?: unknown;
+}
+
 interface ToolStreamState {
   /** Active tools for the current foreground run — displayed inline in ChatView. */
   pendingTools: PendingTool[];
   /** Background activity — displayed in the AgentActivityBar. */
   bgActivity: AgentActivity | null;
+  /** Persistent activity log for user-visible process history. */
+  activityLog: ActivityLogEntry[];
+  /** Remember run -> session mapping for events missing sessionKey. */
+  runSessionMap: Record<string, string>;
 
   handleAgentEvent: (payload: unknown, chatRunId: string | null, activeSessionKey: string) => void;
   clearAll: () => void;
+  clearActivityLog: () => void;
 }
 
 const ACTIVE_STATES = new Set(['thinking', 'tool_running', 'streaming']);
@@ -49,10 +67,28 @@ const ACTIVE_STATES = new Set(['thinking', 'tool_running', 'streaming']);
  * Guards against memory leaks when phase:"end" events are lost (network jitter).
  */
 const STALE_TOOL_MS = 120_000;
+const ACTIVITY_LOG_MAX = 200;
+
+function pushActivityLog(
+  set: (partial: Partial<ToolStreamState>) => void,
+  get: () => ToolStreamState,
+  entry: Omit<ActivityLogEntry, 'id' | 'ts'>,
+) {
+  const e: ActivityLogEntry = {
+    id: crypto.randomUUID(),
+    ts: Date.now(),
+    ...entry,
+  };
+  set({
+    activityLog: [...get().activityLog, e].slice(-ACTIVITY_LOG_MAX),
+  });
+}
 
 export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
   pendingTools: [],
   bgActivity: null,
+  activityLog: [],
+  runSessionMap: {},
 
   handleAgentEvent: (payload: unknown, chatRunId: string | null, activeSessionKey: string) => {
     const evt = payload as {
@@ -68,21 +104,57 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
       };
     };
 
-    // Session isolation: drop events from other sessions (aligned with OC
-    // app-tool-stream.ts:311,415-416). Without this, cron/monitor tool events
-    // from other sessions leak into the current chat view.
-    if (evt.sessionKey && normalizeSessionKey(evt.sessionKey) !== normalizeSessionKey(activeSessionKey)) {
-      return;
+    const normalizedActiveSessionKey = normalizeSessionKey(activeSessionKey);
+
+    // Build runId -> sessionKey mapping from authoritative events.
+    if (evt.runId && evt.sessionKey) {
+      const normalizedEventSession = normalizeSessionKey(evt.sessionKey);
+      const prev = get().runSessionMap[evt.runId];
+      if (prev !== normalizedEventSession) {
+        set({ runSessionMap: { ...get().runSessionMap, [evt.runId]: normalizedEventSession } });
+      }
     }
 
     // Background = different runId from the user's active chat, or no active chat.
     const isBackground = !!evt.runId && (!chatRunId || evt.runId !== chatRunId);
+
+    // Resolve event session: explicit sessionKey -> remembered run mapping ->
+    // current foreground run's active session. For background events, never
+    // fall back to active session to avoid cross-session pollution.
+    const mappedSessionKey = evt.runId ? get().runSessionMap[evt.runId] : undefined;
+    const eventSessionKey = normalizeSessionKey(
+      evt.sessionKey
+      ?? mappedSessionKey
+      ?? (!isBackground && evt.runId && chatRunId && evt.runId === chatRunId ? activeSessionKey : undefined),
+    );
+
+    // Session isolation: if we can resolve session and it is not active, drop it.
+    if (eventSessionKey && eventSessionKey !== normalizedActiveSessionKey) {
+      return;
+    }
 
     // ── Path A: Status-only events (state field, no stream) ──
     // These are broadcast to ALL clients. The status dot uses them.
     // We use them for background activity detection (P1-3).
     if (evt.state && !evt.stream) {
       if (isBackground && ACTIVE_STATES.has(evt.state)) {
+        // Only log if the event carries a sessionKey (skip global broadcasts
+        // that have no session — they'd pollute every session's log).
+        if (eventSessionKey) {
+          pushActivityLog(set, get, {
+            sessionKey: eventSessionKey,
+            runId: evt.runId ?? null,
+            toolCallId: null,
+            scope: 'background',
+            status: evt.state,
+            text: evt.state === 'tool_running'
+              ? 'Background run is calling tools'
+              : evt.state === 'streaming'
+                ? 'Background run is streaming response'
+                : 'Background run is thinking',
+            detail: evt,
+          });
+        }
         set({
           bgActivity: {
             runId: evt.runId!,
@@ -95,6 +167,17 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
           },
         });
       } else if (evt.state === 'idle' || evt.state === 'error') {
+        if (eventSessionKey) {
+          pushActivityLog(set, get, {
+            sessionKey: eventSessionKey,
+            runId: evt.runId ?? null,
+            toolCallId: null,
+            scope: isBackground ? 'background' : 'foreground',
+            status: evt.state,
+            text: evt.state === 'idle' ? 'Run finished' : 'Run failed',
+            detail: evt,
+          });
+        }
         // Clear bgActivity only when the idle/error is for the tracked run.
         // Skip runId-less broadcasts to avoid clearing activity for a run
         // that is still in-flight but whose status we haven't received yet.
@@ -125,6 +208,17 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
 
         switch (phase) {
           case 'start':
+            if (eventSessionKey) {
+              pushActivityLog(set, get, {
+                sessionKey: eventSessionKey,
+                runId: evt.runId ?? null,
+                toolCallId,
+                scope: 'foreground',
+                status: 'tool_start',
+                text: `Tool started: ${name ?? 'unknown'}`,
+                detail: evt.data,
+              });
+            }
             set((s) => ({
               pendingTools: [
                 ...evictStale(s.pendingTools),
@@ -140,6 +234,22 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
             }));
             break;
           case 'result':
+            {
+              const t = get().pendingTools.find((x) => x.toolCallId === toolCallId);
+              const durationMs = t ? (now - t.startedAt) : undefined;
+            if (eventSessionKey) {
+              pushActivityLog(set, get, {
+                sessionKey: eventSessionKey,
+                runId: evt.runId ?? null,
+                toolCallId,
+                scope: 'foreground',
+                status: 'tool_result',
+                text: `Tool returned: ${name ?? 'unknown'}`,
+                durationMs,
+                detail: evt.data,
+              });
+            }
+            }
             set((s) => ({
               pendingTools: evictStale(s.pendingTools).map((t) =>
                 t.toolCallId === toolCallId ? { ...t, phase: 'result', lastEventAt: now } : t,
@@ -147,6 +257,22 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
             }));
             break;
           case 'end':
+            {
+              const t = get().pendingTools.find((x) => x.toolCallId === toolCallId);
+              const durationMs = t ? (now - t.startedAt) : undefined;
+            if (eventSessionKey) {
+              pushActivityLog(set, get, {
+                sessionKey: eventSessionKey,
+                runId: evt.runId ?? null,
+                toolCallId,
+                scope: 'foreground',
+                status: 'tool_end',
+                text: `Tool finished: ${name ?? 'unknown'}`,
+                durationMs,
+                detail: evt.data,
+              });
+            }
+            }
             setTimeout(() => {
               set((s) => ({
                 pendingTools: s.pendingTools.filter((t) => t.toolCallId !== toolCallId),
@@ -162,6 +288,19 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
       } else {
         // Background: update bgActivity with tool name
         if (phase === 'start' || phase === 'running') {
+          if (phase === 'start') {
+            if (eventSessionKey) {
+              pushActivityLog(set, get, {
+                sessionKey: eventSessionKey,
+                runId: evt.runId ?? null,
+                toolCallId,
+                scope: 'background',
+                status: 'tool_start',
+                text: `Background tool started: ${name ?? 'unknown'}`,
+                detail: evt.data,
+              });
+            }
+          }
           set({
             bgActivity: {
               runId: evt.runId!,
@@ -181,6 +320,17 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
     if (evt.stream === 'lifecycle' && isBackground) {
       const lifecyclePhase = evt.data.phase;
       if (lifecyclePhase === 'start') {
+        if (eventSessionKey) {
+          pushActivityLog(set, get, {
+            sessionKey: eventSessionKey,
+            runId: evt.runId ?? null,
+            toolCallId: null,
+            scope: 'background',
+            status: 'start',
+            text: 'Background run started',
+            detail: evt.data,
+          });
+        }
         set({
           bgActivity: {
             runId: evt.runId!,
@@ -191,6 +341,21 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
           },
         });
       } else if (lifecyclePhase === 'end' || lifecyclePhase === 'error') {
+        const startedAt = get().bgActivity?.runId === evt.runId
+          ? get().bgActivity?.startedAt
+          : undefined;
+        if (eventSessionKey) {
+          pushActivityLog(set, get, {
+            sessionKey: eventSessionKey,
+            runId: evt.runId ?? null,
+            toolCallId: null,
+            scope: 'background',
+            status: lifecyclePhase,
+            text: lifecyclePhase === 'error' ? 'Background run failed' : 'Background run finished',
+            durationMs: startedAt ? (Date.now() - startedAt) : undefined,
+            detail: evt.data,
+          });
+        }
         if (get().bgActivity?.runId === evt.runId) {
           set({ bgActivity: null });
         }
@@ -199,6 +364,10 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
   },
 
   clearAll: () => {
-    set({ pendingTools: [], bgActivity: null });
+    set({ pendingTools: [], bgActivity: null, runSessionMap: {} });
+  },
+
+  clearActivityLog: () => {
+    set({ activityLog: [] });
   },
 }));

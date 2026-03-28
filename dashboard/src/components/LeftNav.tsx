@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { useUiStore, type PanelTab } from '../stores/ui';
 import { useSessionsStore, MAIN_SESSION_KEY } from '../stores/sessions';
 import { normalizeSessionKey } from '../utils/session-key';
+import { removeScheduledJobForSession } from '../utils/remove-cron-for-session';
 
 const { Text } = Typography;
 
@@ -98,6 +99,15 @@ export default function LeftNav() {
       deleteSession(key);
     }
   };
+
+  const handleDeleteCronSession = useCallback(async (key: string) => {
+    if (!confirm(t('cron.deleteSessionConfirm'))) return;
+    const session = sessions.find((s) => s.key === key);
+    const label = session ? getSessionName(session, t) : key;
+    await removeScheduledJobForSession(key, label);
+    await deleteSession(key);
+    await loadSessions();
+  }, [sessions, t, deleteSession, loadSessions]);
 
   // ── Project switcher dropdown content ──────────────────────────────────────
 
@@ -294,6 +304,13 @@ export default function LeftNav() {
                   <span style={{ flex: 1, fontWeight: isActive ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-secondary)' }}>
                     {name}
                   </span>
+                  <DeleteOutlined
+                    style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDeleteCronSession(session.key);
+                    }}
+                  />
                 </div>
               );
             })}
@@ -324,7 +341,7 @@ export default function LeftNav() {
       </div>
     </div>
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, t]);
+  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, t, handleDeleteCronSession]);
 
   const activeSessionLabel = useMemo(() => {
     const session = sessions.find((s) => s.key === activeSessionKey);

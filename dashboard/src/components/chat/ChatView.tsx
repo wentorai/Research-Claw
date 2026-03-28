@@ -1,11 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Typography, Spin } from 'antd';
-import { MessageOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import {
+  MessageOutlined,
+  ArrowDownOutlined,
+  ToolOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  LoadingOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useToolStreamStore } from '../../stores/tool-stream';
 import { useGatewayStore } from '../../stores/gateway';
 import type { ChatMessage } from '../../gateway/types';
+import { normalizeSessionKey } from '../../utils/session-key';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import ToolActivityStream from './ToolActivityStream';
@@ -39,8 +47,14 @@ function hasImageContent(msg: ChatMessage): boolean {
   return msg.content.some((c) => c.type === 'image' || c.type === 'image_url');
 }
 
+function fmtTime(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour12: false });
+}
+
 export default function ChatView() {
   const { t } = useTranslation();
+  const sessionKey = useChatStore((s) => s.sessionKey);
   const rawMessages = useChatStore((s) => s.messages);
   // Filter messages for display:
   // 1. Only show 'user' and 'assistant' roles (skip toolResult, etc.)
@@ -57,6 +71,8 @@ export default function ChatView() {
   const lastError = useChatStore((s) => s.lastError);
   const clearError = useChatStore((s) => s.clearError);
   const pendingTools = useToolStreamStore((s) => s.pendingTools);
+  const activityLog = useToolStreamStore((s) => s.activityLog);
+  const clearActivityLog = useToolStreamStore((s) => s.clearActivityLog);
   const connState = useGatewayStore((s) => s.state);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -66,6 +82,13 @@ export default function ChatView() {
   // rAF deduplication: batch rapid streaming deltas into one scroll per frame.
   // Matches OC pattern: openclaw/ui/src/ui/app-scroll.ts:19-21
   const scrollFrameRef = useRef<number | null>(null);
+  const prevActivityActiveRef = useRef(false);
+  const activityActive = sending || streaming || pendingTools.length > 0;
+  const activityEntries = activityLog
+    .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey))
+    .slice(-30)
+    .reverse();
+  const [openActivityId, setOpenActivityId] = useState<string | null>(null);
 
   // Scroll event handler — tracks whether user is near bottom
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -144,6 +167,16 @@ export default function ChatView() {
       setNewMessagesBelow(false);
     }
   }, [messages.length]);
+
+  // Bind activity log lifecycle to "thinking/tool-running" lifecycle:
+  // each run starts with a fresh log, and UI releases when run finishes.
+  useEffect(() => {
+    const prev = prevActivityActiveRef.current;
+    if (!prev && activityActive) {
+      clearActivityLog();
+    }
+    prevActivityActiveRef.current = activityActive;
+  }, [activityActive, clearActivityLog]);
 
   return (
     <div
@@ -230,12 +263,106 @@ export default function ChatView() {
             />
           )}
 
-          {/* Sending / waiting-for-first-delta indicator.
-            * Covers: (1) RPC in flight (sending), (2) RPC resolved but first delta
-            * hasn't arrived yet (streaming=true, streamText=null).
-            * OC uses chatStream="" (empty string, truthy) at send time so its streaming
-            * bubble shows immediately. We bridge the gap with this extended condition. */}
-          {(sending || (streaming && !streamText)) && (
+          {/* Tool stream + activity log are lifecycle-bound to thinking/running */}
+          {activityActive && (
+            <>
+              {(sending || (streaming && !streamText)) && (
+                <div style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Spin size="small" />
+                  <Text type="secondary" style={{ fontSize: 13 }}>
+                    {t('chat.thinking')}
+                  </Text>
+                </div>
+              )}
+              <ToolActivityStream />
+              {activityEntries.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  {activityEntries.map((e) => {
+                    const scope = e.scope === 'background' ? 'BG' : 'FG';
+                    const dur = typeof e.durationMs === 'number' ? ` ${Math.round(e.durationMs)}ms` : '';
+                    const rowText = `${fmtTime(e.ts)} ${scope}  ${e.text}${dur}`;
+                    const expanded = openActivityId === e.id;
+                    const status = e.status || '';
+                    const icon = status.includes('error')
+                      ? <CloseCircleOutlined style={{ color: '#ef4444' }} />
+                      : (status.includes('result') || status.includes('end'))
+                        ? <CheckCircleOutlined style={{ color: '#22c55e' }} />
+                        : (status.includes('running') || status.includes('start'))
+                          ? <LoadingOutlined spin style={{ color: '#a3a3a3' }} />
+                          : <ToolOutlined style={{ color: '#a3a3a3' }} />;
+                    const detailObj = {
+                      runId: e.runId,
+                      toolCallId: e.toolCallId,
+                      scope: e.scope,
+                      status: e.status,
+                      durationMs: e.durationMs,
+                      detail: e.detail ?? 'No detailed params',
+                    };
+
+                    return (
+                      <div
+                        key={e.id}
+                        style={{
+                          marginBottom: 8,
+                          borderRadius: 8,
+                          border: '1px solid rgba(0,0,0,0.08)',
+                          background: 'rgba(0,0,0,0.03)',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setOpenActivityId((prev) => (prev === e.id ? null : e.id))}
+                          style={{
+                            width: '100%',
+                            border: 'none',
+                            background: 'transparent',
+                            padding: '10px 12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            color: 'var(--text-tertiary)',
+                            fontSize: 12,
+                            fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                        >
+                          <span style={{ color: 'var(--text-tertiary)', fontSize: 11, minWidth: 10 }}>
+                            {expanded ? '▼' : '▶'}
+                          </span>
+                          <span style={{ fontSize: 12, minWidth: 14, display: 'inline-flex', justifyContent: 'center' }}>
+                            {icon}
+                          </span>
+                          <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{rowText}</span>
+                        </button>
+                        {expanded && (
+                          <pre
+                            style={{
+                              margin: '0 12px 10px 34px',
+                              padding: 8,
+                              borderRadius: 6,
+                              background: 'var(--code-bg, rgba(0,0,0,0.06))',
+                              border: '1px solid rgba(0,0,0,0.1)',
+                              fontSize: 11,
+                              lineHeight: 1.4,
+                              color: 'var(--text-tertiary)',
+                              overflowX: 'auto',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                            }}
+                          >
+{JSON.stringify(detailObj, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+          {/* Sending / waiting-for-first-delta indicator (only when no activity panel). */}
+          {!activityActive && (sending || (streaming && !streamText)) && (
             <div style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Spin size="small" />
               <Text type="secondary" style={{ fontSize: 13 }}>
@@ -243,9 +370,6 @@ export default function ChatView() {
               </Text>
             </div>
           )}
-
-          {/* Tool activity stream — shows live tool calls during agent execution (P1-2) */}
-          {(sending || streaming) && <ToolActivityStream />}
         </div>
       </div>
 
