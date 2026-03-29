@@ -2,7 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Typography, Image } from 'antd';
-import { CopyOutlined, CheckOutlined, CodeOutlined } from '@ant-design/icons';
+import {
+  CopyOutlined,
+  CheckOutlined,
+  CodeOutlined,
+  ToolOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  LoadingOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ChatMessage } from '../../gateway/types';
 import { useGatewayStore } from '../../stores/gateway';
@@ -185,6 +193,12 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
 }
 
+interface ActivityLogContentBlock {
+  type: 'activity_log';
+  title?: string;
+  entries?: Array<string | { id?: string; text: string; status?: string; detail?: unknown }>;
+}
+
 export default function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
@@ -282,6 +296,89 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
   // ── System message rendering (slash command results) ──
   // Centered, muted styling matching OC's injectCommandResult pattern.
   if (message.role === 'system') {
+    const activityBlock = Array.isArray(message.content)
+      ? message.content.find((b) => typeof b === 'object' && b?.type === 'activity_log') as ActivityLogContentBlock | undefined
+      : undefined;
+    if (activityBlock) {
+      const rows = Array.isArray(activityBlock.entries) ? activityBlock.entries : [];
+      const getRowText = (row: string | { id?: string; text: string; status?: string; detail?: unknown }) =>
+        typeof row === 'string' ? row : row.text;
+      const getRowStatus = (row: string | { id?: string; text: string; status?: string; detail?: unknown }) =>
+        typeof row === 'string' ? '' : (row.status ?? '');
+      const getRowDetail = (row: string | { id?: string; text: string; status?: string; detail?: unknown }) =>
+        typeof row === 'string' ? null : (row.detail ?? null);
+      const getRowId = (row: string | { id?: string; text: string; status?: string; detail?: unknown }) =>
+        typeof row === 'string' ? row : (row.id ?? row.text);
+      const statusIcon = (status: string) => {
+        if (status.includes('error')) return <CloseCircleOutlined style={{ color: '#ef4444' }} />;
+        if (status.includes('result') || status.includes('end')) return <CheckCircleOutlined style={{ color: '#22c55e' }} />;
+        if (status.includes('running') || status.includes('start')) return <LoadingOutlined spin style={{ color: '#a3a3a3' }} />;
+        return <ToolOutlined style={{ color: '#a3a3a3' }} />;
+      };
+      return (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            marginBottom: 16,
+            maxWidth: '85%',
+          }}
+        >
+          {rows.map((row, idx) => (
+            <details
+              key={`${idx}-${getRowId(row)}`}
+              style={{
+                width: '100%',
+                padding: '9px 12px',
+                marginBottom: 8,
+                borderRadius: 8,
+                border: '1px solid rgba(0,0,0,0.08)',
+                background: 'rgba(0,0,0,0.03)',
+                color: 'var(--text-tertiary)',
+                fontSize: 12,
+                fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
+              }}
+            >
+              <summary
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{'▸'}</span>
+                <span style={{ fontSize: 12, minWidth: 14, display: 'inline-flex', justifyContent: 'center' }}>
+                  {statusIcon(getRowStatus(row))}
+                </span>
+                <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{getRowText(row)}</span>
+              </summary>
+              {getRowDetail(row) && (
+                <pre
+                  style={{
+                    margin: '8px 0 0 22px',
+                    padding: 8,
+                    borderRadius: 6,
+                    background: 'var(--code-bg, rgba(0,0,0,0.06))',
+                    border: '1px solid rgba(0,0,0,0.1)',
+                    fontSize: 11,
+                    lineHeight: 1.4,
+                    color: 'var(--text-tertiary)',
+                    overflowX: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+{JSON.stringify(getRowDetail(row), null, 2)}
+                </pre>
+              )}
+            </details>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div
         style={{

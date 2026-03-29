@@ -34,6 +34,18 @@ const SYSTEM_LINE_RE = /^System:\s/;
 /** Feishu [System: ...] bracket injections (mention hints, permission errors) */
 const FEISHU_SYSTEM_INJECTION_RE = /\n*\[System:\s[^\]]*\]/g;
 
+/**
+ * Internal maintenance directives (agent memory/heartbeat instructions) that may
+ * be pasted into user-visible transcript by upstream orchestration prompts.
+ * Keep these hidden in the dashboard user bubble.
+ */
+const MAINTENANCE_MEMORY_FLUSH_BLOCK_RE =
+  /Pre-compaction memory flush\.[\s\S]*?Current time:[^\n]*UTC/gi;
+const MAINTENANCE_HEARTBEAT_BLOCK_RE =
+  /Read HEARTBEAT\.md if it exists[\s\S]*?Current time:[^\n]*UTC/gi;
+const MAINTENANCE_HEARTBEAT_PATH_LINE_RE =
+  /When reading HEARTBEAT\.md,[^\n]*/gi;
+
 /** [message_id: ...] lines — backup for gateway stripping */
 const MESSAGE_ID_LINE_RE = /^\s*\[message_id:\s*[^\]]+\]\s*$/;
 
@@ -75,11 +87,21 @@ export function sanitizeUserMessage(text: string): string {
   // Step 1: Cron reminder — strip to empty
   if (CRON_REMINDER_RE.test(text)) return '';
 
+  // Step 1.5: Strip internal maintenance/system-instruction blocks that should
+  // never appear in user-facing chat bubbles.
+  let normalizedText = text;
+  MAINTENANCE_MEMORY_FLUSH_BLOCK_RE.lastIndex = 0;
+  normalizedText = normalizedText.replace(MAINTENANCE_MEMORY_FLUSH_BLOCK_RE, '');
+  MAINTENANCE_HEARTBEAT_BLOCK_RE.lastIndex = 0;
+  normalizedText = normalizedText.replace(MAINTENANCE_HEARTBEAT_BLOCK_RE, '');
+  MAINTENANCE_HEARTBEAT_PATH_LINE_RE.lastIndex = 0;
+  normalizedText = normalizedText.replace(MAINTENANCE_HEARTBEAT_PATH_LINE_RE, '');
+
   // Track whether channel-specific markers were found (for safe sender prefix stripping)
   let hadChannelMarkers = false;
 
   // Step 2-3: Line-by-line stripping of [Research-Claw] blocks and System: lines
-  const lines = text.split('\n');
+  const lines = normalizedText.split('\n');
   const afterLineStrip: string[] = [];
   let inRcBlock = false;
 

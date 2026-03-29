@@ -1113,28 +1113,48 @@ export class LiteratureService {
     query: string,
     limit: number = 50,
     offset: number = 0,
+    collectionId?: string,
   ): { items: Paper[]; total: number } {
     const safeLimit = Math.min(limit, 500);
+    const collJoin = collectionId
+      ? `JOIN rc_collection_papers cp ON cp.paper_id = p.id AND cp.collection_id = ?`
+      : '';
 
     // Try FTS5 first
     try {
-      const countRow = this.db
-        .prepare(
-          `SELECT COUNT(*) as cnt FROM rc_papers_fts
+      const countSql = collectionId
+        ? `SELECT COUNT(*) as cnt FROM rc_papers_fts
            JOIN rc_papers p ON p.rowid = rc_papers_fts.rowid
-           WHERE rc_papers_fts MATCH ? AND ${NOT_DELETED}`,
-        )
-        .get(query) as { cnt: number };
+           ${collJoin}
+           WHERE rc_papers_fts MATCH ? AND ${NOT_DELETED}`
+        : `SELECT COUNT(*) as cnt FROM rc_papers_fts
+           JOIN rc_papers p ON p.rowid = rc_papers_fts.rowid
+           WHERE rc_papers_fts MATCH ? AND ${NOT_DELETED}`;
 
-      const rows = this.db
-        .prepare(
-          `SELECT p.* FROM rc_papers_fts
+      const countStmt = this.db.prepare(countSql);
+      const countRow = (
+        collectionId ? countStmt.get(collectionId, query) : countStmt.get(query)
+      ) as { cnt: number };
+
+      const selectSql = collectionId
+        ? `SELECT p.* FROM rc_papers_fts
+           JOIN rc_papers p ON p.rowid = rc_papers_fts.rowid
+           ${collJoin}
+           WHERE rc_papers_fts MATCH ? AND ${NOT_DELETED}
+           ORDER BY rank
+           LIMIT ? OFFSET ?`
+        : `SELECT p.* FROM rc_papers_fts
            JOIN rc_papers p ON p.rowid = rc_papers_fts.rowid
            WHERE rc_papers_fts MATCH ? AND ${NOT_DELETED}
            ORDER BY rank
-           LIMIT ? OFFSET ?`,
-        )
-        .all(query, safeLimit, offset) as PaperRow[];
+           LIMIT ? OFFSET ?`;
+
+      const selectStmt = this.db.prepare(selectSql);
+      const rows = (
+        collectionId
+          ? selectStmt.all(collectionId, query, safeLimit, offset)
+          : selectStmt.all(query, safeLimit, offset)
+      ) as PaperRow[];
 
       const items = rows.map((r) => rowToPaper(r, getTagsForPaper(this.db, r.id)));
       return { items, total: countRow.cnt };
@@ -1142,23 +1162,49 @@ export class LiteratureService {
       // FTS5 parse error — fall back to LIKE
       const likeQuery = `%${query}%`;
 
-      const countRow = this.db
-        .prepare(
-          `SELECT COUNT(*) as cnt FROM rc_papers p
+      const likeCountSql = collectionId
+        ? `SELECT COUNT(*) as cnt FROM rc_papers p
+           ${collJoin}
            WHERE ${NOT_DELETED}
-           AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)`,
-        )
-        .get(likeQuery, likeQuery, likeQuery, likeQuery) as { cnt: number };
+           AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)`
+        : `SELECT COUNT(*) as cnt FROM rc_papers p
+           WHERE ${NOT_DELETED}
+           AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)`;
 
-      const rows = this.db
-        .prepare(
-          `SELECT p.* FROM rc_papers p
+      const likeCountStmt = this.db.prepare(likeCountSql);
+      const countRow = (
+        collectionId
+          ? likeCountStmt.get(collectionId, likeQuery, likeQuery, likeQuery, likeQuery)
+          : likeCountStmt.get(likeQuery, likeQuery, likeQuery, likeQuery)
+      ) as { cnt: number };
+
+      const likeSelectSql = collectionId
+        ? `SELECT p.* FROM rc_papers p
+           ${collJoin}
            WHERE ${NOT_DELETED}
            AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)
            ORDER BY p.added_at DESC
-           LIMIT ? OFFSET ?`,
-        )
-        .all(likeQuery, likeQuery, likeQuery, likeQuery, safeLimit, offset) as PaperRow[];
+           LIMIT ? OFFSET ?`
+        : `SELECT p.* FROM rc_papers p
+           WHERE ${NOT_DELETED}
+           AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)
+           ORDER BY p.added_at DESC
+           LIMIT ? OFFSET ?`;
+
+      const likeSelectStmt = this.db.prepare(likeSelectSql);
+      const rows = (
+        collectionId
+          ? likeSelectStmt.all(
+              collectionId,
+              likeQuery,
+              likeQuery,
+              likeQuery,
+              likeQuery,
+              safeLimit,
+              offset,
+            )
+          : likeSelectStmt.all(likeQuery, likeQuery, likeQuery, likeQuery, safeLimit, offset)
+      ) as PaperRow[];
 
       const items = rows.map((r) => rowToPaper(r, getTagsForPaper(this.db, r.id)));
       return { items, total: countRow.cnt };

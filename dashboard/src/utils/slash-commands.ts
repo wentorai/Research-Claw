@@ -37,7 +37,9 @@ export interface SlashCommandResult {
   /** Markdown-formatted result to display in chat. */
   content: string;
   /** Side-effect action the caller should perform after displaying the result. */
-  action?: 'refresh' | 'new-session' | 'stop' | 'clear';
+  action?: 'refresh' | 'new-session' | 'stop' | 'clear' | 'clear-local-fallback';
+  /** Present after a successful `sessions.reset` when the gateway returns a canonical key. */
+  nextSessionKey?: string;
 }
 
 // ── Command Definitions ──
@@ -160,7 +162,7 @@ export async function executeSlashCommand(
     case 'stop':
       return { content: i18n.t('slashCmd.stopping'), action: 'stop' };
     case 'clear':
-      return { content: i18n.t('slashCmd.cleared'), action: 'clear' };
+      return await executeClear(client, sessionKey);
     case 'model':
       return await executeModel(client, sessionKey, args);
     case 'think':
@@ -212,6 +214,29 @@ async function executeCompact(
     return { content: i18n.t('slashCmd.compactSuccess'), action: 'refresh' };
   } catch (err) {
     return { content: `${i18n.t('slashCmd.compactFailed')}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/** Archives transcript server-side via OpenClaw `sessions.reset` so reload/history stays empty. */
+async function executeClear(
+  client: GatewayClient,
+  sessionKey: string,
+): Promise<SlashCommandResult> {
+  try {
+    const res = await client.request<{ ok?: boolean; key?: string }>('sessions.reset', {
+      key: sessionKey,
+      reason: 'reset',
+    });
+    return {
+      content: i18n.t('slashCmd.cleared'),
+      action: 'clear',
+      nextSessionKey: typeof res?.key === 'string' ? res.key : undefined,
+    };
+  } catch (err) {
+    return {
+      content: `${i18n.t('slashCmd.clearFailed')}: ${err instanceof Error ? err.message : String(err)}`,
+      action: 'clear-local-fallback',
+    };
   }
 }
 

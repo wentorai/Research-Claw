@@ -31,6 +31,7 @@ describe('Library store filter combinations', () => {
     useLibraryStore.setState({
       papers: [],
       tags: [],
+      collections: [],
       loading: false,
       loadingMore: false,
       total: 0,
@@ -165,7 +166,11 @@ describe('Library store filter combinations', () => {
       ],
       total: 2,
     });
-    mockGatewayClient.request.mockResolvedValueOnce({});
+    mockGatewayClient.request
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ by_status: {}, starred_count: 0 });
 
     await useLibraryStore.getState().deletePaper('p1');
 

@@ -13,7 +13,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { App, Button, Input, Modal, Segmented, Switch, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, Input, Modal, Segmented, Select, Switch, Tag, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -50,7 +50,7 @@ import { relativeTime } from '../../utils/relativeTime';
 const { Text } = Typography;
 const { Search } = Input;
 
-type SubTab = 'skills' | 'channels' | 'plugins';
+type SubTab = 'skills' | 'channels' | 'plugins' | 'ppt';
 
 /** Channels that support QR code login via web.login.start / web.login.wait */
 const QR_LOGIN_CHANNELS = new Set(['openclaw-weixin', 'whatsapp']);
@@ -1246,6 +1246,340 @@ function PluginsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
   );
 }
 
+// ── PPT Sub-Tab (A+B integration) ───────────────────────────────────────────
+
+type PptStatus = {
+  pptRoot: string;
+  exists: boolean;
+  scriptsRoot: string;
+  hasProjectManager: boolean;
+  hasSvgToPptx: boolean;
+};
+
+type PptOutputsList = {
+  root: string;
+  files: string[];
+};
+
+function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
+  const { t } = useTranslation();
+  const { message: messageApi } = App.useApp();
+  const client = useGatewayStore((s) => s.client);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<PptStatus | null>(null);
+  const [lastResult, setLastResult] = useState<unknown>(null);
+  const [lastOutputPath, setLastOutputPath] = useState<string>('');
+  const [selectedSourceFilePath, setSelectedSourceFilePath] = useState<string>('');
+  const [sourceFiles, setSourceFiles] = useState<string[]>([]);
+  const [projectName, setProjectName] = useState('demo-deck');
+  const [format, setFormat] = useState('ppt169');
+  const [projectPath, setProjectPath] = useState('projects/demo-deck');
+  const [stage, setStage] = useState('final');
+  const fieldLabelStyle: React.CSSProperties = {
+    color: tokens.text.muted,
+    fontSize: 12,
+    lineHeight: '18px',
+  };
+
+  const SOURCE_EXTS = useMemo(
+    () => new Set(['.md', '.markdown', '.txt', '.pdf', '.docx', '.doc', '.html', '.htm']),
+    [],
+  );
+
+  const callRpc = useCallback(async <T,>(method: string, params: Record<string, unknown>) => {
+    if (!client || !client.isConnected) {
+      throw new Error(t('extensions.disconnected', 'Connect to gateway to view extensions'));
+    }
+    return client.request<T>(method, params);
+  }, [client, t]);
+
+  const handleStatus = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await callRpc<PptStatus>('rc.ppt.status', {});
+      setStatus(res);
+      setLastResult(res);
+      if (!res.exists || !res.hasProjectManager || !res.hasSvgToPptx) {
+        messageApi.warning(t('extensions.ppt.statusWarn', 'ppt-master integration path is incomplete'));
+      } else {
+        messageApi.success(t('extensions.ppt.statusOk', 'ppt-master integration is ready'));
+      }
+    } catch (err) {
+      messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [callRpc, messageApi, t]);
+
+  const handleInit = useCallback(async () => {
+    setLoading(true);
+    try {
+      // If a source file is selected, delegate to ppt-master skill (agent pipeline).
+      // This ensures full SVG generation + export, not just svg_to_pptx packaging.
+      if (selectedSourceFilePath) {
+        const baseName = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
+        const dotIdx = baseName.lastIndexOf('.');
+        const ext = dotIdx >= 0 ? baseName.slice(dotIdx).toLowerCase() : '';
+        const fileName = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
+        const prompt = [
+          '请使用 ppt-master 根据下面的源文件内容生成 PPTX。',
+          `源文件路径：${selectedSourceFilePath}`,
+          `源文件名：${fileName}`,
+          ext ? `源文件类型：${ext}` : '',
+          `项目名：${projectName}`,
+          `画布格式：${format}`,
+          '请使用推荐模板与风格（按推荐自动选择，跳过模板/风格询问）。',
+          '请完成项目初始化、导入 sources、生成并导出最终 PPTX（导出到 workspace/outputs/ppt/ 按日期目录）。',
+        ].filter(Boolean).join('\n');
+
+        useChatStore.getState().send(prompt);
+        messageApi.success(t('extensions.ppt.generateFromSourceOk', 'Submitted PPT generation request'));
+        return;
+      }
+
+      const res = await callRpc('rc.ppt.init', {
+        projectName,
+        format,
+      });
+      setLastResult(res);
+      messageApi.success(t('extensions.ppt.initOk', 'Project initialized'));
+    } catch (err) {
+      messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [callRpc, projectName, format, selectedSourceFilePath, messageApi, t]);
+
+  const handleExport = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await callRpc<{ outputPath?: string }>('rc.ppt.export', { projectPath, stage });
+      setLastResult(res);
+      const nextOutput = typeof res.outputPath === 'string' ? res.outputPath : '';
+      setLastOutputPath(nextOutput);
+      messageApi.success(t('extensions.ppt.exportOk', 'Export completed'));
+    } catch (err) {
+      messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [callRpc, projectPath, stage, messageApi, t]);
+
+  const handleRefreshSources = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await callRpc<PptOutputsList>('rc.ppt.outputs.list', {});
+      const filtered = res.files.filter((f) => {
+        const lower = f.toLowerCase();
+        // Avoid selecting generated PPTX as "source".
+        if (lower.endsWith('.pptx')) return false;
+        const matched = Array.from(SOURCE_EXTS).some((ext) => lower.endsWith(ext));
+        return matched;
+      });
+      setSourceFiles(filtered);
+      if (selectedSourceFilePath && filtered.includes(selectedSourceFilePath)) {
+        return;
+      }
+      setSelectedSourceFilePath(filtered[0] ?? '');
+    } catch (err) {
+      messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [callRpc, selectedSourceFilePath, messageApi, t, SOURCE_EXTS]);
+
+  const handleOpenOutput = useCallback(async () => {
+    let pathToOpen = lastOutputPath;
+    if (!pathToOpen) {
+      // When generating via agent, `lastOutputPath` may not be filled in this panel.
+      // Fallback: open newest pptx under workspace/outputs/ppt/.
+      const res = await callRpc<PptOutputsList>('rc.ppt.outputs.list', {});
+      const newest = res.files.find(
+        (f) => f.toLowerCase().endsWith('.pptx') && f.includes('/outputs/ppt/'),
+      );
+      if (!newest) {
+        throw new Error('No pptx output found under workspace/outputs/ppt/');
+      }
+      pathToOpen = newest;
+      setLastOutputPath(newest);
+    }
+    setLoading(true);
+    try {
+      // Strong一致命名：如果选了源文件，就用「源文件名(去后缀) + 时间戳」重命名最新 pptx
+      if (selectedSourceFilePath) {
+        const base = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
+        const dotIdx = base.lastIndexOf('.');
+        const desiredBaseName = dotIdx >= 0 ? base.slice(0, dotIdx) : base;
+        if (desiredBaseName) {
+          try {
+            const renameRes = await callRpc<{ ok: boolean; oldPath: string; newPath: string }>(
+              'rc.ppt.outputs.rename',
+              { inputPath: pathToOpen, desiredBaseName },
+            );
+            if (renameRes?.ok && renameRes.newPath) {
+              pathToOpen = renameRes.newPath;
+              setLastOutputPath(pathToOpen);
+            }
+          } catch {
+            // Ignore rename failures; still try to open the file.
+          }
+        }
+      }
+      const res = await callRpc<{ ok: boolean; fallback?: string; containerPath?: string }>('rc.ppt.open', {
+        filePath: pathToOpen,
+      });
+      setLastResult(res);
+      if (!res.ok && res.fallback === 'docker') {
+        messageApi.warning(
+          t(
+            'extensions.ppt.openDockerFallback',
+            'Cannot open directly in Docker. Use the container path shown in the result.',
+          ),
+        );
+      } else {
+        messageApi.success(t('extensions.ppt.openOk', 'Opened output file'));
+      }
+    } catch (err) {
+      messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [callRpc, lastOutputPath, selectedSourceFilePath, messageApi, t]);
+
+  useEffect(() => {
+    if (!client?.isConnected) return;
+    handleRefreshSources();
+  }, [client?.isConnected, handleRefreshSources]);
+
+  return (
+    <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <Text style={{ color: tokens.text.secondary, fontSize: 12 }}>
+        {t('extensions.ppt.hint', 'Use rc.ppt.* methods to initialize and export PPT Master projects.')}
+      </Text>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button type="primary" onClick={handleStatus} loading={loading}>
+          {t('extensions.ppt.checkStatus', 'Check Status')}
+        </Button>
+      </div>
+
+      {status && (
+        <div
+          style={{
+            border: `1px solid ${tokens.border.default}`,
+            borderRadius: 8,
+            padding: 10,
+            background: tokens.bg.surfaceHover,
+            fontSize: 12,
+          }}
+        >
+          <div><Text strong>{t('extensions.ppt.root', 'Root')}:</Text> <Text code>{status.pptRoot}</Text></div>
+          <div><Text strong>{t('extensions.ppt.exists', 'Exists')}:</Text> {status.exists ? 'yes' : 'no'}</div>
+          <div><Text strong>project_manager.py:</Text> {status.hasProjectManager ? 'yes' : 'no'}</div>
+          <div><Text strong>svg_to_pptx.py:</Text> {status.hasSvgToPptx ? 'yes' : 'no'}</div>
+        </div>
+      )}
+
+      <div
+        style={{
+          border: `1px solid ${tokens.border.default}`,
+          borderRadius: 8,
+          padding: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
+        <Text strong>{t('extensions.ppt.initTitle', 'Init Project')}</Text>
+        <Text style={fieldLabelStyle}>{t('extensions.ppt.projectName', 'Project name')}</Text>
+        <Input
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+          placeholder={t('extensions.ppt.projectName', 'Project name')}
+        />
+        <Text style={fieldLabelStyle}>{t('extensions.ppt.format', 'Format (e.g. ppt169)')}</Text>
+        <Input
+          value={format}
+          onChange={(e) => setFormat(e.target.value)}
+          placeholder={t('extensions.ppt.format', 'Format (e.g. ppt169)')}
+        />
+        <Text style={fieldLabelStyle}>
+          {t('extensions.ppt.sourceFileSelect', 'Select source file from workspace outputs')}
+        </Text>
+        <Select
+          value={selectedSourceFilePath || undefined}
+          onChange={(v) => setSelectedSourceFilePath(v)}
+          options={sourceFiles.map((file) => {
+            const base = file.split('/').pop() ?? file;
+            return { value: file, label: base };
+          })}
+          placeholder={t(
+            'extensions.ppt.sourceFileSelect',
+            'Select source file from workspace outputs',
+          )}
+          style={{ width: '100%' }}
+          showSearch
+          optionFilterProp="label"
+          allowClear
+        />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Button onClick={handleRefreshSources} loading={loading}>
+            {t('extensions.ppt.refreshSourcesBtn', 'Refresh sources')}
+          </Button>
+          <Button type="primary" onClick={handleInit} loading={loading} style={{ flex: 1 }}>
+            {t('extensions.ppt.initBtn', 'Init')}
+          </Button>
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: `1px solid ${tokens.border.default}`,
+          borderRadius: 8,
+          padding: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
+        <Text strong>{t('extensions.ppt.exportTitle', 'Output')}</Text>
+        <Text style={fieldLabelStyle}>
+          {t(
+            'extensions.ppt.outputHint',
+            'After generation, open the newest PPTX under workspace/outputs/ppt/.',
+          )}
+        </Text>
+        <Button onClick={handleOpenOutput} disabled={loading} loading={loading}>
+          {t('extensions.ppt.openBtn', 'Open Output')}
+        </Button>
+      </div>
+
+      {Boolean(lastResult) && (
+        <div>
+          <Text strong>{t('extensions.ppt.lastResult', 'Last Result')}</Text>
+          <pre
+            style={{
+              marginTop: 6,
+              padding: 8,
+              borderRadius: 6,
+              background: 'var(--code-bg, rgba(0,0,0,0.2))',
+              border: `1px solid ${tokens.border.default}`,
+              fontSize: 11,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              color: tokens.text.secondary,
+              maxHeight: 220,
+              overflow: 'auto',
+            }}
+          >
+{JSON.stringify(lastResult, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Panel ──────────────────────────────────────────────────────────────
 
 export default function ExtensionsPanel() {
@@ -1358,6 +1692,7 @@ export default function ExtensionsPanel() {
             { label: t('extensions.tabs.skills', 'Skills'), value: 'skills' },
             { label: t('extensions.tabs.channels', 'Channels'), value: 'channels' },
             { label: t('extensions.tabs.plugins', 'Plugins'), value: 'plugins' },
+            { label: t('extensions.tabs.ppt', 'PPT'), value: 'ppt' },
           ]}
           size="small"
         />
@@ -1378,6 +1713,11 @@ export default function ExtensionsPanel() {
         {visited.has('plugins') && (
           <div style={{ display: activeTab === 'plugins' ? 'block' : 'none', height: '100%', overflow: 'auto' }}>
             <PluginsTab tokens={tokens} />
+          </div>
+        )}
+        {visited.has('ppt') && (
+          <div style={{ display: activeTab === 'ppt' ? 'block' : 'none', height: '100%', overflow: 'auto' }}>
+            <PptTab tokens={tokens} />
           </div>
         )}
       </div>

@@ -350,6 +350,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     const parsed = parseSlashCommand(trimmed);
     if (parsed?.command.executeLocal) {
       try {
+        if (parsed.command.name === 'clear') {
+          // Align with gateway sessions.reset cleanup (embedded runs, queues).
+          get().abort();
+        }
         const result = await executeSlashCommand(
           client, get().sessionKey, parsed.command.name, parsed.args,
         );
@@ -369,8 +373,35 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           case 'new-session':
             useSessionsStore.getState().createSession();
             break;
-          case 'clear':
-            set({ messages: [] });
+          case 'clear': {
+            const sk = get().sessionKey;
+            const next = result.nextSessionKey ?? sk;
+            if (normalizeSessionKey(next) !== normalizeSessionKey(sk)) {
+              // switchSession already calls loadHistory + loadSessionUsage
+              useSessionsStore.getState().switchSession(next);
+            } else {
+              get().setSessionKey(sk);
+              // Same session — must reload explicitly since switchSession won't fire
+              await get().loadHistory();
+              await get().loadSessionUsage();
+            }
+            break;
+          }
+          case 'clear-local-fallback':
+            stopStaleStreamWatchdog();
+            set({
+              messages: [],
+              streaming: false,
+              streamText: null,
+              runId: null,
+              sending: false,
+              lastError: null,
+              _pendingGapReload: false,
+              _pendingUserMsgs: [],
+              _streamStartedAt: null,
+              _lastDeltaAt: null,
+              _reconnectedAt: null,
+            });
             break;
         }
 

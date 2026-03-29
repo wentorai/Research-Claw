@@ -47,7 +47,7 @@ export const HELLO_OK_PAYLOAD: HelloOk = {
   },
   features: {
     methods: [
-      'connect', 'chat.send', 'chat.abort', 'chat.history', 'config.get',
+      'connect', 'chat.send', 'chat.abort', 'chat.history', 'sessions.reset', 'config.get',
       'config.set', 'sessions.list', 'agents.list', 'skills.status',
     ],
     events: [

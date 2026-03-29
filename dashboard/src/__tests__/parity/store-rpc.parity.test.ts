@@ -287,7 +287,11 @@ describe('Library store RPC parity (rc.lit.*)', () => {
   describe('deletePaper → rc.lit.delete', () => {
     it('removes paper from local state after successful RPC', async () => {
       // Source: literature/rpc.ts:227-235 → returns { ok: true }
-      mockGatewayClient.request.mockResolvedValueOnce({ ok: true });
+      mockGatewayClient.request
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({ by_status: {}, starred_count: 0 });
       useLibraryStore.setState({
         papers: RC_LIT_LIST_RESPONSE.items,
         total: 3,

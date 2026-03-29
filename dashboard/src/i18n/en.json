@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "WentorOS\u00b7ResearchClaw",
+    "name": "WentorOS·ResearchClaw",
     "tagline": "AI-Powered Academic Research Assistant"
   },
   "topbar": {
@@ -42,6 +42,9 @@
     "thinkingLabel": "Thinking",
     "imageNotSupported": "Current model does not support image input. Please enable a separate vision model in Settings, or switch to a model that supports images (e.g. Claude, GPT-4o).",
     "bgWorking": "Working in background...",
+    "activityHistory": "Activity history",
+    "noActivityYet": "No activity yet",
+    "clear": "Clear",
     "refresh": "Refresh chat",
     "copyRaw": "Copy source (thinking + markdown)",
     "system": "System",
@@ -51,6 +54,7 @@
     "newSession": "Starting new session...",
     "stopping": "Stopping current run...",
     "cleared": "Chat history cleared.",
+    "clearFailed": "Could not reset transcript on gateway; only cleared this view until reload",
     "compactSuccess": "Context compacted successfully.",
     "compactFailed": "Compaction failed",
     "currentModel": "Current model",
@@ -73,6 +77,11 @@
     "inbox": "Inbox",
     "archive": "Archive",
     "starred": "Starred",
+    "selectCollection": "Browse by collection (all papers in set)",
+    "noCollectionsYet": "No collections yet. Create one with the agent (e.g. library_manage_collection).",
+    "addToCollectionTooltip": "Add paper to a collection",
+    "addedToCollection": "Added to \"{{name}}\"",
+    "addToCollectionFailed": "Could not add to collection",
     "movedToArchive": "Moved to Archive",
     "undo": "Undo",
     "search": "Search papers...",
@@ -388,7 +397,7 @@
     "start": "Start Research-Claw",
     "configuring": "Configuring...",
     "configureFailed": "Configuration failed — check the API URL and key, then try again",
-    "skipToDashboard": "Skip to Dashboard \u2192"
+    "skipToDashboard": "Skip to Dashboard →"
   },
   "boot": {
     "connecting": "Connecting to gateway...",
@@ -528,7 +537,8 @@
   "cron": {
     "taskCompleted": "Scheduled task completed",
     "viewResult": "View Result",
-    "cronSessions": "Scheduled Tasks"
+    "cronSessions": "Scheduled Tasks",
+    "deleteSessionConfirm": "Remove this scheduled task? The gateway cron job will be stopped (when matched) and the chat session will be deleted."
   },
   "project": {
     "newProject": "New Project...",
@@ -554,8 +564,12 @@
     "closePanel": "Close panel"
   },
   "docker": {
-    "openFile": { "title": "Cannot open file directly" },
-    "openFolder": { "title": "Cannot open folder directly" },
+    "openFile": {
+      "title": "Cannot open file directly"
+    },
+    "openFolder": {
+      "title": "Cannot open folder directly"
+    },
     "description": "Research-Claw is running inside a Docker container. Files cannot be opened with host applications directly.",
     "downloadFile": "Download File",
     "downloadFolder": "Download Folder (.tar.gz)",
@@ -570,7 +584,37 @@
     "tabs": {
       "skills": "Skills",
       "channels": "Channels",
-      "plugins": "Plugins"
+      "plugins": "Plugins",
+      "ppt": "PPT"
+    },
+    "ppt": {
+      "hint": "Use rc.ppt.* methods to initialize and export PPT Master projects.",
+      "checkStatus": "Check Status",
+      "statusOk": "ppt-master integration is ready",
+      "statusWarn": "ppt-master integration path is incomplete",
+      "actionFailed": "Action failed",
+      "root": "Root",
+      "exists": "Exists",
+      "initTitle": "Init Project",
+      "projectName": "Project name",
+      "format": "Format (e.g. ppt169)",
+      "initBtn": "Init",
+      "initOk": "Project initialized",
+      "exportTitle": "Export Project",
+      "projectPath": "Project path (e.g. projects/demo-deck)",
+      "stage": "Stage (default: final)",
+      "exportBtn": "Export",
+      "exportOk": "Export completed",
+      "refreshOutputsBtn": "Refresh outputs",
+      "outputFileSelect": "Select file from workspace outputs",
+      "refreshSourcesBtn": "Refresh sources",
+      "sourceFileSelect": "Select source file from workspace outputs",
+      "generateFromSourceOk": "Submitted PPT generation request",
+      "outputHint": "After generation, open the newest PPTX under workspace/outputs/ppt/.",
+      "openBtn": "Open Output",
+      "openOk": "Opened output file",
+      "openDockerFallback": "Cannot open directly in Docker. Use the container path shown in the result.",
+      "lastResult": "Last Result"
     },
     "skills": {
       "title": "Skills",

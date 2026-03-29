@@ -27,6 +27,11 @@
         "type": "number",
         "description": "Hours before deadline to trigger warning",
         "default": 48
+      },
+      "pptRoot": {
+        "type": "string",
+        "description": "Absolute or relative path to a local ppt-master repository root",
+        "default": "ppt-master"
       }
     }
   }

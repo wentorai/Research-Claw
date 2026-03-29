@@ -65,6 +65,22 @@ export interface PaperFilter {
   tags?: string[];
   year?: number;
   sort?: 'added_at' | 'year' | 'title';
+  /**
+   * On the Starred tab: when set, list all papers in that collection (not only starred).
+   * When unset, list starred papers only (rating > 0).
+   */
+  collection_id?: string;
+}
+
+/** Named paper collection from `rc.lit.collections.list` */
+export interface LibraryCollection {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+  created_at: string;
+  updated_at: string;
+  paper_count?: number;
 }
 
 // --- Pagination & tab-filtering constants ---
@@ -88,6 +104,7 @@ export interface TabCounts {
 interface LibraryState {
   papers: Paper[];
   tags: Tag[];
+  collections: LibraryCollection[];
   loading: boolean;
   loadingMore: boolean;
   total: number;
@@ -101,6 +118,7 @@ interface LibraryState {
   loadPapers: (filter?: PaperFilter) => Promise<void>;
   loadMorePapers: () => Promise<void>;
   loadTags: () => Promise<void>;
+  loadCollections: () => Promise<void>;
   loadStats: () => Promise<void>;
   setSearchQuery: (q: string) => void;
   setActiveTab: (tab: TabKey) => void;
@@ -109,6 +127,7 @@ interface LibraryState {
   setFilters: (filters: Partial<PaperFilter>) => void;
   searchPapers: (query: string) => Promise<void>;
   deletePaper: (id: string) => Promise<void>;
+  addPaperToCollection: (paperId: string, collectionId: string) => Promise<void>;
 }
 
 // --- Helpers ---
@@ -127,10 +146,15 @@ function buildListParams(
     offset,
   };
 
-  // Tab-level read_status filtering (server-side)
   if (tab === 'starred') {
-    // Starred tab: sort by rating descending, no read_status constraint
-    params.sort = '-rating';
+    if (filters.collection_id) {
+      // Browse one collection: show every paper in it (sort still prefers higher rating first)
+      params.collection_id = filters.collection_id;
+      params.sort = '-rating';
+    } else {
+      // Default: all starred papers, rating first
+      params.sort = '-rating';
+    }
   } else {
     params.read_status = TAB_STATUS_MAP[tab];
   }
@@ -150,6 +174,7 @@ function buildListParams(
 export const useLibraryStore = create<LibraryState>()((set, get) => ({
   papers: [],
   tags: [],
+  collections: [],
   loading: false,
   loadingMore: false,
   total: 0,
@@ -168,13 +193,19 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     }
     set({ loading: true });
     try {
+      const { activeTab, filters } = get();
+
       const query = get().searchQuery.trim();
       if (query) {
         // rc.lit.list does NOT support text search — use rc.lit.search (FTS5)
         console.log('[LibraryStore] loadPapers → rc.lit.search (query=%s)', query);
+        const searchParams: Record<string, unknown> = { query, limit: PAGE_SIZE, offset: 0 };
+        if (activeTab === 'starred' && filters.collection_id) {
+          searchParams.collection_id = filters.collection_id;
+        }
         const result = await client.request<{ items: Paper[]; total: number }>(
           'rc.lit.search',
-          { query, limit: PAGE_SIZE, offset: 0 },
+          searchParams,
         );
         set({
           papers: result.items,
@@ -185,7 +216,6 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
         });
       } else {
         // No search query — use rc.lit.list with structured filters
-        const { activeTab } = get();
         const effectiveFilter = filter ?? get().filters;
         const params = buildListParams(activeTab, effectiveFilter, 0);
         console.log('[LibraryStore] loadPapers → rc.lit.list', params);
@@ -197,20 +227,23 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
 
         let items = result.items;
         let total = result.total;
+        let hasMore = items.length >= PAGE_SIZE;
 
-        // Starred tab: client-filter to only papers with rating > 0
-        if (activeTab === 'starred') {
+        // Starred tab, no collection: only show starred papers (intersection was wrong UX)
+        if (activeTab === 'starred' && !effectiveFilter.collection_id) {
           items = items.filter((p) => (p.rating ?? 0) > 0);
-          // Use server-side starred_count from tabCounts when available for accurate total
           const cachedStarred = get().tabCounts?.starred;
           total = cachedStarred ?? (items.length < PAGE_SIZE ? items.length : result.total);
+          hasMore = items.length >= PAGE_SIZE;
+        } else if (activeTab === 'starred' && effectiveFilter.collection_id) {
+          hasMore = items.length < result.total;
         }
 
         set({
           papers: items,
           total,
           offset: items.length,
-          hasMore: items.length >= PAGE_SIZE,
+          hasMore,
           loading: false,
         });
       }
@@ -226,15 +259,21 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
 
+    const { activeTab, filters } = get();
+
     set({ loadingMore: true });
     try {
-      const { searchQuery, activeTab, filters, offset, papers } = get();
+      const { searchQuery, offset, papers } = get();
       const query = searchQuery.trim();
 
       if (query) {
+        const searchParams: Record<string, unknown> = { query, limit: PAGE_SIZE, offset };
+        if (activeTab === 'starred' && filters.collection_id) {
+          searchParams.collection_id = filters.collection_id;
+        }
         const result = await client.request<{ items: Paper[]; total: number }>(
           'rc.lit.search',
-          { query, limit: PAGE_SIZE, offset },
+          searchParams,
         );
         const merged = [...papers, ...result.items];
         set({
@@ -252,16 +291,21 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
         );
 
         let newItems = result.items;
-        if (activeTab === 'starred') {
+        if (activeTab === 'starred' && !filters.collection_id) {
           newItems = newItems.filter((p) => (p.rating ?? 0) > 0);
         }
 
         const merged = [...papers, ...newItems];
+        const hasMore =
+          activeTab === 'starred' && filters.collection_id
+            ? merged.length < result.total
+            : newItems.length >= PAGE_SIZE;
+
         set({
           papers: merged,
           total: result.total,
           offset: merged.length,
-          hasMore: newItems.length >= PAGE_SIZE,
+          hasMore,
           loadingMore: false,
         });
       }
@@ -276,6 +320,17 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     try {
       const result = await client.request<Tag[]>('rc.lit.tags');
       set({ tags: Array.isArray(result) ? result : [] });
+    } catch {
+      /* non-fatal */
+    }
+  },
+
+  loadCollections: async () => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) return;
+    try {
+      const result = await client.request<LibraryCollection[]>('rc.lit.collections.list');
+      set({ collections: Array.isArray(result) ? result : [] });
     } catch {
       /* non-fatal */
     }
@@ -305,16 +360,35 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
   },
 
   setActiveTab: (tab: TabKey) => {
-    // Clear papers immediately so the UI shows the loading state for the new tab
-    set({ activeTab: tab, papers: [], total: 0, offset: 0, hasMore: false });
-    // Trigger async reload on next tick to avoid calling loadPapers inside a set()
+    set((s) => {
+      const nextFilters = { ...s.filters };
+      if (tab !== 'starred') {
+        delete nextFilters.collection_id;
+      }
+      return {
+        activeTab: tab,
+        papers: [],
+        total: 0,
+        offset: 0,
+        hasMore: false,
+        filters: nextFilters,
+      };
+    });
     setTimeout(() => {
       get().loadPapers();
     }, 0);
   },
 
   setFilters: (filters: Partial<PaperFilter>) => {
-    set((s) => ({ filters: { ...s.filters, ...filters } }));
+    set((s) => {
+      const next = { ...s.filters, ...filters };
+      for (const key of Object.keys(filters) as (keyof PaperFilter)[]) {
+        if (filters[key] === undefined) {
+          delete next[key];
+        }
+      }
+      return { filters: next };
+    });
   },
 
   updatePaperStatus: async (id: string, status: ReadStatus) => {
@@ -351,11 +425,16 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
   searchPapers: async (query: string) => {
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
+    const { activeTab, filters } = get();
     set({ loading: true, searchQuery: query });
     try {
+      const searchParams: Record<string, unknown> = { query, limit: PAGE_SIZE, offset: 0 };
+      if (activeTab === 'starred' && filters.collection_id) {
+        searchParams.collection_id = filters.collection_id;
+      }
       const result = await client.request<{ items: Paper[]; total: number }>(
         'rc.lit.search',
-        { query, limit: PAGE_SIZE, offset: 0 },
+        searchParams,
       );
       set({
         papers: result.items,
@@ -369,6 +448,18 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     }
   },
 
+  addPaperToCollection: async (paperId: string, collectionId: string) => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) throw new Error('Gateway not connected');
+    await client.request('rc.lit.collections.manage', {
+      action: 'add_paper',
+      id: collectionId,
+      paper_ids: [paperId],
+    });
+    await get().loadCollections();
+    get().loadPapers();
+  },
+
   deletePaper: async (id: string) => {
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
@@ -378,8 +469,9 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
         papers: s.papers.filter((p) => p.id !== id),
         total: s.total - 1,
       }));
-      // Refresh tags and stats so counts and visibility stay in sync
+      // Refresh tags, collections, and stats so counts stay in sync
       get().loadTags();
+      get().loadCollections();
       get().loadStats();
     } catch {
       // Reload to restore consistent state

@@ -133,6 +133,7 @@ function resetStores() {
   useLibraryStore.setState({
     papers: [],
     tags: [],
+    collections: [],
     loading: false,
     loadingMore: false,
     total: 0,
