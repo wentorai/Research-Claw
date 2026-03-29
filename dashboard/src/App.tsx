@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, Suspense, useState } from 'react';
-import { App as AntdApp, ConfigProvider, Spin, Result, Button, Input, Space } from 'antd';
+import { App as AntdApp, ConfigProvider, Spin, Result, Button, Input, Space, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { getAntdThemeConfig } from './styles/theme';
 import { useConfigStore } from './stores/config';
@@ -309,27 +309,40 @@ export default function App() {
                 ? `${connectError.code}: ${connectError.message}`
                 : t('boot.needsTokenHint')}
               extra={
-                <Space.Compact style={{ width: 360 }}>
-                  <Input.Password
-                    id="rc-token-input"
-                    placeholder={t('boot.tokenPlaceholder')}
-                    onPressEnter={(e) => {
-                      const val = (e.target as HTMLInputElement).value.trim();
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                  <Space.Compact style={{ width: 360 }}>
+                    <Input.Password
+                      id="rc-token-input"
+                      placeholder={t('boot.tokenPlaceholder')}
+                      onPressEnter={(e) => {
+                        const val = (e.target as HTMLInputElement).value.trim();
+                        if (val) {
+                          window.location.href = `${window.location.pathname}?token=${encodeURIComponent(val)}`;
+                        }
+                      }}
+                    />
+                    <Button type="primary" onClick={() => {
+                      const input = document.getElementById('rc-token-input') as HTMLInputElement;
+                      const val = input?.value?.trim();
                       if (val) {
                         window.location.href = `${window.location.pathname}?token=${encodeURIComponent(val)}`;
                       }
+                    }}>
+                      {t('boot.connectWithToken')}
+                    </Button>
+                  </Space.Compact>
+                  <Button
+                    type="link"
+                    onClick={() => {
+                      window.location.href = `${window.location.pathname}?token=research-claw`;
                     }}
-                  />
-                  <Button type="primary" onClick={() => {
-                    const input = document.getElementById('rc-token-input') as HTMLInputElement;
-                    const val = input?.value?.trim();
-                    if (val) {
-                      window.location.href = `${window.location.pathname}?token=${encodeURIComponent(val)}`;
-                    }
-                  }}>
-                    {t('boot.connectWithToken')}
+                  >
+                    {t('boot.tryDefaultToken')}
                   </Button>
-                </Space.Compact>
+                  <Typography.Text type="secondary" style={{ maxWidth: 460, textAlign: 'left', fontSize: 12, lineHeight: 1.8, whiteSpace: 'pre-line' }}>
+                    {t('boot.tokenGuide')}
+                  </Typography.Text>
+                </div>
               }
             />
           </div>

@@ -407,7 +407,9 @@
     "needsToken": "Gateway Token Required",
     "needsTokenHint": "Enter the gateway token to connect. Find it in Docker logs or your .env file.",
     "tokenPlaceholder": "Gateway token",
-    "connectWithToken": "Connect"
+    "connectWithToken": "Connect",
+    "tryDefaultToken": "Try default token (research-claw)",
+    "tokenGuide": "How to find your token:\n1. Default token for Docker installs is research-claw — click the link above to try it\n2. Run docker logs research-claw in your terminal to see the token in startup logs\n3. Check ~/.openclaw/openclaw.json → gateway.auth.token field"
   },
   "status": {
     "connected": "Connected",

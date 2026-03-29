@@ -407,7 +407,9 @@
     "needsToken": "需要网关令牌",
     "needsTokenHint": "请输入网关令牌以连接。令牌可在 Docker 日志或 .env 文件中找到。",
     "tokenPlaceholder": "网关令牌",
-    "connectWithToken": "连接"
+    "connectWithToken": "连接",
+    "tryDefaultToken": "使用默认令牌 (research-claw) 连接",
+    "tokenGuide": "如何找到令牌：\n1. Docker 安装的默认令牌为 research-claw，点击上方链接可直接尝试\n2. 终端执行 docker logs research-claw 查看启动日志中的令牌\n3. 查看配置文件 ~/.openclaw/openclaw.json 中的 gateway.auth.token 字段"
   },
   "status": {
     "connected": "已连接",
