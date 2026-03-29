@@ -16,6 +16,15 @@
 #   SKIP_START   — set to 1 to install only, don't launch gateway
 #   NPM_REGISTRY — npm registry URL (for slow networks: https://registry.npmmirror.com)
 # ============================================================================
+
+# ── curl|bash safety ─────────────────────────────────────────────────────
+# Wrap entire script in a function so bash reads it completely before executing.
+# Without this, child processes (fnm installer, git, node) can read from stdin
+# (the curl pipe), consuming script bytes and causing parse errors like:
+#   bash: line 318: syntax error near unexpected token `fi'
+# This is the standard pattern used by Homebrew, nvm, and rustup installers.
+_main() {
+
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/research-claw}"
@@ -173,7 +182,7 @@ install_node_fnm() {
     # Method 1: installer script (requires Homebrew on macOS)
     local tmp; tmp="$(mktemp)"
     if curl -fsSL https://fnm.vercel.app/install -o "$tmp" 2>/dev/null; then
-      if bash "$tmp" --install-dir "$FNM_DIR" --skip-shell &>/dev/null; then
+      if bash "$tmp" --install-dir "$FNM_DIR" --skip-shell </dev/null &>/dev/null; then
         INSTALLED=true
       fi
     fi
@@ -211,7 +220,7 @@ install_node_fnm() {
     export PATH="$FNM_DIR:$PATH"
   fi
   eval "$(fnm env --shell bash 2>/dev/null || true)"
-  fnm install "$NODE_MIN" --progress=never && fnm use "$NODE_MIN" && fnm default "$NODE_MIN"
+  fnm install "$NODE_MIN" --progress=never </dev/null && fnm use "$NODE_MIN" </dev/null && fnm default "$NODE_MIN" </dev/null
 
   # Persist to shell profile (create if none exist)
   local FNM_SNIPPET
@@ -248,7 +257,7 @@ install_node_nvm() {
   fi
   # shellcheck disable=SC1091
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-  nvm install "$NODE_MIN" && nvm use "$NODE_MIN" && nvm alias default "$NODE_MIN"
+  nvm install "$NODE_MIN" </dev/null && nvm use "$NODE_MIN" </dev/null && nvm alias default "$NODE_MIN" </dev/null
 }
 
 NODE_MAX=24  # Node 25+ is Current (not LTS); native modules (better-sqlite3) may not compile
@@ -1227,3 +1236,6 @@ while true; do
   printf "  ${C}▸${N} Gateway exited (code $CODE) — restarting in ${BACKOFF}s...\n"
   sleep "$BACKOFF"
 done
+
+} # end _main — do not remove; curl|bash safety depends on this closing brace
+_main "$@"
