@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Input, Tooltip, Typography } from 'antd';
+import { Button, Dropdown, Input, Modal, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined,
   BookOutlined,
@@ -100,13 +100,19 @@ export default function LeftNav() {
     }
   };
 
-  const handleDeleteCronSession = useCallback(async (key: string) => {
-    if (!confirm(t('cron.deleteSessionConfirm'))) return;
-    const session = sessions.find((s) => s.key === key);
-    const label = session ? getSessionName(session, t) : key;
-    await removeScheduledJobForSession(key, label);
-    await deleteSession(key);
-    await loadSessions();
+  const handleDeleteCronSession = useCallback((key: string) => {
+    Modal.confirm({
+      title: t('cron.deleteSessionConfirm'),
+      okText: t('common.ok', 'OK'),
+      cancelText: t('common.cancel', 'Cancel'),
+      onOk: async () => {
+        const session = sessions.find((s) => s.key === key);
+        const label = session ? getSessionName(session, t) : key;
+        await removeScheduledJobForSession(key, label);
+        await deleteSession(key);
+        await loadSessions();
+      },
+    });
   }, [sessions, t, deleteSession, loadSessions]);
 
   // ── Project switcher dropdown content ──────────────────────────────────────

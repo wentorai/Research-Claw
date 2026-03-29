@@ -363,14 +363,14 @@ export class PptService {
 
   private runOpen(absPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const quoted = JSON.stringify(absPath);
-      const cmd =
-        process.platform === 'darwin'
-          ? `open ${quoted}`
-          : process.platform === 'win32'
-            ? `start "" ${quoted}`
-            : `xdg-open ${quoted}`;
-      const child = spawn(cmd, { cwd: this.pptRoot, shell: true, stdio: 'ignore' });
+      let child;
+      if (process.platform === 'darwin') {
+        child = spawn('open', [absPath], { cwd: this.pptRoot, stdio: 'ignore' });
+      } else if (process.platform === 'win32') {
+        child = spawn('cmd', ['/c', 'start', '', absPath], { cwd: this.pptRoot, stdio: 'ignore' });
+      } else {
+        child = spawn('xdg-open', [absPath], { cwd: this.pptRoot, stdio: 'ignore' });
+      }
       child.on('error', reject);
       child.on('close', (code) => {
         if (code === 0) resolve();

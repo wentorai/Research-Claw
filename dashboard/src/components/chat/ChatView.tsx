@@ -14,6 +14,7 @@ import { useToolStreamStore } from '../../stores/tool-stream';
 import { useGatewayStore } from '../../stores/gateway';
 import type { ChatMessage } from '../../gateway/types';
 import { normalizeSessionKey } from '../../utils/session-key';
+import { fmtActivityRow } from '../../utils/activity-log';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import ToolActivityStream from './ToolActivityStream';
@@ -45,11 +46,6 @@ function extractVisibleText(msg: ChatMessage): string {
 function hasImageContent(msg: ChatMessage): boolean {
   if (!Array.isArray(msg.content)) return false;
   return msg.content.some((c) => c.type === 'image' || c.type === 'image_url');
-}
-
-function fmtTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleTimeString([], { hour12: false });
 }
 
 export default function ChatView() {
@@ -278,9 +274,7 @@ export default function ChatView() {
               {activityEntries.length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   {activityEntries.map((e) => {
-                    const scope = e.scope === 'background' ? 'BG' : 'FG';
-                    const dur = typeof e.durationMs === 'number' ? ` ${Math.round(e.durationMs)}ms` : '';
-                    const rowText = `${fmtTime(e.ts)} ${scope}  ${e.text}${dur}`;
+                    const rowText = fmtActivityRow(e);
                     const expanded = openActivityId === e.id;
                     const status = e.status || '';
                     const icon = status.includes('error')

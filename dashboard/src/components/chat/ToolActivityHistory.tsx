@@ -3,11 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useToolStreamStore } from '../../stores/tool-stream';
 import { useChatStore } from '../../stores/chat';
 import { normalizeSessionKey } from '../../utils/session-key';
-
-function fmtTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleTimeString([], { hour12: false });
-}
+import { fmtTime } from '../../utils/activity-log';
 
 interface ToolActivityHistoryProps {
   resetKey?: number;

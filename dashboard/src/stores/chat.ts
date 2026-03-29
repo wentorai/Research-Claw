@@ -377,12 +377,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             const sk = get().sessionKey;
             const next = result.nextSessionKey ?? sk;
             if (normalizeSessionKey(next) !== normalizeSessionKey(sk)) {
+              // switchSession already calls loadHistory + loadSessionUsage
               useSessionsStore.getState().switchSession(next);
             } else {
               get().setSessionKey(sk);
+              // Same session — must reload explicitly since switchSession won't fire
+              await get().loadHistory();
+              await get().loadSessionUsage();
             }
-            await get().loadHistory();
-            await get().loadSessionUsage();
             break;
           }
           case 'clear-local-fallback':

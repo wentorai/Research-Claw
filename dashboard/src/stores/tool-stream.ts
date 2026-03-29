@@ -68,6 +68,8 @@ const ACTIVE_STATES = new Set(['thinking', 'tool_running', 'streaming']);
  */
 const STALE_TOOL_MS = 120_000;
 const ACTIVITY_LOG_MAX = 200;
+/** Max entries in runSessionMap before oldest entries are evicted. */
+const RUN_SESSION_MAP_MAX = 100;
 
 function pushActivityLog(
   set: (partial: Partial<ToolStreamState>) => void,
@@ -111,7 +113,15 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
       const normalizedEventSession = normalizeSessionKey(evt.sessionKey);
       const prev = get().runSessionMap[evt.runId];
       if (prev !== normalizedEventSession) {
-        set({ runSessionMap: { ...get().runSessionMap, [evt.runId]: normalizedEventSession } });
+        const nextMap = { ...get().runSessionMap, [evt.runId]: normalizedEventSession };
+        // Evict oldest entries when map exceeds cap to prevent unbounded growth.
+        const keys = Object.keys(nextMap);
+        if (keys.length > RUN_SESSION_MAP_MAX) {
+          for (const k of keys.slice(0, keys.length - RUN_SESSION_MAP_MAX)) {
+            delete nextMap[k];
+          }
+        }
+        set({ runSessionMap: nextMap });
       }
     }
 
@@ -233,22 +243,21 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
               ),
             }));
             break;
-          case 'result':
-            {
-              const t = get().pendingTools.find((x) => x.toolCallId === toolCallId);
-              const durationMs = t ? (now - t.startedAt) : undefined;
-            if (eventSessionKey) {
-              pushActivityLog(set, get, {
-                sessionKey: eventSessionKey,
-                runId: evt.runId ?? null,
-                toolCallId,
-                scope: 'foreground',
-                status: 'tool_result',
-                text: `Tool returned: ${name ?? 'unknown'}`,
-                durationMs,
-                detail: evt.data,
-              });
-            }
+          case 'result': {
+              const matched = get().pendingTools.find((x) => x.toolCallId === toolCallId);
+              const durationMs = matched ? (now - matched.startedAt) : undefined;
+              if (eventSessionKey) {
+                pushActivityLog(set, get, {
+                  sessionKey: eventSessionKey,
+                  runId: evt.runId ?? null,
+                  toolCallId,
+                  scope: 'foreground',
+                  status: 'tool_result',
+                  text: `Tool returned: ${name ?? 'unknown'}`,
+                  durationMs,
+                  detail: evt.data,
+                });
+              }
             }
             set((s) => ({
               pendingTools: evictStale(s.pendingTools).map((t) =>
@@ -256,22 +265,21 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
               ),
             }));
             break;
-          case 'end':
-            {
-              const t = get().pendingTools.find((x) => x.toolCallId === toolCallId);
-              const durationMs = t ? (now - t.startedAt) : undefined;
-            if (eventSessionKey) {
-              pushActivityLog(set, get, {
-                sessionKey: eventSessionKey,
-                runId: evt.runId ?? null,
-                toolCallId,
-                scope: 'foreground',
-                status: 'tool_end',
-                text: `Tool finished: ${name ?? 'unknown'}`,
-                durationMs,
-                detail: evt.data,
-              });
-            }
+          case 'end': {
+              const matched = get().pendingTools.find((x) => x.toolCallId === toolCallId);
+              const durationMs = matched ? (now - matched.startedAt) : undefined;
+              if (eventSessionKey) {
+                pushActivityLog(set, get, {
+                  sessionKey: eventSessionKey,
+                  runId: evt.runId ?? null,
+                  toolCallId,
+                  scope: 'foreground',
+                  status: 'tool_end',
+                  text: `Tool finished: ${name ?? 'unknown'}`,
+                  durationMs,
+                  detail: evt.data,
+                });
+              }
             }
             setTimeout(() => {
               set((s) => ({
