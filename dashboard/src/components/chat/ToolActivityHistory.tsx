@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useToolStreamStore } from '../../stores/tool-stream';
 import { useChatStore } from '../../stores/chat';
 import { normalizeSessionKey } from '../../utils/session-key';
-import { fmtTime } from '../../utils/activity-log';
+import { fmtTime, safeStringifyDetail } from '../../utils/activity-log';
 
 interface ToolActivityHistoryProps {
   resetKey?: number;
@@ -150,14 +150,14 @@ export default function ToolActivityHistory({ resetKey = 0 }: ToolActivityHistor
                   wordBreak: 'break-word',
                 }}
               >
-{JSON.stringify({
+{safeStringifyDetail({
   runId: e.runId,
   toolCallId: e.toolCallId,
   scope: e.scope,
   status: e.status,
   durationMs: e.durationMs,
   detail: e.detail,
-}, null, 2)}
+})}
               </pre>
             </details>
           ))}

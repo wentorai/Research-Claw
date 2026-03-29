@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ChatMessage } from '../../gateway/types';
+import { safeStringifyDetail } from '../../utils/activity-log';
 import { useGatewayStore } from '../../stores/gateway';
 import { sanitizeUserMessage } from '../../utils/sanitize-message';
 import { sanitizeAssistantMessage, sanitizeAssistantRawCopy } from '../../utils/sanitize-assistant-message';
@@ -370,7 +371,7 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
                     wordBreak: 'break-word',
                   }}
                 >
-{JSON.stringify(getRowDetail(row), null, 2)}
+{safeStringifyDetail(getRowDetail(row))}
                 </pre>
               )}
             </details>

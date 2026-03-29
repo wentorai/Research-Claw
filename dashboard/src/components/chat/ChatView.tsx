@@ -14,7 +14,7 @@ import { useToolStreamStore } from '../../stores/tool-stream';
 import { useGatewayStore } from '../../stores/gateway';
 import type { ChatMessage } from '../../gateway/types';
 import { normalizeSessionKey } from '../../utils/session-key';
-import { fmtActivityRow } from '../../utils/activity-log';
+import { fmtActivityRow, safeStringifyDetail } from '../../utils/activity-log';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import ToolActivityStream from './ToolActivityStream';
@@ -345,7 +345,7 @@ export default function ChatView() {
                               wordBreak: 'break-word',
                             }}
                           >
-{JSON.stringify(detailObj, null, 2)}
+{safeStringifyDetail(detailObj)}
                           </pre>
                         )}
                       </div>
