@@ -27,13 +27,20 @@ const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ??
     ? 'ws://127.0.0.1:28789'
     : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`);
 
-/** Default token for local Docker deployment */
+/** Default token for local deployment (matches OPENCLAW_GATEWAY_TOKEN default in run.sh) */
 const DEFAULT_TOKEN = 'research-claw';
+const TOKEN_STORAGE_KEY = 'rc-gateway-token';
 
-/** Read gateway token: URL ?token=xxx overrides default */
+/** Read gateway token: URL param > localStorage (remote users) > hardcoded default */
 function getGatewayToken(): string {
   const params = new URLSearchParams(window.location.search);
-  return params.get('token') || DEFAULT_TOKEN;
+  const urlToken = params.get('token');
+  if (urlToken) return urlToken;
+  try {
+    const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (stored) return stored;
+  } catch { /* non-fatal */ }
+  return DEFAULT_TOKEN;
 }
 
 const BP_MOBILE = 1024;
@@ -99,6 +106,21 @@ export default function App() {
   useEffect(() => {
     connect(GATEWAY_URL, getGatewayToken());
   }, [connect]);
+
+  // Persist token on successful connection (remote users don't re-enter on next visit)
+  useEffect(() => {
+    if (connState === 'connected') {
+      const token = getGatewayToken();
+      try {
+        if (token !== DEFAULT_TOKEN) {
+          localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        } else {
+          // Using default — clear any stale custom token
+          localStorage.removeItem(TOKEN_STORAGE_KEY);
+        }
+      } catch { /* non-fatal */ }
+    }
+  }, [connState]);
 
   // Boot timeout: if still pending after 10s and not connected, show unreachable
   useEffect(() => {
@@ -298,6 +320,8 @@ export default function App() {
   }
 
   if (bootState === 'needs_token') {
+    // Clear stale cached token so we don't keep retrying a bad value
+    try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch { /* non-fatal */ }
     return (
       <ConfigProvider theme={antdTheme}>
         <AntdApp>
@@ -342,6 +366,29 @@ export default function App() {
                   <Typography.Text type="secondary" style={{ maxWidth: 460, textAlign: 'left', fontSize: 12, lineHeight: 1.8, whiteSpace: 'pre-line' }}>
                     {t('boot.tokenGuide')}
                   </Typography.Text>
+                  <div style={{ maxWidth: 460, width: '100%', borderTop: '1px solid var(--border, #333)', paddingTop: 16, marginTop: 4 }}>
+                    <Typography.Text strong style={{ fontSize: 13 }}>
+                      {t('boot.tokenFixTitle')}
+                    </Typography.Text>
+                    {[
+                      { label: 'boot.tokenFixDocker', cmd: 'boot.tokenFixDockerCmd' },
+                      { label: 'boot.tokenFixNative', cmd: 'boot.tokenFixNativeCmd' },
+                      { label: 'boot.tokenFixSystemd', cmd: 'boot.tokenFixSystemdCmd' },
+                    ].map(({ label, cmd }) => (
+                      <div key={label} style={{ marginTop: 8 }}>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {t(label)}
+                        </Typography.Text>
+                        <Typography.Paragraph
+                          code
+                          copyable
+                          style={{ marginTop: 4, marginBottom: 0, fontSize: 12 }}
+                        >
+                          {t(cmd)}
+                        </Typography.Paragraph>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               }
             />

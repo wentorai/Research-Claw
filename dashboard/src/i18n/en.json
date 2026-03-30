@@ -409,7 +409,14 @@
     "tokenPlaceholder": "Gateway token",
     "connectWithToken": "Connect",
     "tryDefaultToken": "Try default token (research-claw)",
-    "tokenGuide": "How to find your token:\n1. Default token for Docker installs is research-claw — click the link above to try it\n2. Run docker logs research-claw in your terminal to see the token in startup logs\n3. Check ~/.openclaw/openclaw.json → gateway.auth.token field"
+    "tokenGuide": "How to find your token:\n1. Default token is research-claw — click the link above to try it\n2. Run docker logs research-claw to see the token in startup logs\n3. Check your config file: gateway.auth.token field",
+    "tokenFixTitle": "Still can't connect?",
+    "tokenFixDocker": "Docker users:",
+    "tokenFixDockerCmd": "docker restart research-claw",
+    "tokenFixNative": "pnpm serve users (macOS / WSL2):",
+    "tokenFixNativeCmd": "cd ~/research-claw && pnpm serve",
+    "tokenFixSystemd": "WSL2 systemd service users:",
+    "tokenFixSystemdCmd": "systemctl --user restart research-claw"
   },
   "status": {
     "connected": "Connected",

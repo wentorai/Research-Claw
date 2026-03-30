@@ -126,8 +126,12 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       },
       onConnectError: (code: string, message: string) => {
         set({ connectError: { code, message } });
-        if (code === 'NOT_PAIRED' || code === 'UNAUTHORIZED' ||
-            (code === 'INVALID_REQUEST' && message.includes('token'))) {
+        // OC gateway connect handshake only returns INVALID_REQUEST and NOT_PAIRED
+        // as top-level error codes for auth failures. All INVALID_REQUEST errors
+        // during connect are auth/config problems — show needs_token which has
+        // guided recovery (try default, Docker restart, etc.), not gateway_unreachable
+        // which only offers a blind retry button.
+        if (code === 'NOT_PAIRED' || code === 'UNAUTHORIZED' || code === 'INVALID_REQUEST') {
           useConfigStore.getState().setBootState('needs_token');
         }
       },

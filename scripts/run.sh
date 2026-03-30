@@ -59,6 +59,14 @@ fi
 # Without this, it reads ~/.openclaw/openclaw.json which has no RC settings.
 export OPENCLAW_CONFIG_PATH="$(pwd)/config/openclaw.json"
 
+# Token auth — must be set BEFORE ensure-config so it can align config to this value.
+# Default 'research-claw' matches Dashboard's DEFAULT_TOKEN for zero-config local use.
+# Remote users override via: export OPENCLAW_GATEWAY_TOKEN=my-secret (before pnpm serve)
+# Docker users override via: docker run -e OPENCLAW_GATEWAY_TOKEN=my-secret ...
+if [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
+  export OPENCLAW_GATEWAY_TOKEN=research-claw
+fi
+
 # --- Ensure config has all OC 2026.3.13+ required fields ---
 # MUST run BEFORE path resolution so that newly added relative paths
 # (e.g. ./extensions/openclaw-weixin) get converted to absolute below.
@@ -127,9 +135,6 @@ done
 [ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ -f "$RC_DIR/BOOTSTRAP.md.example" ] && \
   cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md" && echo "[run] BOOTSTRAP.md initialized (first run)"
 
-# Token auth — matches Dashboard's DEFAULT_TOKEN ('research-claw').
-export OPENCLAW_GATEWAY_TOKEN=research-claw
-
 # Ensure `openclaw` CLI is available to agent's system.run commands.
 # Without this, agent diagnostics (`openclaw doctor`, `openclaw plugins list`) fail
 # with "command not found" because node_modules/.bin is not in PATH.
@@ -139,6 +144,19 @@ STOP=false
 trap 'STOP=true' INT TERM
 
 while true; do
+  # Token drift guard: if openclaw setup or manual edit changed the config token,
+  # realign it to the env var. Only touches gateway.auth.token — no paths, no prefs.
+  "$GW_NODE" -e "
+    const fs=require('fs'),f=process.env.OPENCLAW_CONFIG_PATH;
+    const e=process.env.OPENCLAW_GATEWAY_TOKEN||'research-claw';
+    try{const c=JSON.parse(fs.readFileSync(f,'utf8'));
+    if(c.gateway?.auth?.token&&c.gateway.auth.token!==e){
+      c.gateway.auth.token=e;const t=f+'.tmp.'+process.pid;
+      fs.writeFileSync(t,JSON.stringify(c,null,2)+'\n');fs.renameSync(t,f);
+      console.log('[run] Token realigned to expected value');
+    }}catch{}
+  " 2>/dev/null || true
+
   echo "[run] Starting Research-Claw gateway..."
 
   # Export HTTP(S)_PROXY from OpenClaw config so child processes (minimax-oauth-proxy)

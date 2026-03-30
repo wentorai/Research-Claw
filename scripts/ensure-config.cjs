@@ -79,10 +79,13 @@ function ensureConfig(filePath) {
     }
   }
 
-  // 5. gateway.auth.token must match Dashboard's DEFAULT_TOKEN
+  // 5. gateway.auth.token must match the expected token (env var or default 'research-claw').
+  //    This aligns config to the runtime token so OC's config-first precedence doesn't
+  //    pick up a stale token from a previous openclaw setup or manual edit.
+  const expectedToken = process.env.OPENCLAW_GATEWAY_TOKEN || 'research-claw';
   if (c.gateway?.auth) {
-    if (c.gateway.auth.token && c.gateway.auth.token !== 'research-claw') {
-      c.gateway.auth.token = 'research-claw';
+    if (c.gateway.auth.token && c.gateway.auth.token !== expectedToken) {
+      c.gateway.auth.token = expectedToken;
       changed = true;
     }
     if (c.gateway.auth.mode && c.gateway.auth.mode !== 'none' && c.gateway.auth.mode !== 'token') {

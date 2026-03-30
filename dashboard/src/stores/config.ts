@@ -282,6 +282,12 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
   useConfigStore.setState({ bootState: 'needs_setup' });
 };
 
+// Debug helper: show needs_token page from browser console.
+// Usage: __resetToken()
+(window as unknown as Record<string, unknown>).__resetToken = () => {
+  useConfigStore.setState({ bootState: 'needs_token' });
+};
+
 /**
  * Check whether the primary model supports inline image input.
  * Used by chat.send() to decide whether to route images through workspace

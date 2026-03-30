@@ -409,7 +409,14 @@
     "tokenPlaceholder": "网关令牌",
     "connectWithToken": "连接",
     "tryDefaultToken": "使用默认令牌 (research-claw) 连接",
-    "tokenGuide": "如何找到令牌：\n1. Docker 安装的默认令牌为 research-claw，点击上方链接可直接尝试\n2. 终端执行 docker logs research-claw 查看启动日志中的令牌\n3. 查看配置文件 ~/.openclaw/openclaw.json 中的 gateway.auth.token 字段"
+    "tokenGuide": "如何找到令牌：\n1. 默认令牌为 research-claw，点击上方链接可直接尝试\n2. 终端执行 docker logs research-claw 查看启动日志中的令牌\n3. 查看配置文件中 gateway.auth.token 字段",
+    "tokenFixTitle": "仍然无法连接？",
+    "tokenFixDocker": "Docker 用户：",
+    "tokenFixDockerCmd": "docker restart research-claw",
+    "tokenFixNative": "pnpm serve 用户 (macOS / WSL2)：",
+    "tokenFixNativeCmd": "cd ~/research-claw && pnpm serve",
+    "tokenFixSystemd": "WSL2 systemd 服务用户：",
+    "tokenFixSystemdCmd": "systemctl --user restart research-claw"
   },
   "status": {
     "connected": "已连接",
