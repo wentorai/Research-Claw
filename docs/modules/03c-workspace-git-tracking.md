@@ -10,7 +10,7 @@
 | **Depends on** | `02` (Engineering Architecture — HTTP route registration, RPC protocol) |
 | **Consumed by** | `03b` (task-file linking), `03e` (WorkspacePanel component), `03f` (plugin aggregation) |
 | **Namespace** | `rc.ws.*` (11 WS RPC methods + 1 HTTP route) |
-| **Agent tools** | 7 (`workspace_save`, `workspace_read`, `workspace_list`, `workspace_diff`, `workspace_history`, `workspace_restore`, `workspace_move`) |
+| **Agent tools** | 8 (`workspace_save`, `workspace_read`, `workspace_list`, `workspace_diff`, `workspace_history`, `workspace_restore`, `workspace_move`, `workspace_export`) |
 | **HTTP routes** | 1 (`POST /rc/upload`) |
 
 ---
@@ -419,6 +419,62 @@ type WorkspaceMoveResult = Static<typeof WorkspaceMoveResult>;
 2. Move the file or directory from `from` to `to`.
 3. Auto-commit with git.
 4. Return the paths and commit status.
+
+### 3.8 `workspace_export`
+
+Convert a text source file in the workspace to a binary document format.
+`workspace_save` only writes UTF-8 text — this tool handles the conversion
+to binary formats via external engines (pandoc, Python pandas).
+
+```typescript
+const WorkspaceExportParams = Type.Object({
+  source: Type.String({
+    description: 'Source file path relative to workspace root (must be a text file)',
+    minLength: 1,
+    maxLength: 512,
+  }),
+  format: Type.Union([
+    Type.Literal('docx'),
+    Type.Literal('pdf'),
+    Type.Literal('xlsx'),
+  ], { description: 'Target output format' }),
+  output: Type.Optional(Type.String({
+    description: 'Output file path (default: outputs/exports/{name}.{format})',
+    maxLength: 512,
+  })),
+});
+type WorkspaceExportParams = Static<typeof WorkspaceExportParams>;
+
+const WorkspaceExportResult = Type.Object({
+  source: Type.String(),
+  output: Type.String(),
+  size: Type.Number(),
+  format: Type.String(),
+  committed: Type.Boolean(),
+  commit_hash: Type.Optional(Type.String()),
+});
+type WorkspaceExportResult = Static<typeof WorkspaceExportResult>;
+```
+
+**Supported conversions:**
+
+| Source | Target | Engine |
+|--------|--------|--------|
+| `.md` `.txt` `.tex` `.html` `.rst` | `.docx` | pandoc |
+| `.md` `.txt` `.tex` `.html` `.rst` | `.pdf` | pandoc + xelatex (CJK) |
+| `.csv` `.tsv` `.json` | `.xlsx` | Python pandas + openpyxl |
+
+**Behavior:**
+
+1. Validate source exists and is a valid text format for the target.
+2. Resolve output path (default: `outputs/exports/{basename}.{format}`).
+3. Run conversion via `child_process.execFile` (60s timeout).
+4. Auto-commit the generated binary file.
+5. Return a `file_card` JSON for the LLM to include in its response.
+
+**Context (Issue #38):** LLM agents generate text only. Writing text with a
+`.docx` extension produces a corrupt file (not a valid OOXML ZIP). This tool
+provides the correct pipeline: save as `.md` first, then export.
 
 ---
 

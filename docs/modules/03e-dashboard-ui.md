@@ -160,7 +160,43 @@ generated and persisted locally. During the handshake, the `connect` request pay
 signed with the private key; the gateway verifies the signature against the stored
 public key as part of the v3 protocol hello sequence.
 
-### 2.4 Reconnection Strategy
+### 2.4 Token Resolution (v0.6.0)
+
+```
+getGatewayToken():
+  URL param ?token=xxx   →  最高优先级（needs_token 页提交后附带）
+  localStorage 'rc-gateway-token'  →  远程用户持久化（连接成功时写入）
+  DEFAULT_TOKEN 'research-claw'    →  本地部署零配置匹配
+```
+
+**连接成功时**: 若 token ≠ DEFAULT_TOKEN → 写入 localStorage（远程用户后续免输入）。
+**进入 needs_token 时**: 清除 localStorage（防止过期 token 循环失败）。
+
+### 2.5 onConnectError → needs_token 路由
+
+```typescript
+// stores/gateway.ts
+if (code === 'NOT_PAIRED' || code === 'UNAUTHORIZED' || code === 'INVALID_REQUEST') {
+  useConfigStore.getState().setBootState('needs_token');
+}
+```
+
+OC gateway connect 握手只返回 `INVALID_REQUEST` 和 `NOT_PAIRED` 作为 auth 失败的 top-level code。
+所有 `INVALID_REQUEST` 统一路由到 `needs_token`（有引导），而非 `gateway_unreachable`（仅重试按钮）。
+
+### 2.6 needs_token 页面
+
+| 区域 | 内容 |
+|------|------|
+| 标题 | "需要网关令牌" + error code/message |
+| 输入 | 密码框 + 连接按钮 |
+| 快捷 | "使用默认令牌 (research-claw) 连接" 链接 |
+| 引导 | 如何找到令牌（3 步文本） |
+| 恢复 | 3 套可复制命令：Docker / pnpm serve / WSL2 systemd |
+
+调试入口: 浏览器控制台 `__resetToken()` 可强制显示此页面。
+
+### 2.7 Reconnection Strategy
 
 - **Algorithm:** Exponential backoff
 - **Initial delay:** 800ms
