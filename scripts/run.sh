@@ -85,18 +85,40 @@ const f = process.env.OPENCLAW_CONFIG_PATH;
 const cfg = JSON.parse(fs.readFileSync(f, 'utf8'));
 const root = process.cwd();
 const abs = p => path.isAbsolute(p) ? p : path.resolve(root, p);
+// Re-root stale absolute paths from a different machine/user.
+// Strip path segments from the left until the remainder exists under root.
+const reroot = p => {
+  if (!path.isAbsolute(p)) return path.resolve(root, p);
+  if (p.startsWith(root + '/') || p === root) return p;
+  const segs = p.split(path.sep).filter(Boolean);
+  for (let i = 1; i < segs.length; i++) {
+    const suffix = segs.slice(i).join(path.sep);
+    const candidate = path.join(root, suffix);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return abs(p); // fallback: at least make it absolute
+};
+const dedup = arr => [...new Set(arr)];
 let changed = false;
-if (cfg.plugins?.load?.paths?.some(p => !path.isAbsolute(p))) {
-  cfg.plugins.load.paths = cfg.plugins.load.paths.map(abs); changed = true;
+if (cfg.plugins?.load?.paths) {
+  const fixed = dedup(cfg.plugins.load.paths.map(reroot));
+  if (JSON.stringify(fixed) !== JSON.stringify(cfg.plugins.load.paths)) {
+    cfg.plugins.load.paths = fixed; changed = true;
+  }
 }
-if (cfg.skills?.load?.extraDirs?.some(p => !path.isAbsolute(p))) {
-  cfg.skills.load.extraDirs = cfg.skills.load.extraDirs.map(abs); changed = true;
+if (cfg.skills?.load?.extraDirs) {
+  const fixed = dedup(cfg.skills.load.extraDirs.map(reroot));
+  if (JSON.stringify(fixed) !== JSON.stringify(cfg.skills.load.extraDirs)) {
+    cfg.skills.load.extraDirs = fixed; changed = true;
+  }
 }
-if (cfg.gateway?.controlUi?.root && !path.isAbsolute(cfg.gateway.controlUi.root)) {
-  cfg.gateway.controlUi.root = abs(cfg.gateway.controlUi.root); changed = true;
+if (cfg.gateway?.controlUi?.root) {
+  const fixed = reroot(cfg.gateway.controlUi.root);
+  if (fixed !== cfg.gateway.controlUi.root) { cfg.gateway.controlUi.root = fixed; changed = true; }
 }
-if (cfg.agents?.defaults?.workspace && !path.isAbsolute(cfg.agents.defaults.workspace)) {
-  cfg.agents.defaults.workspace = abs(cfg.agents.defaults.workspace); changed = true;
+if (cfg.agents?.defaults?.workspace) {
+  const fixed = reroot(cfg.agents.defaults.workspace);
+  if (fixed !== cfg.agents.defaults.workspace) { cfg.agents.defaults.workspace = fixed; changed = true; }
 }
 if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); console.log('[run] Config paths resolved to absolute'); }
 "

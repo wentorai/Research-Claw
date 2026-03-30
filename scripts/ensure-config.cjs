@@ -128,6 +128,15 @@ function ensureConfig(filePath) {
     }
   }
 
+  // 8b. Deduplicate plugin load paths (stale re-roots can leave duplicates)
+  if (c.plugins?.load?.paths) {
+    const unique = [...new Set(c.plugins.load.paths)];
+    if (unique.length !== c.plugins.load.paths.length) {
+      c.plugins.load.paths = unique;
+      changed = true;
+    }
+  }
+
   // 9. Restore critical RC fields if missing (safety net for config.apply stripping)
   if (!c.gateway) c.gateway = {};
   if (!c.gateway.controlUi) {

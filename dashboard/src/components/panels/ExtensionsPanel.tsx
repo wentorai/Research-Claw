@@ -12,7 +12,7 @@
  * without DOM bloat. SkillCard is React.memo'd with stable props.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App, Button, Input, Modal, Segmented, Select, Switch, Tag, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined,
@@ -23,6 +23,7 @@ import {
   DownOutlined,
   ExclamationCircleOutlined,
   LinkOutlined,
+  QuestionCircleOutlined,
   LoadingOutlined,
   MessageOutlined,
   ReloadOutlined,
@@ -46,6 +47,8 @@ import {
 } from '../../stores/extensions';
 import { getThemeTokens } from '../../styles/theme';
 import { relativeTime } from '../../utils/relativeTime';
+import DockerFileModal from './DockerFileModal';
+import type { DockerFileModalProps } from './DockerFileModal';
 
 const { Text } = Typography;
 const { Search } = Input;
@@ -1261,29 +1264,73 @@ type PptOutputsList = {
   files: string[];
 };
 
+const PROJECT_NAME_RE = /^[a-zA-Z0-9._-]+$/;
+
+/** Canvas format definitions — from ppt-master/skills/ppt-master/scripts/config.py */
+const CANVAS_FORMATS = [
+  { key: 'ppt169',      dims: '1280×720' },
+  { key: 'ppt43',       dims: '1024×768' },
+  { key: 'xiaohongshu', dims: '1242×1660' },
+  { key: 'moments',     dims: '1080×1080' },
+  { key: 'story',       dims: '1080×1920' },
+  { key: 'wechat',      dims: '900×383' },
+  { key: 'banner',      dims: '1920×1080' },
+  { key: 'a4',          dims: '1240×1754' },
+] as const;
+
+const LS_PROJECT_NAME = 'rc-ppt-project-name';
+const LS_FORMAT = 'rc-ppt-format';
+
 function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
   const { t } = useTranslation();
-  const { message: messageApi } = App.useApp();
+  const { message: messageApi, modal: modalApi } = App.useApp();
   const client = useGatewayStore((s) => s.client);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<PptStatus | null>(null);
   const [lastResult, setLastResult] = useState<unknown>(null);
-  const [lastOutputPath, setLastOutputPath] = useState<string>('');
+  const [availableOutputPath, setAvailableOutputPath] = useState<string>('');
   const [selectedSourceFilePath, setSelectedSourceFilePath] = useState<string>('');
   const [sourceFiles, setSourceFiles] = useState<string[]>([]);
-  const [projectName, setProjectName] = useState('demo-deck');
-  const [format, setFormat] = useState('ppt169');
+  const [projectName, setProjectName] = useState(
+    () => localStorage.getItem(LS_PROJECT_NAME) || 'demo-deck',
+  );
+  const [format, setFormat] = useState(
+    () => localStorage.getItem(LS_FORMAT) || 'ppt169',
+  );
   const [projectPath, setProjectPath] = useState('projects/demo-deck');
   const [stage, setStage] = useState('final');
+  const [dockerModal, setDockerModal] = useState<Omit<DockerFileModalProps, 'open' | 'onClose'> | null>(null);
+
+  // Refs for values used inside effect-triggered callbacks (avoids identity-change → effect re-fire loops)
+  const selectedSourceRef = useRef(selectedSourceFilePath);
+  selectedSourceRef.current = selectedSourceFilePath;
+
   const fieldLabelStyle: React.CSSProperties = {
     color: tokens.text.muted,
     fontSize: 12,
     lineHeight: '18px',
   };
 
+  const isValidProjectName = PROJECT_NAME_RE.test(projectName);
+  const canSubmit = isValidProjectName && !!selectedSourceFilePath && !loading;
+  const canOpenOutput = !!availableOutputPath && !loading;
+
+  // Persist user preferences to localStorage
+  useEffect(() => { localStorage.setItem(LS_PROJECT_NAME, projectName); }, [projectName]);
+  useEffect(() => { localStorage.setItem(LS_FORMAT, format); }, [format]);
+
   const SOURCE_EXTS = useMemo(
     () => new Set(['.md', '.markdown', '.txt', '.pdf', '.docx', '.doc', '.html', '.htm']),
     [],
+  );
+
+  const formatOptions = useMemo(
+    () => CANVAS_FORMATS.map(({ key, dims }) => ({
+      value: key,
+      label: `${key} (${dims})`,
+      desc: t(`extensions.ppt.formats.${key}`, key),
+    })),
+    [t],
   );
 
   const callRpc = useCallback(async <T,>(method: string, params: Record<string, unknown>) => {
@@ -1291,7 +1338,7 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
       throw new Error(t('extensions.disconnected', 'Connect to gateway to view extensions'));
     }
     return client.request<T>(method, params);
-  }, [client, t]);
+  }, [client]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleStatus = useCallback(async () => {
     setLoading(true);
@@ -1311,52 +1358,44 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
     }
   }, [callRpc, messageApi, t]);
 
-  const handleInit = useCallback(async () => {
-    setLoading(true);
-    try {
-      // If a source file is selected, delegate to ppt-master skill (agent pipeline).
-      // This ensures full SVG generation + export, not just svg_to_pptx packaging.
-      if (selectedSourceFilePath) {
-        const baseName = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
-        const dotIdx = baseName.lastIndexOf('.');
-        const ext = dotIdx >= 0 ? baseName.slice(dotIdx).toLowerCase() : '';
-        const fileName = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
-        const prompt = [
-          '请使用 ppt-master 根据下面的源文件内容生成 PPTX。',
-          `源文件路径：${selectedSourceFilePath}`,
-          `源文件名：${fileName}`,
-          ext ? `源文件类型：${ext}` : '',
-          `项目名：${projectName}`,
-          `画布格式：${format}`,
-          '请使用推荐模板与风格（按推荐自动选择，跳过模板/风格询问）。',
-          '请完成项目初始化、导入 sources、生成并导出最终 PPTX（导出到 workspace/outputs/ppt/ 按日期目录）。',
-        ].filter(Boolean).join('\n');
+  const doSubmit = useCallback(() => {
+    const baseName = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
+    const dotIdx = baseName.lastIndexOf('.');
+    const ext = dotIdx >= 0 ? baseName.slice(dotIdx).toLowerCase() : '';
+    const fileName = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
+    const prompt = [
+      '请使用 ppt-master 根据下面的源文件内容生成 PPTX。',
+      `源文件路径：${selectedSourceFilePath}`,
+      `源文件名：${fileName}`,
+      ext ? `源文件类型：${ext}` : '',
+      `项目名：${projectName}`,
+      `画布格式：${format}`,
+      '请使用推荐模板与风格（按推荐自动选择，跳过模板/风格询问）。',
+      '请完成项目初始化、导入 sources、生成并导出最终 PPTX（导出到 workspace/outputs/ppt/ 按日期目录）。',
+    ].filter(Boolean).join('\n');
 
-        useChatStore.getState().send(prompt);
-        messageApi.success(t('extensions.ppt.generateFromSourceOk', 'Submitted PPT generation request'));
-        return;
-      }
+    useChatStore.getState().send(prompt);
+    messageApi.success(t('extensions.ppt.initOk', 'PPT generation task submitted'));
+  }, [selectedSourceFilePath, projectName, format, messageApi, t]);
 
-      const res = await callRpc('rc.ppt.init', {
-        projectName,
-        format,
-      });
-      setLastResult(res);
-      messageApi.success(t('extensions.ppt.initOk', 'Project initialized'));
-    } catch (err) {
-      messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
-    } finally {
-      setLoading(false);
-    }
-  }, [callRpc, projectName, format, selectedSourceFilePath, messageApi, t]);
+  const handleSubmit = useCallback(() => {
+    modalApi.confirm({
+      title: t('extensions.ppt.submitConfirmTitle', 'Confirm Submission'),
+      content: t('extensions.ppt.submitConfirmContent', 'Research-Claw will start generating the PPT. Please do not submit repeatedly.'),
+      okText: t('extensions.ppt.submitOk', 'OK'),
+      cancelText: t('extensions.ppt.submitCancel', 'Cancel'),
+      onOk: doSubmit,
+    });
+  }, [modalApi, t, doSubmit]);
 
   const handleExport = useCallback(async () => {
     setLoading(true);
     try {
       const res = await callRpc<{ outputPath?: string }>('rc.ppt.export', { projectPath, stage });
       setLastResult(res);
-      const nextOutput = typeof res.outputPath === 'string' ? res.outputPath : '';
-      setLastOutputPath(nextOutput);
+      if (typeof res.outputPath === 'string') {
+        setAvailableOutputPath(res.outputPath);
+      }
       messageApi.success(t('extensions.ppt.exportOk', 'Export completed'));
     } catch (err) {
       messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
@@ -1371,41 +1410,39 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
       const res = await callRpc<PptOutputsList>('rc.ppt.outputs.list', {});
       const filtered = res.files.filter((f) => {
         const lower = f.toLowerCase();
-        // Avoid selecting generated PPTX as "source".
         if (lower.endsWith('.pptx')) return false;
-        const matched = Array.from(SOURCE_EXTS).some((ext) => lower.endsWith(ext));
-        return matched;
+        return Array.from(SOURCE_EXTS).some((ext) => lower.endsWith(ext));
       });
       setSourceFiles(filtered);
-      if (selectedSourceFilePath && filtered.includes(selectedSourceFilePath)) {
-        return;
+      const cur = selectedSourceRef.current;
+      if (!cur || !filtered.includes(cur)) {
+        setSelectedSourceFilePath(filtered[0] ?? '');
       }
-      setSelectedSourceFilePath(filtered[0] ?? '');
+
+      // Also refresh available outputs in the same RPC result
+      const pptxFiles = res.files.filter(
+        (f) => f.toLowerCase().endsWith('.pptx') && f.includes('/outputs/ppt/'),
+      );
+      const prefix = `ppt-${projectName}-`;
+      const matched = pptxFiles.find((f) => {
+        const base = f.split('/').pop() ?? '';
+        return base.startsWith(prefix);
+      });
+      setAvailableOutputPath(matched ?? pptxFiles[0] ?? '');
     } catch (err) {
+      // messageApi/t accessed via closure — stable enough for error display
       messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
     } finally {
       setLoading(false);
     }
-  }, [callRpc, selectedSourceFilePath, messageApi, t, SOURCE_EXTS]);
+  }, [callRpc, SOURCE_EXTS, projectName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOpenOutput = useCallback(async () => {
-    let pathToOpen = lastOutputPath;
-    if (!pathToOpen) {
-      // When generating via agent, `lastOutputPath` may not be filled in this panel.
-      // Fallback: open newest pptx under workspace/outputs/ppt/.
-      const res = await callRpc<PptOutputsList>('rc.ppt.outputs.list', {});
-      const newest = res.files.find(
-        (f) => f.toLowerCase().endsWith('.pptx') && f.includes('/outputs/ppt/'),
-      );
-      if (!newest) {
-        throw new Error('No pptx output found under workspace/outputs/ppt/');
-      }
-      pathToOpen = newest;
-      setLastOutputPath(newest);
-    }
+    if (!availableOutputPath) return;
     setLoading(true);
     try {
-      // Strong一致命名：如果选了源文件，就用「源文件名(去后缀) + 时间戳」重命名最新 pptx
+      // Rename output to source-based name if a source file was selected
+      let pathToOpen = availableOutputPath;
       if (selectedSourceFilePath) {
         const base = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
         const dotIdx = base.lastIndexOf('.');
@@ -1418,33 +1455,38 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
             );
             if (renameRes?.ok && renameRes.newPath) {
               pathToOpen = renameRes.newPath;
-              setLastOutputPath(pathToOpen);
+              setAvailableOutputPath(pathToOpen);
             }
           } catch {
             // Ignore rename failures; still try to open the file.
           }
         }
       }
-      const res = await callRpc<{ ok: boolean; fallback?: string; containerPath?: string }>('rc.ppt.open', {
-        filePath: pathToOpen,
-      });
+      // Use workspace openExternal for consistent Docker/desktop handling
+      const res = await callRpc<{
+        ok: boolean;
+        fallback?: string;
+        containerPath?: string;
+        relativePath?: string;
+        fileName?: string;
+      }>('rc.ws.openExternal', { path: pathToOpen });
       setLastResult(res);
-      if (!res.ok && res.fallback === 'docker') {
-        messageApi.warning(
-          t(
-            'extensions.ppt.openDockerFallback',
-            'Cannot open directly in Docker. Use the container path shown in the result.',
-          ),
-        );
+      if (res?.fallback === 'docker') {
+        setDockerModal({
+          mode: 'file',
+          containerPath: String(res.containerPath ?? ''),
+          relativePath: String(res.relativePath ?? pathToOpen),
+          fileName: String(res.fileName ?? pathToOpen.split('/').pop() ?? 'output.pptx'),
+        });
       } else {
         messageApi.success(t('extensions.ppt.openOk', 'Opened output file'));
       }
     } catch (err) {
-      messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
+      messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.openFailed', 'Failed to open output file'));
     } finally {
       setLoading(false);
     }
-  }, [callRpc, lastOutputPath, selectedSourceFilePath, messageApi, t]);
+  }, [callRpc, availableOutputPath, selectedSourceFilePath, messageApi, t]);
 
   useEffect(() => {
     if (!client?.isConnected) return;
@@ -1454,7 +1496,7 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
   return (
     <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <Text style={{ color: tokens.text.secondary, fontSize: 12 }}>
-        {t('extensions.ppt.hint', 'Use rc.ppt.* methods to initialize and export PPT Master projects.')}
+        {t('extensions.ppt.hint', 'Select a source file and submit, Research-Claw will generate PPT automatically.')}
       </Text>
 
       <div style={{ display: 'flex', gap: 8 }}>
@@ -1490,25 +1532,54 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
           gap: 8,
         }}
       >
-        <Text strong>{t('extensions.ppt.initTitle', 'Init Project')}</Text>
+        <Text strong>{t('extensions.ppt.initTitle', 'Generate PPT')}</Text>
         <Text style={fieldLabelStyle}>{t('extensions.ppt.projectName', 'Project name')}</Text>
         <Input
           value={projectName}
           onChange={(e) => setProjectName(e.target.value)}
-          placeholder={t('extensions.ppt.projectName', 'Project name')}
+          placeholder={t('extensions.ppt.projectNamePlaceholder', 'Project name (letters, numbers, _, -, .)')}
+          status={projectName && !isValidProjectName ? 'error' : undefined}
         />
-        <Text style={fieldLabelStyle}>{t('extensions.ppt.format', 'Format (e.g. ppt169)')}</Text>
-        <Input
+        {projectName && !isValidProjectName && (
+          <Text style={{ color: tokens.accent.red, fontSize: 11 }}>
+            {t('extensions.ppt.projectNameInvalid', 'Only letters, numbers, underscore, dash, and dot are allowed')}
+          </Text>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Text style={fieldLabelStyle}>{t('extensions.ppt.format', 'Canvas format')}</Text>
+          <Tooltip
+            title={t('extensions.ppt.formatTooltip', 'Canvas format determines the dimensions and aspect ratio of the generated content. Choose based on your use case.')}
+            placement="right"
+            overlayStyle={{ maxWidth: 280 }}
+          >
+            <QuestionCircleOutlined
+              style={{ fontSize: 12, color: tokens.text.muted, cursor: 'help' }}
+            />
+          </Tooltip>
+        </div>
+        <Select
           value={format}
-          onChange={(e) => setFormat(e.target.value)}
-          placeholder={t('extensions.ppt.format', 'Format (e.g. ppt169)')}
-        />
+          onChange={(v) => setFormat(v)}
+          optionLabelProp="label"
+          style={{ width: '100%' }}
+        >
+          {formatOptions.map((opt) => (
+            <Select.Option key={opt.value} value={opt.value} label={opt.label}>
+              <div>
+                <span style={{ fontWeight: 500 }}>{opt.value}</span>
+                <span style={{ color: tokens.text.muted, marginLeft: 8, fontSize: 12 }}>
+                  {opt.desc}
+                </span>
+              </div>
+            </Select.Option>
+          ))}
+        </Select>
         <Text style={fieldLabelStyle}>
           {t('extensions.ppt.sourceFileSelect', 'Select source file from workspace outputs')}
         </Text>
         <Select
           value={selectedSourceFilePath || undefined}
-          onChange={(v) => setSelectedSourceFilePath(v)}
+          onChange={(v) => setSelectedSourceFilePath(v ?? '')}
           options={sourceFiles.map((file) => {
             const base = file.split('/').pop() ?? file;
             return { value: file, label: base };
@@ -1526,9 +1597,21 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
           <Button onClick={handleRefreshSources} loading={loading}>
             {t('extensions.ppt.refreshSourcesBtn', 'Refresh sources')}
           </Button>
-          <Button type="primary" onClick={handleInit} loading={loading} style={{ flex: 1 }}>
-            {t('extensions.ppt.initBtn', 'Init')}
-          </Button>
+          <Tooltip title={!canSubmit && !loading ? (
+            !isValidProjectName
+              ? t('extensions.ppt.projectNameInvalid', 'Only letters, numbers, underscore, dash, and dot are allowed')
+              : t('extensions.ppt.sourceFileSelect', 'Select source file from workspace outputs')
+          ) : undefined}>
+            <Button
+              type="primary"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              loading={loading}
+              style={{ flex: 1 }}
+            >
+              {t('extensions.ppt.submitBtn', 'Submit Task')}
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
@@ -1546,12 +1629,14 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
         <Text style={fieldLabelStyle}>
           {t(
             'extensions.ppt.outputHint',
-            'After generation, open the newest PPTX under workspace/outputs/ppt/.',
+            'After generation, open the matching PPTX under workspace/outputs/ppt/.',
           )}
         </Text>
-        <Button onClick={handleOpenOutput} disabled={loading} loading={loading}>
-          {t('extensions.ppt.openBtn', 'Open Output')}
-        </Button>
+        <Tooltip title={!canOpenOutput ? t('extensions.ppt.noOutput', 'No output file available') : undefined}>
+          <Button onClick={handleOpenOutput} disabled={!canOpenOutput} loading={loading}>
+            {t('extensions.ppt.openBtn', 'Open Output')}
+          </Button>
+        </Tooltip>
       </div>
 
       {Boolean(lastResult) && (
@@ -1575,6 +1660,14 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
 {JSON.stringify(lastResult, null, 2)}
           </pre>
         </div>
+      )}
+
+      {dockerModal && (
+        <DockerFileModal
+          open
+          onClose={() => setDockerModal(null)}
+          {...dockerModal}
+        />
       )}
     </div>
   );
