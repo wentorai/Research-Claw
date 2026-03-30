@@ -74,6 +74,7 @@ const ACTUAL_WORKSPACE_TOOLS = [
   'workspace_history',
   'workspace_restore',
   'workspace_move',
+  'workspace_export',
 ] as const;
 
 /** 5 monitor agent tools (from monitor/tools.ts) */
@@ -85,7 +86,7 @@ const ACTUAL_MONITOR_TOOLS = [
   'monitor_note',
 ] as const;
 
-/** All 47 agent tools (25 + 10 + 7 + 5) */
+/** All 48 agent tools (25 + 10 + 8 + 5) */
 const ALL_AGENT_TOOLS = [
   ...ACTUAL_LITERATURE_TOOLS,
   ...ACTUAL_TASK_TOOLS,
@@ -187,10 +188,10 @@ describe('Bootstrap file consistency (AGENTS.md v4.0 & TOOLS.md v4.0)', () => {
       expect(ACTUAL_TASK_TOOLS.length).toBe(10);
     });
 
-    it('states Workspace has 7 tools', () => {
+    it('states Workspace has 8 tools', () => {
       if (!hasBootstrapFiles) return;
-      expect(agentsMd).toMatch(/Workspace\s+\(7 tools\)/);
-      expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(7);
+      expect(agentsMd).toMatch(/Workspace\s+\(8 tools\)/);
+      expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(8);
     });
 
     it('states Monitor has 5 tools', () => {
@@ -204,8 +205,8 @@ describe('Bootstrap file consistency (AGENTS.md v4.0 & TOOLS.md v4.0)', () => {
       expect(agentsMd).toMatch(/Memory\s+\(2 tools\)/);
     });
 
-    it('total local agent tool count is 47 (25 + 10 + 7 + 5)', () => {
-      expect(ALL_AGENT_TOOLS.length).toBe(47);
+    it('total local agent tool count is 48 (25 + 10 + 8 + 5)', () => {
+      expect(ALL_AGENT_TOOLS.length).toBe(48);
     });
   });
 

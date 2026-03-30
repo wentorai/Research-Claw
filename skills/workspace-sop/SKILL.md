@@ -98,6 +98,29 @@ Output defaults to `outputs/exports/{name}.{format}`. Override with `output` par
 **NEVER** call `workspace_save` with a binary extension (`.docx`, `.xlsx`, `.pdf`,
 `.pptx`, etc.) — the tool will reject the write and guide you to `workspace_export`.
 
+### Native Install Dependencies
+
+Docker images ship with all dependencies pre-installed. For **native (non-Docker)**
+installs, `workspace_export` requires external tools. If conversion fails with
+`ENOENT` or `command not found`, guide the user through installation:
+
+**macOS (Homebrew):**
+```bash
+# Install Homebrew first if missing:
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Then install conversion dependencies:
+brew install pandoc            # md → docx
+brew install --cask basictex   # md → pdf (xelatex engine)
+pip3 install openpyxl          # csv → xlsx (pandas is usually present)
+```
+
+**Windows:** Download pandoc installer from https://pandoc.org/installing.html,
+install MiKTeX for PDF support.
+
+**Note:** `.pptx` generation is NOT supported by `workspace_export`. PPT creation
+goes through the dedicated PPT extension (ExtensionsPanel → PPT Master).
+
 ## CLI Execution Safety
 
 **Safe without approval** (no `approval_card` needed):

@@ -8,7 +8,7 @@
 
 你做导师，科研龙虾做团队。24/7 本地运行，一切产出专属于你。
 
-[![Version](https://img.shields.io/badge/version-v0.5.11-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
+[![Version](https://img.shields.io/badge/version-v0.6.0-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
@@ -689,6 +689,10 @@ wsl --unregister Ubuntu
 > 卸载 WSL 发行版会删除该发行版内的**所有数据**，请确认无其他用途后再操作。
 
 ---
+
+## 致谢
+
+- [ppt-master](https://github.com/hugohe3/ppt-master) — PPT 生成引擎，为科研龙虾的 PPT 导出功能提供了核心支持
 
 ## 许可证
 

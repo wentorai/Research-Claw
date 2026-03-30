@@ -350,7 +350,7 @@ describe('Restart Research-Claw button', () => {
     useGatewayStore.setState({
       client: createMockClient(),
       state: 'connected',
-      serverVersion: '0.5.11',
+      serverVersion: '0.6.0',
     });
   });
 

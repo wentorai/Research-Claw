@@ -1,6 +1,6 @@
 {
   "name": "@research-claw/wentor-connect",
-  "version": "0.5.11",
+  "version": "0.6.0",
   "description": "PLACEHOLDER — Wentor platform integration (account, skills sync). Not part of MVP.",
   "type": "module",
   "main": "dist/index.js",
