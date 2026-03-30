@@ -20,6 +20,7 @@ import {
   DeleteOutlined,
   LoadingOutlined,
   PlusOutlined,
+  ReloadOutlined,
   SearchOutlined,
   CloseCircleFilled,
 } from '@ant-design/icons';
@@ -950,14 +951,29 @@ export default function WorkspacePanel() {
 
   const filteredTree = useMemo(() => filterTree(tree, debouncedQuery), [tree, debouncedQuery]);
 
+  // Priority lock: loadData (user-triggered) always runs; silentRefresh yields.
+  const fetchingRef = useRef(false);   // true while any fetch is in-flight
+  const priorityRef = useRef(false);   // true while loadData is running — silentRefresh discards results
+  // Snapshot for silent-diff comparison (avoids unnecessary re-renders)
+  const prevSnapshotRef = useRef('');
+  // Refs for interaction guards inside silentRefresh (avoids restarting interval on every state change)
+  const dragSrcPathRef = useRef(dragSrcPath);
+  dragSrcPathRef.current = dragSrcPath;
+  const movingPathRef = useRef(movingPath);
+  movingPathRef.current = movingPath;
+  const rootCreateTypeRef = useRef(rootCreateType);
+  rootCreateTypeRef.current = rootCreateType;
+
   const loadData = useCallback(async () => {
     if (!client?.isConnected) return;
+    // User-triggered load always runs — never blocked by fetchingRef.
+    // Signal in-flight silentRefresh to discard its results.
+    priorityRef.current = true;
+    fetchingRef.current = true;
     setLoading(true);
     try {
-      console.log('[WorkspacePanel] loading tree & history');
       const [treeResult, historyResult] = await Promise.all([
         client.request<{ tree: TreeNode[]; workspace_root: string; hidden_count: number }>('rc.ws.tree', {
-          // Increase depth so nested outputs (e.g. outputs/ppt/YYYY-MM-DD/*.pptx) are visible.
           depth: 5,
           includeHidden: showSystemFiles,
         }),
@@ -969,12 +985,56 @@ export default function WorkspacePanel() {
       setCommits(historyResult.commits);
       setHasMoreCommits(historyResult.has_more ?? false);
       setHasLoaded(true);
+      prevSnapshotRef.current = JSON.stringify({ t: treeResult.tree, c: historyResult.commits });
     } catch (err) {
       console.warn('[WorkspacePanel] loadData failed:', err);
     } finally {
       setLoading(false);
+      fetchingRef.current = false;
+      priorityRef.current = false;
     }
   }, [client, showSystemFiles]);
+
+  /**
+   * Silent background refresh — called by polling interval.
+   * - No loading spinner, no error toasts, no console warnings
+   * - Skips when: already fetching, user dragging/creating, tab hidden
+   * - Only updates state when data actually changed (JSON diff)
+   */
+  const silentRefresh = useCallback(async () => {
+    if (
+      fetchingRef.current ||
+      !client?.isConnected ||
+      dragSrcPathRef.current !== null ||
+      movingPathRef.current !== null ||
+      rootCreateTypeRef.current !== null ||
+      document.hidden
+    ) return;
+    fetchingRef.current = true;
+    try {
+      const [treeResult, historyResult] = await Promise.all([
+        client.request<{ tree: TreeNode[]; workspace_root: string; hidden_count: number }>('rc.ws.tree', {
+          depth: 5,
+          includeHidden: showSystemFiles,
+        }),
+        client.request<{ commits: CommitEntry[]; total: number; has_more: boolean }>('rc.ws.history', { limit: 5 }),
+      ]);
+      // If loadData started while we were fetching, discard our (potentially stale) results
+      if (priorityRef.current) return;
+      const snapshot = JSON.stringify({ t: treeResult.tree, c: historyResult.commits });
+      if (snapshot === prevSnapshotRef.current) return; // no change — skip setState
+      prevSnapshotRef.current = snapshot;
+      setTree(treeResult.tree);
+      setWorkspaceRoot(treeResult.workspace_root ?? '');
+      setHiddenCount(treeResult.hidden_count ?? 0);
+      setCommits(historyResult.commits);
+      setHasMoreCommits(historyResult.has_more ?? false);
+    } catch {
+      // Silent — network issues, non-localhost, gateway restart are all expected
+    } finally {
+      if (!priorityRef.current) fetchingRef.current = false;
+    }
+  }, [client, showSystemFiles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMoreCommits = useCallback(async () => {
     if (!client?.isConnected || loadingMoreCommits) return;
@@ -1074,6 +1134,13 @@ export default function WorkspacePanel() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSystemFiles]);
+
+  // Background silent polling — 10s interval, no spinner, no error toast
+  useEffect(() => {
+    if (connState !== 'connected' || !hasLoaded) return;
+    const id = setInterval(silentRefresh, 10_000);
+    return () => clearInterval(id);
+  }, [connState, hasLoaded, silentRefresh]);
 
   useEffect(() => {
     if (pendingPreviewPath) {
@@ -1235,6 +1302,23 @@ export default function WorkspacePanel() {
               <Text strong style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: tokens.text.muted }}>
                 {t('workspace.fileTree')}
               </Text>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                title={t('workspace.refreshTooltip', { defaultValue: 'Refresh' })}
+                style={{
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  color: tokens.text.muted,
+                  padding: '0 2px',
+                  borderRadius: 3,
+                  transition: 'color 0.15s',
+                }}
+                onClick={loadData}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = tokens.text.primary; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = tokens.text.muted; }}
+              >
+                <ReloadOutlined />
+              </span>
               <Dropdown
                 menu={{
                   items: [
@@ -1261,6 +1345,7 @@ export default function WorkspacePanel() {
                   <PlusOutlined />
                 </span>
               </Dropdown>
+              </div>
             </div>
 
             {/* Search box */}

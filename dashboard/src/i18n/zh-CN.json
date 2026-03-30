@@ -222,6 +222,7 @@
     "loadMore": "加载更多...",
     "diffLoading": "加载 diff...",
     "fileTree": "文件树",
+    "refreshTooltip": "刷新",
     "empty": "工作区为空。\n文件将在你和助手创建时出现在此处。",
     "filesChanged": "{{count}} 个文件已修改",
     "dragDrop": "拖放文件到此处添加到工作区",

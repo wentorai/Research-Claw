@@ -222,6 +222,7 @@
     "loadMore": "Load more...",
     "diffLoading": "Loading diff...",
     "fileTree": "File Tree",
+    "refreshTooltip": "Refresh",
     "empty": "Workspace is empty.\nFiles will appear here as you and the agent create them.",
     "filesChanged": "{{count}} files changed",
     "dragDrop": "Drop files here to add to workspace",
