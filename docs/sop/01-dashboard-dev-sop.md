@@ -279,11 +279,16 @@ pnpm typecheck    # tsc --noEmit
 
 ### 7.2 Implementation
 
-<!-- Append implementation entries here -->
+- [2026-03-30] [Claude] feat: PPT tab — format Select (8 canvas formats from ppt-master config.py), submit confirmation modal, output file Select dropdown (mtime desc), projectName regex validation, localStorage persistence (rc-ppt-project-name, rc-ppt-format)
+- [2026-03-30] [Claude] feat: workspace silent polling — 10s setInterval with priority lock (fetchingRef + priorityRef), JSON snapshot diff to avoid flicker, skip conditions (document.hidden, drag/create active), silent catch for non-localhost
+- [2026-03-30] [Claude] feat: workspace manual refresh button — ReloadOutlined icon next to "+" in file tree header
 
 ### 7.3 Issues & Fixes
 
-<!-- Append bug fixes here -->
+- [2026-03-30] [Claude] fix: PPT open output — replaced rc.ppt.open with rc.ws.openExternal for consistent Docker/desktop handling, integrated DockerFileModal for browser download fallback
+- [2026-03-30] [Claude] fix: useCallback infinite effect loop — PptTab handleRefreshSources deps included unstable t/messageApi/selectedSourceFilePath from App.useApp(); fixed with refs + deps cleanup
+- [2026-03-30] [Claude] fix: run.sh path re-rooting — config with hardcoded /Users/sylvanl/ paths caused gateway crash loop; added reroot() function with suffix-match + fs.existsSync validation
+- [2026-03-30] [Claude] fix: ensure-config.cjs plugin path dedup — repeated ensure-config runs accumulated duplicate entries in plugins.load.paths
 
 ---
 

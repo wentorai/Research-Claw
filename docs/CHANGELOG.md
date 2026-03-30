@@ -17,6 +17,29 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-03-30 — v0.6.0 Release
+
+- [2026-03-30] [Dashboard] [Claude] feat: workspace silent polling (10s) + manual refresh button — fetchingRef/priorityRef priority lock, JSON snapshot diff, silent error handling for non-localhost
+- [2026-03-30] [Dashboard] [Claude] feat: PPT tab UX overhaul — format Input→Select (8 canvas formats + tooltip), "初始化"→"提交任务" with Modal.confirm, output file Select dropdown (mtime desc), projectName validation + localStorage persistence
+- [2026-03-30] [Dashboard] [Claude] fix: PPT open output uses rc.ws.openExternal + DockerFileModal (replaces rc.ppt.open), Docker/WSL2 browser download support
+- [2026-03-30] [Dashboard] [Claude] fix: useCallback deps stability — selectedSourceRef/selectedOutputRef avoid infinite effect loops, remove unstable t/messageApi from deps
+- [2026-03-30] [Infra] [Claude] fix: run.sh path resolution — reroot stale absolute paths from different machines (suffix-match + fs.existsSync), dedup plugin paths
+- [2026-03-30] [Infra] [Claude] fix: ensure-config.cjs — deduplicate plugins.load.paths on every startup
+- [2026-03-30] [Infra] [Claude] Tests: 23 new PptTab tests + 8 WorkspacePanel tests pass, 1151 total (was 1029)
+- [2026-03-30] [Modules] [Siyuan] feat: Ollama tool call capability probe — auto-detect whether local models support tool_use
+- [2026-03-30] [Modules] [Siyuan] feat: workspace_export tool + binary write rejection in workspace_save (#38)
+- [2026-03-30] [Modules] [Siyuan] feat: PPT export module (ppt-master integration) — ppt_export tool, project/slide/export pipeline
+- [2026-03-30] [Dashboard] [Siyuan] feat: seven UX improvements (PR #35) — ToolActivityHistory, ExtensionsPanel overhaul, Library batch ops, ChatView enhancements, ConfigRestartListener, slash command autocomplete
+- [2026-03-30] [Dashboard] [Siyuan] fix: NotificationDropdown insertBefore DOM error — replace antd Typography with CSS ellipsis
+- [2026-03-30] [Dashboard] [Siyuan] fix: rename "项目/Project" → "会话/Session" in session switcher
+- [2026-03-30] [Infra] [Siyuan] fix: token auth resilience — env-var-driven alignment, SIGUSR1 drift guard, needs_token UX overhaul
+- [2026-03-30] [Infra] [Siyuan] fix: install.sh + systemd service token auth convention alignment
+- [2026-03-30] [Infra] [Siyuan] fix: fresh-install config wizard 10s wait — unconfigured fast-path
+- [2026-03-30] [Infra] [Siyuan] fix: curl|bash stdin consumption syntax error
+- [2026-03-27] [Dashboard] [Claude] fix: config-save restart race + reconnect toast via global listener
+- [2026-03-27] [Dashboard] [Claude] fix: notification persistence, markdown rendering, timestamp sort
+- [2026-03-27] [Infra] [Claude] fix: activity log circular ref + oversized payload guard + unit tests
+
 ### 2026-03-27 — Notification Subsystem Bugfixes + Test Suite Cleanup
 
 - [2026-03-27] [Dashboard] [Claude] fix(P0): notification timestamps reset to "just now" on page refresh — full `Notification[]` now persisted to `localStorage` (`rc-notifications`); timestamp set once at creation, immutable
