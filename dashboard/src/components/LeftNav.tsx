@@ -17,6 +17,7 @@ import {
   ClockCircleOutlined,
   RightOutlined,
   DownOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUiStore, type PanelTab } from '../stores/ui';
@@ -115,7 +116,7 @@ export default function LeftNav() {
     });
   }, [sessions, t, deleteSession, loadSessions]);
 
-  // ── Project switcher dropdown content ──────────────────────────────────────
+  // ── Session switcher dropdown content ───────────────────────────────────────
 
   const [sessionSearch, setSessionSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -171,7 +172,7 @@ export default function LeftNav() {
     return { userSessions: user.slice(0, 30), cronSessions: dedupedCron };
   }, [sessions, sessionSearch, t]);
 
-  const projectDropdownRender = useCallback(() => (
+  const sessionDropdownRender = useCallback(() => (
     <div
       style={{
         background: 'var(--surface)',
@@ -324,7 +325,7 @@ export default function LeftNav() {
         )}
       </div>
 
-      {/* Fixed footer: New Project */}
+      {/* Fixed footer: New Session */}
       <div style={{ borderTop: '1px solid var(--border)', padding: '4px 0' }}>
         <div
           onClick={async () => { await createSession(); setDropdownOpen(false); }}
@@ -368,7 +369,7 @@ export default function LeftNav() {
         overflow: 'hidden',
       }}
     >
-      {/* Project switcher */}
+      {/* Session switcher */}
       <div
         style={{
           padding: collapsed ? '12px 8px' : '12px 16px',
@@ -377,7 +378,7 @@ export default function LeftNav() {
       >
         {collapsed ? (
           <Tooltip title={t('project.switchProject')} placement="right">
-            <Dropdown open={dropdownOpen} onOpenChange={handleDropdownOpenChange} dropdownRender={projectDropdownRender} trigger={['click']} placement="bottomLeft">
+            <Dropdown open={dropdownOpen} onOpenChange={handleDropdownOpenChange} dropdownRender={sessionDropdownRender} trigger={['click']} placement="bottomLeft">
               <Button
                 type="text"
                 icon={<AppstoreOutlined />}
@@ -386,29 +387,52 @@ export default function LeftNav() {
             </Dropdown>
           </Tooltip>
         ) : (
-          <Dropdown open={dropdownOpen} onOpenChange={handleDropdownOpenChange} dropdownRender={projectDropdownRender} trigger={['click']} placement="bottomLeft">
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                cursor: 'pointer',
-                padding: '4px 0',
-              }}
-            >
-              <AppstoreOutlined style={{ color: 'var(--accent-secondary)', fontSize: 16 }} />
-              <Text
-                ellipsis
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Dropdown open={dropdownOpen} onOpenChange={handleDropdownOpenChange} dropdownRender={sessionDropdownRender} trigger={['click']} placement="bottomLeft">
+              <div
                 style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                  padding: '4px 0',
                   flex: 1,
-                  fontSize: 13,
-                  fontWeight: 500,
+                  minWidth: 0,
                 }}
               >
-                {activeSessionLabel}
-              </Text>
-            </div>
-          </Dropdown>
+                <AppstoreOutlined style={{ color: 'var(--accent-secondary)', fontSize: 16, flexShrink: 0 }} />
+                <Text
+                  ellipsis
+                  style={{
+                    flex: 1,
+                    fontSize: 13,
+                    fontWeight: 500,
+                  }}
+                >
+                  {activeSessionLabel}
+                </Text>
+              </div>
+            </Dropdown>
+            <Tooltip
+              title={
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('project.sessionHelpTitle')}</div>
+                  <div>{t('project.sessionHelp')}</div>
+                </div>
+              }
+              placement="right"
+              overlayStyle={{ maxWidth: 280 }}
+            >
+              <QuestionCircleOutlined
+                style={{
+                  fontSize: 12,
+                  color: 'var(--text-tertiary)',
+                  cursor: 'help',
+                  flexShrink: 0,
+                }}
+              />
+            </Tooltip>
+          </div>
         )}
       </div>
 

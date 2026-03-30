@@ -550,13 +550,15 @@
     "deleteSessionConfirm": "Remove this scheduled task? The gateway cron job will be stopped (when matched) and the chat session will be deleted."
   },
   "project": {
-    "newProject": "New Project...",
-    "switchProject": "Switch Project",
+    "newProject": "New Session...",
+    "switchProject": "Switch Session",
     "mainSession": "Main Session",
     "searchSessions": "Search sessions...",
     "noResults": "No matching sessions",
     "renamePrompt": "Enter new name:",
-    "deleteConfirm": "Delete this project? Chat history will be lost."
+    "deleteConfirm": "Delete this session? Chat history will be lost.",
+    "sessionHelpTitle": "What is a Session?",
+    "sessionHelp": "Each session is an independent conversation thread with its own history. Different sessions run in parallel without blocking each other. Use multiple sessions to work on different tasks simultaneously."
   },
   "error": {
     "title": "Something went wrong — click Retry or refresh the page",

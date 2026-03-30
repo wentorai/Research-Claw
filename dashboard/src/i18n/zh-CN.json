@@ -550,13 +550,15 @@
     "deleteSessionConfirm": "删除该定时任务，并删除该会话的聊天记录？"
   },
   "project": {
-    "newProject": "新建项目...",
-    "switchProject": "切换项目",
+    "newProject": "新建会话...",
+    "switchProject": "切换会话",
     "mainSession": "主会话",
     "searchSessions": "搜索会话...",
     "noResults": "无匹配会话",
     "renamePrompt": "输入新名称：",
-    "deleteConfirm": "删除此项目？聊天记录将丢失。"
+    "deleteConfirm": "删除此会话？聊天记录将丢失。",
+    "sessionHelpTitle": "什么是会话？",
+    "sessionHelp": "每个会话是一条独立的对话线程，拥有各自的聊天记录。不同会话之间完全并行、互不阻塞。你可以同时开多个会话，分别处理不同的科研任务。"
   },
   "error": {
     "title": "出了点问题 — 请点击重试或刷新页面",
