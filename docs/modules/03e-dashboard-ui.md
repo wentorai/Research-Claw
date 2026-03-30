@@ -482,6 +482,14 @@ interface ConfigState {
   gatewayConfig: GatewayConfig | null;
   gatewayConfigLoading: boolean;
 
+  /** Tool call probe result — null until probed */
+  toolCallProbe: {
+    status: 'probing' | 'done';
+    supported: boolean | null;
+    model: string | null;
+    error?: string;
+  } | null;
+
   setTheme: (t: 'dark' | 'light') => void;
   setLocale: (l: 'en' | 'zh-CN') => void;
   setSystemPromptAppend: (v: string) => void;
@@ -489,6 +497,7 @@ interface ConfigState {
   loadGatewayConfig: () => Promise<void>;
   evaluateConfig: () => void;
   setBootState: (s: BootState) => void;
+  probeToolCalling: () => Promise<void>;
 }
 ```
 
@@ -601,6 +610,8 @@ App
         │       └── RailIcon { icon: Settings, tab: 'settings', active }
         │
         ├── ChatView ───────────────────── grid-area: chat
+        │   ├── ConnectionBanner (reconnecting/disconnected)
+        │   ├── ToolCallWarningBanner (when model fails tool call probe)
         │   ├── MessageList
         │   │   └── MessageBubble { message, isStreaming? }
         │   │       ├── [text content] → react-markdown + remark-gfm
