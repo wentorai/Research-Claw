@@ -222,10 +222,38 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
         }
       }
 
+      // ── Fresh-install fast-path ──────────────────────────────────────────
+      // If config.get returned structurally complete data (OC defaults applied:
+      // agents/env present) but absolutely no model is configured, this is a
+      // genuine unconfigured state — not a transient race.
+      //
+      // Why this is safe (unlike the removed d89f6dc fast-path):
+      //  - Old fast-path only checked `!models.providers` → triggered on the
+      //    config/resolved preference bug (resolved lacks runtime defaults).
+      //  - This version requires structural completeness (agents OR env present)
+      //    as proof that config.get returned real data with OC defaults applied.
+      //  - ensure-config.cjs runs BEFORE gateway (run.sh:66) → no write race.
+      //  - hello-ok proves config is fully loaded → not a timing issue.
+      //
+      // History: cold-start-config-resolution.md#坑10 → dashboard-gateway-liveness.md#问题四
+      if (gwConnected && gatewayConfig) {
+        const hasStructuralContent = !!(gatewayConfig.agents || gatewayConfig.env || gatewayConfig.raw);
+        const modelRef = gatewayConfig.agents?.defaults?.model?.primary ?? '';
+        const hasAnyModel = modelRef.length > 0 && modelRef.includes('/');
+        const hasProviders = !!(gatewayConfig.models?.providers &&
+          Object.keys(gatewayConfig.models.providers).length > 0);
+
+        if (hasStructuralContent && !hasAnyModel && !hasProviders) {
+          console.log('[config] Config structurally complete but no model configured — showing setup wizard');
+          set({ bootState: 'needs_setup', _configRetryCount: 0 });
+          return;
+        }
+      }
+
       // Level 3: Retry — gateway may not have fully loaded its config yet, or the
       // config was being written (ensure-config.cjs, wizard) when we read it.
-      // Always retry before falling through to wizard, even when models.providers
-      // appears empty — a transient invalid config should not skip retries.
+      // Covers: transient empty config (config.get failed → gatewayConfig null),
+      // or partial model config that didn't match any validation level.
       if (_configRetryCount < CONFIG_RETRY_MAX) {
         console.log(`[config] Validation failed, retry ${_configRetryCount + 1}/${CONFIG_RETRY_MAX}`,
           { gwConnected, hasConfig: !!gatewayConfig, agents: !!gatewayConfig?.agents, models: !!gatewayConfig?.models });
