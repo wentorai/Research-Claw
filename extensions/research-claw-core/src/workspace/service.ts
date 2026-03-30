@@ -407,7 +407,7 @@ export class WorkspaceService {
    * Resolve a relative path to an absolute path within the workspace.
    * Also checks for symlink escapes on existing paths and their parent dirs.
    */
-  private resolvePath(relativePath: string): string {
+  resolvePath(relativePath: string): string {
     this.validatePath(relativePath);
     const resolved = path.resolve(this.root, relativePath);
 
@@ -912,6 +912,28 @@ export class WorkspaceService {
       committed,
       commit_hash: commitHash,
     };
+  }
+
+  // -----------------------------------------------------------------------
+  // commitGeneratedFile — commit an externally-generated file to git
+  // -----------------------------------------------------------------------
+
+  /**
+   * Commit a file that was written to disk by an external tool (e.g. pandoc).
+   * Unlike save(), this does NOT write content — it only stages + commits.
+   *
+   * @param filePath - Relative path within workspace (must already exist on disk)
+   * @param message  - Git commit message
+   */
+  async commitGeneratedFile(
+    filePath: string,
+    message: string,
+  ): Promise<{ committed: boolean; hash?: string }> {
+    if (!this.tracker) return { committed: false };
+
+    this.tracker.invalidateStatusCache();
+    const result = await this.tracker.commitFile(filePath, message);
+    return { committed: result.committed, hash: result.hash };
   }
 
   // -----------------------------------------------------------------------

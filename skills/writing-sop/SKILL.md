@@ -218,12 +218,13 @@ review and accept/reject individually.
 | Save draft | `workspace_save` | `outputs/drafts/{topic}.md` |
 | Save final | `workspace_save` | `outputs/reports/{title}.md` |
 | Review draft | `workspace_read` | `outputs/drafts/{file}` |
+| Export to Word | `workspace_export` | `{ source: "outputs/drafts/{file}.md", format: "docx" }` |
+| Export to PDF | `workspace_export` | `{ source: "outputs/drafts/{file}.md", format: "pdf" }` |
 | Export bib | `library_export_bibtex` | Library subset as `.bib` |
 | Save .bib | `workspace_save` | `outputs/exports/bibliography-{project}.bib` |
 | Link to task | `task_link_file` | After saving, link file to task |
-| md to PDF | `exec` | `node skills/md2pdf-export/scripts/md2pdf.js {file}` |
 | Compile LaTeX | `exec` | `cd {dir} && xelatex -interaction=nonstopmode main.tex` |
-| Pandoc | `exec` | `pandoc {input} -o {output} [options]` |
+| Pandoc (custom) | `exec` | `pandoc {input} -o {output} [options]` |
 
 ## Related Research-Plugins Skills
 

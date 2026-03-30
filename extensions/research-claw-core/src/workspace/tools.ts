@@ -1,8 +1,9 @@
 /**
- * workspace/tools — 7 Agent Tool Registrations
+ * workspace/tools — 8 Agent Tool Registrations
  *
  * Registers workspace_save, workspace_read, workspace_list, workspace_diff,
- * workspace_history, workspace_restore, and workspace_move as OpenClaw agent tools.
+ * workspace_history, workspace_restore, workspace_move, and workspace_export
+ * as OpenClaw agent tools.
  *
  * All tools delegate to WorkspaceService (no direct DB or Git access).
  * Uses plain JSON Schema objects for parameter definitions.
@@ -14,6 +15,13 @@
 
 import * as path from 'node:path';
 import type { WorkspaceService, TreeNode } from './service.js';
+import {
+  convertFile,
+  isSupportedFormat,
+  isValidSource,
+  validSourceExts,
+  SUPPORTED_FORMATS,
+} from './export-convert.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,11 +39,39 @@ const EXT_MIME: Record<string, string> = {
   js: 'text/javascript', ts: 'text/typescript',
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
   svg: 'image/svg+xml', gif: 'image/gif',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
 function fail(message: string): unknown {
   return { content: [{ type: 'text', text: `Error: ${message}` }], details: { error: message } };
 }
+
+// ---------------------------------------------------------------------------
+// Binary format guard — prevents writing text to binary file extensions
+// ---------------------------------------------------------------------------
+
+/** Extensions that are binary formats and cannot be created from plain text. */
+const BINARY_SAVE_GUARD = new Set([
+  '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.odt', '.ods',
+  '.pdf',
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif', '.ico', '.webp',
+  '.zip', '.tar', '.gz', '.7z', '.rar',
+  '.hdf5', '.h5', '.parquet', '.sqlite', '.db',
+  '.npy', '.npz',
+  '.exe', '.dll', '.so', '.dylib',
+  '.mp4', '.avi', '.mov', '.mkv', '.mp3', '.wav', '.flac',
+]);
+
+/** Suggest the correct text source format for each binary target. */
+const BINARY_TO_TEXT: Record<string, string> = {
+  '.docx': '.md', '.doc': '.md',
+  '.xlsx': '.csv', '.xls': '.csv',
+  '.pptx': '.md',
+  '.pdf': '.md',
+  '.odt': '.md', '.ods': '.csv',
+};
 
 /**
  * Flatten a TreeNode[] into a flat list of file entries (excluding directories).
@@ -86,7 +122,7 @@ function matchPattern(filePath: string, pattern: string): boolean {
 import type { ToolDefinition } from '../types.js';
 
 /**
- * Create the 6 workspace agent tools.
+ * Create the 8 workspace agent tools.
  *
  * @param service   - WorkspaceService instance to delegate operations to
  * @returns Array of tool definitions to register
@@ -134,11 +170,26 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
         const content = params.content;
         const commitMessage = typeof params.commit_message === 'string' ? params.commit_message : undefined;
 
+        // Guard: reject text writes to known binary formats (Issue #38)
+        const ext = path.extname(filePath).toLowerCase();
+        if (BINARY_SAVE_GUARD.has(ext)) {
+          const textExt = BINARY_TO_TEXT[ext] ?? '.md';
+          const textPath = filePath.replace(/\.[^.]+$/, textExt);
+          const fmt = ext.slice(1);
+          return fail(
+            `Cannot write "${ext}" files directly — "${ext}" is a binary format ` +
+            `that cannot be created from plain text.\n\n` +
+            `Correct workflow:\n` +
+            `1. Save content as "${textExt}" first: workspace_save("${textPath}", content)\n` +
+            `2. Convert to "${ext}": workspace_export({ source: "${textPath}", format: "${fmt}" })`,
+          );
+        }
+
         const result = await service.save(filePath, content, commitMessage);
 
         // Build file_card JSON block so the LLM includes it in its response
-        const ext = path.extname(filePath).slice(1).toLowerCase();
-        const mimeType = EXT_MIME[ext] ?? 'application/octet-stream';
+        const fileExt = path.extname(filePath).slice(1).toLowerCase();
+        const mimeType = EXT_MIME[fileExt] ?? 'application/octet-stream';
         const gitStatus = result.committed ? 'committed' : 'new';
         const cardJson = JSON.stringify({
           type: 'file_card',
@@ -466,6 +517,121 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
         return ok(
           `Moved "${fromPath}" → "${toPath}" (committed: ${result.committed})`,
           { from: result.from, to: result.to, committed: result.committed },
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // -----------------------------------------------------------------------
+  // 8. workspace_export (Issue #38 — binary format conversion)
+  // -----------------------------------------------------------------------
+  tools.push({
+    name: 'workspace_export',
+    description:
+      'Convert a text file in the workspace to a binary document format. ' +
+      'Use this instead of workspace_save for binary formats. ' +
+      'Supported: md/txt → docx, md/txt → pdf (with CJK support), csv/json → xlsx. ' +
+      'The source file must already exist in the workspace (save it first with workspace_save).',
+    parameters: {
+      type: 'object',
+      required: ['source', 'format'],
+      properties: {
+        source: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 512,
+          description: 'Source file path relative to workspace root (must be a text file, e.g. "outputs/drafts/review.md")',
+        },
+        format: {
+          type: 'string',
+          enum: SUPPORTED_FORMATS,
+          description: `Target output format: ${SUPPORTED_FORMATS.join(', ')}`,
+        },
+        output: {
+          type: 'string',
+          maxLength: 512,
+          description: 'Output file path relative to workspace root. Default: same name with new extension in outputs/exports/',
+        },
+      },
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>) {
+      try {
+        if (typeof params.source !== 'string' || !params.source.trim()) {
+          return fail('source is required and must be a non-empty string');
+        }
+        if (typeof params.format !== 'string' || !params.format.trim()) {
+          return fail('format is required and must be a non-empty string');
+        }
+
+        const source = params.source.trim();
+        const format = params.format.trim().toLowerCase();
+
+        if (!isSupportedFormat(format)) {
+          return fail(`Unsupported format: "${format}". Supported: ${SUPPORTED_FORMATS.join(', ')}`);
+        }
+
+        if (!isValidSource(source, format)) {
+          const valid = validSourceExts(format);
+          return fail(
+            `Cannot convert "${path.extname(source)}" to "${format}". ` +
+            `Valid source formats: ${valid.join(', ')}`,
+          );
+        }
+
+        // Resolve output path
+        let outputRelative: string;
+        if (typeof params.output === 'string' && params.output.trim()) {
+          outputRelative = params.output.trim();
+        } else {
+          // Default: outputs/exports/{basename}.{format}
+          const baseName = path.basename(source, path.extname(source));
+          outputRelative = `outputs/exports/${baseName}.${format}`;
+        }
+
+        // Use service.resolvePath for security (path traversal guard)
+        const srcAbsPath = service.resolvePath(source);
+        const destAbsPath = service.resolvePath(outputRelative);
+
+        const result = await convertFile(srcAbsPath, destAbsPath, format);
+
+        // Auto-commit the generated file
+        let committed = false;
+        let commitHash: string | undefined;
+        try {
+          const saveResult = await service.commitGeneratedFile(
+            outputRelative,
+            `Export: ${path.basename(source)} → ${path.basename(outputRelative)}`,
+          );
+          committed = saveResult.committed;
+          commitHash = saveResult.hash;
+        } catch {
+          // Git failure is non-fatal
+        }
+
+        // Build file_card
+        const mimeType = EXT_MIME[format] ?? 'application/octet-stream';
+        const cardJson = JSON.stringify({
+          type: 'file_card',
+          name: path.basename(outputRelative),
+          path: outputRelative,
+          size_bytes: result.size,
+          mime_type: mimeType,
+          git_status: committed ? 'committed' : 'new',
+        });
+
+        return ok(
+          `Exported ${source} → ${outputRelative} (${result.size} bytes, format: ${format})\n\n` +
+          `Include this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
+          {
+            source,
+            output: outputRelative,
+            size: result.size,
+            format,
+            committed,
+            commit_hash: commitHash,
+          },
         );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));

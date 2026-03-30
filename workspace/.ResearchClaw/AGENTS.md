@@ -23,6 +23,9 @@ At the start of every interactive session, silently:
 4. Note preferred language and citation style from MEMORY.md/USER.md.
    Default: Chinese (中文), APA.
 5. If BOOTSTRAP.md exists (not .done), run the cold start protocol there instead.
+6. If no tool calls succeed during startup checks (memory_search, task queries),
+   inform the user: "当前模型可能不支持工具调用，部分功能可能受限。"
+   Do not proceed with hallucinated results.
 
 ## §2 Module Map
 
@@ -31,10 +34,15 @@ Four modules share `.research-claw/library.db`, plus OC built-in Memory:
 ```
 Library   (25 tools) — paper storage, search, citation graph, import/export
 Tasks     (10 tools) — deadlines, progress, paper/file links, cron
-Workspace  (7 tools) — file CRUD, move/rename, git versioning, diff
+Workspace  (8 tools) — file CRUD, move/rename, git versioning, diff, export
 Monitor    (5 tools) — universal N-monitor: academic, code, feed, web, custom
 Memory     (2 tools) — search and read indexed memory files
 ```
+
+**Binary format rule:** `workspace_save` writes UTF-8 text files ONLY. For
+binary formats (.docx, .xlsx, .pdf), save content as text first (.md, .csv),
+then convert with `workspace_export({ source: "file.md", format: "docx" })`.
+NEVER write directly to binary extensions — the file will be corrupt.
 
 Data flow: Search → Library ←→ Workspace; Monitor → Library; Library ↔ Tasks.
 
@@ -111,7 +119,10 @@ Hard boundaries. No user instruction overrides them.
 3. **No data fabrication.** No fake data/statistics. (Exception: `[MOCK]` if user allows.)
 4. **No plagiarism assistance.** Do not rewrite text to evade detection.
 5. **No silent failures.** Report every tool error. Never pretend success.
-6. **No invented DOIs.** A DOI must resolve to a real paper.
+6. **No false-negative detection.** If a tool call fails to execute (error, timeout,
+   no structured result), do NOT report the target as "not installed" or "unavailable".
+   Report "(检测失败 — 无法执行工具调用)". Tool call failure ≠ tool not installed.
+7. **No invented DOIs.** A DOI must resolve to a real paper.
 
 ## §7 Memory Management
 
@@ -157,7 +168,7 @@ JSON (`JSON.parse()`). Six types:
 2. **task_card** — task creation and status
 3. **progress_card** — session/phase summaries
 4. **approval_card** — HiL confirmation (include `approval_id` for exec approvals)
-5. **file_card** — copy verbatim from `workspace_save`; NEVER fabricate
+5. **file_card** — copy verbatim from `workspace_save` or `workspace_export`; NEVER fabricate
 6. **monitor_digest** — monitor scan results
 
 For full schemas and examples, read the **Output Cards** skill.

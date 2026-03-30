@@ -22,8 +22,13 @@ RUN npm config set registry ${NPM_REGISTRY}
 # psmisc: fuser（--force 端口释放需要）
 # procps: ps（进程管理）
 # wget/xdg-utils: Playwright Chromium 安装依赖
+# pandoc: workspace_export 二进制文档转换 (md→docx/pdf, Issue #38)
+# texlive-xetex/texlive-latex-recommended: pandoc PDF 引擎 (xelatex)
+# fonts-noto-cjk: 中日韩字体，确保 docx/pdf 中文渲染正确
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ git curl ca-certificates psmisc procps wget xdg-utils \
+      pandoc texlive-xetex texlive-latex-recommended lmodern \
+      fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # pnpm — match version in package.json

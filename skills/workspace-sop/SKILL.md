@@ -50,18 +50,20 @@ outputs/
 | `Upload:` | User-uploaded file saved |
 | `Restore:` | File restored from history |
 | `Delete:` | File removed |
+| `Export:` | Binary format converted from text source |
 
-## Tool Chain (7 tools)
+## Tool Chain (8 tools)
 
 | Tool | Purpose |
 |------|---------|
-| `workspace_save` | Write file + auto-commit → emits `file_card` |
+| `workspace_save` | Write **text** file + auto-commit → emits `file_card` |
 | `workspace_read` | Read file contents |
 | `workspace_list` | List files (glob filter + git status) |
 | `workspace_diff` | Show changes (no range = uncommitted vs HEAD) |
 | `workspace_history` | List commits for a file or path |
 | `workspace_restore` | Checkout historical version + commit as Restore: |
 | `workspace_move` | Rename/move file + commit |
+| `workspace_export` | Convert text → binary format (md→docx/pdf, csv→xlsx) |
 
 ## Version Control Operations
 
@@ -77,6 +79,24 @@ outputs/
 - **Append vs. Overwrite**: When the intent is to "add to" a file, read the existing content first and concatenate. **Never** overwrite a multi-section file with only the new snippet.
 - **Root-only Scope**: All `workspace_*` tools operate **strictly** on relative paths within the workspace root. 
 - **Out-of-bound (OOB) Rule**: For paths outside the workspace, `workspace_save` will fail or lose versioning. Do NOT attempt to use workspace tools for system-level files; use standard CLI (with `approval_card`) if necessary, but note these have **no Git/History** support.
+
+## Binary Format Exports
+
+`workspace_save` writes **UTF-8 text only**. For Word/Excel/PDF output:
+
+1. Save content as Markdown/CSV: `workspace_save("outputs/drafts/paper.md", content)`
+2. Convert: `workspace_export({ source: "outputs/drafts/paper.md", format: "docx" })`
+
+| Source | → Target | Engine |
+|--------|----------|--------|
+| `.md` `.txt` | `.docx` | pandoc |
+| `.md` `.txt` | `.pdf` | pandoc + xelatex (CJK supported) |
+| `.csv` `.json` | `.xlsx` | Python pandas + openpyxl |
+
+Output defaults to `outputs/exports/{name}.{format}`. Override with `output` param.
+
+**NEVER** call `workspace_save` with a binary extension (`.docx`, `.xlsx`, `.pdf`,
+`.pptx`, etc.) — the tool will reject the write and guide you to `workspace_export`.
 
 ## CLI Execution Safety
 
