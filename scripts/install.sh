@@ -1198,7 +1198,10 @@ if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; 
 # Using --auth token instead of --auth none: some environments with pre-existing
 # OpenClaw device pairing state reject connections with NOT_PAIRED even when
 # dangerouslyDisableDeviceAuth=true. Token auth bypasses device pairing entirely.
-export OPENCLAW_GATEWAY_TOKEN=research-claw
+# Respects user-set value for remote deployments with custom tokens.
+if [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
+  export OPENCLAW_GATEWAY_TOKEN=research-claw
+fi
 
 CRASH_COUNT=0
 MAX_CRASHES=10
