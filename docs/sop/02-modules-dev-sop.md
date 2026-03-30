@@ -83,7 +83,7 @@ extensions/research-claw-core/
 | `rc_cron_state` | Cron | Preset enable/disable + gateway job IDs |
 | `rc_papers_fts` | Literature | FTS5 virtual table (title, authors, abstract, notes) |
 
-### 2.4 RPC Methods (57 WS + 1 HTTP = 58 total)
+### 2.4 RPC Methods (58 WS + 1 HTTP = 59 total)
 
 | Namespace | Count | Module Doc |
 |-----------|------:|-----------|
@@ -247,7 +247,7 @@ export async function activate(api: PluginRuntime): Promise<void> {
 
 - **Lifecycle**: `activate()` called once at gateway start. `deactivate()` on shutdown.
 - **Config schema**: Validated by OpenClaw plugin loader via manifest `configSchema`.
-- **Total RPC**: 57 WS + 1 HTTP = 58 methods (26 lit + 11 task + 11 ws + 7 cron + 2 notifications).
+- **Total RPC**: 58 WS + 1 HTTP = 59 methods (26 lit + 11 task + 11 ws + 7 cron + 2 notifications + 1 model).
 
 ---
 

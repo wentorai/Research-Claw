@@ -129,6 +129,8 @@ Projects
 4. Current projects (title, deadline, stage)
 5. Preferences (language, notification frequency)
 6. Environment detection (OS, editors, git, python/R/LaTeX)
+   - **Tool Call Failure Protocol**: if a tool call fails, record `(检测失败)` instead
+     of `(未检测)`. After 3+ consecutive failures, stop and warn about model compatibility.
 
 Completion: writes MEMORY.md + USER.md, renames BOOTSTRAP.md to BOOTSTRAP.md.done.
 

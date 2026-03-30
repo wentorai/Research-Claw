@@ -28,7 +28,7 @@
 
 `research-claw-core` is the single OpenClaw plugin that aggregates all Research-Claw
 functionality. It acts as the central wiring layer: it owns the SQLite database, registers
-every agent tool (28), every gateway RPC method (57), the HTTP file-upload route, and seven
+every agent tool (28), every gateway RPC method (58), the HTTP file-upload route, and seven
 lifecycle hooks. Individual feature modules (literature, tasks, workspace) are plain
 TypeScript modules with no plugin awareness -- this plugin imports them and connects them
 to the OpenClaw runtime via the `PluginApi` interface.
@@ -280,7 +280,7 @@ const plugin: PluginDefinition = {
     api.on('after_tool_call', (event) => { ... });
     api.on('gateway_start', () => { ... });
 
-    api.logger.info('Research-Claw Core registered (31 tools, 61 WS RPC + 1 HTTP = 62 interfaces, 7 hooks)');
+    api.logger.info('Research-Claw Core registered (39 tools, 79 WS RPC + 1 HTTP = 80 interfaces, 8 hooks)');
   },
 };
 
@@ -528,8 +528,9 @@ Namespace: `rc.ws.*`. Defined in `src/workspace/rpc.ts`. Canonical schemas in do
 | 55 | `rc.ws.openExternal` | `{ path }` | `{ ok }` | Open file in system default app. |
 | 56 | `rc.ws.openFolder` | `{ path }` | `{ ok }` | Open containing folder in file manager. |
 | 57 | `rc.ws.move` | `{ from, to }` | `{ from, to, committed }` | Move/rename within workspace. |
+| 58 | `rc.model.probeToolCalling` | `{ model?, baseUrl? }` | `{ supported, model, provider, testedAt, error? }` | Probe whether current Ollama model supports structured tool calls. Cached 30 min per model. |
 
-**Total: 57 WS RPC methods** (26 lit + 11 task + 7 cron + 2 notifications + 11 ws)
+**Total: 58 WS RPC methods** (26 lit + 11 task + 7 cron + 2 notifications + 11 ws + 1 model)
 plus 1 HTTP route (`POST /rc/upload`). Note: `rc.ws.upload` is HTTP POST only (see §7) and
 is not registered as a gateway RPC method.
 
@@ -1015,6 +1016,13 @@ export function registerPromptContextHook(
       context += ` Last reading: "${shortTitle}" on ${date}.`;
     }
 
+    // Tool call probe warning — if the active model failed the probe,
+    // inject guidance so the agent does not hallucinate tool results.
+    if (_lastProbeResult && !_lastProbeResult.supported) {
+      context += '\nWARNING: Current model may not support structured tool calls. '
+        + 'Report "(检测失败)" instead of assuming tools/plugins are uninstalled.';
+    }
+
     return { prependContext: context };
   });
 }
@@ -1024,6 +1032,11 @@ export function registerPromptContextHook(
 
 ```
 Library: 47 papers (12 unread). Tasks: 2 overdue, 5 due within 48h. Last reading: "Attention Is All You Need" on 2026-03-10.
+```
+
+When the tool call probe detects failure, an additional warning line is appended:
+```
+WARNING: Current model may not support structured tool calls. Report "(检测失败)" instead of assuming tools/plugins are uninstalled.
 ```
 
 ### 10.2 `session_start` -- Database Warm-Up
@@ -1710,6 +1723,7 @@ interface HttpRouteParams {
 | `03a` Literature Library | Defines the 12 literature tools and 26 `rc.lit.*` RPC methods aggregated here |
 | `03b` Task System | Defines the 9 task tools, 11 `rc.task.*` RPC methods, 7 `rc.cron.presets.*` methods, and 2 `rc.notifications.*` methods |
 | `03c` Workspace & Git | Defines the 7 workspace tools and 11 `rc.ws.*` RPC methods (+ 1 HTTP upload) |
+| — | `rc.model.probeToolCalling` is an inline RPC (not module-backed) for Ollama tool call capability detection |
 | `03d` Message Card Protocol | Defines card types (`paper_card`, `task_card`, etc.) rendered in dashboard |
 | `05` Plugin Integration Guide | Full Plugin SDK reference, plugin development workflow |
 | `02` Engineering Architecture | Gateway protocol, coupling tiers, overall system design |

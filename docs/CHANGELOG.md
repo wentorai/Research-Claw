@@ -26,7 +26,7 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 - [2026-03-30] [Infra] [Claude] fix: run.sh path resolution — reroot stale absolute paths from different machines (suffix-match + fs.existsSync), dedup plugin paths
 - [2026-03-30] [Infra] [Claude] fix: ensure-config.cjs — deduplicate plugins.load.paths on every startup
 - [2026-03-30] [Infra] [Claude] Tests: 23 new PptTab tests + 8 WorkspacePanel tests pass, 1151 total (was 1029)
-- [2026-03-30] [Modules] [Siyuan] feat: Ollama tool call capability probe — auto-detect whether local models support tool_use
+- [2026-03-30] [Modules] [Claude] feat: Ollama tool call capability probe — `rc.model.probeToolCalling` RPC, before_prompt_build agent warning injection, Dashboard warning banner (ChatView), BOOTSTRAP.md Tool Call Failure Protocol, AGENTS.md red line §6.6 "No false-negative detection"
 - [2026-03-30] [Modules] [Siyuan] feat: workspace_export tool + binary write rejection in workspace_save (#38)
 - [2026-03-30] [Modules] [Siyuan] feat: PPT export module (ppt-master integration) — ppt_export tool, project/slide/export pipeline
 - [2026-03-30] [Dashboard] [Siyuan] feat: seven UX improvements (PR #35) — ToolActivityHistory, ExtensionsPanel overhaul, Library batch ops, ChatView enhancements, ConfigRestartListener, slash command autocomplete
@@ -36,6 +36,18 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 - [2026-03-30] [Infra] [Siyuan] fix: install.sh + systemd service token auth convention alignment
 - [2026-03-30] [Infra] [Siyuan] fix: fresh-install config wizard 10s wait — unconfigured fast-path
 - [2026-03-30] [Infra] [Siyuan] fix: curl|bash stdin consumption syntax error
+- [2026-03-30] [Infra] [Claude] fix(review): PR #35 code review — 7 fixes across P1/P2/P3
+- [2026-03-30] [Modules] [Claude] fix(P1): PptService.runOpen() — remove `shell: true`, use direct spawn args (security)
+- [2026-03-30] [Dashboard] [Claude] fix(P1): tool-stream runSessionMap — add 100-entry eviction cap (memory leak)
+- [2026-03-30] [Infra] [Claude] test(P1): 21 new PptService unit tests (path validation, rename, list, status, constructor)
+- [2026-03-30] [Dashboard] [Claude] refactor(P2): extract shared `fmtTime`/`fmtActivityRow`/`safeStringifyDetail` to `utils/activity-log.ts`
+- [2026-03-30] [Dashboard] [Claude] fix(P2): tool-stream.ts result/end block indentation + variable naming
+- [2026-03-30] [Dashboard] [Claude] fix(P2): guard activity log detail rendering — safeStringifyDetail (circular ref catch + 8KB truncate)
+- [2026-03-30] [Dashboard] [Claude] fix(P3): LeftNav cron deletion — `confirm()` → `Modal.confirm` (Ant Design consistency)
+- [2026-03-30] [Dashboard] [Claude] fix(P3): /clear double loadHistory — move reload to else branch (switchSession already reloads)
+- [2026-03-30] [Infra] [Claude] test: 10 new activity-log util tests (fmtTime, fmtActivityRow, safeStringifyDetail edge cases)
+- [2026-03-30] [Infra] [Claude] fix: config wizard 10s wait — unconfigured fast-path (cherry-picked config.ts from d42894f)
+- [2026-03-30] [Infra] [Claude] Tests: 62 files, 1128 dashboard + 401 extension = 1529 total pass
 - [2026-03-27] [Dashboard] [Claude] fix: config-save restart race + reconnect toast via global listener
 - [2026-03-27] [Dashboard] [Claude] fix: notification persistence, markdown rendering, timestamp sort
 - [2026-03-27] [Infra] [Claude] fix: activity log circular ref + oversized payload guard + unit tests
@@ -479,7 +491,7 @@ Code-to-documentation sync after comprehensive audit session.
 - [x] Task tools (9) + RPC (11 + 7 cron + 2 notifications)
 - [x] Workspace tools (7) + RPC (11) + HTTP upload
 - [x] Radar tools (3) + RPC (4) — `radar_configure`, `radar_get_config`, `radar_scan` (arXiv + Semantic Scholar)
-- [x] Plugin entry index.ts (31 tools, 61 WS RPC + 1 HTTP = 62 interfaces)
+- [x] Plugin entry index.ts (31 tools, 62 WS RPC + 1 HTTP = 63 interfaces)
 - [x] 7 hooks registered (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call, gateway_start)
 
 ---

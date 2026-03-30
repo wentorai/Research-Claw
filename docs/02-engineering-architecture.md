@@ -49,7 +49,7 @@ Cross-references: [`05` Plugin SDK details](./modules/05-plugin-sdk.md) | [`03e`
  │                  │  │  (L1 plugin)          │    │    (L1 plugin, future)  │  │   │
  │                  │  │                       │    │                         │  │   │
  │                  │  │  - 28 agent tools     │    │  - account sync         │  │   │
- │                  │  │  - 57 WS RPC methods  │    │  - skills sync          │  │   │
+ │                  │  │  - 58 WS RPC methods  │    │  - skills sync          │  │   │
  │                  │  │  - 7 hooks            │    │  - telemetry            │  │   │
  │                  │  │  - 1 HTTP route       │    │                         │  │   │
  │                  │  │  - 1 service (SQLite) │    │  (deferred post-MVP)    │  │   │
@@ -153,7 +153,7 @@ The plugin tier uses OpenClaw's documented Plugin SDK. Plugins are TypeScript pa
 
 | Plugin | Status | Description |
 |--------|--------|-------------|
-| `research-claw-core` | MVP (P0) | Literature library, task management, workspace tracking, 28 tools, 57 WS RPC + 1 HTTP = 58 interface methods |
+| `research-claw-core` | MVP (P0) | Literature library, task management, workspace tracking, 31 tools, 58 WS RPC + 1 HTTP = 59 interface methods |
 | `wentor-connect` | Placeholder | Wentor platform sync (deferred post-MVP) |
 
 **Upgrade risk: LOW.** Plugin SDK is semver-stable. Breaking changes only on OpenClaw major versions. TypeScript compilation catches interface drift at build time.

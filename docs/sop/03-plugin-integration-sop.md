@@ -247,7 +247,7 @@ OpenClaw commit `a1520d70f` introduced scope enforcement for plugin HTTP handler
 - [ ] `pnpm build` in extensions/research-claw-core succeeds
 - [ ] Gateway discovers and activates plugin
 - [ ] SQLite DB created at configured path
-- [ ] All 61 WS RPC methods respond (even if stub)
+- [ ] All 62 WS RPC methods respond (even if stub)
 - [ ] All 31 agent tools register
 - [ ] HTTP upload endpoint responds
 
