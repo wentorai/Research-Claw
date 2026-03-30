@@ -639,7 +639,7 @@
       "refreshSourcesBtn": "刷新源文件列表",
       "sourceFileSelect": "从工作区 outputs 选择源文件",
       "generateFromSourceOk": "已提交 PPT 生成请求",
-      "outputHint": "生成完成后打开 workspace/outputs/ppt/ 下对应的 PPTX。",
+      "outputHint": "生成完成后打开 workspace/outputs/ppt/ 下最新的 PPTX。",
       "noOutput": "当前没有可打开的输出文件",
       "openBtn": "打开输出文件",
       "openOk": "已打开输出文件",

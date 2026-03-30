@@ -1419,23 +1419,19 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
         setSelectedSourceFilePath(filtered[0] ?? '');
       }
 
-      // Also refresh available outputs in the same RPC result
-      const pptxFiles = res.files.filter(
+      // Also refresh available output — newest pptx under /outputs/ppt/ (any name/depth).
+      // LLM-generated filenames are non-deterministic, so we don't filter by projectName.
+      // Service returns files sorted by mtime desc, so [0] is the newest.
+      const newestPptx = res.files.find(
         (f) => f.toLowerCase().endsWith('.pptx') && f.includes('/outputs/ppt/'),
       );
-      const prefix = `ppt-${projectName}-`;
-      const matched = pptxFiles.find((f) => {
-        const base = f.split('/').pop() ?? '';
-        return base.startsWith(prefix);
-      });
-      setAvailableOutputPath(matched ?? '');
+      setAvailableOutputPath(newestPptx ?? '');
     } catch (err) {
-      // messageApi/t accessed via closure — stable enough for error display
       messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
     } finally {
       setLoading(false);
     }
-  }, [callRpc, SOURCE_EXTS, projectName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [callRpc, SOURCE_EXTS]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOpenOutput = useCallback(async () => {
     if (!availableOutputPath) return;

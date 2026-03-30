@@ -639,7 +639,7 @@
       "refreshSourcesBtn": "Refresh sources",
       "sourceFileSelect": "Select source file from workspace outputs",
       "generateFromSourceOk": "Submitted PPT generation request",
-      "outputHint": "After generation, open the matching PPTX under workspace/outputs/ppt/.",
+      "outputHint": "After generation, open the newest PPTX under workspace/outputs/ppt/.",
       "noOutput": "No output file available",
       "openBtn": "Open Output",
       "openOk": "Opened output file",

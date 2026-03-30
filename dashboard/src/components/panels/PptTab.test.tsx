@@ -353,10 +353,10 @@ describe('PptTab', () => {
       expect(openBtn.hasAttribute('disabled') || openBtn.classList.contains('ant-btn-disabled')).toBe(true);
     });
 
-    it('stays disabled when pptx exists but does not match projectName', async () => {
-      // Files exist but none match the default projectName "demo-deck"
+    it('stays disabled when pptx exists outside /outputs/ppt/', async () => {
+      // pptx exists but NOT under /outputs/ppt/ — should not enable button
       mockFiles = [
-        '/workspace/outputs/ppt/2026-03-30/ppt-other-project-final-20260330.pptx',
+        '/workspace/outputs/some-other-dir/presentation.pptx',
         '/workspace/outputs/research.pdf',
       ];
       await renderPptTab();
@@ -365,9 +365,10 @@ describe('PptTab', () => {
       expect(openBtn.hasAttribute('disabled') || openBtn.classList.contains('ant-btn-disabled')).toBe(true);
     });
 
-    it('is enabled when matching output file exists', async () => {
+    it('is enabled when any pptx exists under /outputs/ppt/ regardless of name', async () => {
+      // LLM-generated filenames vary — any pptx under /outputs/ppt/ should enable
       mockFiles = [
-        '/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
+        '/workspace/outputs/ppt/2026-03-30/研究報告-2026-03-30T04-29-55.pptx',
         '/workspace/outputs/research.pdf',
       ];
       await renderPptTab();
@@ -381,10 +382,11 @@ describe('PptTab', () => {
       });
     });
 
-    it('prefers output matching current projectName', async () => {
+    it('opens the newest pptx (first in mtime-sorted list)', async () => {
+      // Service returns files sorted by mtime desc — first match is newest
       mockFiles = [
-        '/workspace/outputs/ppt/2026-03-30/ppt-other-project-final-20260330.pptx',
-        '/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
+        '/workspace/outputs/ppt/2026-03-30/研究報告-newest.pptx',
+        '/workspace/outputs/ppt/2026-03-29/older-output.pptx',
         '/workspace/outputs/research.pdf',
       ];
       await renderPptTab();
@@ -402,14 +404,13 @@ describe('PptTab', () => {
           (c: unknown[]) => c[0] === 'rc.ws.openExternal',
         );
         expect(openCall).toBeTruthy();
-        expect(openCall![1]).toEqual({
-          path: '/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
-        });
+        // Should open the first (newest) pptx, not the older one
+        expect((openCall![1] as { path: string }).path).toContain('newest');
       });
     });
 
     it('uses rc.ws.openExternal instead of rc.ppt.open', async () => {
-      mockFiles = ['/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx'];
+      mockFiles = ['/workspace/outputs/ppt/2026-03-30/demo-deck-final.pptx'];
       await renderPptTab();
 
       await waitFor(() => {
@@ -428,12 +429,12 @@ describe('PptTab', () => {
     });
 
     it('shows DockerFileModal on Docker fallback', async () => {
-      mockFiles = ['/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx'];
+      mockFiles = ['/workspace/outputs/ppt/2026-03-30/demo-deck-final.pptx'];
       mockOpenExternal = () => Promise.resolve({
         ok: false,
         fallback: 'docker',
-        containerPath: '/app/workspace//workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
-        relativePath: '/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
+        containerPath: '/app/workspace//workspace/outputs/ppt/2026-03-30/demo-deck-final.pptx',
+        relativePath: '/workspace/outputs/ppt/2026-03-30/demo-deck-final.pptx',
         fileName: 'output.pptx',
       });
 
@@ -450,7 +451,7 @@ describe('PptTab', () => {
       await waitFor(() => {
         expect(screen.getByTestId('docker-file-modal')).toBeTruthy();
         expect(screen.getByTestId('docker-container-path').textContent).toBe(
-          '/app/workspace//workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
+          '/app/workspace//workspace/outputs/ppt/2026-03-30/demo-deck-final.pptx',
         );
         expect(screen.getByTestId('docker-file-name').textContent).toBe('output.pptx');
       });
