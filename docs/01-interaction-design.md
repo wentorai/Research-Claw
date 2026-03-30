@@ -250,27 +250,23 @@ md/sm (< 1024px)
 | Label | Visible, Inter Regular 14px | Hidden (tooltip on hover) |
 | Active indicator | Left 3px bar, `var(--accent-red)` | Left 3px bar, `var(--accent-red)` |
 
-### 5.3 Project Switcher
+### 5.3 Session Switcher
 
-Projects in Research-Claw are **shared workstreams** (attention focuses), NOT
-isolated containers. All projects share a single global `MEMORY.md`. Switching
-projects changes:
+Sessions in Research-Claw are **independent conversation threads** backed by
+OpenClaw's session system. Each session has its own chat history and runs on a
+separate command lane — different sessions execute **in parallel** without
+blocking each other (up to `agents.defaults.maxConcurrent`, default 4).
 
-- Which tasks are visible (filtered by project tag)
-- Which radar keywords are active
-- The chat context hint sent with each message
-
-Projects do **not** create separate chat histories or file trees. They are
-lightweight labels for organizing attention.
+A help tooltip (ⓘ icon) next to the session label explains the concept on hover.
 
 | Property | Spec |
 |----------|------|
 | Trigger | Dropdown button, full width of nav sidebar |
-| Display | Project name + colored dot indicator |
-| Dropdown items | List of projects + "All Projects" option at top + "New Project..." at bottom |
-| New project | Opens chat with pre-filled: `/project create {name}` |
-| Active project | Bold text + accent dot |
-| Max visible | 10 items, then scroll |
+| Display | Session name (label / derivedTitle) |
+| Dropdown items | List of sessions + "New Session..." at bottom |
+| New session | Creates `project-{uuid}` key with label `Session N` |
+| Active session | Bold text + accent indicator |
+| Max visible | 30 items, then scroll |
 
 ### 5.4 Function Rail Icons
 
@@ -1491,7 +1487,7 @@ locales/
 
 Namespaces (top-level keys):
   common.*        -- Shared: buttons, labels, status text
-  nav.*           -- Navigation labels, project switcher
+  nav.*           -- Navigation labels, session switcher
   chat.*          -- Chat area: placeholders, system messages
   literature.*    -- Literature panel
   workspace.*     -- Workspace panel
@@ -1748,7 +1744,7 @@ Response:
 | `Alt+4` | Toggle Radar panel |
 | `Alt+5` | Toggle Settings panel |
 | `Alt+N` | Toggle left nav sidebar |
-| `Alt+P` | Open project switcher |
+| `Alt+P` | Open session switcher |
 
 There is **no `Cmd+K`** shortcut. The agent is the search engine.
 
