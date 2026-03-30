@@ -125,8 +125,20 @@ if (project.channels) {
   }
 }
 
+// --- RC-specific plugin identifiers (must NOT leak into global config) ---
+const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins'];
+const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin'];
+
 // --- Build RC overlay with absolute paths ---
 const overlay = JSON.parse(JSON.stringify(project)); // deep clone
+
+// Remove RC-specific plugin configuration from the overlay.
+// These paths/entries only make sense inside the RC project directory.
+// OC 2026.3.28+ strictly validates plugins.load.paths — syncing RC extension
+// paths to the global config causes fatal "Config invalid" for standalone openclaw.
+// The RC gateway reads the project config (OPENCLAW_CONFIG_PATH), so plugins
+// are discovered there — no need to duplicate in global.
+delete overlay.plugins;
 
 // gateway.controlUi.root → absolute
 if (overlay.gateway?.controlUi?.root) {
@@ -137,24 +149,25 @@ if (overlay.gateway?.controlUi?.root) {
 if (!overlay.gateway) overlay.gateway = {};
 overlay.gateway.auth = { mode: 'none' };
 
-// plugins.load.paths → absolute
-if (overlay.plugins?.load?.paths) {
-  overlay.plugins.load.paths = overlay.plugins.load.paths.map(abs);
-}
-
 // skills.load.extraDirs → absolute
 if (overlay.skills?.load?.extraDirs) {
   overlay.skills.load.extraDirs = overlay.skills.load.extraDirs.map(abs);
 }
 
-// plugins.entries.*.config.dbPath → absolute (prevents CWD mismatch
-// when `openclaw gateway --force` resolves relative paths from wrong directory)
-if (overlay.plugins?.entries) {
-  for (const entry of Object.values(overlay.plugins.entries)) {
-    if (entry?.config?.dbPath && !path.isAbsolute(entry.config.dbPath)) {
-      entry.config.dbPath = abs(entry.config.dbPath);
-    }
-  }
+// --- Clean up previously synced RC plugin data from global config ---
+// Older versions of this script synced plugins.load.paths, plugins.entries, and
+// plugins.allow to the global config.  Remove RC-specific entries so standalone
+// openclaw (especially 2026.3.28+ with strict validation) doesn't crash.
+if (Array.isArray(global.plugins?.load?.paths)) {
+  global.plugins.load.paths = global.plugins.load.paths.filter(p =>
+    !RC_EXTENSION_DIRS.some(d => p === './' + d || p.endsWith('/' + d))
+  );
+}
+if (Array.isArray(global.plugins?.allow)) {
+  global.plugins.allow = global.plugins.allow.filter(id => !RC_PLUGIN_IDS.includes(id));
+}
+if (global.plugins?.entries) {
+  for (const id of RC_PLUGIN_IDS) delete global.plugins.entries[id];
 }
 
 // --- Merge into global config ---

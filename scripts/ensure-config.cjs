@@ -15,12 +15,17 @@
  *   4. Stale tool names in tools.alsoAllow
  *   5. gateway.auth.token alignment with Dashboard DEFAULT_TOKEN
  *   6. channels.discord.botToken → token (fix stale example config key)
+ *  10. agents.defaults.sandbox.mode = "off" (RC has no Docker sandbox)
  */
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins', 'openclaw-weixin'];
+const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins'];
+const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin'];
 const REQUIRED_TOOLS = ['ppt_init', 'ppt_export'];
 const STALE_TOOLS = [
   'search_papers', 'get_paper', 'get_citations',
@@ -39,13 +44,45 @@ function ensureConfig(filePath) {
 
   let changed = false;
 
-  // 1. plugins.allow — append missing required IDs (don't replace user's extras)
-  if (!c.plugins) c.plugins = {};
-  if (!Array.isArray(c.plugins.allow)) c.plugins.allow = [];
-  for (const id of REQUIRED_ALLOW) {
-    if (!c.plugins.allow.includes(id)) {
-      c.plugins.allow.push(id);
-      changed = true;
+  // Detect global config: RC-specific plugin paths/entries must NOT be written here.
+  // OC 2026.3.28+ strictly validates plugins.load.paths — RC extension paths in the
+  // global config cause "Config invalid" fatal errors for standalone openclaw users.
+  const globalDir = path.join(os.homedir(), '.openclaw');
+  const isGlobal = path.resolve(filePath).startsWith(globalDir);
+
+  // 0. Global config cleanup — remove previously synced RC-specific plugin data
+  if (isGlobal) {
+    // Remove RC plugin IDs from plugins.allow
+    if (Array.isArray(c.plugins?.allow)) {
+      const before = c.plugins.allow.length;
+      c.plugins.allow = c.plugins.allow.filter(id => !RC_PLUGIN_IDS.includes(id));
+      if (c.plugins.allow.length !== before) changed = true;
+    }
+    // Remove RC extension paths from plugins.load.paths
+    if (Array.isArray(c.plugins?.load?.paths)) {
+      const before = c.plugins.load.paths.length;
+      c.plugins.load.paths = c.plugins.load.paths.filter(p =>
+        !RC_EXTENSION_DIRS.some(d => p === './' + d || p.endsWith('/' + d))
+      );
+      if (c.plugins.load.paths.length !== before) changed = true;
+    }
+    // Remove RC plugin entries
+    if (c.plugins?.entries) {
+      for (const id of RC_PLUGIN_IDS) {
+        if (c.plugins.entries[id]) { delete c.plugins.entries[id]; changed = true; }
+      }
+    }
+  }
+
+  // 1. plugins.allow — append missing required IDs (project config only)
+  if (!isGlobal) {
+    if (!c.plugins) c.plugins = {};
+    if (!Array.isArray(c.plugins.allow)) c.plugins.allow = [];
+    for (const id of REQUIRED_ALLOW) {
+      if (!c.plugins.allow.includes(id)) {
+        c.plugins.allow.push(id);
+        changed = true;
+      }
     }
   }
 
@@ -113,18 +150,20 @@ function ensureConfig(filePath) {
     if (c.plugins.load.paths.length !== before) changed = true;
   }
 
-  // 8. plugins.load.paths — ensure openclaw-weixin is discoverable
+  // 8. plugins.load.paths — ensure openclaw-weixin is discoverable (project config only)
   // Match by directory suffix, not exact string — paths may be absolute from a previous run.
-  if (!c.plugins.load) c.plugins.load = {};
-  if (!Array.isArray(c.plugins.load.paths)) c.plugins.load.paths = [];
-  const REQUIRED_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin'];
-  for (const dir of REQUIRED_DIRS) {
-    const alreadyPresent = c.plugins.load.paths.some(p =>
-      p === './' + dir || p.endsWith('/' + dir)
-    );
-    if (!alreadyPresent) {
-      c.plugins.load.paths.push('./' + dir);
-      changed = true;
+  if (!isGlobal) {
+    if (!c.plugins) c.plugins = {};
+    if (!c.plugins.load) c.plugins.load = {};
+    if (!Array.isArray(c.plugins.load.paths)) c.plugins.load.paths = [];
+    for (const dir of RC_EXTENSION_DIRS) {
+      const alreadyPresent = c.plugins.load.paths.some(p =>
+        p === './' + dir || p.endsWith('/' + dir)
+      );
+      if (!alreadyPresent) {
+        c.plugins.load.paths.push('./' + dir);
+        changed = true;
+      }
     }
   }
 
@@ -161,9 +200,18 @@ function ensureConfig(filePath) {
   if (!c.skills) { c.skills = { load: { extraDirs: ['./skills'] } }; changed = true; }
   if (!c.cron) { c.cron = { enabled: true }; changed = true; }
 
-  // 10. Heartbeat — ensure lightContext is true to minimize token cost
+  // 10. Sandbox — force off. RC is a local desktop app; native installs don't have Docker,
+  //     Docker installs don't need nested Docker. Global config from a previous OC Docker
+  //     setup may carry sandbox.mode="non-main" which crashes agents on launch.
   if (!c.agents) c.agents = {};
   if (!c.agents.defaults) c.agents.defaults = {};
+  if (!c.agents.defaults.sandbox || c.agents.defaults.sandbox.mode !== 'off') {
+    if (!c.agents.defaults.sandbox) c.agents.defaults.sandbox = {};
+    c.agents.defaults.sandbox.mode = 'off';
+    changed = true;
+  }
+
+  // 11. Heartbeat — ensure lightContext is true to minimize token cost
   if (!c.agents.defaults.heartbeat) {
     c.agents.defaults.heartbeat = { every: '30m', lightContext: true };
     changed = true;
@@ -171,7 +219,8 @@ function ensureConfig(filePath) {
     c.agents.defaults.heartbeat.lightContext = true;
     changed = true;
   }
-  if (!c.plugins.entries) {
+  if (!isGlobal && !c.plugins?.entries) {
+    if (!c.plugins) c.plugins = {};
     c.plugins.entries = {
       'research-claw-core': { enabled: true, config: { dbPath: '.research-claw/library.db', autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' } },
       'openclaw-weixin': { enabled: true },
@@ -179,7 +228,7 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
-  // 11. Browser — ensure config exists with RC default profile
+  // 12. Browser — ensure config exists with RC default profile
   // Added in v0.5.9: Docker images now ship Chromium. Older configs created before
   // browser support was added have no `browser` key → dashboard shows "未启用".
   if (!c.browser) {
@@ -194,7 +243,7 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
-  // 12. Session reset — override OC default "daily 4AM" with idle-based reset.
+  // 13. Session reset — override OC default "daily 4AM" with idle-based reset.
   // Scientific workflows span days; daily reset silently archives the transcript,
   // causing issue #31 ("会话记录被覆盖"). 4320 min = 72 hours idle before reset.
   if (!c.session || !c.session.reset || c.session.reset.mode === 'daily') {

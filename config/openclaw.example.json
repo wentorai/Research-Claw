@@ -30,6 +30,9 @@
       "heartbeat": {
         "every": "30m",
         "lightContext": true
+      },
+      "sandbox": {
+        "mode": "off"
       }
     }
   },
