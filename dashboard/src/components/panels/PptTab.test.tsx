@@ -354,7 +354,6 @@ describe('PptTab', () => {
     });
 
     it('stays disabled when pptx exists outside /outputs/ppt/', async () => {
-      // pptx exists but NOT under /outputs/ppt/ — should not enable button
       mockFiles = [
         '/workspace/outputs/some-other-dir/presentation.pptx',
         '/workspace/outputs/research.pdf',
@@ -365,25 +364,29 @@ describe('PptTab', () => {
       expect(openBtn.hasAttribute('disabled') || openBtn.classList.contains('ant-btn-disabled')).toBe(true);
     });
 
-    it('is enabled when any pptx exists under /outputs/ppt/ regardless of name', async () => {
-      // LLM-generated filenames vary — any pptx under /outputs/ppt/ should enable
+    it('populates output dropdown with all pptx under /outputs/ppt/', async () => {
       mockFiles = [
-        '/workspace/outputs/ppt/2026-03-30/研究報告-2026-03-30T04-29-55.pptx',
+        '/workspace/outputs/ppt/2026-03-30/研究報告-newest.pptx',
+        '/workspace/outputs/ppt/2026-03-29/older-output.pptx',
         '/workspace/outputs/research.pdf',
       ];
       await renderPptTab();
 
-      // Trigger a manual refresh to ensure output state settles
+      // Trigger refresh to ensure output list settles
       fireEvent.click(screen.getByText('Refresh sources').closest('button')!);
 
       await waitFor(() => {
-        const openBtn = screen.getByText('Open Output').closest('button')!;
-        expect(openBtn.hasAttribute('disabled')).toBe(false);
+        // Both pptx files should appear as selectable options
+        // The newest should be auto-selected (shown in the Select display)
+        expect(screen.getByText('研究報告-newest.pptx')).toBeTruthy();
       });
+
+      // Open button should be enabled (newest auto-selected)
+      const openBtn = screen.getByText('Open Output').closest('button')!;
+      expect(openBtn.hasAttribute('disabled')).toBe(false);
     });
 
-    it('opens the newest pptx (first in mtime-sorted list)', async () => {
-      // Service returns files sorted by mtime desc — first match is newest
+    it('opens the user-selected file (defaults to newest)', async () => {
       mockFiles = [
         '/workspace/outputs/ppt/2026-03-30/研究報告-newest.pptx',
         '/workspace/outputs/ppt/2026-03-29/older-output.pptx',
@@ -396,15 +399,14 @@ describe('PptTab', () => {
         expect(openBtn.hasAttribute('disabled')).toBe(false);
       });
 
-      const openBtn = screen.getByText('Open Output').closest('button')!;
-      fireEvent.click(openBtn);
+      fireEvent.click(screen.getByText('Open Output').closest('button')!);
 
       await waitFor(() => {
         const openCall = mockRequest.mock.calls.find(
           (c: unknown[]) => c[0] === 'rc.ws.openExternal',
         );
         expect(openCall).toBeTruthy();
-        // Should open the first (newest) pptx, not the older one
+        // Default selection is the newest (first in list)
         expect((openCall![1] as { path: string }).path).toContain('newest');
       });
     });

@@ -1288,7 +1288,8 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<PptStatus | null>(null);
   const [lastResult, setLastResult] = useState<unknown>(null);
-  const [availableOutputPath, setAvailableOutputPath] = useState<string>('');
+  const [outputFiles, setOutputFiles] = useState<string[]>([]);
+  const [selectedOutputPath, setSelectedOutputPath] = useState<string>('');
   const [selectedSourceFilePath, setSelectedSourceFilePath] = useState<string>('');
   const [sourceFiles, setSourceFiles] = useState<string[]>([]);
   const [projectName, setProjectName] = useState(
@@ -1304,6 +1305,8 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
   // Refs for values used inside effect-triggered callbacks (avoids identity-change → effect re-fire loops)
   const selectedSourceRef = useRef(selectedSourceFilePath);
   selectedSourceRef.current = selectedSourceFilePath;
+  const selectedOutputRef = useRef(selectedOutputPath);
+  selectedOutputRef.current = selectedOutputPath;
 
   const fieldLabelStyle: React.CSSProperties = {
     color: tokens.text.muted,
@@ -1313,7 +1316,7 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
 
   const isValidProjectName = PROJECT_NAME_RE.test(projectName);
   const canSubmit = isValidProjectName && !!selectedSourceFilePath && !loading;
-  const canOpenOutput = !!availableOutputPath && !loading;
+  const canOpenOutput = !!selectedOutputPath && !loading;
 
   // Persist user preferences to localStorage
   useEffect(() => { localStorage.setItem(LS_PROJECT_NAME, projectName); }, [projectName]);
@@ -1394,7 +1397,7 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
       const res = await callRpc<{ outputPath?: string }>('rc.ppt.export', { projectPath, stage });
       setLastResult(res);
       if (typeof res.outputPath === 'string') {
-        setAvailableOutputPath(res.outputPath);
+        setSelectedOutputPath(res.outputPath);
       }
       messageApi.success(t('extensions.ppt.exportOk', 'Export completed'));
     } catch (err) {
@@ -1419,13 +1422,16 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
         setSelectedSourceFilePath(filtered[0] ?? '');
       }
 
-      // Also refresh available output — newest pptx under /outputs/ppt/ (any name/depth).
-      // LLM-generated filenames are non-deterministic, so we don't filter by projectName.
-      // Service returns files sorted by mtime desc, so [0] is the newest.
-      const newestPptx = res.files.find(
+      // Refresh output file list — all pptx under /outputs/ppt/ (mtime desc from service).
+      const pptxFiles = res.files.filter(
         (f) => f.toLowerCase().endsWith('.pptx') && f.includes('/outputs/ppt/'),
       );
-      setAvailableOutputPath(newestPptx ?? '');
+      setOutputFiles(pptxFiles);
+      // Auto-select newest if current selection is gone or empty
+      const curOutput = selectedOutputRef.current;
+      if (!curOutput || !pptxFiles.includes(curOutput)) {
+        setSelectedOutputPath(pptxFiles[0] ?? '');
+      }
     } catch (err) {
       messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
     } finally {
@@ -1434,45 +1440,23 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
   }, [callRpc, SOURCE_EXTS]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOpenOutput = useCallback(async () => {
-    if (!availableOutputPath) return;
+    if (!selectedOutputPath) return;
     setLoading(true);
     try {
-      // Rename output to source-based name if a source file was selected
-      let pathToOpen = availableOutputPath;
-      if (selectedSourceFilePath) {
-        const base = selectedSourceFilePath.split('/').pop() ?? selectedSourceFilePath;
-        const dotIdx = base.lastIndexOf('.');
-        const desiredBaseName = dotIdx >= 0 ? base.slice(0, dotIdx) : base;
-        if (desiredBaseName) {
-          try {
-            const renameRes = await callRpc<{ ok: boolean; oldPath: string; newPath: string }>(
-              'rc.ppt.outputs.rename',
-              { inputPath: pathToOpen, desiredBaseName },
-            );
-            if (renameRes?.ok && renameRes.newPath) {
-              pathToOpen = renameRes.newPath;
-              setAvailableOutputPath(pathToOpen);
-            }
-          } catch {
-            // Ignore rename failures; still try to open the file.
-          }
-        }
-      }
-      // Use workspace openExternal for consistent Docker/desktop handling
       const res = await callRpc<{
         ok: boolean;
         fallback?: string;
         containerPath?: string;
         relativePath?: string;
         fileName?: string;
-      }>('rc.ws.openExternal', { path: pathToOpen });
+      }>('rc.ws.openExternal', { path: selectedOutputPath });
       setLastResult(res);
       if (res?.fallback === 'docker') {
         setDockerModal({
           mode: 'file',
           containerPath: String(res.containerPath ?? ''),
-          relativePath: String(res.relativePath ?? pathToOpen),
-          fileName: String(res.fileName ?? pathToOpen.split('/').pop() ?? 'output.pptx'),
+          relativePath: String(res.relativePath ?? selectedOutputPath),
+          fileName: String(res.fileName ?? selectedOutputPath.split('/').pop() ?? 'output.pptx'),
         });
       } else {
         messageApi.success(t('extensions.ppt.openOk', 'Opened output file'));
@@ -1482,7 +1466,7 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
     } finally {
       setLoading(false);
     }
-  }, [callRpc, availableOutputPath, selectedSourceFilePath, messageApi, t]);
+  }, [callRpc, selectedOutputPath, messageApi, t]);
 
   useEffect(() => {
     if (!client?.isConnected) return;
@@ -1625,9 +1609,23 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
         <Text style={fieldLabelStyle}>
           {t(
             'extensions.ppt.outputHint',
-            'After generation, open the matching PPTX under workspace/outputs/ppt/.',
+            'After generation, open the newest PPTX under workspace/outputs/ppt/.',
           )}
         </Text>
+        <Select
+          value={selectedOutputPath || undefined}
+          onChange={(v) => setSelectedOutputPath(v ?? '')}
+          options={outputFiles.map((file) => {
+            const base = file.split('/').pop() ?? file;
+            return { value: file, label: base };
+          })}
+          placeholder={t('extensions.ppt.noOutput', 'No output file available')}
+          style={{ width: '100%' }}
+          showSearch
+          optionFilterProp="label"
+          allowClear
+          notFoundContent={t('extensions.ppt.noOutput', 'No output file available')}
+        />
         <Tooltip title={!canOpenOutput ? t('extensions.ppt.noOutput', 'No output file available') : undefined}>
           <Button onClick={handleOpenOutput} disabled={!canOpenOutput} loading={loading}>
             {t('extensions.ppt.openBtn', 'Open Output')}
