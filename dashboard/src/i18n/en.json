@@ -29,6 +29,7 @@
       "reconnecting": "Connection lost — reconnecting automatically...",
       "disconnected": "Disconnected — unsent messages may be lost. Check if the gateway is running"
     },
+    "toolCallWarning": "Current model ({{model}}) may not support tool calls. Commands may not execute and plugins may be unavailable. Consider switching models.",
     "notConnected": "Not connected — check if the gateway is running",
     "sendFailed": "Send failed — the connection may have dropped. Try resending",
     "you": "You",

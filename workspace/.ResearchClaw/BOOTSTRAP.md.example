@@ -241,6 +241,15 @@ communication preferences -- just follow this default.
 
 ## Step 6 -- Environment Detection (Silent)
 
+**Tool Call Failure Protocol:**
+If a tool call fails (no structured result returned, timeout, or error instead of
+tool output), record the status as **(检测失败)** in TOOLS.md, NOT **(未检测)**.
+If 3 or more consecutive tool calls fail with no structured result, STOP the
+detection process and warn the user:
+"当前模型可能不支持工具调用，环境检测无法完成。请在设置中检查模型兼容性。"
+Do NOT assume that a failed detection means the tool is not installed.
+Tool call failure ≠ tool not installed.
+
 Silently detect and record in **MEMORY.md** under `## Global > ### Environment`
 AND populate **TOOLS.md** (the L3 environment memo) with detected values:
 - Operating system
@@ -267,7 +276,10 @@ AND populate **TOOLS.md** (the L3 environment memo) with detected values:
   → update TOOLS.md `## 本地工具 > AI CLI`
 - Any relevant academic tools in PATH
 - **Research-Plugins**: Check if `@wentorai/research-plugins` is installed
-  (`openclaw plugins info research-plugins`). If not installed, inform user:
+  (`openclaw plugins info research-plugins`). If the tool call returns no
+  structured result, record "(检测失败)" — do NOT report "not installed" or
+  suggest installation. Only if the tool call succeeds AND reports not installed,
+  inform user:
   "Research skill pack not found. Install for 438 research skills + 34 API tools:
   `openclaw plugins install @wentorai/research-plugins`"
   Record install status in Environment.

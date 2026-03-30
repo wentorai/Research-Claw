@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useToolStreamStore } from '../../stores/tool-stream';
 import { useGatewayStore } from '../../stores/gateway';
+import { useConfigStore } from '../../stores/config';
 import type { ChatMessage } from '../../gateway/types';
 import { normalizeSessionKey } from '../../utils/session-key';
 import { fmtActivityRow, safeStringifyDetail } from '../../utils/activity-log';
@@ -70,6 +71,7 @@ export default function ChatView() {
   const activityLog = useToolStreamStore((s) => s.activityLog);
   const clearActivityLog = useToolStreamStore((s) => s.clearActivityLog);
   const connState = useGatewayStore((s) => s.state);
+  const toolCallProbe = useConfigStore((s) => s.toolCallProbe);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Smart scroll state — refs to avoid re-renders on every scroll event
@@ -205,6 +207,24 @@ export default function ChatView() {
           {connState === 'reconnecting'
             ? t('chat.connectionBanner.reconnecting')
             : t('chat.connectionBanner.disconnected')}
+        </div>
+      )}
+
+      {/* Tool call capability warning — model cannot generate structured tool calls */}
+      {toolCallProbe?.status === 'done' && toolCallProbe.supported === false && (
+        <div
+          role="alert"
+          style={{
+            padding: '6px 16px',
+            fontSize: 12,
+            fontFamily: "'Fira Code', 'JetBrains Mono', Consolas, monospace",
+            textAlign: 'center',
+            color: 'var(--warning, #FBBF24)',
+            background: 'rgba(251, 191, 36, 0.08)',
+            borderBottom: '1px solid rgba(251, 191, 36, 0.2)',
+          }}
+        >
+          {t('chat.toolCallWarning', { model: toolCallProbe.model ?? 'unknown' })}
         </div>
       )}
 

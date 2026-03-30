@@ -6,8 +6,8 @@
  *
  * Registration totals:
  *   - 39 agent tools (17 literature + 10 task + 7 workspace + 5 monitor)
- *   - 80 WS RPC methods + 1 HTTP route = 81 interface methods
- *     (34 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 2 rc.heartbeat.* + 12 rc.ws.* + 12 rc.monitor.* = 80 WS; POST /rc/upload = 1 HTTP)
+ *   - 81 WS RPC methods + 1 HTTP route = 82 interface methods
+ *     (34 rc.lit.* + 11 rc.task.* + 7 rc.cron.* + 2 rc.notifications.* + 2 rc.heartbeat.* + 12 rc.ws.* + 12 rc.monitor.* + 1 rc.model.* = 81 WS; POST /rc/upload = 1 HTTP)
  *   - 8 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×2, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  */
@@ -115,6 +115,13 @@ let _wsService: InstanceType<typeof WorkspaceService> | null = null;
 let _wsConfig: WorkspaceConfig | null = null;
 let _wsInitPromise: Promise<void> | null = null;
 let _pptService: InstanceType<typeof PptService> | null = null;
+
+// ── Tool call probe state ─────────────────────────────────────────────
+// Caches Ollama tool-calling probe results per model string (30-min TTL).
+// _lastProbeResult is read by before_prompt_build to inject agent warnings.
+const PROBE_TTL_MS = 30 * 60 * 1000;
+let _toolCallProbeCache = new Map<string, { supported: boolean; model: string; provider: string; testedAt: number }>();
+let _lastProbeResult: { supported: boolean; model: string } | null = null;
 
 function resolvePptRoot(api: PluginApi, cfg: PluginConfig): string {
   // Prefer a repo checked out at RC root: ./ppt-master (submodule or clone).
@@ -248,11 +255,13 @@ const plugin: PluginDefinition = {
         _pptService = null;
         _wsConfig = null;
         _wsInitPromise = null;
+        _toolCallProbeCache = new Map();
+        _lastProbeResult = null;
         _initialized = false;
       },
     });
 
-    // ── 4. Register tools (38 total) ─────────────────────────────────
+    // ── 4. Register tools (39 total) ─────────────────────────────────
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
     }
@@ -332,6 +341,129 @@ const plugin: PluginDefinition = {
       const provider = params.provider as string;
       if (!provider) throw new Error('provider is required');
       return oauthStatus(provider);
+    });
+
+    // Tool call probe RPC — tests whether the active Ollama model supports
+    // structured tool calls. Dashboard calls this after config load to show
+    // a warning banner when tool calling is unsupported.
+    registerMethod('rc.model.probeToolCalling', async (params: Record<string, unknown>) => {
+      // 1. Determine active model & provider
+      let modelPrimary = params.model as string | undefined;
+      let ollamaBaseUrl = params.baseUrl as string | undefined;
+
+      if (!modelPrimary) {
+        // Read from openclaw.json on disk
+        try {
+          const configPath = api.resolvePath('config/openclaw.json');
+          const configText = fs.readFileSync(configPath, 'utf-8');
+          const config = JSON.parse(configText) as Record<string, unknown>;
+          const agents = config.agents as Record<string, unknown> | undefined;
+          const defaults = agents?.defaults as Record<string, unknown> | undefined;
+          const model = defaults?.model as Record<string, unknown> | undefined;
+          modelPrimary = model?.primary as string | undefined;
+
+          if (!ollamaBaseUrl) {
+            const models = config.models as Record<string, unknown> | undefined;
+            const providers = models?.providers as Record<string, Record<string, unknown>> | undefined;
+            if (providers?.ollama?.baseUrl) {
+              ollamaBaseUrl = providers.ollama.baseUrl as string;
+            }
+          }
+        } catch {
+          // Config read failed — fall back to params or defaults
+        }
+      }
+
+      if (!modelPrimary) {
+        return { supported: true, skipped: true, reason: 'no_model_configured' };
+      }
+
+      // 2. Parse provider from model string (e.g. "ollama/Qwen3.5:35b-a3b")
+      const slashIdx = modelPrimary.indexOf('/');
+      const providerKey = slashIdx > 0 ? modelPrimary.slice(0, slashIdx) : '';
+      const modelId = slashIdx > 0 ? modelPrimary.slice(slashIdx + 1) : modelPrimary;
+
+      // Only probe Ollama models — other providers reliably support tool calls
+      if (providerKey !== 'ollama') {
+        return { supported: true, skipped: true, reason: 'non_ollama', model: modelPrimary, provider: providerKey };
+      }
+
+      // 3. Check cache
+      const cached = _toolCallProbeCache.get(modelPrimary);
+      if (cached && Date.now() - cached.testedAt < PROBE_TTL_MS) {
+        _lastProbeResult = { supported: cached.supported, model: modelPrimary };
+        return cached;
+      }
+
+      // 4. Probe Ollama API
+      const baseUrl = (ollamaBaseUrl || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+      const probePayload = {
+        model: modelId,
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant. Always use the provided tools when applicable.' },
+          { role: 'user', content: 'What is 2+2? Use the calculator tool to compute it.' },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'calculator',
+            description: 'Performs arithmetic calculations',
+            parameters: {
+              type: 'object',
+              properties: {
+                expression: { type: 'string', description: 'The math expression to evaluate' },
+              },
+              required: ['expression'],
+            },
+          },
+        }],
+        stream: false,
+      };
+
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+
+        const resp = await fetch(`${baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(probePayload),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!resp.ok) {
+          const result = { supported: false, model: modelPrimary, provider: providerKey, testedAt: Date.now(), error: `http_${resp.status}` };
+          _toolCallProbeCache.set(modelPrimary, result);
+          _lastProbeResult = { supported: false, model: modelPrimary };
+          return result;
+        }
+
+        const body = await resp.json() as { message?: { tool_calls?: unknown[] } };
+        const toolCalls = body?.message?.tool_calls;
+        const supported = Array.isArray(toolCalls) && toolCalls.length > 0;
+
+        const result = { supported, model: modelPrimary, provider: providerKey, testedAt: Date.now() };
+        _toolCallProbeCache.set(modelPrimary, result);
+        _lastProbeResult = { supported, model: modelPrimary };
+        api.logger.info(`[ToolProbe] Model ${modelPrimary}: tool calling ${supported ? 'supported' : 'NOT supported'}`);
+        return result;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isAbort = errMsg.includes('abort');
+        const result = {
+          supported: false,
+          model: modelPrimary,
+          provider: providerKey,
+          testedAt: Date.now(),
+          error: isAbort ? 'timeout' : 'connection_failed',
+          message: errMsg,
+        };
+        _toolCallProbeCache.set(modelPrimary, result);
+        _lastProbeResult = { supported: false, model: modelPrimary };
+        api.logger.warn(`[ToolProbe] Probe failed for ${modelPrimary}: ${errMsg}`);
+        return result;
+      }
     });
 
     // ── 6. Register HTTP route: POST /rc/upload ──────────────────────
@@ -566,6 +698,16 @@ const plugin: PluginDefinition = {
             const lastCheck = m.last_check_at ?? 'never';
             lines.push(`  - "${m.name}" (${m.source_type}, schedule: ${m.schedule}, last: ${lastCheck})`);
           }
+        }
+
+        // Tool call probe warning — if the active model failed the probe,
+        // inject guidance so the agent does not hallucinate tool results.
+        if (_lastProbeResult && !_lastProbeResult.supported) {
+          lines.push(
+            '[Research-Claw] WARNING: Current model may not support structured tool calls. ' +
+            'If a tool call fails or returns no structured result, report "(检测失败 — 工具调用不可用)" ' +
+            'instead of assuming the tool/plugin is not installed. Inform the user about model compatibility.',
+          );
         }
 
         return { prependContext: lines.join('\n') };
@@ -908,7 +1050,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (38 tools, 78 WS RPC + 1 HTTP = 79 interfaces, 8 hooks)');
+    api.logger.info('Research-Claw Core registered (39 tools, 78 WS RPC + 1 HTTP = 79 interfaces, 8 hooks)');
   },
 };
 

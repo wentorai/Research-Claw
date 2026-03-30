@@ -64,6 +64,14 @@ interface ConfigState {
    *  Persisted to sessionStorage so it survives page refresh. */
   pendingConfigRestart: boolean;
 
+  /** Tool call probe result — null until probed, then reflects model capability */
+  toolCallProbe: {
+    status: 'probing' | 'done';
+    supported: boolean | null;
+    model: string | null;
+    error?: string;
+  } | null;
+
   setTheme: (t: 'dark' | 'light') => void;
   setLocale: (l: 'en' | 'zh-CN') => void;
   setSystemPromptAppend: (v: string) => void;
@@ -72,6 +80,7 @@ interface ConfigState {
   evaluateConfig: () => void;
   setBootState: (s: BootState) => void;
   setPendingConfigRestart: (v: boolean) => void;
+  probeToolCalling: () => Promise<void>;
 }
 
 function loadFromStorage(): { theme: 'dark' | 'light'; locale: 'en' | 'zh-CN'; systemPromptAppend: string } {
@@ -96,6 +105,7 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
     gatewayConfig: null,
     gatewayConfigLoading: false,
     _configRetryCount: 0,
+    toolCallProbe: null,
     pendingConfigRestart: (() => {
       try { return sessionStorage.getItem('rc:pending-config-restart') === '1'; }
       catch { return false; }
@@ -166,6 +176,8 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
           projectConfig: (snapshot.config ?? null) as Record<string, unknown> | null,
         };
         set({ gatewayConfig: gc, gatewayConfigLoading: false });
+        // Probe tool call support for the active model after config is loaded
+        get().probeToolCalling();
         get().evaluateConfig();
       } catch (err) {
         console.warn('[config] loadGatewayConfig failed:', err);
@@ -272,6 +284,42 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
 
     setBootState: (s: BootState) => {
       set({ bootState: s });
+    },
+
+    probeToolCalling: async () => {
+      const { toolCallProbe } = get();
+      // Skip if already probing
+      if (toolCallProbe?.status === 'probing') return;
+
+      const client = useGatewayStore.getState().client;
+      if (!client?.isConnected) return;
+
+      // Skip re-probe if model hasn't changed
+      const currentModel = get().gatewayConfig?.agents?.defaults?.model?.primary ?? null;
+      if (toolCallProbe?.status === 'done' && toolCallProbe.model === currentModel) return;
+
+      set({ toolCallProbe: { status: 'probing', supported: null, model: currentModel } });
+
+      try {
+        const result = await client.request<{
+          supported: boolean;
+          model?: string;
+          skipped?: boolean;
+          error?: string;
+        }>('rc.model.probeToolCalling', {});
+
+        set({
+          toolCallProbe: {
+            status: 'done',
+            supported: result.supported,
+            model: result.model ?? currentModel,
+            error: result.error,
+          },
+        });
+      } catch {
+        // RPC failed (method not registered, gateway down, etc.) — don't show banner
+        set({ toolCallProbe: { status: 'done', supported: null, model: currentModel } });
+      }
     },
   };
 });
