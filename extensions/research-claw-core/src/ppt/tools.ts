@@ -1,5 +1,3 @@
-import path from 'node:path';
-import fs from 'node:fs';
 import type { ToolDefinition } from '../types.js';
 import type { PptService } from './service.js';
 
@@ -80,25 +78,8 @@ export function createPptTools(service: PptService): ToolDefinition[] {
             stage: typeof params.stage === 'string' ? params.stage : undefined,
           });
           const { sourceOutputPath: _ignoredSourceOutputPath, ...publicResult } = result;
-          const outputFile = result.outputPath ?? result.projectPath;
-
-          // Build file_card so the agent can embed it in the response (same pattern as workspace_save/workspace_export)
-          let cardBlock = '';
-          if (result.outputPath && fs.existsSync(result.outputPath)) {
-            const stat = fs.statSync(result.outputPath);
-            const cardJson = JSON.stringify({
-              type: 'file_card',
-              name: path.basename(result.outputPath),
-              path: result.outputPath,
-              size_bytes: stat.size,
-              mime_type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-              git_status: 'new',
-            });
-            cardBlock = `\n\nInclude this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``;
-          }
-
           return ok(
-            `PPT export completed. Output saved to workspace outputs: ${outputFile}${cardBlock}`,
+            `PPT export completed. Output saved to workspace outputs: ${result.outputPath ?? result.projectPath}`,
             publicResult,
           );
         } catch (err) {

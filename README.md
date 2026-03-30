@@ -359,7 +359,7 @@ docker compose up -d --build
 >   ghcr.io/wentorai/research-claw:latest
 > ```
 >
-> **数据持久化**：配置、数据库、工作区挂载在具名 volume（`rc-config`、`rc-data`、`rc-workspace`），容器删除后数据不丢失。
+> **数据持久化**：配置、数据库、工作区、会话历史挂载在具名 volume（`rc-config`、`rc-data`、`rc-workspace`、`rc-state`），容器删除后数据不丢失。
 >
 > **LLM API 代理**：如果你的 LLM API（如 OpenAI）需要代理访问，在 Docker Desktop → Settings → Resources → Proxies 中配置 HTTP/HTTPS 代理即可。本地构建用户也可在 `docker-compose.yml` 中取消 `HTTP_PROXY` / `HTTPS_PROXY` 注释。
 

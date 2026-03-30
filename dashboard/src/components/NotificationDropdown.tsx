@@ -99,30 +99,33 @@ function NotificationItem({
 
       {/* Content — expand on hover */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <Text
+        {/* Use CSS text-overflow instead of antd Typography ellipsis to avoid
+            internal DOM manipulation that causes insertBefore errors on hover toggle */}
+        <div
           style={{
             fontSize: 13,
             fontWeight: item.read ? 400 : 600,
             color: tokens.text.primary,
-            display: 'block',
             lineHeight: '18px',
-            whiteSpace: hovered ? 'normal' : undefined,
-            wordBreak: hovered ? 'break-word' : undefined,
+            ...(hovered
+              ? { whiteSpace: 'normal', wordBreak: 'break-word' }
+              : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }),
           }}
-          ellipsis={!hovered}
         >
           {item.title}
-        </Text>
-        {item.body && (hovered ? (
+        </div>
+        {item.body && (
           <div
             style={{
               fontSize: 12,
               color: tokens.text.secondary,
               marginTop: 2,
               lineHeight: '16px',
-              wordBreak: 'break-word',
+              ...(hovered
+                ? { wordBreak: 'break-word' }
+                : { overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }),
             }}
-            className="notification-markdown-body"
+            className={hovered ? 'notification-markdown-body' : undefined}
           >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -150,22 +153,7 @@ function NotificationItem({
               {item.body}
             </ReactMarkdown>
           </div>
-        ) : (
-          <div
-            style={{
-              fontSize: 12,
-              color: tokens.text.secondary,
-              marginTop: 2,
-              lineHeight: '16px',
-              overflow: 'hidden',
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical' as const,
-            }}
-          >
-            {item.body}
-          </div>
-        ))}
+        )}
         <Text
           style={{
             fontSize: 11,

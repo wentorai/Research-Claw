@@ -168,7 +168,7 @@ JSON (`JSON.parse()`). Six types:
 2. **task_card** — task creation and status
 3. **progress_card** — session/phase summaries
 4. **approval_card** — HiL confirmation (include `approval_id` for exec approvals)
-5. **file_card** — copy verbatim from `workspace_save`, `workspace_export`, or `ppt_export`; NEVER fabricate
+5. **file_card** — copy verbatim from `workspace_save` or `workspace_export`; NEVER fabricate
 6. **monitor_digest** — monitor scan results
 
 For full schemas and examples, read the **Output Cards** skill.

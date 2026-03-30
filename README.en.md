@@ -50,6 +50,8 @@ Join our **Research-Claw · WentorOS** WeChat group
 
 <img src="assets/community-qr.jpg" width="260" alt="WeChat community QR code" />
 
+This group is for developers and contributors only. For questions, please open an [Issue](https://github.com/wentorai/Research-Claw/issues).
+
 </div>
 
 ---
@@ -355,7 +357,7 @@ Or configure a proxy in Docker Desktop → Settings → Resources → Proxies, t
 >   ghcr.io/wentorai/research-claw:latest
 > ```
 >
-> **Persistence**: Config, database, workspace in named volumes (`rc-config`, `rc-data`, `rc-workspace`) — survives container removal.
+> **Persistence**: Config, database, workspace, and session history in named volumes (`rc-config`, `rc-data`, `rc-workspace`, `rc-state`) — survives container removal.
 >
 > **Proxy for LLM API**: If your LLM API (e.g. OpenAI) requires a proxy, configure it in Docker Desktop → Settings → Resources → Proxies. Local-build users can also uncomment `HTTP_PROXY` / `HTTPS_PROXY` in `docker-compose.yml`.
 
@@ -373,6 +375,23 @@ pnpm backup         # Backup database
 ```
 
 > `pnpm serve` is the recommended way to run. When you change API key / model in the browser, the gateway restarts automatically — no manual intervention needed.
+
+### Slash Commands
+
+Type `/` in the chat input to trigger the autocomplete menu. Navigate with ↑↓, confirm with Enter, dismiss with Esc.
+
+| Command | Description |
+|:--|:--|
+| `/compact` | Compress conversation context (fixes token-limit issues) |
+| `/model [name]` | View or switch the current model |
+| `/think [level]` | Set thinking level (off / low / medium / high) |
+| `/fast [on\|off]` | Toggle fast mode |
+| `/verbose [on\|off\|full]` | Toggle verbose mode |
+| `/usage` | Show current session token usage |
+| `/help` | List all available commands |
+| `/stop` | Stop the current run |
+| `/clear` | Clear chat history |
+| `/new` | Start a new session |
 
 ### Update
 

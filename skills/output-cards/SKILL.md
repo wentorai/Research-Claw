@@ -10,7 +10,7 @@ description: >-
 <!-- SKILL MAINTENANCE NOTES:
      - Dashboard 用 JSON.parse() 解析卡片内容
      - 字段变更必须同步 dashboard/src/components/chat/ 中的渲染组件
-     - file_card 必须从 workspace_save / workspace_export / ppt_export 工具输出中复制，绝不可伪造
+     - file_card 必须从 workspace_save / workspace_export 工具输出中复制，绝不可伪造
      - approval_card 必须包含 approval_id（来自 exec.approval.requested）
 -->
 
@@ -50,7 +50,7 @@ Optional: `details` (**must be a JSON object**, not a string — e.g. `{"paper_c
 
 ## file_card
 
-**CRITICAL**: ONLY copy the file_card from `workspace_save`, `workspace_export`, or `ppt_export` tool output verbatim.
+**CRITICAL**: ONLY copy the file_card from `workspace_save` or `workspace_export` tool output verbatim.
 **NEVER fabricate** — causes "file not found" errors.
 
 ## monitor_digest
