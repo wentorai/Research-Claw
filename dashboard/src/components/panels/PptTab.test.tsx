@@ -353,7 +353,19 @@ describe('PptTab', () => {
       expect(openBtn.hasAttribute('disabled') || openBtn.classList.contains('ant-btn-disabled')).toBe(true);
     });
 
-    it('is enabled when output file exists', async () => {
+    it('stays disabled when pptx exists but does not match projectName', async () => {
+      // Files exist but none match the default projectName "demo-deck"
+      mockFiles = [
+        '/workspace/outputs/ppt/2026-03-30/ppt-other-project-final-20260330.pptx',
+        '/workspace/outputs/research.pdf',
+      ];
+      await renderPptTab();
+
+      const openBtn = screen.getByText('Open Output').closest('button')!;
+      expect(openBtn.hasAttribute('disabled') || openBtn.classList.contains('ant-btn-disabled')).toBe(true);
+    });
+
+    it('is enabled when matching output file exists', async () => {
       mockFiles = [
         '/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
         '/workspace/outputs/research.pdf',
@@ -397,7 +409,7 @@ describe('PptTab', () => {
     });
 
     it('uses rc.ws.openExternal instead of rc.ppt.open', async () => {
-      mockFiles = ['/workspace/outputs/ppt/2026-03-30/output.pptx'];
+      mockFiles = ['/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx'];
       await renderPptTab();
 
       await waitFor(() => {
@@ -416,12 +428,12 @@ describe('PptTab', () => {
     });
 
     it('shows DockerFileModal on Docker fallback', async () => {
-      mockFiles = ['/workspace/outputs/ppt/2026-03-30/output.pptx'];
+      mockFiles = ['/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx'];
       mockOpenExternal = () => Promise.resolve({
         ok: false,
         fallback: 'docker',
-        containerPath: '/app/workspace//workspace/outputs/ppt/2026-03-30/output.pptx',
-        relativePath: '/workspace/outputs/ppt/2026-03-30/output.pptx',
+        containerPath: '/app/workspace//workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
+        relativePath: '/workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
         fileName: 'output.pptx',
       });
 
@@ -438,7 +450,7 @@ describe('PptTab', () => {
       await waitFor(() => {
         expect(screen.getByTestId('docker-file-modal')).toBeTruthy();
         expect(screen.getByTestId('docker-container-path').textContent).toBe(
-          '/app/workspace//workspace/outputs/ppt/2026-03-30/output.pptx',
+          '/app/workspace//workspace/outputs/ppt/2026-03-30/ppt-demo-deck-final-20260330.pptx',
         );
         expect(screen.getByTestId('docker-file-name').textContent).toBe('output.pptx');
       });

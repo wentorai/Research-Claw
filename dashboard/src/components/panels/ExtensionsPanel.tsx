@@ -1428,7 +1428,7 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
         const base = f.split('/').pop() ?? '';
         return base.startsWith(prefix);
       });
-      setAvailableOutputPath(matched ?? pptxFiles[0] ?? '');
+      setAvailableOutputPath(matched ?? '');
     } catch (err) {
       // messageApi/t accessed via closure — stable enough for error display
       messageApi.error(err instanceof Error ? err.message : t('extensions.ppt.actionFailed', 'Action failed'));
