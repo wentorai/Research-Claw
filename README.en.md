@@ -688,6 +688,43 @@ wsl --unregister Ubuntu
 
 ---
 
+## Bug Reports
+
+Found a bug? File it on [GitHub Issues](https://github.com/wentorai/Research-Claw/issues). Title format: `[Bug] one-line description`.
+
+**An effective bug report needs four things:**
+
+| Element | How to provide |
+|:--|:--|
+| **Repro steps** | What you did, clicked, or typed — enough for the developer to reproduce |
+| **Backend logs** | Copy log text from terminal / Docker (see commands below) — **don't just screenshot** |
+| **Browser console** | `Cmd+Option+J` (macOS) or `Ctrl+Shift+J` (Windows) to open, copy error messages |
+| **Environment** | OS, install method (install.sh / Docker / WSL2), RC version (Dashboard bottom-left), model |
+
+> **Why copy log text instead of screenshots?** Screenshots can't be searched, can't be pasted into code for debugging, and often miss critical lines above or below the visible area. Use screenshots for UI issues + text-copy for logs.
+
+<details>
+<summary><b>Commands to get backend logs by platform</b></summary>
+
+```bash
+# macOS / Linux native install
+tail -50 ~/.openclaw/openclaw.log
+
+# Docker (macOS / Linux / Windows)
+docker logs --tail 50 research-claw
+
+# WSL2 (systemd service mode)
+journalctl --user -u research-claw --no-pager -n 50
+```
+
+You can also view and filter logs in Dashboard → **Settings** → **Logs** tab.
+
+</details>
+
+Feature requests and discussions → [GitHub Discussions](https://github.com/wentorai/Research-Claw/discussions).
+
+---
+
 ## Acknowledgments
 
 - [ppt-master](https://github.com/hugohe3/ppt-master) — PPT generation engine powering Research-Claw's presentation export feature
