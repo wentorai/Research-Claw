@@ -690,6 +690,43 @@ wsl --unregister Ubuntu
 
 ---
 
+## 问题反馈
+
+遇到 Bug？在 [GitHub Issues](https://github.com/wentorai/Research-Claw/issues) 提交报告，标题格式：`[Bug] 一句话描述`。
+
+**一份有效的 Bug 报告需要四样东西：**
+
+| 要素 | 怎么提供 |
+|:--|:--|
+| **复现步骤** | 写清楚你做了什么、点了什么、说了什么，让开发者能重现问题 |
+| **后端日志** | 从终端 / Docker 复制日志文字（见下方命令），**不要只截图** |
+| **浏览器控制台** | `Cmd+Option+J`（macOS）或 `Ctrl+Shift+J`（Windows）打开，复制错误信息 |
+| **环境信息** | 系统、安装方式（install.sh / Docker / WSL2）、RC 版本（Dashboard 左下角）、模型 |
+
+> **为什么日志要文字复制？** 截图里的日志无法搜索、无法复制到代码中定位、容易截不全。截图展示界面异常 + 文字复制日志内容，两者配合。
+
+<details>
+<summary><b>各平台获取后端日志的命令</b></summary>
+
+```bash
+# macOS / Linux 原生安装
+tail -50 ~/.openclaw/openclaw.log
+
+# Docker（macOS / Linux / Windows）
+docker logs --tail 50 research-claw
+
+# WSL2（systemd 服务模式）
+journalctl --user -u research-claw --no-pager -n 50
+```
+
+也可以在 Dashboard → **Settings** → **Logs** 标签中查看和筛选日志。
+
+</details>
+
+功能建议和讨论请用 [GitHub Discussions](https://github.com/wentorai/Research-Claw/discussions)。
+
+---
+
 ## 致谢
 
 - [ppt-master](https://github.com/hugohe3/ppt-master) — PPT 生成引擎，为科研龙虾的 PPT 导出功能提供了核心支持
