@@ -322,7 +322,7 @@
     "clearApiKey": "Clear API Key",
     "providerConfigured": "Configured",
     "apiKeyWillUpdate": "Saving will replace the current API key",
-    "apiKeyDeletePending": "Saving will clear this provider's API key",
+    "apiKeyDeletePending": "Saving will clear the previously saved API key",
     "apiKeyMissing": "No API key configured for this provider",
     "primaryModel": "Text Endpoint",
     "enableVision": "Independent Vision Model (optional)",
