@@ -47,6 +47,13 @@
     "noActivityYet": "No activity yet",
     "clear": "Clear",
     "refresh": "Refresh chat",
+    "refreshed": "Refreshed — {{count}} new message(s)",
+    "refreshUpToDate": "Chat is up to date",
+    "refreshFailed": "Refresh failed",
+    "inputHistory": "Input history",
+    "inputHistoryTitle": "Input History",
+    "inputHistoryEmpty": "No history yet",
+    "inputHistoryTip": "Tip: Press \u2191\u2193 in the input box to quickly browse history",
     "copyRaw": "Copy source (thinking + markdown)",
     "system": "System",
     "commandFailed": "Command failed"

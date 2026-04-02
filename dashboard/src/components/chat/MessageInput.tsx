@@ -1,12 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Button, Tooltip, message } from 'antd';
-import { SendOutlined, PaperClipOutlined, ReloadOutlined } from '@ant-design/icons';
+import { SendOutlined, PaperClipOutlined, ReloadOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
 import { useToolStreamStore } from '../../stores/tool-stream';
 import type { ChatAttachment } from '../../gateway/types';
 import SlashCommandMenu, { useSlashCommandMenu } from './SlashCommandMenu';
+import InputHistoryPopup from './InputHistoryPopup';
+import { useInputHistory } from '../../hooks/useInputHistory';
 
 const DRAFT_STORAGE_PREFIX = 'rc-chat-draft:';
 
@@ -32,6 +34,11 @@ export default function MessageInput() {
   const loadHistory = useChatStore((s) => s.loadHistory);
   const connState = useGatewayStore((s) => s.state);
 
+  const inputHistory = useInputHistory();
+  const [historyPopupOpen, setHistoryPopupOpen] = useState(false);
+  /** Stashed draft text when browsing history — restored on ArrowDown past end. */
+  const draftRef = useRef<string | null>(null);
+
   const isConnected = connState === 'connected';
   const canSend = (text.trim().length > 0 || attachments.length > 0) && isConnected && !sending;
 
@@ -48,6 +55,9 @@ export default function MessageInput() {
 
   // Restore draft when session changes
   useEffect(() => {
+    // Reset history navigation state for the new session
+    inputHistory.reset();
+    draftRef.current = null;
     try {
       const saved = localStorage.getItem(DRAFT_STORAGE_PREFIX + sessionKey) ?? '';
       setText(saved);
@@ -59,12 +69,25 @@ export default function MessageInput() {
         }
       }
     } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- inputHistory ref is stable
   }, [sessionKey]);
 
-  const handleRefresh = useCallback(() => {
-    useToolStreamStore.getState().clearAll();
-    loadHistory();
-  }, [loadHistory]);
+  const handleRefresh = useCallback(async () => {
+    const beforeCount = useChatStore.getState().messages.length;
+    try {
+      useToolStreamStore.getState().clearAll();
+      await loadHistory();
+      const afterCount = useChatStore.getState().messages.length;
+      const diff = afterCount - beforeCount;
+      if (diff > 0) {
+        message.success(t('chat.refreshed', { count: diff, defaultValue: 'Refreshed — {{count}} new message(s)' }), 2);
+      } else {
+        message.info(t('chat.refreshUpToDate', { defaultValue: 'Chat is up to date' }), 2);
+      }
+    } catch {
+      message.error(t('chat.refreshFailed', { defaultValue: 'Refresh failed' }), 2);
+    }
+  }, [loadHistory, t]);
 
   // Slash command autocomplete menu
   const slashMenu = useSlashCommandMenu(text, (completed) => {
@@ -160,6 +183,13 @@ export default function MessageInput() {
   const handleSend = useCallback(() => {
     const msg = text.trim();
     if ((!msg && attachments.length === 0) || !isConnected || sending) return;
+    // Push to input history before clearing
+    if (msg) {
+      inputHistory.push(msg);
+      inputHistory.reset();
+      draftRef.current = null;
+    }
+    setHistoryPopupOpen(false);
     setText('');
     setAttachments([]);
     // Clear persisted draft on send
@@ -168,13 +198,65 @@ export default function MessageInput() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [text, attachments, isConnected, sending, send, sessionKey]);
+  }, [text, attachments, isConnected, sending, send, sessionKey, inputHistory]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Do not intercept Enter during IME composition (e.g. Chinese pinyin input)
+    // Do not intercept during IME composition (e.g. Chinese pinyin input)
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     // Let slash command menu handle navigation keys first
     if (slashMenu.handleKeyDown(e)) return;
+
+    // ── Input history navigation (ArrowUp / ArrowDown) ──
+    const el = textareaRef.current;
+    if (el && e.key === 'ArrowUp' && !historyPopupOpen) {
+      // Only intercept if cursor is at the first line (before first newline or at pos 0)
+      const beforeCursor = el.value.slice(0, el.selectionStart);
+      if (!beforeCursor.includes('\n')) {
+        const prev = inputHistory.up();
+        if (prev !== null) {
+          e.preventDefault();
+          // Stash current text as draft on first history navigation
+          if (draftRef.current === null) {
+            draftRef.current = text;
+          }
+          setText(prev);
+          // Move cursor to end after React re-render
+          requestAnimationFrame(() => {
+            if (el) {
+              el.style.height = 'auto';
+              el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+              el.selectionStart = el.selectionEnd = el.value.length;
+            }
+          });
+        }
+        return;
+      }
+    }
+
+    if (el && e.key === 'ArrowDown' && inputHistory.cursor() >= 0) {
+      // Only intercept if cursor is at the last line
+      const afterCursor = el.value.slice(el.selectionEnd);
+      if (!afterCursor.includes('\n')) {
+        const next = inputHistory.down();
+        e.preventDefault();
+        if (next !== null) {
+          setText(next);
+        } else {
+          // Back to draft
+          setText(draftRef.current ?? '');
+          draftRef.current = null;
+        }
+        requestAnimationFrame(() => {
+          if (el) {
+            el.style.height = 'auto';
+            el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+            el.selectionStart = el.selectionEnd = el.value.length;
+          }
+        });
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -299,6 +381,34 @@ export default function MessageInput() {
             icon={<PaperClipOutlined />}
             onClick={() => fileInputRef.current?.click()}
             disabled={!isConnected || sending}
+            style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
+          />
+        </Tooltip>
+
+        {/* Input history popup + trigger button */}
+        <InputHistoryPopup
+          items={inputHistory.items()}
+          visible={historyPopupOpen}
+          onSelect={(historyText) => {
+            setText(historyText);
+            setHistoryPopupOpen(false);
+            textareaRef.current?.focus();
+            requestAnimationFrame(() => {
+              const el = textareaRef.current;
+              if (el) {
+                el.style.height = 'auto';
+                el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+                el.selectionStart = el.selectionEnd = el.value.length;
+              }
+            });
+          }}
+          onDismiss={() => setHistoryPopupOpen(false)}
+        />
+        <Tooltip title={t('chat.inputHistory', { defaultValue: 'Input history' })}>
+          <Button
+            type="text"
+            icon={<HistoryOutlined />}
+            onClick={() => setHistoryPopupOpen((v) => !v)}
             style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
           />
         </Tooltip>

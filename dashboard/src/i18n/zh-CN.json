@@ -47,6 +47,13 @@
     "noActivityYet": "暂无活动",
     "clear": "清空",
     "refresh": "刷新对话",
+    "refreshed": "已刷新 — 发现 {{count}} 条新消息",
+    "refreshUpToDate": "对话已是最新",
+    "refreshFailed": "刷新失败",
+    "inputHistory": "历史输入",
+    "inputHistoryTitle": "历史输入",
+    "inputHistoryEmpty": "暂无记录",
+    "inputHistoryTip": "提示：在输入框中按键盘 ↑↓ 键可以快速切换到历史输入记录",
     "copyRaw": "复制原文（思维链 + Markdown）",
     "system": "系统",
     "commandFailed": "命令执行失败"
