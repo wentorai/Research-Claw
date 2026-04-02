@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   openclaw@2026.3.13:
-    hash: aet2zbzwwtjncv44kxsmmeiwfu
+    hash: aiymcx6q4axvac2tt3ys5xja3u
     path: patches/openclaw@2026.3.13.patch
 
 importers:
@@ -18,7 +18,7 @@ importers:
     dependencies:
       openclaw:
         specifier: 2026.3.13
-        version: 2026.3.13(patch_hash=aet2zbzwwtjncv44kxsmmeiwfu)(@napi-rs/canvas@0.1.96)(@types/express@5.0.6)(node-llama-cpp@3.16.2(typescript@5.9.3))
+        version: 2026.3.13(patch_hash=aiymcx6q4axvac2tt3ys5xja3u)(@napi-rs/canvas@0.1.96)(@types/express@5.0.6)(node-llama-cpp@3.16.2(typescript@5.9.3))
     devDependencies:
       concurrently:
         specifier: ^9.1.0
@@ -160,7 +160,7 @@ importers:
         version: 22.19.15
       openclaw:
         specifier: 2026.3.13
-        version: 2026.3.13(patch_hash=aet2zbzwwtjncv44kxsmmeiwfu)(@napi-rs/canvas@0.1.96)(@types/express@5.0.6)(node-llama-cpp@3.16.2(typescript@5.9.3))
+        version: 2026.3.13(patch_hash=aiymcx6q4axvac2tt3ys5xja3u)(@napi-rs/canvas@0.1.96)(@types/express@5.0.6)(node-llama-cpp@3.16.2(typescript@5.9.3))
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -10471,7 +10471,7 @@ snapshots:
       ws: 8.19.0
       zod: 4.3.6
 
-  openclaw@2026.3.13(patch_hash=aet2zbzwwtjncv44kxsmmeiwfu)(@napi-rs/canvas@0.1.96)(@types/express@5.0.6)(node-llama-cpp@3.16.2(typescript@5.9.3)):
+  openclaw@2026.3.13(patch_hash=aiymcx6q4axvac2tt3ys5xja3u)(@napi-rs/canvas@0.1.96)(@types/express@5.0.6)(node-llama-cpp@3.16.2(typescript@5.9.3)):
     dependencies:
       '@agentclientprotocol/sdk': 0.16.1(zod@4.3.6)
       '@aws-sdk/client-bedrock': 3.1014.0
