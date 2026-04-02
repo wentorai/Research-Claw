@@ -718,6 +718,12 @@ const plugin: PluginDefinition = {
 
     // Hook 2: Ensure DB is open and migrated on session start
     api.on('session_start', () => {
+      // Reset tool call dedup state — each session/run is a fresh context.
+      // Without this, dedup threshold leaks across sessions and blocks
+      // legitimate calls that happen to match a previous session's pattern.
+      _lastToolSig = null;
+      _lastToolCount = 0;
+
       if (dbManager?.isOpen()) {
         runMigrations(dbManager.db);
       }
@@ -787,9 +793,37 @@ const plugin: PluginDefinition = {
       /:\(\)\s*\{.*:\|:.*&\s*\}/,
     ];
 
+    // ── Tool call dedup guard ──────────────────────────────────────
+    // Some models (e.g. glm-5) generate 1000+ identical tool calls in
+    // a single response. Track consecutive identical calls and block
+    // after TOOL_DEDUP_MAX repeats to prevent transcript bloat.
+    const TOOL_DEDUP_MAX = 5;
+    let _lastToolSig: string | null = null;
+    let _lastToolCount = 0;
+
     api.on('before_tool_call', (event: unknown) => {
       const evt = event as { toolName?: string; params?: Record<string, unknown> } | undefined;
       if (!evt) return {};
+
+      // ── Duplicate tool call guard ───────────────────────────────────
+      const toolSig = `${evt.toolName ?? ''}::${JSON.stringify(evt.params ?? {})}`;
+      if (toolSig === _lastToolSig) {
+        _lastToolCount++;
+        if (_lastToolCount > TOOL_DEDUP_MAX) {
+          api.logger.warn(
+            `[ToolDedup] Blocked "${evt.toolName}" — ${_lastToolCount} identical consecutive calls`,
+          );
+          return {
+            block: true,
+            blockReason:
+              `Blocked: "${evt.toolName}" called ${_lastToolCount} times with identical arguments. ` +
+              `This appears to be a model tool-call loop. Change the arguments or use a different approach.`,
+          };
+        }
+      } else {
+        _lastToolSig = toolSig;
+        _lastToolCount = 1;
+      }
 
       // ── Cron schedule sync ──────────────────────────────────────────
       // The agent uses OpenClaw's built-in `cron` tool (action: "update")

@@ -211,6 +211,15 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
+  // 10b. Agent timeout — cap at 300s (5 min). The original 900s (15 min)
+  //      causes unrecoverable hangs when the model API is unresponsive.
+  //      OC default (600s) is also too long; RC uses faster failover.
+  const RC_TIMEOUT_SECONDS = 300;
+  if (!c.agents.defaults.timeoutSeconds || c.agents.defaults.timeoutSeconds > RC_TIMEOUT_SECONDS) {
+    c.agents.defaults.timeoutSeconds = RC_TIMEOUT_SECONDS;
+    changed = true;
+  }
+
   // 11. Heartbeat — ensure lightContext is true to minimize token cost
   if (!c.agents.defaults.heartbeat) {
     c.agents.defaults.heartbeat = { every: '30m', lightContext: true };

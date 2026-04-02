@@ -113,6 +113,10 @@ index 1111111111111111111111111111111111111111..22222222222222222222222222222222
 -	const SHUTDOWN_TIMEOUT_MS = 5e3;
 +	const DRAIN_TIMEOUT_MS = 15e3;
 +	const SHUTDOWN_TIMEOUT_MS = 8e3;
+@@ -10896,1 +10896,2 @@
+-		const normalized = sanitizeChatHistoryMessages(stripEnvelopeFromMessages(rawMessages.length > max ? rawMessages.slice(-max) : rawMessages));
++		const visibleMessages = rawMessages.filter((m) => m.role !== 'toolResult');
++		const normalized = sanitizeChatHistoryMessages(stripEnvelopeFromMessages(visibleMessages.length > max ? visibleMessages.slice(-max) : visibleMessages));
 diff --git a/dist/gateway-cli-Ol-vpIk7.js b/dist/gateway-cli-Ol-vpIk7.js
 index 3333333333333333333333333333333333333333..4444444444444444444444444444444444444444 100644
 --- a/dist/gateway-cli-Ol-vpIk7.js
@@ -122,6 +126,10 @@ index 3333333333333333333333333333333333333333..44444444444444444444444444444444
 -	const SHUTDOWN_TIMEOUT_MS = 5e3;
 +	const DRAIN_TIMEOUT_MS = 15e3;
 +	const SHUTDOWN_TIMEOUT_MS = 8e3;
+@@ -10894,1 +10894,2 @@
+-		const normalized = sanitizeChatHistoryMessages(stripEnvelopeFromMessages(rawMessages.length > max ? rawMessages.slice(-max) : rawMessages));
++		const visibleMessages = rawMessages.filter((m) => m.role !== 'toolResult');
++		const normalized = sanitizeChatHistoryMessages(stripEnvelopeFromMessages(visibleMessages.length > max ? visibleMessages.slice(-max) : visibleMessages));
 diff --git a/dist/cli/daemon-cli.js b/dist/cli/daemon-cli.js
 index 336686b8b31f6e417786c44e73b34facd8829b90..86058e0c863ae2403b9525bbf770af10f9822103 100644
 --- a/dist/cli/daemon-cli.js

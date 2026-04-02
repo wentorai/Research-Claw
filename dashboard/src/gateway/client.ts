@@ -254,7 +254,7 @@ export class GatewayClient {
       // Pass error info to onClose so the store can distinguish error types
       this.opts.onClose?.({ code: ev.code, reason: ev.reason ?? '', error: connectError });
 
-      if (this.intentionalClose || ev.code === 1000 || ev.code === 1001) {
+      if (this.intentionalClose || ev.code === 1000) {
         this.setState('disconnected');
         return;
       }
