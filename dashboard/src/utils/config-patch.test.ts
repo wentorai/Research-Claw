@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   buildSaveConfig,
   extractConfigFields,
+  mergeProjectConfigsPreservingProviders,
   isConfigValid,
   hasModelConfigured,
   REDACTED_SENTINEL,
+  type ConfigPatchInput,
 } from './config-patch';
 
 describe('buildSaveConfig', () => {
@@ -284,9 +286,7 @@ describe('buildSaveConfig', () => {
     expect(providers.zai.apiKey).toBe('sk-shared');
   });
 
-  // --- New tests: stale provider cleanup ---
-
-  it('removes stale providers not referenced by user input', () => {
+  it('preserves non-active providers when saving the current provider', () => {
     const existing = {
       models: {
         providers: {
@@ -305,9 +305,118 @@ describe('buildSaveConfig', () => {
     });
 
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
-    expect(providers.rc).toBeUndefined();
+    expect(providers.rc).toBeDefined();
+    expect(providers.rc.apiKey).toBe('old-key');
     expect(providers.openai).toBeDefined();
-    expect(Object.keys(providers)).toEqual(['openai']);
+    expect(providers.openai.apiKey).toBe('sk-new');
+  });
+
+  it('merges omitted providers back into newer project snapshots', () => {
+    const previous = {
+      agents: { defaults: { model: { primary: 'zai-coding-global/glm-5' } } },
+      models: {
+        providers: {
+          'zai-coding-global': {
+            baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+            api: 'openai-completions',
+            apiKey: REDACTED_SENTINEL,
+            models: [{ id: 'glm-5', name: 'glm-5' }],
+          },
+        },
+      },
+    };
+
+    const latest = {
+      agents: { defaults: { model: { primary: 'minimax/MiniMax-M2.7' } } },
+      models: {
+        providers: {
+          minimax: {
+            baseUrl: 'https://api.minimax.io/anthropic',
+            api: 'anthropic-messages',
+            apiKey: REDACTED_SENTINEL,
+            models: [{ id: 'MiniMax-M2.7', name: 'MiniMax-M2.7' }],
+          },
+        },
+      },
+    };
+
+    const merged = mergeProjectConfigsPreservingProviders(
+      latest as Record<string, unknown>,
+      previous as Record<string, unknown>,
+    );
+
+    const providers = (merged?.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers['zai-coding-global']).toBeDefined();
+    expect(providers['zai-coding-global'].apiKey).toBe(REDACTED_SENTINEL);
+    expect(providers.minimax).toBeDefined();
+  });
+
+  it('rebuilds a switched-back provider from merged snapshots without requiring a new key', () => {
+    const previous = {
+      agents: { defaults: { model: { primary: 'zai-coding-global/glm-5' } } },
+      models: {
+        providers: {
+          'zai-coding-global': {
+            baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+            api: 'openai-completions',
+            apiKey: REDACTED_SENTINEL,
+            models: [{ id: 'glm-5', name: 'glm-5' }],
+          },
+        },
+      },
+    };
+
+    const latest = {
+      agents: { defaults: { model: { primary: 'minimax/MiniMax-M2.7' } } },
+      models: {
+        providers: {
+          minimax: {
+            baseUrl: 'https://api.minimax.io/anthropic',
+            api: 'anthropic-messages',
+            apiKey: REDACTED_SENTINEL,
+            models: [{ id: 'MiniMax-M2.7', name: 'MiniMax-M2.7' }],
+          },
+        },
+      },
+    };
+
+    const merged = mergeProjectConfigsPreservingProviders(
+      latest as Record<string, unknown>,
+      previous as Record<string, unknown>,
+    );
+
+    const config = buildSaveConfig(merged, {
+      provider: 'zai-coding-global',
+      baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+      api: 'openai-completions',
+      textModel: 'glm-5',
+      apiKeyConfigured: true,
+    });
+
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers['zai-coding-global']).toBeDefined();
+    expect(providers['zai-coding-global'].apiKey).toBe(REDACTED_SENTINEL);
+    expect(providers.minimax).toBeDefined();
+  });
+
+  it('explicit deleteTextApiKey clears the text provider apiKey', () => {
+    const existing = {
+      models: {
+        providers: {
+          openai: { baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-old' },
+        },
+      },
+    };
+
+    const config = buildSaveConfig(existing, {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      textModel: 'gpt-4o',
+      deleteTextApiKey: true,
+    });
+
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers.openai.apiKey).toBe('');
   });
 
   // --- New tests: config preservation ---
@@ -562,6 +671,79 @@ describe('buildSaveConfig', () => {
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
     expect(providers.openai.apiKey).toBe('sk-text-old');
     expect(providers.zai.apiKey).toBe('sk-vision-old');
+  });
+
+  it('keeps apiKey for non-active providers across provider switches', () => {
+    const config1 = {
+      models: {
+        providers: {
+          zai: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', apiKey: 'sk-zai-old', api: 'openai-completions' },
+          minimax: { baseUrl: 'https://api.minimax.io/anthropic', apiKey: 'sk-minimax-old', api: 'anthropic-messages' },
+        },
+      },
+      agents: {
+        defaults: {
+          model: { primary: 'zai/glm-5' },
+          imageModel: { primary: 'zai/glm-5' },
+        },
+      },
+    };
+
+    // Switch zai -> minimax, user leaves apiKey input empty => preserve minimax apiKey and keep zai apiKey.
+    const config2 = buildSaveConfig(config1 as unknown as Record<string, unknown>, {
+      provider: 'minimax',
+      baseUrl: 'https://api.minimax.io/anthropic',
+      textModel: 'MiniMax-M2.7',
+    } as ConfigPatchInput);
+
+    const providers2 = (config2.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers2.zai.apiKey).toBe('sk-zai-old');
+    expect(providers2.minimax.apiKey).toBe('sk-minimax-old');
+
+    // Switch minimax -> zai, again user leaves apiKey input empty => preserve both sides.
+    const config3 = buildSaveConfig(config2 as unknown as Record<string, unknown>, {
+      provider: 'zai',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      textModel: 'glm-5',
+    } as ConfigPatchInput);
+
+    const providers3 = (config3.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers3.zai.apiKey).toBe('sk-zai-old');
+    expect(providers3.minimax.apiKey).toBe('sk-minimax-old');
+  });
+
+  it('restores missing provider entries from restoreProviders (prevents key loss)', () => {
+    const existing = {
+      models: {
+        providers: {
+          'openai-codex': {
+            baseUrl: 'https://chatgpt.com/backend-api',
+            api: 'openai-codex-responses',
+            models: [{ id: 'gpt-5.4', input: ['text', 'image'] }],
+          },
+        },
+      },
+      agents: {
+        defaults: {
+          model: { primary: 'openai-codex/gpt-5.4' },
+        },
+      },
+    };
+
+    const config = buildSaveConfig(existing as unknown as Record<string, unknown>, {
+      provider: 'openai-codex',
+      baseUrl: 'https://chatgpt.com/backend-api',
+      api: 'openai-codex-responses',
+      textModel: 'gpt-5.4',
+      restoreProviders: {
+        zai: { modelId: 'glm-5', apiKey: 'sk-zai-keep' },
+      },
+    } as any);
+
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers['openai-codex']).toBeDefined();
+    expect(providers.zai).toBeDefined();
+    expect(providers.zai.apiKey).toBe('sk-zai-keep');
   });
 });
 
