@@ -351,7 +351,7 @@ export const CONFIG_GET_WITH_HEARTBEAT = {
 
 // ─── Config with stale provider from a previous setup ────────────────
 // Simulates migrating from an old 'rc' provider to 'openai'.
-// The 'rc' entry should be dropped by buildSaveConfig.
+// The 'rc' entry is preserved when saving another provider (merge, not replace).
 export const CONFIG_GET_STALE_PROVIDER = {
   config: {
     agents: {

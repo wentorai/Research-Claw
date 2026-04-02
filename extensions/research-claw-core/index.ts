@@ -333,6 +333,32 @@ const plugin: PluginDefinition = {
       if (!provider) throw new Error('provider is required');
       return oauthStatus(provider);
     });
+    registerMethod('rc.auth.status', (params: Record<string, unknown>) => {
+      const { apiKeyStatus } = require('./src/oauth/service');
+      const provider = params.provider as string;
+      if (!provider) throw new Error('provider is required');
+      return apiKeyStatus(provider);
+    });
+    registerMethod('rc.auth.statuses', (params: Record<string, unknown>) => {
+      const { apiKeyStatuses } = require('./src/oauth/service');
+      const providers = (params.providers as string[] | undefined) ?? [];
+      return apiKeyStatuses(providers);
+    });
+    registerMethod('rc.auth.setApiKey', (params: Record<string, unknown>) => {
+      const { setApiKeyProfile } = require('./src/oauth/service');
+      const provider = params.provider as string;
+      const apiKey = params.apiKey as string;
+      const profileId = params.profileId as string | undefined;
+      if (!provider || !apiKey) throw new Error('provider and apiKey are required');
+      return setApiKeyProfile(provider, apiKey, profileId);
+    });
+    registerMethod('rc.auth.clearApiKey', (params: Record<string, unknown>) => {
+      const { clearApiKeyProfile } = require('./src/oauth/service');
+      const provider = params.provider as string;
+      const profileId = params.profileId as string | undefined;
+      if (!provider) throw new Error('provider is required');
+      return clearApiKeyProfile(provider, profileId);
+    });
 
     // ── 6. Register HTTP route: POST /rc/upload ──────────────────────
     api.registerHttpRoute({

@@ -34,12 +34,18 @@ interface OAuthCredential {
   email?: string;
 }
 
+interface ApiKeyCredential {
+  type: 'api_key';
+  provider: string;
+  key: string;
+}
+
 // Matches OC's AuthProfileStore shape (agents/auth-profiles/types.ts).
 // Extra fields (lastGood, usageStats, order) are preserved via JSON round-trip
 // even though TypeScript doesn't enforce them here.
 interface AuthProfileStore {
   version?: number;
-  profiles: Record<string, OAuthCredential>;
+  profiles: Record<string, OAuthCredential | ApiKeyCredential>;
   order?: Record<string, unknown>;
   lastGood?: Record<string, string>;
   usageStats?: Record<string, unknown>;
@@ -114,6 +120,16 @@ function readAuthStore(): AuthProfileStore {
   } catch {
     return { version: 1, profiles: {} };
   }
+}
+
+function defaultProfileId(provider: string): string {
+  return `${provider}:manual`;
+}
+
+function ensureProviderOrder(store: AuthProfileStore, provider: string, profileId: string): void {
+  const existing = Array.isArray(store.order?.[provider]) ? (store.order?.[provider] as string[]) : [];
+  const deduped = [profileId, ...existing.filter((id) => id !== profileId)];
+  store.order = { ...(store.order ?? {}), [provider]: deduped };
 }
 
 // Write auth store with atomic rename (write-to-temp-then-rename).
@@ -442,4 +458,95 @@ export function oauthStatus(provider: string): { authenticated: boolean; profile
     profileId: def.profileId,
     expiresAt: cred.expires,
   };
+}
+
+export function apiKeyStatus(provider: string): {
+  configured: boolean;
+  profileId: string | null;
+  profileType: 'api_key' | 'oauth' | null;
+} {
+  const store = readAuthStore();
+  const entries = Object.entries(store.profiles);
+  for (const [profileId, cred] of entries) {
+    if (!cred || cred.provider !== provider) continue;
+    if (cred.type === 'api_key' && typeof cred.key === 'string' && cred.key.length > 0) {
+      return { configured: true, profileId, profileType: 'api_key' };
+    }
+    if (cred.type === 'oauth' && typeof cred.access === 'string' && cred.access.length > 0) {
+      return { configured: true, profileId, profileType: 'oauth' };
+    }
+  }
+  return { configured: false, profileId: null, profileType: null };
+}
+
+export function apiKeyStatuses(providers: string[]): Record<string, {
+  configured: boolean;
+  profileId: string | null;
+  profileType: 'api_key' | 'oauth' | null;
+}> {
+  const result: Record<string, {
+    configured: boolean;
+    profileId: string | null;
+    profileType: 'api_key' | 'oauth' | null;
+  }> = {};
+  for (const provider of providers) {
+    if (!provider) continue;
+    result[provider] = apiKeyStatus(provider);
+  }
+  return result;
+}
+
+export function setApiKeyProfile(
+  provider: string,
+  apiKey: string,
+  profileId?: string,
+): { ok: true; provider: string; profileId: string } {
+  const trimmedKey = apiKey.trim();
+  if (!provider) throw new Error('provider is required');
+  if (!trimmedKey) throw new Error('apiKey is required');
+
+  const resolvedProfileId = (profileId || defaultProfileId(provider)).trim();
+  const store = readAuthStore();
+  if (!store.version) store.version = 1;
+
+  store.profiles[resolvedProfileId] = {
+    type: 'api_key',
+    provider,
+    key: trimmedKey,
+  };
+  ensureProviderOrder(store, provider, resolvedProfileId);
+  store.lastGood = { ...(store.lastGood ?? {}), [provider]: resolvedProfileId };
+  writeAuthStore(store);
+
+  return { ok: true, provider, profileId: resolvedProfileId };
+}
+
+export function clearApiKeyProfile(
+  provider: string,
+  profileId?: string,
+): { ok: true; provider: string; removed: string[] } {
+  if (!provider) throw new Error('provider is required');
+
+  const store = readAuthStore();
+  const removed: string[] = [];
+  const targetId = profileId?.trim();
+
+  for (const [id, cred] of Object.entries(store.profiles)) {
+    if (targetId && id !== targetId) continue;
+    if (cred?.provider !== provider) continue;
+    if (cred.type !== 'api_key') continue;
+    delete store.profiles[id];
+    removed.push(id);
+  }
+
+  if (removed.length > 0 && store.order && Array.isArray(store.order[provider])) {
+    const nextOrder = (store.order[provider] as string[]).filter((id) => !removed.includes(id));
+    store.order[provider] = nextOrder;
+  }
+  if (removed.length > 0 && store.lastGood?.[provider] && removed.includes(store.lastGood[provider])) {
+    delete store.lastGood[provider];
+  }
+
+  writeAuthStore(store);
+  return { ok: true, provider, removed };
 }

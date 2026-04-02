@@ -17,7 +17,12 @@ import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
 import { useUiStore } from '../../stores/ui';
 import { getThemeTokens } from '../../styles/theme';
-import { buildSaveConfig, extractConfigFields } from '../../utils/config-patch';
+import {
+  buildSaveConfig,
+  extractConfigFields,
+  extractProviderFieldsForEditor,
+  mergeProjectConfigsPreservingProviders,
+} from '../../utils/config-patch';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
 
 const { Text } = Typography;
@@ -43,7 +48,15 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', gap: 16 }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        padding: '10px 0',
+        gap: 16,
+      }}
+    >
       <div style={{ flex: 1, minWidth: 0 }}>
         <Text style={{ fontSize: 13 }}>{label}</Text>
         {description && (
@@ -310,19 +323,118 @@ export default function SettingsPanel() {
   // True on mount (initial load) and after explicit refresh / save-restart.
   // Prevents WebSocket reconnections from overwriting in-progress user edits.
   const syncNeeded = useRef(true);
+  const projectConfigCacheRef = useRef<Record<string, unknown> | null>(null);
+
+  /** Set true when user clicks "Clear API Key"; applied on next save only. */
+  const deleteTextApiKeyRef = useRef(false);
+  const deleteVisionApiKeyRef = useRef(false);
+
+  // In-memory cache to avoid forcing re-entry when the gateway's `config.get`
+  // response drops non-active providers (common after provider switches).
+  // Cache is cleared only via explicit "Clear API Key" actions.
+  const apiKeyCacheRef = useRef<Record<string, string>>({});
+  const visionApiKeyCacheRef = useRef<Record<string, string>>({});
+
+  // Cache the last selected model id per provider so we can restore
+  // providers even when the gateway's `config.get` response drops them.
+  const textModelCacheRef = useRef<Record<string, string>>({});
+  const visionModelCacheRef = useRef<Record<string, string>>({});
 
   const isOpenAICodexOAuth = provider === 'openai-codex';
+  const visionSeparateProvider = visionProvider !== provider;
   const [oauthModalOpen, setOauthModalOpen] = useState(false);
+  const [textApiKeyDeletePending, setTextApiKeyDeletePending] = useState(false);
+  const [visionApiKeyDeletePending, setVisionApiKeyDeletePending] = useState(false);
+  const [authConfiguredByProvider, setAuthConfiguredByProvider] = useState<Record<string, boolean>>({});
 
-  const handleProviderChange = (id: string) => {
+  const supportsAuthProfiles = useCallback((id: string) => (
+    id !== 'custom' &&
+    id !== 'openai-codex' &&
+    id !== 'ollama' &&
+    id !== 'vllm'
+  ), []);
+
+  const refreshAuthStatuses = useCallback(async (providers?: string[]) => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) return;
+
+    const targets = (providers ?? PROVIDER_PRESETS.map((preset) => preset.id))
+      .filter((id, index, all) => Boolean(id) && all.indexOf(id) === index && supportsAuthProfiles(id));
+    if (targets.length === 0) return;
+
+    try {
+      const result = await client.request<Record<string, { configured?: boolean }>>('rc.auth.statuses', {
+        providers: targets,
+      });
+      setAuthConfiguredByProvider((prev) => {
+        const next = { ...prev };
+        for (const id of targets) {
+          next[id] = Boolean(result?.[id]?.configured);
+        }
+        return next;
+      });
+    } catch {
+      // Best effort only — config-based UI still works without auth status.
+    }
+  }, [supportsAuthProfiles]);
+
+  const providerHasSavedKey = useCallback((id: string) => {
+    if (!id || id === 'openai-codex') return false;
+    const cached = apiKeyCacheRef.current[id] || visionApiKeyCacheRef.current[id];
+    if (cached?.trim()) return true;
+    if (authConfiguredByProvider[id]) return true;
+    const providerConfig = projectConfigCacheRef.current ?? gatewayConfig as unknown as Record<string, unknown> | null;
+    if (!providerConfig) return false;
+    const hydrated = extractProviderFieldsForEditor(providerConfig, id);
+    return Boolean(hydrated?.apiKeyConfigured);
+  }, [authConfiguredByProvider, gatewayConfig]);
+
+  const currentProviderHasSavedKey = !textApiKeyDeletePending && providerHasSavedKey(provider);
+  const currentVisionProviderHasSavedKey = !visionApiKeyDeletePending && providerHasSavedKey(visionProvider);
+
+  const textApiKeyStatus = useMemo(() => {
+    if (isOpenAICodexOAuth) return t('setup.openaiCodexOauthNoApiKey');
+    if (textApiKeyDeletePending) return t('settings.apiKeyDeletePending');
+    if (apiKey.trim()) return t('settings.apiKeyWillUpdate');
+    if (apiKeyConfigured || currentProviderHasSavedKey) return '';
+    return t('settings.apiKeyMissing');
+  }, [apiKey, apiKeyConfigured, currentProviderHasSavedKey, isOpenAICodexOAuth, t, textApiKeyDeletePending]);
+
+  const visionApiKeyStatus = useMemo(() => {
+    if (!visionEnabled || !visionSeparateProvider) return null;
+    if (visionApiKeyDeletePending) return t('settings.apiKeyDeletePending');
+    if (visionApiKey.trim()) return t('settings.apiKeyWillUpdate');
+    if (visionApiKeyConfigured || currentVisionProviderHasSavedKey) return '';
+    return t('settings.apiKeyMissing');
+  }, [
+    currentVisionProviderHasSavedKey,
+    t,
+    visionApiKey,
+    visionApiKeyConfigured,
+    visionApiKeyDeletePending,
+    visionEnabled,
+    visionProvider,
+    visionSeparateProvider,
+  ]);
+
+  const handleProviderChange = useCallback((id: string) => {
     setProvider(id);
+    deleteTextApiKeyRef.current = false;
+    setTextApiKeyDeletePending(false);
     const preset = getPreset(id);
-    if (preset.baseUrl) {
+    const providerConfig = projectConfigCacheRef.current ?? gatewayConfig as unknown as Record<string, unknown> | null;
+    const hydrated = providerConfig
+      ? extractProviderFieldsForEditor(providerConfig, id)
+      : null;
+    if (hydrated) {
+      setBaseUrl(hydrated.baseUrl);
+      setApi(hydrated.api);
+      setApiKey(hydrated.apiKey);
+      setApiKeyConfigured(hydrated.apiKeyConfigured);
+      setTextModel(hydrated.textModel);
+      if (hydrated.textModel) textModelCacheRef.current[id] = hydrated.textModel;
+    } else if (preset.baseUrl) {
       let url = preset.baseUrl;
-      // Docker detection: when the dashboard is accessed via a non-loopback host
-      // (e.g., 172.x.x.x or host mapped port), the gateway is likely in a Docker
-      // container. Local providers (Ollama, vLLM) must use host.docker.internal
-      // instead of 127.0.0.1 to reach the host machine from inside the container.
       if ((id === 'ollama' || id === 'vllm') && typeof window !== 'undefined') {
         const host = window.location.hostname;
         const isNonLoopback = host !== '127.0.0.1' && host !== 'localhost' && host !== '::1';
@@ -331,31 +443,91 @@ export default function SettingsPanel() {
         }
       }
       setBaseUrl(url);
+      setApi(preset.api);
+      if (preset.models.length > 0) {
+        setTextModel(preset.models[0].id);
+        textModelCacheRef.current[id] = preset.models[0].id;
+      }
+      setApiKey('');
+      setApiKeyConfigured(false);
+    } else {
+      setApi(preset.api);
+      if (preset.models.length > 0) {
+        setTextModel(preset.models[0].id);
+        textModelCacheRef.current[id] = preset.models[0].id;
+      }
+      setApiKey('');
+      setApiKeyConfigured(false);
     }
-    setApi(preset.api);
-    if (preset.models.length > 0) {
-      setTextModel(preset.models[0].id);
+
+    // If the gateway doesn't expose this provider in config.get anymore,
+    // but the user previously typed a key (cached), restore "configured" state
+    // without requiring re-entry.
+    if (!id.startsWith('custom') && !deleteTextApiKeyRef.current) {
+      const cached = apiKeyCacheRef.current[id];
+      if (cached && cached.trim()) {
+        setApiKeyConfigured(true);
+        // Keep apiKey value empty to avoid showing the raw key in the input.
+        setApiKey('');
+      }
     }
-    // Provider-specific auth UX:
-    // `openai-codex` uses OAuth profiles; do not carry over apiKeyConfigured from previous providers.
     if (id === 'openai-codex') {
       setApiKey('');
       setApiKeyConfigured(false);
     }
-  };
+  }, [authConfiguredByProvider, gatewayConfig]);
 
-  const handleVisionProviderChange = (id: string) => {
+  const handleVisionProviderChange = useCallback((id: string) => {
     setVisionProvider(id);
+    deleteVisionApiKeyRef.current = false;
+    setVisionApiKeyDeletePending(false);
     const preset = getPreset(id);
-    if (preset.baseUrl) setVisionBaseUrl(preset.baseUrl);
-    setVisionApi(preset.api);
-    const visionCapable = preset.models.filter((m) => m.input?.includes('image'));
-    if (visionCapable.length > 0) {
-      setVisionModel(visionCapable[0].id);
-    } else if (preset.models.length > 0) {
-      setVisionModel(preset.models[0].id);
+    const providerConfig = projectConfigCacheRef.current ?? gatewayConfig as unknown as Record<string, unknown> | null;
+    const hydrated = providerConfig
+      ? extractProviderFieldsForEditor(providerConfig, id)
+      : null;
+    if (hydrated) {
+      setVisionBaseUrl(hydrated.baseUrl);
+      setVisionApi(hydrated.api);
+      setVisionApiKey(hydrated.apiKey);
+      setVisionApiKeyConfigured(hydrated.apiKeyConfigured);
+      const all = extractConfigFields(gatewayConfig as unknown as Record<string, unknown>);
+      if (all.visionProvider === id && all.visionModel) {
+        setVisionModel(all.visionModel);
+        if (all.visionModel) visionModelCacheRef.current[id] = all.visionModel;
+      } else {
+        const visionCapable = preset.models.filter((m) => m.input?.includes('image'));
+        if (visionCapable.length > 0) {
+          setVisionModel(visionCapable[0].id);
+          visionModelCacheRef.current[id] = visionCapable[0].id;
+        } else if (preset.models.length > 0) {
+          setVisionModel(preset.models[0].id);
+          visionModelCacheRef.current[id] = preset.models[0].id;
+        }
+      }
+    } else {
+      if (preset.baseUrl) setVisionBaseUrl(preset.baseUrl);
+      setVisionApi(preset.api);
+      const visionCapable = preset.models.filter((m) => m.input?.includes('image'));
+      if (visionCapable.length > 0) {
+        setVisionModel(visionCapable[0].id);
+        visionModelCacheRef.current[id] = visionCapable[0].id;
+      } else if (preset.models.length > 0) {
+        setVisionModel(preset.models[0].id);
+        visionModelCacheRef.current[id] = preset.models[0].id;
+      }
+      setVisionApiKey('');
+      setVisionApiKeyConfigured(false);
     }
-  };
+
+    if (!deleteVisionApiKeyRef.current) {
+      const cached = visionApiKeyCacheRef.current[id];
+      if (cached && cached.trim()) {
+        setVisionApiKeyConfigured(true);
+        setVisionApiKey('');
+      }
+    }
+  }, [authConfiguredByProvider, gatewayConfig]);
 
   const currentPreset = getPreset(provider);
   const modelOptions = currentPreset.models.map((m) => ({
@@ -371,9 +543,6 @@ export default function SettingsPanel() {
       label: `${m.id} — ${m.name}`,
     }));
 
-  // Whether vision uses a different provider (show separate baseUrl/apiKey)
-  const visionSeparateProvider = visionProvider !== provider;
-
   // Load gateway config when connected
   useEffect(() => {
     if (state === 'connected' && !gatewayConfig && !gatewayConfigLoading) {
@@ -381,13 +550,29 @@ export default function SettingsPanel() {
     }
   }, [state, gatewayConfig, gatewayConfigLoading, loadGatewayConfig]);
 
+  useEffect(() => {
+    if (state !== 'connected') return;
+    void refreshAuthStatuses();
+  }, [refreshAuthStatuses, state]);
+
   // Sync form fields from gateway config — only when explicitly requested
   // (initial mount, manual refresh, or post-save restart).
   useEffect(() => {
+    const latestProjectConfig = (
+      gatewayConfig?.projectConfig ??
+      (gatewayConfig as unknown as Record<string, unknown> | null)
+    );
+    projectConfigCacheRef.current = mergeProjectConfigsPreservingProviders(
+      latestProjectConfig,
+      projectConfigCacheRef.current,
+    );
+  }, [gatewayConfig]);
+
+  useEffect(() => {
     if (!gatewayConfig || !syncNeeded.current) return;
     syncNeeded.current = false;
-
-    const fields = extractConfigFields(gatewayConfig as unknown as Record<string, unknown>);
+    const configForEditor = projectConfigCacheRef.current ?? gatewayConfig as unknown as Record<string, unknown>;
+    const fields = extractConfigFields(configForEditor);
     setBaseUrl(fields.baseUrl);
     setApi(fields.api);
     setApiKey(fields.apiKey);
@@ -430,8 +615,9 @@ export default function SettingsPanel() {
 
   const handleRefresh = useCallback(() => {
     syncNeeded.current = true;
+    void refreshAuthStatuses();
     loadGatewayConfig();
-  }, [loadGatewayConfig]);
+  }, [loadGatewayConfig, refreshAuthStatuses]);
 
   const handleSave = useCallback(() => {
     const client = useGatewayStore.getState().client;
@@ -482,34 +668,97 @@ export default function SettingsPanel() {
             config?: Record<string, unknown>;
             hash?: string;
           }>('config.get', {});
+          const latestProjectConfig = (configSnapshot.parsed ?? configSnapshot.config ?? null) as Record<string, unknown> | null;
+          const mergedProjectConfig = mergeProjectConfigsPreservingProviders(
+            latestProjectConfig,
+            projectConfigCacheRef.current,
+          );
 
           // Use `parsed` (raw project JSON before OC validation/normalization)
           // so that resolveExistingApiKey finds keys at their original paths.
           // Matches SetupWizard.tsx:148. Without this, OC's config normalization
           // may restructure provider fields, causing apiKey lookups to fail.
+          const cachedTextKey = apiKeyCacheRef.current[provider]?.trim();
+          const cachedVisionKey = visionSeparateProvider
+            ? visionApiKeyCacheRef.current[visionProvider]?.trim()
+            : undefined;
+
+          // If the input box is empty and we have an in-memory cached key for
+          // this provider, send it to preserve configuration without retyping.
+          const apiKeyToSend = deleteTextApiKeyRef.current
+            ? undefined
+            : apiKey.trim() || cachedTextKey || undefined;
+          const visionApiKeyToSend = deleteVisionApiKeyRef.current
+            ? undefined
+            : (visionSeparateProvider ? (visionApiKey.trim() || cachedVisionKey || undefined) : undefined);
+
+          if (supportsAuthProfiles(provider)) {
+            if (deleteTextApiKeyRef.current) {
+              await client.request('rc.auth.clearApiKey', { provider });
+              setAuthConfiguredByProvider((prev) => ({ ...prev, [provider]: false }));
+            } else if (apiKeyToSend) {
+              await client.request('rc.auth.setApiKey', { provider, apiKey: apiKeyToSend });
+              setAuthConfiguredByProvider((prev) => ({ ...prev, [provider]: true }));
+            }
+          }
+          if (visionEnabled && visionSeparateProvider && supportsAuthProfiles(visionProvider)) {
+            if (deleteVisionApiKeyRef.current) {
+              await client.request('rc.auth.clearApiKey', { provider: visionProvider });
+              setAuthConfiguredByProvider((prev) => ({ ...prev, [visionProvider]: false }));
+            } else if (visionApiKeyToSend) {
+              await client.request('rc.auth.setApiKey', { provider: visionProvider, apiKey: visionApiKeyToSend });
+              setAuthConfiguredByProvider((prev) => ({ ...prev, [visionProvider]: true }));
+            }
+          }
+
+          // Restore other cached providers so `config.apply` doesn't accidentally
+          // drop non-active providers when `config.get` omits them.
+          const restoreProviders: Record<string, { modelId: string; apiKey: string }> = {};
+          for (const [pId, k] of Object.entries(apiKeyCacheRef.current)) {
+            const key = k?.trim() ?? '';
+            if (!key) continue;
+            if (pId === provider) continue;
+            const modelId = textModelCacheRef.current[pId] || getPreset(pId).models?.[0]?.id;
+            if (!modelId) continue;
+            restoreProviders[pId] = { modelId, apiKey: key };
+          }
+          if (visionSeparateProvider) {
+            for (const [vpId, k] of Object.entries(visionApiKeyCacheRef.current)) {
+              const key = k?.trim() ?? '';
+              if (!key) continue;
+              if (vpId === provider) continue;
+              const modelId = visionModelCacheRef.current[vpId] || getPreset(vpId).models?.[0]?.id;
+              if (!modelId) continue;
+              restoreProviders[vpId] = { modelId, apiKey: key };
+            }
+          }
+
           const fullConfig = buildSaveConfig(
-            (configSnapshot.parsed ?? configSnapshot.config ?? null) as Record<string, unknown> | null,
+            mergedProjectConfig,
             {
               provider,
               baseUrl: baseUrl.trim(),
               api,
-              apiKey: apiKey.trim() || undefined,
+              apiKey: apiKeyToSend,
               textModel: textModel.trim(),
               visionEnabled,
               visionProvider: visionEnabled ? visionProvider : undefined,
               visionModel: visionEnabled ? visionModel.trim() || undefined : undefined,
               visionBaseUrl: visionEnabled && visionSeparateProvider ? visionBaseUrl.trim() || undefined : undefined,
-              visionApiKey: visionEnabled && visionSeparateProvider ? (visionApiKey.trim() || undefined) : undefined,
+              visionApiKey: visionEnabled && visionSeparateProvider ? visionApiKeyToSend : undefined,
               visionApi: visionEnabled && visionSeparateProvider ? visionApi : undefined,
               proxyUrl: proxyEnabled ? proxyUrl.trim() : '',
               apiKeyConfigured,
               visionApiKeyConfigured,
+              deleteTextApiKey: deleteTextApiKeyRef.current,
+              deleteVisionApiKey: deleteVisionApiKeyRef.current,
               webSearchEnabled,
               webSearchProvider: webSearchEnabled ? webSearchProvider : undefined,
               webSearchApiKey: webSearchEnabled ? (webSearchApiKey.trim() || undefined) : undefined,
               webSearchApiKeyConfigured,
               heartbeatEnabled,
               heartbeatInterval,
+              restoreProviders: Object.keys(restoreProviders).length ? restoreProviders : undefined,
             },
           );
 
@@ -517,6 +766,14 @@ export default function SettingsPanel() {
             raw: JSON.stringify(fullConfig),
             baseHash: configSnapshot.hash,
           });
+
+          projectConfigCacheRef.current = fullConfig;
+
+          deleteTextApiKeyRef.current = false;
+          deleteVisionApiKeyRef.current = false;
+          setTextApiKeyDeletePending(false);
+          setVisionApiKeyDeletePending(false);
+          void refreshAuthStatuses([provider, visionProvider]);
 
           message.success(t('settings.saved'));
           syncNeeded.current = true;
@@ -528,7 +785,7 @@ export default function SettingsPanel() {
         }
       },
     });
-  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, t, modal, message]);
+  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, t, modal, message, refreshAuthStatuses, supportsAuthProfiles]);
 
   const handleSavePrompt = useCallback(() => {
     message.success(t('settings.saved'));
@@ -582,7 +839,8 @@ export default function SettingsPanel() {
           filterOption={providerFilterOption}
           options={PROVIDER_PRESETS.map((p) => {
             const lbl = p.id === 'custom' ? t('setup.providerCustom') : p.label;
-            return { value: p.id, label: lbl, title: lbl as string };
+            const configured = providerHasSavedKey(p.id) ? ` · ${t('settings.providerConfigured')}` : '';
+            return { value: p.id, label: `${lbl}${configured}`, title: `${lbl}${configured}` };
           })}
         />
       </SettingRow>
@@ -614,21 +872,59 @@ export default function SettingsPanel() {
       )}
 
       <SettingRow label={t('settings.apiKeyLabel')}>
-        <Input
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          size="small"
-          style={{ width: 220 }}
-          disabled={isOpenAICodexOAuth}
-          placeholder={
-            isOpenAICodexOAuth
-              ? t('setup.openaiCodexOauthNoApiKey')
-              : (apiKeyConfigured && !apiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder'))
-          }
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+          <Input
+            value={apiKey}
+            onChange={(e) => {
+              deleteTextApiKeyRef.current = false;
+              setTextApiKeyDeletePending(false);
+              const v = e.target.value;
+              setApiKey(v);
+              if (v.trim()) {
+                apiKeyCacheRef.current[provider] = v.trim();
+              }
+            }}
+            size="small"
+            style={{ width: 220 }}
+            disabled={isOpenAICodexOAuth}
+            placeholder={
+              isOpenAICodexOAuth
+                ? t('setup.openaiCodexOauthNoApiKey')
+                : (currentProviderHasSavedKey && !apiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder'))
+            }
+          />
+          {!isOpenAICodexOAuth && (
+            <>
+              {textApiKeyStatus ? (
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {textApiKeyStatus}
+                </Text>
+              ) : null}
+              {(currentProviderHasSavedKey || !!apiKey.trim()) && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', width: 220 }}>
+                  <Button
+                    size="small"
+                    type="link"
+                    danger
+                    style={{ padding: '0 4px', flexShrink: 0 }}
+                    onClick={() => {
+                      deleteTextApiKeyRef.current = true;
+                      setTextApiKeyDeletePending(true);
+                      setApiKey('');
+                      setApiKeyConfigured(false);
+                      delete apiKeyCacheRef.current[provider];
+                    }}
+                  >
+                    {t('settings.clearApiKey')}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </SettingRow>
       {isOpenAICodexOAuth && (
-        <div style={{ marginTop: -6, marginBottom: 6 }}>
+        <div style={{ marginTop: -6, marginBottom: 6, marginLeft: 100 }}>
           <Button
             size="small"
             icon={<KeyOutlined />}
@@ -647,7 +943,10 @@ export default function SettingsPanel() {
       <SettingRow label={t('settings.primaryModel')}>
         <AutoComplete
           value={textModel}
-          onChange={setTextModel}
+          onChange={(v) => {
+            setTextModel(v);
+            if (v.trim()) textModelCacheRef.current[provider] = v.trim();
+          }}
           options={modelOptions}
           allowClear
           size="small"
@@ -686,7 +985,7 @@ export default function SettingsPanel() {
               filterOption={providerFilterOption}
               options={PROVIDER_PRESETS.map((p) => ({
                 value: p.id,
-                label: p.id === 'custom' ? t('setup.providerCustom') : p.label,
+                label: `${p.id === 'custom' ? t('setup.providerCustom') : p.label}${providerHasSavedKey(p.id) ? ` · ${t('settings.providerConfigured')}` : ''}`,
               }))}
             />
           </SettingRow>
@@ -694,7 +993,10 @@ export default function SettingsPanel() {
           <SettingRow label={t('settings.visionModel')}>
             <AutoComplete
               value={visionModel}
-              onChange={setVisionModel}
+              onChange={(v) => {
+                setVisionModel(v);
+                if (v.trim()) visionModelCacheRef.current[visionProvider] = v.trim();
+              }}
               options={visionModelOptions}
               allowClear
               size="small"
@@ -720,13 +1022,47 @@ export default function SettingsPanel() {
               </SettingRow>
 
               <SettingRow label={t('settings.visionApiKey')}>
-                <Input
-                  value={visionApiKey}
-                  onChange={(e) => setVisionApiKey(e.target.value)}
-                  size="small"
-                  style={{ width: 220 }}
-                  placeholder={visionApiKeyConfigured && !visionApiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder')}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                  <Input
+                    value={visionApiKey}
+                    onChange={(e) => {
+                      deleteVisionApiKeyRef.current = false;
+                      setVisionApiKeyDeletePending(false);
+                      const v = e.target.value;
+                      setVisionApiKey(v);
+                      if (v.trim()) {
+                        visionApiKeyCacheRef.current[visionProvider] = v.trim();
+                      }
+                    }}
+                    size="small"
+                    style={{ width: 220 }}
+                    placeholder={currentVisionProviderHasSavedKey && !visionApiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder')}
+                  />
+                  {visionApiKeyStatus ? (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {visionApiKeyStatus}
+                    </Text>
+                  ) : null}
+                  {(currentVisionProviderHasSavedKey || !!visionApiKey.trim()) && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', width: 220 }}>
+                      <Button
+                        size="small"
+                        type="link"
+                        danger
+                        style={{ padding: '0 4px', flexShrink: 0 }}
+                        onClick={() => {
+                          deleteVisionApiKeyRef.current = true;
+                          setVisionApiKeyDeletePending(true);
+                          setVisionApiKey('');
+                          setVisionApiKeyConfigured(false);
+                          delete visionApiKeyCacheRef.current[visionProvider];
+                        }}
+                      >
+                        {t('settings.clearApiKey')}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </SettingRow>
             </>
           )}
@@ -849,9 +1185,15 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <Text type="secondary" style={{ fontSize: 11, flex: 1 }}>
-          {t('settings.restartHint')}
-        </Text>
+        <div style={{ flex: 1 }}>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+            {t('settings.restartHint')}
+          </Text>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+            {textApiKeyStatus}
+            {visionApiKeyStatus ? ` · ${visionApiKeyStatus}` : ''}
+          </Text>
+        </div>
         <Button type="primary" size="small" onClick={handleSave} loading={saving || pendingRestart} disabled={pendingRestart} style={{ flexShrink: 0 }}>
           {pendingRestart ? t('setup.gatewayRestarting') : t('settings.save')}
         </Button>

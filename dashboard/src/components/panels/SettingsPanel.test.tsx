@@ -37,7 +37,15 @@ vi.mock('react-i18next', () => ({
 }));
 
 /** Minimal valid gateway config for form rendering. */
-function makeGatewayConfig(textModel = 'test-model', provider = 'custom', baseUrl = 'https://api.example.com/v1') {
+function makeGatewayConfig(
+  textModel = 'test-model',
+  provider = 'custom',
+  baseUrl = 'https://api.example.com/v1',
+  overrides?: {
+    apiKey?: string;
+    extraProviders?: Record<string, Record<string, unknown>>;
+  },
+) {
   return {
     agents: {
       defaults: {
@@ -50,8 +58,10 @@ function makeGatewayConfig(textModel = 'test-model', provider = 'custom', baseUr
         [provider]: {
           baseUrl,
           api: 'openai-completions',
+          ...(overrides?.apiKey ? { apiKey: overrides.apiKey } : {}),
           models: [{ id: textModel, name: textModel }],
         },
+        ...(overrides?.extraProviders ?? {}),
       },
     },
   };
@@ -67,6 +77,12 @@ function createMockClient(requestFn?: (...args: unknown[]) => Promise<unknown>) 
   } as unknown as ReturnType<typeof useGatewayStore.getState>['client'];
 }
 
+function clickConfigSaveButton(): void {
+  const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
+  const configButton = saveButtons.find((button) => button.parentElement?.textContent?.includes('settings.restartHint')) ?? saveButtons[0];
+  fireEvent.click(configButton);
+}
+
 describe('SettingsPanel', () => {
   beforeEach(() => {
     mockModalConfirm.mockReset();
@@ -77,6 +93,7 @@ describe('SettingsPanel', () => {
       locale: 'en',
       systemPromptAppend: '',
       bootState: 'ready',
+      pendingConfigRestart: false,
       gatewayConfig: null,
       gatewayConfigLoading: false,
       _configRetryCount: 0,
@@ -154,6 +171,7 @@ describe('PR #18: syncNeeded — form sync gating', () => {
       locale: 'en',
       systemPromptAppend: '',
       bootState: 'ready',
+      pendingConfigRestart: false,
       gatewayConfig: null,
       gatewayConfigLoading: false,
       _configRetryCount: 0,
@@ -329,6 +347,303 @@ describe('PR #18: syncNeeded — form sync gating', () => {
   });
 });
 
+describe('API key status guidance', () => {
+  beforeEach(() => {
+    mockModalConfirm.mockReset();
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({
+      client: createMockClient(),
+      state: 'connected',
+      serverVersion: '0.5.11',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows keep-current-key guidance when the current provider already has a configured key', () => {
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+        apiKey: '__OPENCLAW_REDACTED__',
+      }),
+    });
+
+    render(<SettingsPanel />);
+
+    expect(screen.getAllByText('settings.apiKeyWillKeep').length).toBeGreaterThan(0);
+    expect(screen.getByText(/settings\.providerConfigured/)).toBeTruthy();
+  });
+
+  it('shows replace guidance after typing a new API key', () => {
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+        apiKey: '__OPENCLAW_REDACTED__',
+      }),
+    });
+
+    render(<SettingsPanel />);
+
+    const apiKeyInput = screen.getByPlaceholderText('setup.apiKeyExisting');
+    fireEvent.change(apiKeyInput, { target: { value: 'sk-new-openai-key' } });
+
+    expect(screen.getAllByText('settings.apiKeyWillUpdate').length).toBeGreaterThan(0);
+  });
+
+  it('shows delete guidance after clearing an existing API key', () => {
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+        apiKey: '__OPENCLAW_REDACTED__',
+      }),
+    });
+
+    render(<SettingsPanel />);
+
+    fireEvent.click(screen.getByText('settings.clearApiKey'));
+
+    expect(screen.getAllByText('settings.apiKeyDeletePending').length).toBeGreaterThan(0);
+  });
+
+  it('does not keep the existing-key placeholder after clear is requested', () => {
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+        apiKey: '__OPENCLAW_REDACTED__',
+      }),
+    });
+
+    render(<SettingsPanel />);
+
+    fireEvent.click(screen.getByText('settings.clearApiKey'));
+
+    expect(screen.queryByPlaceholderText('setup.apiKeyExisting')).toBeNull();
+    expect(screen.getByPlaceholderText('setup.apiKeyPlaceholder')).toBeTruthy();
+  });
+
+  it('marks inactive providers with configured status in the provider picker labels', () => {
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+        apiKey: '__OPENCLAW_REDACTED__',
+        extraProviders: {
+          anthropic: {
+            baseUrl: 'https://api.anthropic.com/v1',
+            api: 'anthropic-messages',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'claude-sonnet-4-5', name: 'claude-sonnet-4-5' }],
+          },
+        },
+      }),
+    });
+
+    render(<SettingsPanel />);
+
+    expect(screen.getByText(/OpenAI · settings\.providerConfigured/)).toBeTruthy();
+  });
+
+  it('writes the current provider key into auth-profiles before applying config', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.auth.statuses') return Promise.resolve({ openai: { configured: true } });
+      if (method === 'config.get') {
+        return Promise.resolve({
+          config: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+            apiKey: '__OPENCLAW_REDACTED__',
+          }),
+          hash: 'hash123',
+        });
+      }
+      if (method === 'rc.auth.setApiKey') return Promise.resolve({ ok: true, provider: 'openai', profileId: 'openai:manual' });
+      if (method === 'config.apply') return Promise.resolve({});
+      return Promise.resolve({});
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+        apiKey: '__OPENCLAW_REDACTED__',
+      }),
+    });
+
+    render(<SettingsPanel />);
+    expect(screen.getByDisplayValue('gpt-4o')).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('setup.apiKeyExisting'), {
+      target: { value: 'sk-fresh-openai' },
+    });
+    clickConfigSaveButton();
+
+    const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+    await confirmCall.onOk();
+
+    expect(mockRequest).toHaveBeenCalledWith('rc.auth.setApiKey', {
+      provider: 'openai',
+      apiKey: 'sk-fresh-openai',
+    });
+    expect(mockRequest).toHaveBeenCalledWith('config.apply', expect.any(Object));
+  });
+
+  it('clears the auth-profile key when the user removes it and saves', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.auth.statuses') return Promise.resolve({ openai: { configured: true } });
+      if (method === 'config.get') {
+        return Promise.resolve({
+          config: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+            apiKey: '__OPENCLAW_REDACTED__',
+          }),
+          hash: 'hash456',
+        });
+      }
+      if (method === 'rc.auth.clearApiKey') return Promise.resolve({ ok: true, provider: 'openai', removed: ['openai:manual'] });
+      if (method === 'config.apply') return Promise.resolve({});
+      return Promise.resolve({});
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+        apiKey: '__OPENCLAW_REDACTED__',
+      }),
+    });
+
+    render(<SettingsPanel />);
+    expect(screen.getByDisplayValue('gpt-4o')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('settings.clearApiKey'));
+    clickConfigSaveButton();
+
+    const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+    await confirmCall.onOk();
+
+    expect(mockRequest).toHaveBeenCalledWith('rc.auth.clearApiKey', {
+      provider: 'openai',
+    });
+  });
+
+  it('does not write the redacted sentinel back into config when only auth-profiles has the key', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string, params?: unknown) => {
+      if (method === 'rc.auth.statuses') return Promise.resolve({ 'zai-coding': { configured: true } });
+      if (method === 'config.get') {
+        return Promise.resolve({
+          config: makeGatewayConfig('glm-5', 'zai-coding', 'https://open.bigmodel.cn/api/coding/paas/v4'),
+          hash: 'hash789',
+        });
+      }
+      if (method === 'config.apply') return Promise.resolve({});
+      return Promise.resolve({});
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('glm-5', 'zai-coding', 'https://open.bigmodel.cn/api/coding/paas/v4'),
+    });
+
+    render(<SettingsPanel />);
+    expect(screen.getByDisplayValue('glm-5')).toBeTruthy();
+
+    clickConfigSaveButton();
+
+    const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+    await confirmCall.onOk();
+
+    const applyCall = mockRequest.mock.calls.find((call: unknown[]) => call[0] === 'config.apply');
+    expect(applyCall).toBeTruthy();
+    const applyPayload = applyCall?.[1] as { raw: string };
+    expect(applyPayload.raw).not.toContain('__OPENCLAW_REDACTED__');
+  });
+
+  it('preserves a previously seen redacted provider when a later config.get snapshot omits it', async () => {
+    const initialProjectConfig = {
+      agents: {
+        defaults: {
+          model: { primary: 'zai-coding-global/glm-5' },
+          imageModel: { primary: 'zai-coding-global/glm-5' },
+        },
+      },
+      models: {
+        providers: {
+          'zai-coding-global': {
+            baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'glm-5', name: 'glm-5' }],
+          },
+        },
+      },
+    };
+
+    const minimaxOnlyProjectConfig = {
+      agents: {
+        defaults: {
+          model: { primary: 'minimax/MiniMax-M2.7' },
+          imageModel: { primary: 'minimax/MiniMax-M2.7' },
+        },
+      },
+      models: {
+        providers: {
+          minimax: {
+            baseUrl: 'https://api.minimax.io/anthropic',
+            api: 'anthropic-messages',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'MiniMax-M2.7', name: 'MiniMax-M2.7' }],
+          },
+        },
+      },
+    };
+
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.auth.statuses') return Promise.resolve({});
+      if (method === 'config.get') {
+        return Promise.resolve({
+          config: minimaxOnlyProjectConfig,
+          hash: 'hash-preserve-provider',
+        });
+      }
+      if (method === 'config.apply') return Promise.resolve({});
+      return Promise.resolve({});
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({
+      gatewayConfig: {
+        ...(initialProjectConfig as ReturnType<typeof makeGatewayConfig>),
+        projectConfig: initialProjectConfig,
+      },
+    });
+
+    render(<SettingsPanel />);
+    expect(screen.getByDisplayValue('glm-5')).toBeTruthy();
+
+    act(() => {
+      useConfigStore.setState({
+        gatewayConfig: {
+          ...(minimaxOnlyProjectConfig as ReturnType<typeof makeGatewayConfig>),
+          projectConfig: minimaxOnlyProjectConfig,
+        },
+      });
+    });
+
+    clickConfigSaveButton();
+
+    const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+    await confirmCall.onOk();
+
+    const applyCall = mockRequest.mock.calls.find((call: unknown[]) => call[0] === 'config.apply');
+    expect(applyCall).toBeTruthy();
+    const applyPayload = applyCall?.[1] as { raw: string };
+    expect(applyPayload.raw).toContain('"zai-coding-global"');
+    expect(applyPayload.raw).toContain('__OPENCLAW_REDACTED__');
+  });
+});
+
 // ============================================================
 // Restart button in settings panel
 // ============================================================
@@ -343,6 +658,7 @@ describe('Restart Research-Claw button', () => {
       locale: 'en',
       systemPromptAppend: '',
       bootState: 'ready',
+      pendingConfigRestart: false,
       gatewayConfig: makeGatewayConfig(),
       gatewayConfigLoading: false,
       _configRetryCount: 0,

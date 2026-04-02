@@ -2,9 +2,10 @@
  * Build & parse OpenClaw config for the dashboard.
  *
  * Uses config.apply (full replacement + restart) instead of config.patch
- * (deep merge) so that stale providers are cleaned up, all model metadata
- * (contextWindow, maxTokens, reasoning) comes from presets, and the
- * gateway's restoreRedactedValues() handles API key round-trips.
+ * (deep merge). Model metadata (contextWindow, maxTokens, reasoning) comes
+ * from presets; the gateway's restoreRedactedValues() handles API key
+ * round-trips. Non-active providers are preserved — only the edited provider
+ * (and optional separate vision provider) are merged in.
  *
  * Uses OpenClaw's native provider keys (e.g. 'zai', 'openai', 'anthropic')
  * so that ProviderCapabilities and imageModel fallback logic work correctly.
@@ -40,6 +41,10 @@ export interface ConfigPatchInput {
   apiKeyConfigured?: boolean;
   /** Same hint for the vision provider */
   visionApiKeyConfigured?: boolean;
+  /** User clicked "Clear API Key" for the text provider — remove key (empty string). */
+  deleteTextApiKey?: boolean;
+  /** User clicked "Clear API Key" for the vision provider (when separate). */
+  deleteVisionApiKey?: boolean;
   /** Web search provider (optional, needs API key) */
   webSearchEnabled?: boolean;
   webSearchProvider?: string;
@@ -49,6 +54,13 @@ export interface ConfigPatchInput {
   heartbeatEnabled?: boolean;
   /** Heartbeat interval string (e.g. "30m", "1h") */
   heartbeatInterval?: string;
+
+  /**
+   * Restore additional provider entries that might be missing from
+   * `config.get` snapshots after provider switches.
+   * These providers will be added only when absent in `currentConfig.models.providers`.
+   */
+  restoreProviders?: Record<string, { modelId: string; apiKey: string }>;
 }
 
 export interface ExtractedConfig {
@@ -142,7 +154,7 @@ function resolveModelDef(provider: string, modelId: string): Record<string, unkn
  * Resolve the existing API key from project config for a given provider.
  * Returns the key (may be REDACTED_SENTINEL) or undefined if not found.
  */
-function resolveExistingApiKey(
+export function resolveExistingApiKey(
   projectConfig: Record<string, unknown> | null,
   providerKey: string,
 ): string | undefined {
@@ -153,18 +165,129 @@ function resolveExistingApiKey(
   return typeof key === 'string' ? key : undefined;
 }
 
+function cloneExistingProviders(
+  base: Record<string, unknown>,
+): Record<string, Record<string, unknown>> {
+  const raw = (base.models as Record<string, unknown> | undefined)?.providers;
+  if (!raw || typeof raw !== 'object') return {};
+  return structuredClone(raw) as Record<string, Record<string, unknown>>;
+}
+
 /**
- * Build the complete project-level config by merging user edits into
- * the current project config.
+ * Merge a fresh project config snapshot with an older snapshot while preserving
+ * provider entries that the newer snapshot omitted.
  *
- * This produces a full config ready for config.apply (not a partial patch).
- * Only providers referenced by the user appear in the output — stale
- * providers (e.g. old 'rc') are naturally excluded.
- *
- * API keys: when the user doesn't supply a new key, the existing key
- * (which may be __OPENCLAW_REDACTED__) is preserved. The gateway's
- * restoreRedactedValues() restores sentinels to real values on write.
+ * OpenClaw's config.get can occasionally elide inactive providers after the
+ * user switches providers. When that happens, we still want Settings to retain
+ * the last known provider entry (including redacted apiKey sentinels) so a
+ * later config.apply can round-trip those secrets safely.
  */
+export function mergeProjectConfigsPreservingProviders(
+  latestConfig: Record<string, unknown> | null,
+  previousConfig: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!latestConfig && !previousConfig) return null;
+  if (!latestConfig) return previousConfig ? structuredClone(previousConfig) : null;
+  if (!previousConfig) return structuredClone(latestConfig);
+
+  const merged = structuredClone(latestConfig);
+
+  const latestProviders = cloneExistingProviders(latestConfig);
+  const previousProviders = cloneExistingProviders(previousConfig);
+  const mergedProviders = {
+    ...previousProviders,
+    ...latestProviders,
+  };
+
+  if (Object.keys(mergedProviders).length > 0) {
+    const models = ((merged.models as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+    merged.models = {
+      ...models,
+      providers: mergedProviders,
+    };
+  }
+
+  const latestEnv = ((merged.env as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const previousEnv = ((previousConfig.env as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const latestVars = ((latestEnv.vars as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const previousVars = ((previousEnv.vars as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+
+  if (Object.keys(previousEnv).length > 0 || Object.keys(previousVars).length > 0) {
+    merged.env = {
+      ...previousEnv,
+      ...latestEnv,
+      vars: {
+        ...previousVars,
+        ...latestVars,
+      },
+    };
+  }
+
+  return merged;
+}
+
+/**
+ * Load saved fields for a provider when the user switches provider in Settings
+ * (so keys/baseUrl are not lost and do not require re-entry).
+ */
+export function extractProviderFieldsForEditor(
+  config: Record<string, unknown> | null,
+  providerId: string,
+): {
+  baseUrl: string;
+  api: string;
+  apiKey: string;
+  apiKeyConfigured: boolean;
+  textModel: string;
+} | null {
+  if (!config) return null;
+  const providers = (config.models as Record<string, unknown> | undefined)
+    ?.providers as Record<string, Record<string, unknown>> | undefined;
+  const entry = providers?.[providerId];
+  if (!entry) return null;
+
+  const env = config.env as Record<string, unknown> | undefined;
+  const envVars = (env?.vars as Record<string, unknown> | undefined) ?? undefined;
+
+  const deRedact = (v: unknown): string => {
+    const s = (v as string) ?? '';
+    return s === REDACTED_SENTINEL ? '' : s;
+  };
+
+  const baseUrlRaw = (entry.baseUrl as string) ?? '';
+  let displayBaseUrl = baseUrlRaw;
+  if ((providerId === 'minimax' || providerId === 'minimax-cn') && baseUrlRaw.startsWith('http://127.0.0.1:28790')) {
+    const upstream =
+      (typeof envVars?.[RC_MINIMAX_UPSTREAM_BASEURL_ENV] === 'string' ? (envVars?.[RC_MINIMAX_UPSTREAM_BASEURL_ENV] as string) : '') ||
+      '';
+    displayBaseUrl = upstream || baseUrlRaw;
+  }
+
+  const apiKeyRaw = entry.apiKey;
+  const preset = getPreset(providerId);
+
+  const agents = config.agents as Record<string, unknown> | undefined;
+  const defaults = agents?.defaults as Record<string, unknown> | undefined;
+  const modelDef = defaults?.model as { primary?: string } | undefined;
+  const primary = modelDef?.primary ?? '';
+
+  let textModel = preset.models[0]?.id ?? '';
+  if (primary.startsWith(`${providerId}/`)) {
+    textModel = primary.slice(providerId.length + 1);
+  } else {
+    const models = entry.models as Array<{ id: string }> | undefined;
+    if (models?.[0]?.id) textModel = models[0].id;
+  }
+
+  return {
+    baseUrl: displayBaseUrl,
+    api: (entry.api as string) ?? preset.api ?? 'openai-completions',
+    apiKey: deRedact(apiKeyRaw),
+    apiKeyConfigured: typeof apiKeyRaw === 'string' && apiKeyRaw.length > 0,
+    textModel,
+  };
+}
+
 /**
  * RC-specific config fields that must survive a config.apply round-trip.
  * When currentConfig is null (e.g. config.get returned valid:false due to CWD drift),
@@ -268,6 +391,16 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
   cron: { enabled: true },
 };
 
+/**
+ * Build the complete project-level config by merging user edits into
+ * the current project config.
+ *
+ * Existing `models.providers` entries are kept; only the current text
+ * provider (and optional separate vision provider) are overwritten from the form.
+ *
+ * API keys: empty input means "keep existing" unless `deleteTextApiKey` /
+ * `deleteVisionApiKey` is set.
+ */
 export function buildSaveConfig(
   currentConfig: Record<string, unknown> | null,
   input: ConfigPatchInput,
@@ -304,21 +437,82 @@ export function buildSaveConfig(
     textModels.push(resolveModelDef(providerKey, input.visionModel!));
   }
 
+  const providers = cloneExistingProviders(base);
+
+  // Restore additional cached providers if they are missing from the snapshot.
+  // This avoids losing non-active provider secrets when gateway/config.get
+  // omits them after provider switches.
+  if (input.restoreProviders) {
+    const restoreEntries = input.restoreProviders;
+    for (const [restoreKey, restoreVal] of Object.entries(restoreEntries)) {
+      if (!restoreKey) continue;
+      if (providers[restoreKey]) continue; // keep existing
+      const preset = getPreset(restoreKey);
+      const modelId = restoreVal?.modelId?.trim() || preset.models?.[0]?.id;
+      if (!modelId) continue;
+
+      const providerEntry: Record<string, unknown> = {
+        baseUrl: cleanUrl(preset.baseUrl),
+        api: preset.api,
+        models: [resolveModelDef(restoreKey, modelId)],
+      };
+
+      const restoreKeyApiKey = restoreVal?.apiKey ?? '';
+      if (isLocalProvider(restoreKey)) {
+        providerEntry.apiKey = '';
+      } else if (providerSupportsRedactedApiKeySentinel(restoreKey)) {
+        // Only set explicit apiKey for providers that support it.
+        if (typeof restoreKeyApiKey === 'string' && restoreKeyApiKey.trim()) {
+          providerEntry.apiKey = restoreKeyApiKey.trim();
+        }
+      }
+
+      // MiniMax OAuth sk-cp-* handling for restored providers too.
+      if (
+        (restoreKey === 'minimax' || restoreKey === 'minimax-cn') &&
+        typeof restoreKeyApiKey === 'string' &&
+        isMiniMaxOAuthToken(restoreKeyApiKey)
+      ) {
+        const upstreamBaseUrl = cleanUrl(preset.baseUrl);
+        providerEntry.baseUrl = minimaxProxyBaseUrl();
+        const envExisting = (base.env as Record<string, unknown> | undefined) ?? {};
+        const varsExisting = (envExisting.vars as Record<string, unknown> | undefined) ?? {};
+        base.env = {
+          ...envExisting,
+          vars: {
+            ...varsExisting,
+            [RC_MINIMAX_UPSTREAM_BASEURL_ENV]: upstreamBaseUrl,
+          },
+        };
+      }
+
+      providers[restoreKey] = providerEntry as Record<string, unknown>;
+    }
+  }
+
+  const textBase = (providers[providerKey] ?? {}) as Record<string, unknown>;
   const textProvider: Record<string, unknown> = {
+    ...textBase,
     baseUrl,
     api: apiType,
     models: textModels,
   };
+  delete textProvider.apiKey;
 
-  // API key: use new value if provided, otherwise preserve existing (may be sentinel).
-  // Defensive fallback: if resolveExistingApiKey can't find the key (e.g., OC
-  // normalized the config structure), emit REDACTED_SENTINEL so restoreRedactedValues
-  // can restore the real key from the gateway's in-memory copy.
-  // Local providers (ollama, vllm) use an empty API key; never emit the sentinel.
-  if (isLocalProvider(providerKey) && !input.apiKey) {
+  const trimmedTextKey = input.apiKey?.trim() ?? '';
+
+  if (input.deleteTextApiKey) {
     textProvider.apiKey = '';
-  } else if (input.apiKey) {
-    textProvider.apiKey = input.apiKey;
+    if (providerKey === 'minimax' || providerKey === 'minimax-cn') {
+      const envExisting = (base.env as Record<string, unknown> | undefined) ?? {};
+      const varsExisting = { ...((envExisting.vars as Record<string, unknown> | undefined) ?? {}) };
+      delete varsExisting[RC_MINIMAX_UPSTREAM_BASEURL_ENV];
+      base.env = { ...envExisting, vars: varsExisting };
+    }
+  } else if (isLocalProvider(providerKey) && !trimmedTextKey) {
+    textProvider.apiKey = '';
+  } else if (trimmedTextKey) {
+    textProvider.apiKey = trimmedTextKey;
   } else {
     const existing = resolveExistingApiKey(currentConfig, providerKey);
     if (existing) {
@@ -332,7 +526,11 @@ export function buildSaveConfig(
   // Route MiniMax traffic through a local proxy that injects Authorization: Bearer <token>.
   // OpenClaw 2026.3.8 rejects unknown provider keys, so we store the upstream URL
   // in env.vars instead of adding `upstreamBaseUrl` under models.providers.*.
-  if ((providerKey === 'minimax' || providerKey === 'minimax-cn') && isMiniMaxOAuthToken(input.apiKey)) {
+  if (
+    !input.deleteTextApiKey &&
+    (providerKey === 'minimax' || providerKey === 'minimax-cn') &&
+    isMiniMaxOAuthToken(input.apiKey)
+  ) {
     textProvider.baseUrl = minimaxProxyBaseUrl();
     const envExisting = (base.env as Record<string, unknown> | undefined) ?? {};
     const varsExisting = (envExisting.vars as Record<string, unknown> | undefined) ?? {};
@@ -345,32 +543,37 @@ export function buildSaveConfig(
     };
   }
 
-  const providers: Record<string, unknown> = {
-    [providerKey]: textProvider,
-  };
+  providers[providerKey] = textProvider as Record<string, unknown>;
 
   // --- Vision provider entry (only when using a different provider) ---
   if (useSeparateProvider) {
+    const visionBase = (providers[visionProviderKey] ?? {}) as Record<string, unknown>;
     const visionEntry: Record<string, unknown> = {
+      ...visionBase,
       baseUrl: cleanUrl(input.visionBaseUrl || input.baseUrl),
       api: input.visionApi || apiType,
       models: [resolveModelDef(visionProviderKey, input.visionModel!)],
     };
+    delete visionEntry.apiKey;
 
-    if (input.visionApiKey) {
-      visionEntry.apiKey = input.visionApiKey;
-    } else if (input.apiKey) {
-      visionEntry.apiKey = input.apiKey;
+    const trimmedVisionKey = input.visionApiKey?.trim() ?? '';
+
+    if (input.deleteVisionApiKey) {
+      visionEntry.apiKey = '';
+    } else if (trimmedVisionKey) {
+      visionEntry.apiKey = trimmedVisionKey;
     } else {
-      const existing = resolveExistingApiKey(currentConfig, visionProviderKey);
-      if (existing) {
-        visionEntry.apiKey = existing;
-      } else if (input.visionApiKeyConfigured) {
+      const existingVision = resolveExistingApiKey(currentConfig, visionProviderKey);
+      if (existingVision) {
+        visionEntry.apiKey = existingVision;
+      } else if (trimmedTextKey) {
+        visionEntry.apiKey = trimmedTextKey;
+      } else if (input.visionApiKeyConfigured && providerSupportsRedactedApiKeySentinel(visionProviderKey)) {
         visionEntry.apiKey = REDACTED_SENTINEL;
       }
     }
 
-    providers[visionProviderKey] = visionEntry;
+    providers[visionProviderKey] = visionEntry as Record<string, unknown>;
   }
 
   // --- Agent model refs ---
@@ -400,7 +603,7 @@ export function buildSaveConfig(
   // --- Build full config ---
   const result: Record<string, unknown> = { ...base };
   result.agents = { ...existingAgents, defaults };
-  result.models = { providers };
+  result.models = { providers: providers as Record<string, unknown> };
 
   // --- Web search ---
   // OC reads API keys from provider-specific sub-objects, NOT the top-level apiKey:

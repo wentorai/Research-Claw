@@ -559,9 +559,9 @@ describe('Full SetupWizard flow — config.get -> edit -> config.apply', () => {
       expect((defaults.heartbeat as Record<string, string>).every).toBe('3m');
     });
 
-    it('switching provider removes stale provider entry', () => {
-      // config-patch.ts:144-146 — only referenced providers appear in output
-      // This is critical: stale providers would cause confusion and potential key leaks
+    it('switching active provider preserves other provider entries in models.providers', () => {
+      // buildSaveConfig merges into existing providers — inactive providers
+      // keep their keys so users can switch back without re-entering secrets.
       const { savedConfig } = simulateSetupWizardFlow(CONFIG_GET_STALE_PROVIDER, {
         provider: 'openai',
         baseUrl: 'https://api.openai.com/v1',
@@ -571,9 +571,9 @@ describe('Full SetupWizard flow — config.get -> edit -> config.apply', () => {
 
       const providers = (savedConfig.models as Record<string, unknown>)
         .providers as Record<string, Record<string, unknown>>;
-      expect(providers.rc).toBeUndefined();
+      expect(providers.rc).toBeDefined();
       expect(providers.openai).toBeDefined();
-      expect(Object.keys(providers)).toEqual(['openai']);
+      expect(providers.openai.apiKey).toBe('sk-new-openai');
     });
 
     it('disabling proxy clears env proxy vars', () => {
