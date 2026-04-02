@@ -17,6 +17,17 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-04-02 — Bugfixes + Input History
+
+- [2026-04-02] [Dashboard] [Claude] fix(P0): chat.history toolResult flooding — pnpm patch filters toolResult before limit slice; 1715 identical Zotero tool calls from glm-5 model pushed all visible messages out of 500-entry window
+- [2026-04-02] [Dashboard] [Claude] fix(P0): WS close code 1001 now triggers auto-reconnect instead of terminal disconnected state
+- [2026-04-02] [Modules] [Claude] fix(P0): before_tool_call dedup guard — blocks >5 consecutive identical tool calls (model tool-call loop prevention), resets on session_start
+- [2026-04-02] [Infra] [Claude] fix: timeoutSeconds 900→300 in config, example, and ensure-config.cjs (idempotent cap)
+- [2026-04-02] [Dashboard] [Claude] feat: input history — ArrowUp/Down terminal-style navigation, popup with hover tooltip for long text, localStorage persistence (50 items), keyboard shortcut tip, 18 parity tests
+- [2026-04-02] [Dashboard] [Claude] feat: refresh toast feedback — success/info/error toast via Ant Design message API
+- [2026-04-02] [Infra] [Claude] chore: update pnpm-lock.yaml patch hash for chat.history fix
+- [2026-04-02] [Infra] [Claude] Tests: 64 files, 1169 dashboard + 428 extension = 1597 total pass
+
 ### 2026-03-30 — v0.6.0 Release
 
 - [2026-03-30] [Dashboard] [Claude] feat: workspace silent polling (10s) + manual refresh button — fetchingRef/priorityRef priority lock, JSON snapshot diff, silent error handling for non-localhost
