@@ -321,7 +321,6 @@
     "apiKeyLabel": "API 密钥",
     "clearApiKey": "清除 API 密钥",
     "providerConfigured": "已配置",
-    "apiKeyWillKeep": "留空将保留当前 API 密钥",
     "apiKeyWillUpdate": "保存后将替换当前 API 密钥",
     "apiKeyDeletePending": "保存后将清除该 provider 的 API 密钥",
     "apiKeyMissing": "该 provider 尚未配置 API 密钥",

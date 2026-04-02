@@ -373,7 +373,7 @@ describe('API key status guidance', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows keep-current-key guidance when the current provider already has a configured key', () => {
+  it('shows keep-current-key guidance via placeholder when the current provider already has a configured key', () => {
     useConfigStore.setState({
       gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
         apiKey: '__OPENCLAW_REDACTED__',
@@ -382,7 +382,7 @@ describe('API key status guidance', () => {
 
     render(<SettingsPanel />);
 
-    expect(screen.getAllByText('settings.apiKeyWillKeep').length).toBeGreaterThan(0);
+    expect(screen.getByPlaceholderText('setup.apiKeyExisting')).toBeTruthy();
     expect(screen.getByText(/settings\.providerConfigured/)).toBeTruthy();
   });
 
