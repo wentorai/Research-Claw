@@ -396,7 +396,7 @@ export default function SettingsPanel() {
     if (isOpenAICodexOAuth) return t('setup.openaiCodexOauthNoApiKey');
     if (textApiKeyDeletePending) return t('settings.apiKeyDeletePending');
     if (apiKey.trim()) return t('settings.apiKeyWillUpdate');
-    if (apiKeyConfigured || currentProviderHasSavedKey) return '';
+    if (apiKeyConfigured || currentProviderHasSavedKey) return t('settings.apiKeyWillKeep');
     return t('settings.apiKeyMissing');
   }, [apiKey, apiKeyConfigured, currentProviderHasSavedKey, isOpenAICodexOAuth, t, textApiKeyDeletePending]);
 
@@ -404,7 +404,7 @@ export default function SettingsPanel() {
     if (!visionEnabled || !visionSeparateProvider) return null;
     if (visionApiKeyDeletePending) return t('settings.apiKeyDeletePending');
     if (visionApiKey.trim()) return t('settings.apiKeyWillUpdate');
-    if (visionApiKeyConfigured || currentVisionProviderHasSavedKey) return '';
+    if (visionApiKeyConfigured || currentVisionProviderHasSavedKey) return t('settings.apiKeyWillKeep');
     return t('settings.apiKeyMissing');
   }, [
     currentVisionProviderHasSavedKey,
