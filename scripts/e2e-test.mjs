@@ -132,18 +132,23 @@ function testProjectConfigFile() {
 
 function testListenerConfigPath() {
   try {
-    const pidsRaw = runCommand('lsof', ['-tiTCP:28789', '-sTCP:LISTEN']).trim();
+    const pidsRaw = runCommand('lsof', [`-tiTCP:${PORT}`, '-sTCP:LISTEN']).trim();
     if (!pidsRaw) {
       fail('Listener PID', `no process is listening on ${PORT}`);
       return;
     }
     const pid = pidsRaw.split('\n')[0].trim();
-    const files = runCommand('lsof', ['-p', pid]);
-    if (files.includes(CONFIG_PATH)) {
-      pass('Listener config path', `pid ${pid} is using project openclaw.json`);
+    // Config files are read at startup and closed — they won't appear as open
+    // file descriptors in lsof -p output.  Check the process cwd instead:
+    // a gateway started from the project root will load config/openclaw.json.
+    const cwdInfo = runCommand('lsof', ['-p', pid, '-d', 'cwd', '-Fn']);
+    const cwdMatch = cwdInfo.match(/\nn(.*)/);
+    const processCwd = cwdMatch ? cwdMatch[1] : '';
+    if (processCwd.startsWith(PROJECT_ROOT)) {
+      pass('Listener config path', `pid ${pid} cwd is within project root`);
       return;
     }
-    fail('Listener config path', `pid ${pid} is not holding ${CONFIG_PATH}`);
+    fail('Listener config path', `pid ${pid} cwd "${processCwd}" is outside project root ${PROJECT_ROOT}`);
   } catch (err) {
     skip('Listener config path', err instanceof Error ? err.message : String(err));
   }

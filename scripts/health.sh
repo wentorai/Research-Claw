@@ -39,14 +39,17 @@ else
   echo "[WARN] Dashboard UI not responding (gateway may still be starting)"
 fi
 
-# Listener process should hold the project config file.
+# Listener process cwd should be within the project root.
+# Note: config files are read at startup and closed, so they won't appear as
+# open file descriptors in lsof -p output.  Check cwd instead.
 if command -v lsof &>/dev/null; then
   PID="$(lsof -tiTCP:${PORT} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
   if [ -n "${PID:-}" ]; then
-    if lsof -p "$PID" 2>/dev/null | grep -Fq "$CONFIG_PATH"; then
-      echo "[OK] Listener pid $PID is using $CONFIG_PATH"
+    PROC_CWD="$(lsof -p "$PID" -d cwd -Fn 2>/dev/null | grep '^n' | head -n 1 | cut -c2- || true)"
+    if [ -n "$PROC_CWD" ] && [[ "$PROC_CWD" == "$ROOT"* ]]; then
+      echo "[OK] Listener pid $PID cwd is within project root"
     else
-      echo "[WARN] Listener pid $PID is not holding $CONFIG_PATH"
+      echo "[WARN] Listener pid $PID cwd \"$PROC_CWD\" is outside project root $ROOT"
       echo "       This often means the wrong gateway process is bound to $PORT."
     fi
   fi
