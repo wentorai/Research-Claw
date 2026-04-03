@@ -106,6 +106,7 @@ interface PluginDefinition {
 // initialized once and reused — creating duplicates wastes file handles
 // and causes git lock races.
 let _initialized = false;
+let _registrationDone = false;
 let _dbManager: DatabaseManager | null = null;
 let _litService: InstanceType<typeof LiteratureService> | null = null;
 let _taskService: InstanceType<typeof TaskService> | null = null;
@@ -258,9 +259,11 @@ const plugin: PluginDefinition = {
         _toolCallProbeCache = new Map();
         _lastProbeResult = null;
         _initialized = false;
+        _registrationDone = false;
       },
     });
 
+    if (!_registrationDone) {
     // ── 4. Register tools (39 total) ─────────────────────────────────
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
@@ -1111,6 +1114,8 @@ const plugin: PluginDefinition = {
     }
 
     api.logger.info('Research-Claw Core registered (39 tools, 79 WS RPC + 1 HTTP = 80 interfaces, 8 hooks)');
+    _registrationDone = true;
+    }
   },
 };
 
