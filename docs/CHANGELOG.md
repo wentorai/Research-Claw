@@ -17,6 +17,14 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-04-05 — Prompt Architecture Overhaul
+
+- [2026-04-05] [Prompt] [Siyuan] feat: AGENTS.md v4.0 → v4.1 — prompt architecture overhaul borrowing Claude Code system prompt patterns. New §3 Quick Paths, §3.1 Card Emission Protocol (tool→card mapping with CRITICAL warnings), §3.2 Search Fallback Chain (L1 API → L1.5 web_fetch with concrete arXiv/PubMed URLs → L2 browser → ask user), §3.3 Domain→Tool Quick Reference. §9 expanded from pointer to full inline schemas for all 6 card types. ~12.9K chars (was ~8K).
+- [2026-04-05] [Prompt] [Siyuan] feat: SOUL.md v2.1 → v2.2 — added Core Principle #6 "Tool-first, then reason" (call search tools before answering from training data, emit dashboard cards, escalate on failure). Red lines count 6 → 7 (added #6 "No false-negative detection").
+- [2026-04-05] [Modules] [Siyuan] feat: card emission in tool text — library_add_paper, library_batch_add, task_create, task_complete, task_update now embed paper_card/task_card JSON in response text, built from actual service return data
+- [2026-04-05] [Modules] [Siyuan] fix: library_batch_add Paper type — replace `(p: any)` with `(p: Paper)` in card builder, import Paper type from service
+- [2026-04-05] [Infra] [Siyuan] test: bootstrap-consistency.test.ts updated for AGENTS.md v4.1, fix JSDoc comment (7→8 workspace tools)
+
 ### 2026-04-02 — Bugfixes + Input History
 
 - [2026-04-02] [Dashboard] [Claude] fix(P0): chat.history toolResult flooding — pnpm patch filters toolResult before limit slice; 1715 identical Zotero tool calls from glm-5 model pushed all visible messages out of 500-entry window

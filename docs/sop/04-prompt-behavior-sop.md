@@ -22,8 +22,8 @@ This SOP governs all development on the **bootstrap file system** — the 8 mark
 
 | File | Chars | Purpose | Load Priority |
 |------|------:|---------|--------------|
-| `SOUL.md` | 4,059 | Research persona, core principles, red lines (mock data exception) | Always |
-| `AGENTS.md` | 18,861 | Session workflow, SOP, HiL protocol, card JSON examples, discipline workflows | Always |
+| `SOUL.md` | 3,631 | Research persona, 6 core principles (incl. #6 "Tool-first, then reason"), 7 red lines | Always |
+| `AGENTS.md` | 12,891 | Session workflow, §3 Quick Paths, §3.1 Card Emission Protocol, §3.2 Search Fallback Chain, §3.3 Domain→Tool Quick Ref, HiL protocol, §9 inline card schemas | Always |
 | `HEARTBEAT.md` | 3,879 | Periodic checks: deadlines, digest, reading reminders, group meeting prep | Cron only (lightweight mode) |
 | `BOOTSTRAP.md` | 11,341 | First-run onboarding: IM, workspace, group meeting, honey demo (self-renames to .done) | First run only |
 | `IDENTITY.md` | 723 | Product identity, persona | Always |
@@ -61,7 +61,7 @@ Additionally, `skills/wentor-api/SKILL.md` provides platform API documentation.
 **Platform:** OpenClaw satellite (local, privacy-respecting)
 **Avatar concept:** Lobster with mortarboard
 
-### 3.2 Red Lines (6 Absolute Boundaries)
+### 3.2 Red Lines (7 Absolute Boundaries)
 
 These MUST NOT be weakened or removed:
 
@@ -70,7 +70,8 @@ These MUST NOT be weakened or removed:
 3. **No plagiarism assistance** — Will not help copy without attribution
 4. **No fabricated data** — Will not generate fake experimental results
 5. **No submissions without approval** — Human-in-Loop for all external submissions
-6. **No bypassing HiL for irreversible actions** — Destructive operations always need human approval
+6. **No false-negative detection** — Do not claim a tool/API is unavailable without actually trying it
+7. **No bypassing HiL for irreversible actions** — Destructive operations always need human approval
 
 ### 3.3 Research Workflow (4-Phase SOP in AGENTS.md)
 
@@ -254,6 +255,9 @@ Before editing any bootstrap file:
 - [2026-03-12] [Claude] Phase 2C: USER.md updated (v2.0) -- added Group Meeting section
 - [2026-03-12] [Claude] Phase 2C: IDENTITY.md and MEMORY.md verified (no changes needed)
 - [2026-03-12] [Claude] Phase 2C: Total 38.3K chars across 8 files (budget: 150K) — later grew to ~50K with subsequent updates
+
+- [2026-04-05] [Siyuan] AGENTS.md v4.0 → v4.1: prompt architecture overhaul — §3 Quick Paths, §3.1 Card Emission Protocol (tool→card mapping table), §3.2 Search Fallback Chain (L1 API → L1.5 web_fetch → L2 browser → ask), §3.3 Domain→Tool Quick Reference, §9 expanded to inline card schemas for all 6 types. Char count ~12.9K (was ~8K). Card emission now also built into tool code (library_add_paper, batch_add, task_create/complete/update).
+- [2026-04-05] [Siyuan] SOUL.md v2.1 → v2.2: added Core Principle #6 "Tool-first, then reason", red lines count 6 → 7 (added "no false-negative detection")
 
 ### 6.2 Always-Loaded Skill
 

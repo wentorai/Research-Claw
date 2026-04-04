@@ -202,8 +202,8 @@ Convention: fenced code blocks with card type as language tag. Standard code blo
 
 | File | Defining Doc | Chars | Purpose |
 |------|-------------|------:|---------|
-| `SOUL.md` | 04 §3 | 4,058 | Research persona, core principles, red lines |
-| `AGENTS.md` | 04 §4 | 17,316 | Session workflow, SOP, HiL protocol, output formatting, card examples |
+| `SOUL.md` | 04 §3 | 3,631 | Research persona, core principles (6 incl. "Tool-first, then reason"), 7 red lines |
+| `AGENTS.md` | 04 §4 | 12,891 | Session workflow, §3 Quick Paths, §3.1 Card Emission Protocol, §3.2 Search Fallback Chain, §3.3 Domain→Tool Quick Ref, HiL protocol, §9 inline card schemas |
 | `HEARTBEAT.md` | 04 §5 | 3,312 | Periodic checks: deadlines, digest, reading reminders |
 | `BOOTSTRAP.md` | 04 §6 | 6,363 | First-run onboarding (self-deletes after setup) |
 | `IDENTITY.md` | 04 §7 | 703 | Product identity, persona |
@@ -326,4 +326,4 @@ Research-Claw operates **entirely local** with a 4-layer defense model:
 
 ---
 
-*Updated: 2026-03-18 | OpenClaw: 2026.3.8 | Protocol: v3 | RPC: 57 WS + 1 HTTP = 58 methods | Tables: 14 + FTS5 | Tools: 28 | Cards: 6 | Hooks: 7 | Indexes: 23*
+*Updated: 2026-04-05 | OpenClaw: 2026.3.8 | Protocol: v3 | RPC: 57 WS + 1 HTTP = 58 methods | Tables: 14 + FTS5 | Tools: 28 | Cards: 6 | Hooks: 7 | Indexes: 23 | AGENTS.md: v4.1 | SOUL.md: v2.2*
