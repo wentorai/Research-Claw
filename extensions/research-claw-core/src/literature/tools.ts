@@ -107,9 +107,26 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
           citation_count: typeof params.citation_count === 'number' ? params.citation_count : undefined,
         };
         const paper = service.add(input);
+
+        // Build paper_card JSON block so the LLM includes it in its response
+        const cardData: Record<string, unknown> = {
+          type: 'paper_card',
+          title: paper.title,
+          authors: paper.authors ?? [],
+          read_status: paper.read_status ?? 'unread',
+          library_id: paper.id,
+        };
+        if (paper.venue) cardData.venue = paper.venue;
+        if (paper.year) cardData.year = paper.year;
+        if (paper.doi) cardData.doi = paper.doi;
+        if (paper.url) cardData.url = paper.url;
+        if (paper.arxiv_id) cardData.arxiv_id = paper.arxiv_id;
+        const cardJson = JSON.stringify(cardData);
+
         return ok(
           `Added paper "${paper.title}" (id: ${paper.id})` +
-            (paper.tags && paper.tags.length > 0 ? ` with tags: ${paper.tags.join(', ')}` : ''),
+            (paper.tags && paper.tags.length > 0 ? ` with tags: ${paper.tags.join(', ')}` : '') +
+            `\n\nInclude this card in your response:\n\`\`\`paper_card\n${cardJson}\n\`\`\``,
           paper,
         );
       } catch (err) {
@@ -421,6 +438,28 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         const parts: string[] = [`Added ${result.added.length} paper(s)`];
         if (result.duplicates.length > 0) parts.push(`${result.duplicates.length} duplicate(s) skipped`);
         if (result.errors.length > 0) parts.push(`${result.errors.length} error(s)`);
+        // Build paper_card blocks for each added paper
+        if (result.added.length > 0) {
+          const cards = result.added.map((p: any) => {
+            const cd: Record<string, unknown> = {
+              type: 'paper_card',
+              title: p.title,
+              authors: p.authors ?? [],
+              read_status: p.read_status ?? 'unread',
+              library_id: p.id,
+            };
+            if (p.venue) cd.venue = p.venue;
+            if (p.year) cd.year = p.year;
+            if (p.doi) cd.doi = p.doi;
+            if (p.url) cd.url = p.url;
+            if (p.arxiv_id) cd.arxiv_id = p.arxiv_id;
+            return '```paper_card\n' + JSON.stringify(cd) + '\n```';
+          });
+          return ok(
+            parts.join(', ') + '\n\nInclude these cards in your response:\n' + cards.join('\n'),
+            result,
+          );
+        }
         return ok(parts.join(', '), result);
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));

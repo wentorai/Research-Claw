@@ -1,12 +1,14 @@
 ---
 file: AGENTS.md
-version: 4.0
-updated: 2026-03-23
+version: 4.1
+updated: 2026-04-05
 ---
 
 # Agent Behavior Specification
 
-<!-- v4.0: slimmed from 20.3K → ≤8K. Trigger words, dynamic priority, Zotero bridge,
+<!-- v4.1: added §3 Quick Paths, §3.1 Card Emission Protocol, §3.2 Search Fallback Chain,
+     §3.3 Domain → Tool Quick Reference, expanded §9 inline card schemas.
+     v4.0: slimmed from 20.3K → ≤8K. Trigger words, dynamic priority, Zotero bridge,
      recency protocol, PDF import → Search SOP. Channels → Channels Guide. Workspace
      architecture → Workspace SOP. Phases 1-4 → Search SOP + Survey SOP. Card schemas
      → Output Cards. Tool delegation → claude-code/codex-cli/opencode-cli skills. -->
@@ -54,6 +56,20 @@ Native installs: check TOOLS.md for available tools.
 
 ## §3 Tool Priority
 
+### Quick Paths (skip the general tree)
+
+- **"最新/latest/recent" papers?**
+  → MUST use date-sorted params (default `relevance` WILL NOT satisfy this).
+  `search_arxiv(sort_by:"submittedDate")` · `search_crossref(sort:"published")`
+  · `search_openalex(sort_by:"publication_date")` · `search_pubmed(sort:"pub_date")`
+  → L1 insufficient? → `web_fetch` arXiv RSS or `browser` → Google Scholar + date filter.
+
+- **CNKI / Chinese literature?** → Layer 2 `browser` directly. No L1 tool covers Chinese journals.
+
+- **Known DOI?** → `resolve_doi`. No search needed.
+
+### General Decision tree
+
 Decision tree for every user request:
 
 ```
@@ -84,6 +100,55 @@ API tools. Use `system.run` for Python data analysis when needed.
 
 For trigger-word mappings, domain routing, recency protocol, Zotero/EndNote
 bridge, and PDF import, read the **Search SOP** skill.
+
+### §3.1 Card Emission Protocol
+
+**After every data-producing tool call, emit the matching card:**
+
+| Tool call | Card to emit |
+|:----------|:-------------|
+| `library_add_paper` / `library_batch_add` | `paper_card` |
+| `task_create` / `task_complete` / `task_update` | `task_card` |
+| `workspace_save` / `workspace_export` | `file_card` — **COPY from tool output verbatim, NEVER fabricate** |
+| HiL decision needed (§5) | `approval_card` — **MUST include `approval_id` from `exec.approval.requested`** |
+| Phase/session summary | `progress_card` |
+| `monitor_report` | `monitor_digest` |
+
+**CRITICAL:** `approval_card` without `approval_id` renders dashboard buttons non-functional.
+**CRITICAL:** `file_card` MUST be copied from tool response — fabricated cards cause "file not found" errors.
+
+### §3.2 Search Fallback Chain
+
+When searching for literature, **never stop at a single failed layer:**
+
+```
+L1 API tools (18 free databases, see §3.3 below or Search SOP for full routing)
+  ↓ returns 0 or insufficient?
+L1.5 web_fetch — direct access to known URLs:
+  · arXiv RSS: https://rss.arxiv.org/rss/{category}
+  · arXiv API: https://export.arxiv.org/api/query?search_query=...&sortBy=submittedDate&max_results=20
+  · PubMed RSS, conference proceedings pages
+  ↓ still insufficient?
+L2 browser RPA — Google Scholar, CNKI, WoS, Scopus, IEEE Xplore
+  ↓ still insufficient?
+Ask the user
+```
+
+**NEVER** cite `web_search` unavailability as a reason to stop.
+`web_fetch` and `browser` are **ALWAYS** available — use them.
+
+### §3.3 Domain → Tool Quick Reference
+
+| Domain | Primary | Fallback |
+|:-------|:--------|:---------|
+| CS / AI / ML | `search_dblp` + `search_arxiv` | `search_openalex` |
+| Biomedical | `search_pubmed` + `search_europe_pmc` | `search_biorxiv` |
+| Physics / Math | `search_arxiv` + `search_inspire` | `search_crossref` |
+| Chinese lit | **Layer 2 Browser → CNKI** | 万方 / 维普 |
+| Cross-discipline | `search_crossref` + `search_openalex` | `search_doaj` |
+| Datasets | `search_zenodo` + `search_datacite` | — |
+
+Full routing table + filter capabilities → load **Search SOP** skill.
 
 ## §4 Cross-Module Handoff
 
@@ -162,16 +227,46 @@ deeper guidance than this file provides.
 ## §9 Output Cards
 
 Use fenced code blocks with card type as language tag. Content MUST be valid
-JSON (`JSON.parse()`). Six types:
+JSON (`JSON.parse()`). Six types — inline schemas below; load **Output Cards**
+skill for full examples.
 
-1. **paper_card** — real publications only (API queries or library)
-2. **task_card** — task creation and status
-3. **progress_card** — session/phase summaries
-4. **approval_card** — HiL confirmation (include `approval_id` for exec approvals)
-5. **file_card** — copy verbatim from `workspace_save` or `workspace_export`; NEVER fabricate
-6. **monitor_digest** — monitor scan results
+### paper_card — real publications only (API queries or library)
 
-For full schemas and examples, read the **Output Cards** skill.
+Required: `type`, `title`, `authors` (string[]).
+Optional: `venue`, `year`, `doi`, `url`, `arxiv_id`, `abstract_preview`,
+`read_status` ("unread"|"reading"|"read"|"reviewed"), `library_id`, `tags`.
+**NEVER** for concepts, tools, or non-scholarly content.
+
+### task_card
+
+Required: `type`, `title`, `task_type` ("human"|"agent"|"mixed"),
+`status` ("todo"|"in_progress"|"blocked"|"done"|"cancelled"),
+`priority` ("urgent"|"high"|"medium"|"low").
+Optional: `id`, `description`, `deadline` (ISO 8601), `related_paper_title`,
+`related_file_path`.
+
+### progress_card
+
+Required: `type`, `period`, `papers_read`, `papers_added`, `tasks_completed`,
+`tasks_created`. Optional: `writing_words`, `reading_minutes`, `highlights` (max 5).
+
+### approval_card — HiL confirmation
+
+Required: `type`, `action`, `context`, `risk_level` ("low"|"medium"|"high").
+**CRITICAL:** `approval_id` from `exec.approval.requested` is **required** for
+exec approvals — without it, dashboard Approve/Deny buttons are non-functional.
+Optional: `details` (must be a JSON object, not a string).
+
+### file_card — workspace file references
+
+**COPY verbatim** from `workspace_save` / `workspace_export` tool output.
+**NEVER fabricate** — causes "file not found" errors in the dashboard.
+
+### monitor_digest — monitor scan results
+
+Required: `type`, `monitor_name`, `source_type`, `target`, `total_found`,
+`findings` (array of `{title, url?, summary?}`, max 10).
+Optional: `schedule`.
 
 ## §10 File Layers
 

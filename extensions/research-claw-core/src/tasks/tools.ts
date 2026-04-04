@@ -152,7 +152,25 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
         if (task.parent_task_id) summary.push(`  parent: ${task.parent_task_id}`);
         if (task.related_paper_id) summary.push(`  linked paper: ${task.related_paper_id}`);
 
-        return ok(summary.join('\n'), task);
+        // Build task_card JSON block so the LLM includes it in its response
+        const cardData: Record<string, unknown> = {
+          type: 'task_card',
+          id: task.id,
+          title: task.title,
+          task_type: task.task_type,
+          status: task.status,
+          priority: task.priority,
+        };
+        if (task.deadline) cardData.deadline = task.deadline;
+        if (task.description) cardData.description = task.description;
+        if (task.related_file_path) cardData.related_file_path = task.related_file_path;
+        const cardJson = JSON.stringify(cardData);
+
+        return ok(
+          summary.join('\n') +
+            `\n\nInclude this card in your response:\n\`\`\`task_card\n${cardJson}\n\`\`\``,
+          task,
+        );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -258,7 +276,21 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
         ];
         if (notes) summary.push(`  completion notes: ${notes}`);
 
-        return ok(summary.join('\n'), task);
+        const cardData: Record<string, unknown> = {
+          type: 'task_card',
+          id: task.id,
+          title: task.title,
+          task_type: task.task_type,
+          status: task.status,
+          priority: task.priority,
+        };
+        if (task.deadline) cardData.deadline = task.deadline;
+
+        return ok(
+          summary.join('\n') +
+            `\n\nInclude this card in your response:\n\`\`\`task_card\n${JSON.stringify(cardData)}\n\`\`\``,
+          task,
+        );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -365,7 +397,21 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
           `  status: ${task.status} | priority: ${task.priority}`,
         ];
 
-        return ok(summary.join('\n'), task);
+        const cardData: Record<string, unknown> = {
+          type: 'task_card',
+          id: task.id,
+          title: task.title,
+          task_type: task.task_type,
+          status: task.status,
+          priority: task.priority,
+        };
+        if (task.deadline) cardData.deadline = task.deadline;
+
+        return ok(
+          summary.join('\n') +
+            `\n\nInclude this card in your response:\n\`\`\`task_card\n${JSON.stringify(cardData)}\n\`\`\``,
+          task,
+        );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }

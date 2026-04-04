@@ -1,5 +1,5 @@
 /**
- * Bootstrap Consistency Tests — AGENTS.md v4.0 & TOOLS.md v4.0
+ * Bootstrap Consistency Tests — AGENTS.md v4.0/v4.1 & TOOLS.md v4.0
  *
  * Validates that the bootstrap files (AGENTS.md, TOOLS.md) exist,
  * have valid structure, and the AGENTS.md module map accurately
@@ -65,7 +65,7 @@ const ACTUAL_TASK_TOOLS = [
   'send_notification',
 ] as const;
 
-/** 7 workspace agent tools (from workspace/tools.ts) */
+/** 8 workspace agent tools (from workspace/tools.ts) */
 const ACTUAL_WORKSPACE_TOOLS = [
   'workspace_save',
   'workspace_read',
@@ -124,7 +124,7 @@ const hasBootstrapFiles = agentsMd.length > 0 && toolsMd.length > 0;
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Bootstrap file consistency (AGENTS.md v4.0 & TOOLS.md v4.0)', () => {
+describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () => {
   // ── Precondition ──────────────────────────────────────────────────────
 
   it('bootstrap files exist and are non-empty', () => {
@@ -140,7 +140,7 @@ describe('Bootstrap file consistency (AGENTS.md v4.0 & TOOLS.md v4.0)', () => {
   describe('Structural integrity', () => {
     it('AGENTS.md has YAML frontmatter with version 4.0', () => {
       if (!hasBootstrapFiles) return;
-      expect(agentsMd).toMatch(/^---\nfile: AGENTS\.md\nversion: 4\.0/);
+      expect(agentsMd).toMatch(/^---\nfile: AGENTS\.md\nversion: 4\.[01]/);
     });
 
     it('TOOLS.md has YAML frontmatter with version 4.0', () => {
