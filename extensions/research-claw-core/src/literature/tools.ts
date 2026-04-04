@@ -11,7 +11,7 @@
 // functionally equivalent and avoid an additional abstraction layer.
 
 import { existsSync } from 'node:fs';
-import { LiteratureService, type PaperInput, type PaperPatch } from './service.js';
+import { LiteratureService, type Paper, type PaperInput, type PaperPatch } from './service.js';
 import type { ToolDefinition } from '../types.js';
 import { ZoteroBridge } from './zotero.js';
 import { EndNoteBridge } from './endnote.js';
@@ -440,7 +440,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         if (result.errors.length > 0) parts.push(`${result.errors.length} error(s)`);
         // Build paper_card blocks for each added paper
         if (result.added.length > 0) {
-          const cards = result.added.map((p: any) => {
+          const cards = result.added.map((p: Paper) => {
             const cd: Record<string, unknown> = {
               type: 'paper_card',
               title: p.title,

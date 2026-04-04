@@ -111,8 +111,8 @@ bridge, and PDF import, read the **Search SOP** skill.
 | `task_create` / `task_complete` / `task_update` | `task_card` |
 | `workspace_save` / `workspace_export` | `file_card` — **COPY from tool output verbatim, NEVER fabricate** |
 | HiL decision needed (§5) | `approval_card` — **MUST include `approval_id` from `exec.approval.requested`** |
-| Phase/session summary | `progress_card` |
-| `monitor_report` | `monitor_digest` |
+| Phase/session summary | `progress_card` (agent-composed) |
+| `monitor_report` | `monitor_digest` (agent-composed from report results) |
 
 **CRITICAL:** `approval_card` without `approval_id` renders dashboard buttons non-functional.
 **CRITICAL:** `file_card` MUST be copied from tool response — fabricated cards cause "file not found" errors.
