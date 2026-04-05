@@ -15,6 +15,7 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { createDatabaseManager, type DatabaseManager } from './src/db/connection.js';
@@ -189,6 +190,8 @@ function resolvePptRoot(api: PluginApi, cfg: PluginConfig): string {
 
 // ── Plugin definition ──────────────────────────────────────────────────
 
+const DEFAULT_RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
+
 const plugin: PluginDefinition = {
   id: 'research-claw-core',
   name: 'Research-Claw Core',
@@ -197,7 +200,12 @@ const plugin: PluginDefinition = {
 
   register(api) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
-    const dbPath = api.resolvePath(cfg.dbPath ?? '.research-claw/library.db');
+    const rawDbPath = typeof cfg.dbPath === 'string' && cfg.dbPath.trim()
+      ? cfg.dbPath.trim()
+      : DEFAULT_RC_DB_PATH;
+    const dbPath = rawDbPath.startsWith('~/')
+      ? path.join(os.homedir(), rawDbPath.slice(2))
+      : api.resolvePath(rawDbPath);
     const deadlineWarningHours = cfg.heartbeatDeadlineWarningHours ?? 48;
 
     api.logger.info(`Research-Claw Core initializing (db: ${dbPath})`);

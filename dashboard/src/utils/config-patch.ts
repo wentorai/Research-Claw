@@ -15,6 +15,7 @@ import { getPreset } from './provider-presets';
 
 /** Sentinel value OpenClaw uses to redact secrets in resolved config */
 export const REDACTED_SENTINEL = '__OPENCLAW_REDACTED__';
+const RC_DB_PATH_DEFAULT = '~/.research-claw/library.db';
 
 export interface ConfigPatchInput {
   /** OpenClaw native provider key (e.g. 'zai', 'openai', 'anthropic') */
@@ -339,7 +340,7 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
       'research-claw-core': {
         enabled: true,
         config: {
-          dbPath: '.research-claw/library.db',
+          dbPath: RC_DB_PATH_DEFAULT,
           autoTrackGit: true,
           defaultCitationStyle: 'apa',
           heartbeatDeadlineWarningHours: 48,

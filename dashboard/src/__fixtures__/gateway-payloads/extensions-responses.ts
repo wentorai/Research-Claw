@@ -179,7 +179,7 @@ export const CONFIG_GET_RESPONSE = {
         'research-claw-core': {
           enabled: true,
           config: {
-            dbPath: '.research-claw/library.db',
+            dbPath: '~/.research-claw/library.db',
             autoTrackGit: true,
             defaultCitationStyle: 'apa',
             heartbeatDeadlineWarningHours: 48,

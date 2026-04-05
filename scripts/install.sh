@@ -49,6 +49,31 @@ info() { printf "${C}  ▸${N} %s\n" "$1"; }
 warn() { printf "${Y}  ⚠${N} %s\n" "$1"; }
 die()  { printf "${R}  ✗ %s${N}\n" "$1" >&2; printf "  ${D}Report: ${ISSUES_URL}${N}\n" >&2; exit 1; }
 
+ensure_ppt_master() {
+  local target_dir="$INSTALL_DIR/ppt-master"
+  local scripts_root="$target_dir/skills/ppt-master/scripts"
+
+  if [ -f "$scripts_root/project_manager.py" ] && [ -f "$scripts_root/svg_to_pptx.py" ]; then
+    ok "ppt-master ready"
+    return 0
+  fi
+
+  if [ -f "$INSTALL_DIR/.gitmodules" ] && grep -q 'path = ppt-master' "$INSTALL_DIR/.gitmodules" 2>/dev/null; then
+    info "Initializing ppt-master submodule..."
+    git -C "$INSTALL_DIR" submodule sync -- ppt-master >/dev/null 2>&1 || true
+    if ! git -C "$INSTALL_DIR" submodule update --init --recursive ppt-master; then
+      die "Failed to initialize ppt-master. Try: cd $INSTALL_DIR && git submodule update --init --recursive ppt-master"
+    fi
+  fi
+
+  if [ -f "$scripts_root/project_manager.py" ] && [ -f "$scripts_root/svg_to_pptx.py" ]; then
+    ok "ppt-master ready"
+    return 0
+  fi
+
+  die "ppt-master is missing required scripts after install. Try: cd $INSTALL_DIR && git submodule update --init --recursive ppt-master"
+}
+
 # Global error trap — catch unexpected failures from set -euo pipefail
 trap 'printf "\n${R}  ✗ Unexpected error at line $LINENO${N}\n" >&2; printf "  ${D}Report: ${ISSUES_URL}${N}\n" >&2; exit 1' ERR
 
@@ -456,6 +481,8 @@ else
   ok "Cloned"
 fi
 
+ensure_ppt_master
+
 # --- Force git HTTPS (prevent SSH clone failures for git+ dependencies) ---
 # @whiskeysockets/baileys references libsignal-node via git+https URL;
 # some environments convert this to SSH (git@github.com:...) which fails
@@ -689,6 +716,7 @@ node -e "
 " 2>/dev/null || true
 
 if [ -f config/openclaw.json ]; then
+  node scripts/migrate-rc-data-dir.cjs 2>/dev/null || true
   # Clean stale references + ensure OC 2026.3.13+ required fields.
   # Shared logic in ensure-config.cjs — also called by run.sh and docker-entrypoint.sh.
   GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
@@ -1225,7 +1253,11 @@ if (cfg.agents?.defaults?.workspace) {
 if (cfg.plugins?.entries) {
   for (const e of Object.values(cfg.plugins.entries)) {
     if (e?.config?.dbPath && !path.isAbsolute(e.config.dbPath)) {
-      e.config.dbPath = path.resolve(root, e.config.dbPath); changed = true;
+      if (e.config.dbPath.startsWith('~/')) {
+        e.config.dbPath = path.join(require('os').homedir(), e.config.dbPath.slice(2)); changed = true;
+      } else {
+        e.config.dbPath = path.resolve(root, e.config.dbPath); changed = true;
+      }
     }
   }
 }

@@ -213,7 +213,7 @@ describe('ExtensionsPanel', () => {
           name: 'research-claw-core',
           enabled: true,
           path: 'extensions/research-claw-core',
-          config: { dbPath: '.research-claw/library.db' },
+          config: { dbPath: '~/.research-claw/library.db' },
         },
       ],
       pluginsLoaded: true,
