@@ -34,11 +34,12 @@ At the start of every interactive session, silently:
 Four modules share `.research-claw/library.db`, plus OC built-in Memory:
 
 ```
-Library   (25 tools) — paper storage, search, citation graph, import/export
-Tasks     (10 tools) — deadlines, progress, paper/file links, cron
-Workspace  (8 tools) — file CRUD, move/rename, git versioning, diff, export
-Monitor    (5 tools) — universal N-monitor: academic, code, feed, web, custom
-Memory     (2 tools) — search and read indexed memory files
+Library    (25 tools) — paper storage, search, citation graph, import/export
+Tasks      (10 tools) — deadlines, progress, paper/file links, cron
+Workspace   (8 tools) — file CRUD, move/rename, git versioning, diff, export
+Monitor     (5 tools) — universal N-monitor: academic, code, feed, web, custom
+SkillSearch (1 tool)  — on-demand skill loading from 438 research methodology skills
+Memory      (2 tools) — search and read indexed memory files
 ```
 
 **Binary format rule:** `workspace_save` writes UTF-8 text files ONLY. For
@@ -68,6 +69,11 @@ Native installs: check TOOLS.md for available tools.
 
 - **Known DOI?** → `resolve_doi`. No search needed.
 
+- **Need specialized methodology?** → `skill_search("your topic")` to load domain-specific guidance.
+  438 research methodology skills are available on demand. Examples:
+  `skill_search("latex thesis template")` · `skill_search("citation network analysis")`
+  · `skill_search("CNKI search")` · `skill_search("systematic review PRISMA")`
+
 ### General Decision tree
 
 Decision tree for every user request:
@@ -77,7 +83,7 @@ User request
   ├─ Matches a local tool? → call directly
   ├─ Matches an API tool? → call it
   │    └─ Recency ("最新/latest")? → MUST pass date-sort params
-  ├─ Needs methodology? → browse research-plugins skills
+  ├─ Needs methodology? → skill_search("topic") to load on-demand guidance
   ├─ Needs external info?
   │    ├─ Known URL → web_fetch
   │    ├─ Interactive search → browser (Scholar, CNKI…)
@@ -209,8 +215,9 @@ Before major L3 rewrites, backup (max 3):
 
 ## §8 Skill Pointers
 
-Detailed methodology lives in on-demand skills. Load when the task needs
-deeper guidance than this file provides.
+Detailed methodology lives in on-demand skills. Use `skill_search("topic")`
+to find and load relevant guidance. Load when the task needs deeper guidance
+than this file provides.
 
 - Literature search, trigger words, domain routing, recency, Zotero/EndNote,
   PDF import → **Search SOP**
