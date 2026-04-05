@@ -72,6 +72,7 @@ RUN PIP_INDEX_URL="$(echo ${NPM_REGISTRY} | grep -q npmmirror && echo https://py
       requests beautifulsoup4 \
       networkx sympy biopython \
       nbformat jupyter-core \
+      svgwrite cairosvg \
     && /opt/miniforge3/bin/python3 -c "import numpy; print(f'numpy {numpy.__version__} OK')"
 
 ENV PATH="/opt/miniforge3/bin:$PATH"
