@@ -170,6 +170,20 @@ node -e "
     changed = true;
   }
 
+  // Plugin dbPath: Docker volume rc-data mounts at /app/.research-claw.
+  // ensure-config.cjs normalizes dbPath to os.homedir() (/root in container),
+  // which is NOT on the volume — database would be lost on container recreation.
+  // Force the volume-backed path so data persists across upgrades.
+  const DOCKER_DB_PATH = '/app/.research-claw/library.db';
+  const rcEntry = c.plugins?.entries?.['research-claw-core'];
+  if (rcEntry) {
+    if (!rcEntry.config) { rcEntry.config = {}; changed = true; }
+    if (rcEntry.config.dbPath !== DOCKER_DB_PATH) {
+      rcEntry.config.dbPath = DOCKER_DB_PATH;
+      changed = true;
+    }
+  }
+
   if (changed) { const o=JSON.stringify(c,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); }
 " 2>&1 || echo "[research-claw] WARNING: Config patch failed — gateway may not start correctly"
 
