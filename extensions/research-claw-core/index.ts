@@ -5,10 +5,10 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 39 agent tools (17 literature + 10 task + 7 workspace + 5 monitor)
+ *   - 40 agent tools (17 literature + 10 task + 7 workspace + 5 monitor + 1 skill_search)
  *   - 79 WS RPC methods + 1 HTTP route = 80 interface methods
  *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* = 79 WS; POST /rc/upload = 1 HTTP)
- *   - 8 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×2, gateway_start, agent:bootstrap)
+ *   - 10 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×3, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  */
 
@@ -36,6 +36,7 @@ import { PptService } from './src/ppt/service.js';
 import { registerPptRpc } from './src/ppt/rpc.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
+import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -123,6 +124,48 @@ let _pptService: InstanceType<typeof PptService> | null = null;
 const PROBE_TTL_MS = 30 * 60 * 1000;
 let _toolCallProbeCache = new Map<string, { supported: boolean; model: string; provider: string; testedAt: number }>();
 let _lastProbeResult: { supported: boolean; model: string } | null = null;
+
+// ── Error resilience: context injection + degradation hints ──────────
+// Track tool failures within a session. When the same tool fails
+// repeatedly, inject a hint into the result telling the model to
+// try an alternative approach. This prevents the "hitting the same
+// wall" pattern that frustrates users.
+
+interface ToolErrorEntry {
+  tool: string;
+  error: string;
+  ts: number;
+}
+
+const _toolErrorLog: ToolErrorEntry[] = [];
+const ERROR_LOG_MAX = 50; // cap memory usage
+
+// Degradation hints: when tool X fails, suggest tool Y
+// ── Tool call dedup state (module-level for cross-hook visibility) ────
+let _lastToolSig: string | null = null;
+let _lastToolCount = 0;
+
+const DEGRADATION_HINTS: Record<string, string> = {
+  'search_arxiv': 'Try search_crossref or search_openalex instead.',
+  'search_crossref': 'Try search_openalex or search_europe_pmc instead.',
+  'search_openalex': 'Try search_crossref or search_europe_pmc instead.',
+  'search_pubmed': 'Try search_europe_pmc or search_crossref instead.',
+  'search_europe_pmc': 'Try search_pubmed or search_crossref instead.',
+  'search_dblp': 'Try search_arxiv or search_crossref instead.',
+  'search_biorxiv': 'Try search_pubmed or search_europe_pmc instead.',
+  'search_inspire': 'Try search_arxiv instead.',
+  'search_hal': 'Try search_openaire or search_crossref instead.',
+  'search_zenodo': 'Try search_datacite instead.',
+  'search_datacite': 'Try search_zenodo instead.',
+  'library_zotero_import': 'Try library_import_bibtex or library_import_ris as a manual fallback.',
+  'library_zotero_detect': 'Zotero may not be installed or accessible. Try BibTeX/RIS import instead.',
+  'library_endnote_detect': 'EndNote may not be installed. Try BibTeX/RIS import instead.',
+  'library_endnote_import': 'Try library_import_bibtex or library_import_ris instead.',
+  'browser': 'Browser may be unavailable. Try web_fetch for the URL, or use an API tool from Layer 1.',
+  'workspace_export': 'Export may have failed. Try workspace_save as markdown first, then convert manually.',
+  'ppt_init': 'PPT service may not be configured. Save content as markdown and inform the user.',
+  'ppt_export': 'PPT export failed. Try saving as markdown and suggest manual conversion.',
+};
 
 function resolvePptRoot(api: PluginApi, cfg: PluginConfig): string {
   // Prefer a repo checked out at RC root: ./ppt-master (submodule or clone).
@@ -258,13 +301,14 @@ const plugin: PluginDefinition = {
         _wsInitPromise = null;
         _toolCallProbeCache = new Map();
         _lastProbeResult = null;
+        _toolErrorLog.length = 0;
         _initialized = false;
         _registrationDone = false;
       },
     });
 
     if (!_registrationDone) {
-    // ── 4. Register tools (39 total) ─────────────────────────────────
+    // ── 4. Register tools (40 total) ─────────────────────────────────
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
     }
@@ -279,6 +323,124 @@ const plugin: PluginDefinition = {
     }
     for (const tool of createPptTools(pptService)) {
       api.registerTool(tool);
+    }
+
+    // ── 4b. Skill Search tool ─────────────────────────────────────────
+    // On-demand skill loading: searches research-plugins catalog and
+    // returns SKILL.md content so the agent can load methodology guidance
+    // beyond what fits in the initial prompt (~150 of 438 skills).
+    {
+      const rpCandidates = [
+        path.join(api.resolvePath('..'), 'research-plugins'),
+        path.join(api.resolvePath('.'), 'node_modules', '@wentorai', 'research-plugins'),
+      ];
+      const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
+      if (homeDir) {
+        rpCandidates.push(
+          path.join(homeDir, '.openclaw', 'plugins', 'node_modules', '@wentorai', 'research-plugins'),
+        );
+      }
+
+      let rpRoot: string | null = null;
+      for (const candidate of rpCandidates) {
+        if (fs.existsSync(path.join(candidate, 'catalog.json'))) {
+          rpRoot = candidate;
+          break;
+        }
+      }
+
+      if (!rpRoot) {
+        api.logger.warn('[SkillSearch] research-plugins catalog.json not found — skill search disabled');
+      } else {
+        const indexedCount = initSkillIndex(rpRoot);
+        api.logger.info(`[SkillSearch] Indexed ${indexedCount} skills from ${rpRoot}`);
+      }
+
+      // Only register the tool when catalog is available — avoids exposing
+      // a tool that always returns "no skills" which confuses the model.
+      if (rpRoot) api.registerTool({
+        name: 'skill_search',
+        description:
+          'Search and load research methodology skills on demand. Use when you need ' +
+          'domain-specific guidance (e.g., "LaTeX thesis", "citation network", "CNKI search strategy") ' +
+          'that is not in your current prompt. Returns skill content that you should follow.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description:
+                'Search query — use keywords like tool names, domain names, or methodology terms. ' +
+                'Examples: "latex thesis", "citation apa", "CNKI chinese", "machine learning survey", "bokeh visualization"',
+            },
+            max_results: {
+              type: 'number',
+              description: 'Maximum number of skills to return (default: 3, max: 5)',
+            },
+            list_catalog: {
+              type: 'boolean',
+              description: 'Set to true to get a full catalog summary instead of searching',
+            },
+          },
+          required: ['query'],
+        },
+        async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
+          const query = String(params.query ?? '');
+          const maxResults = Math.min(Number(params.max_results) || 3, 5);
+          const listCatalog = Boolean(params.list_catalog);
+
+          if (listCatalog) {
+            return {
+              content: [{ type: 'text', text: getSkillCatalogSummary() }],
+              details: { catalog: true },
+            };
+          }
+
+          if (!query.trim()) {
+            return {
+              content: [{ type: 'text', text: 'Error: Query cannot be empty. Provide keywords to search for skills.' }],
+              details: { error: 'empty_query' },
+            };
+          }
+
+          const matches = searchSkills(query, maxResults);
+          if (matches.length === 0) {
+            return {
+              content: [{
+                type: 'text',
+                text: `No skills found for "${query}". Try broader keywords or use skill_search({ query: "", list_catalog: true }) to see all categories.`,
+              }],
+              details: { query, matches: 0 },
+            };
+          }
+
+          const results: string[] = [];
+          for (const match of matches) {
+            const content = readSkillContent(match);
+            if (content) {
+              results.push(
+                `--- SKILL: ${match.name} (${match.category}/${match.subcategory}) ---\n${content}`,
+              );
+            } else {
+              results.push(
+                `--- SKILL: ${match.name} (${match.category}/${match.subcategory}) ---\n[Content not available at ${match.path}]`,
+              );
+            }
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Found ${matches.length} skill(s) for "${query}":\n\n${results.join('\n\n')}`,
+            }],
+            details: {
+              query,
+              matches: matches.length,
+              skills: matches.map(m => ({ id: m.id, name: m.name, category: m.category, subcategory: m.subcategory })),
+            },
+          };
+        },
+      });
     }
 
     // ── 5. Register RPC methods (78 WS total) ────────────────────────
@@ -739,6 +901,28 @@ const plugin: PluginDefinition = {
           );
         }
 
+        // ── Error memory context injection ─────────────────────────────
+        // If there are recent tool failures, inject a summary so the model
+        // is aware even after compaction/context reset.
+        if (_toolErrorLog.length > 0) {
+          const tenMinAgo = Date.now() - 600_000;
+          const recentErrors = _toolErrorLog.filter(e => e.ts > tenMinAgo);
+          if (recentErrors.length > 0) {
+            const byTool = new Map<string, number>();
+            for (const e of recentErrors) {
+              byTool.set(e.tool, (byTool.get(e.tool) ?? 0) + 1);
+            }
+            const failLines = Array.from(byTool.entries())
+              .map(([tool, count]) => {
+                const hint = DEGRADATION_HINTS[tool] ?? '';
+                return `  - ${tool}: ${count} failure(s)${hint ? ` — ${hint}` : ''}`;
+              })
+              .join('\n');
+            lines.push(`[Research-Claw] TOOL FAILURES (last 10 min):\n${failLines}`);
+            lines.push('[Research-Claw] Do NOT retry failed tools with the same arguments. Use the suggested alternatives above.');
+          }
+        }
+
         return { prependContext: lines.join('\n') };
       } catch {
         return {};
@@ -752,6 +936,10 @@ const plugin: PluginDefinition = {
       // legitimate calls that happen to match a previous session's pattern.
       _lastToolSig = null;
       _lastToolCount = 0;
+
+      // Reset error log — each session starts fresh, but errors from the
+      // current session will persist through compaction/context resets.
+      _toolErrorLog.length = 0;
 
       if (dbManager?.isOpen()) {
         runMigrations(dbManager.db);
@@ -826,9 +1014,7 @@ const plugin: PluginDefinition = {
     // Some models (e.g. glm-5) generate 1000+ identical tool calls in
     // a single response. Track consecutive identical calls and block
     // after TOOL_DEDUP_MAX repeats to prevent transcript bloat.
-    const TOOL_DEDUP_MAX = 5;
-    let _lastToolSig: string | null = null;
-    let _lastToolCount = 0;
+    const TOOL_DEDUP_MAX = 3;
 
     api.on('before_tool_call', (event: unknown) => {
       const evt = event as { toolName?: string; params?: Record<string, unknown> } | undefined;
@@ -852,6 +1038,29 @@ const plugin: PluginDefinition = {
       } else {
         _lastToolSig = toolSig;
         _lastToolCount = 1;
+      }
+
+      // ── Error-aware preemptive block ───────────────────────────────
+      // If this tool has failed 3+ times in the last 10 minutes, block it
+      // preemptively even if the arguments are different.
+      {
+        const tenMinAgo = Date.now() - 600_000;
+        const recentFails = _toolErrorLog.filter(
+          e => e.tool === (evt.toolName ?? '') && e.ts > tenMinAgo,
+        );
+        if (recentFails.length >= 3) {
+          const hint = DEGRADATION_HINTS[evt.toolName ?? ''] ??
+            'Try a completely different approach.';
+          api.logger.warn(
+            `[ErrorGuard] Preemptively blocked "${evt.toolName}" — ${recentFails.length} recent failures`,
+          );
+          return {
+            block: true,
+            blockReason:
+              `Blocked: "${evt.toolName}" has failed ${recentFails.length} times in the last 10 minutes. ` +
+              `The tool appears to be unavailable or misconfigured. ${hint}`,
+          };
+        }
       }
 
       // ── Cron schedule sync ──────────────────────────────────────────
@@ -1045,7 +1254,88 @@ const plugin: PluginDefinition = {
       }
     }, { priority: 50 });
 
-    // Hook 8: Verify DB integrity + bootstrap heartbeat on gateway start
+    // Hook 8b: Error context injection — track tool failures for
+    // degradation via before_prompt_build and before_tool_call blocking.
+    //
+    // after_tool_call is a VOID hook in OC — return values are discarded.
+    // So we only record errors here; the actual degradation happens in:
+    //   - before_tool_call (preemptive block at 3+ failures)
+    //   - before_prompt_build (context injection with hints)
+    //
+    // Error detection: OC populates evt.error for thrown exceptions, and
+    // we also inspect result shape for non-throwing error returns.
+    api.on('after_tool_call', (event: unknown) => {
+      const evt = event as {
+        toolName?: string;
+        params?: Record<string, unknown>;
+        result?: unknown;
+        error?: string;       // OC native: populated when tool throws
+        durationMs?: number;
+      } | undefined;
+      if (!evt?.toolName) return;
+
+      // Detect error — check OC native error field first, then result shape
+      let isError = false;
+      let errorMsg = '';
+
+      // 1. OC native error field (thrown exceptions)
+      if (evt.error) {
+        isError = true;
+        errorMsg = evt.error.slice(0, 200);
+      }
+
+      // 2. Result-based error detection (non-throwing failures)
+      if (!isError) {
+        const result = evt.result;
+        if (typeof result === 'string') {
+          if (/^(Error|Failed|error:)/i.test(result)) {
+            isError = true;
+            errorMsg = result.slice(0, 200);
+          }
+        } else if (typeof result === 'object' && result !== null) {
+          const obj = result as Record<string, unknown>;
+          if (obj.error !== undefined) {
+            isError = true;
+            errorMsg = typeof obj.error === 'string'
+              ? obj.error.slice(0, 200)
+              : JSON.stringify(obj.error).slice(0, 200);
+          } else if (obj.ok === false) {
+            isError = true;
+            const msg = typeof obj.message === 'string' ? obj.message : JSON.stringify(obj);
+            errorMsg = msg.slice(0, 200);
+          }
+        }
+      }
+
+      if (isError) {
+        _toolErrorLog.push({
+          tool: evt.toolName,
+          error: errorMsg || 'Unknown error',
+          ts: Date.now(),
+        });
+
+        // Cap error log size
+        if (_toolErrorLog.length > ERROR_LOG_MAX) {
+          _toolErrorLog.splice(0, _toolErrorLog.length - ERROR_LOG_MAX);
+        }
+
+        api.logger.warn(
+          `[ErrorTracker] "${evt.toolName}" failed: ${errorMsg.slice(0, 80)}`,
+        );
+      } else {
+        // On success, clear old errors for this tool (it's working again).
+        // Only clear entries older than 5 minutes to avoid flapping.
+        const fiveMinAgo = Date.now() - 300_000;
+        for (let i = _toolErrorLog.length - 1; i >= 0; i--) {
+          if (_toolErrorLog[i].tool === evt.toolName && _toolErrorLog[i].ts < fiveMinAgo) {
+            _toolErrorLog.splice(i, 1);
+          }
+        }
+      }
+    }, { priority: 90 });
+
+    // Hook 9: Verify DB integrity + bootstrap heartbeat on gateway start
+    // (was Hook 8 before error-resilience hooks were added)
     api.on('gateway_start', () => {
       if (!dbManager?.isOpen()) return;
       try {
@@ -1068,7 +1358,7 @@ const plugin: PluginDefinition = {
       }
     });
 
-    // Hook 8: Redirect bootstrap file loading from workspace root to .ResearchClaw/ subdirectory.
+    // Hook 10: Redirect bootstrap file loading from workspace root to .ResearchClaw/ subdirectory.
     //
     // OpenClaw hardcodes loading AGENTS.md, SOUL.md, etc. from the workspace root.
     // With skipBootstrap: true, OC won't create default templates at root. This hook
@@ -1113,7 +1403,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (39 tools, 79 WS RPC + 1 HTTP = 80 interfaces, 8 hooks)');
+    api.logger.info('Research-Claw Core registered (40 tools, 79 WS RPC + 1 HTTP = 80 interfaces, 10 hooks)');
     _registrationDone = true;
     }
   },
