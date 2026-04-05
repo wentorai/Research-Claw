@@ -127,6 +127,7 @@ citation needs. Identify gaps BEFORE writing.
    - All cited papers verified/in library? If NO → search or flag
    - All outline key points covered? If NO → expand
 4. **If citation missing mid-section:** pause → search (search-sop) → add to library → continue
+5. **If section needs a figure:** pause → load Plotting SOP → generate figure → `workspace_save` to `outputs/figures/` → embed reference ("See Figure N") → continue
 
 ### Step 2: Save v1
 

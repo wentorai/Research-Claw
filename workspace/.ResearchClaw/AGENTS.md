@@ -69,6 +69,10 @@ Native installs: check TOOLS.md for available tools.
 
 - **Known DOI?** → `resolve_doi`. No search needed.
 
+- **画图/作图/figure/plot/diagram?** → Load **Plotting SOP** skill.
+  Four engines: Python (data viz) · Mermaid (flowcharts) · NanoBanana/Gemini (complex diagrams) · SVG (vector).
+  For complex/beautiful diagrams → recommend NanoBanana first → user declines → Mermaid fallback.
+
 - **Need specialized methodology?** → `skill_search("your topic")` to load domain-specific guidance.
   438 research methodology skills are available on demand. Examples:
   `skill_search("latex thesis template")` · `skill_search("citation network analysis")`
@@ -83,6 +87,7 @@ User request
   ├─ Matches a local tool? → call directly
   ├─ Matches an API tool? → call it
   │    └─ Recency ("最新/latest")? → MUST pass date-sort params
+  ├─ Needs a figure/plot/diagram? → Load Plotting SOP skill
   ├─ Needs methodology? → skill_search("topic") to load on-demand guidance
   ├─ Needs external info?
   │    ├─ Known URL → web_fetch
