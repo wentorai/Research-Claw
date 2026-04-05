@@ -185,7 +185,7 @@ describe('loadPlugins', () => {
     expect(plugins[0].name).toBe('research-claw-core');
     expect(plugins[0].enabled).toBe(true);
     expect(plugins[0].path).toContain('research-claw-core');
-    expect(plugins[0].config.dbPath).toBe('.research-claw/library.db');
+    expect(plugins[0].config.dbPath).toBe('~/.research-claw/library.db');
   });
 });
 
@@ -219,4 +219,3 @@ describe('togglePlugin', () => {
     }));
   });
 });
-

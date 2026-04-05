@@ -26,11 +26,36 @@ const os = require('os');
 const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins', 'openclaw-weixin'];
 const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins'];
 const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin'];
+const RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
 const REQUIRED_TOOLS = ['ppt_init', 'ppt_export'];
 const STALE_TOOLS = [
   'search_papers', 'get_paper', 'get_citations',
   'radar_configure', 'radar_get_config', 'radar_scan',
 ];
+
+function normalizeRcDbPath(configPath, rawPath) {
+  if (!rawPath || typeof rawPath !== 'string') return RC_DB_PATH;
+
+  const projectRoot = path.resolve(path.dirname(configPath), '..');
+  const legacyRel = '.research-claw/library.db';
+  const legacyAbs = path.join(projectRoot, '.research-claw', 'library.db');
+  const normalized = rawPath.trim();
+
+  if (
+    normalized === legacyRel ||
+    normalized === '~/.research-claw/library.db' ||
+    normalized === '$HOME/.research-claw/library.db' ||
+    normalized === legacyAbs
+  ) {
+    return RC_DB_PATH;
+  }
+
+  if (path.isAbsolute(normalized) && normalized.startsWith(path.join(projectRoot, '.research-claw') + path.sep)) {
+    return RC_DB_PATH;
+  }
+
+  return normalized;
+}
 
 function ensureConfig(filePath) {
   if (!fs.existsSync(filePath)) return false;
@@ -108,10 +133,12 @@ function ensureConfig(filePath) {
     const before = c.tools.alsoAllow.length;
     c.tools.alsoAllow = c.tools.alsoAllow.filter(t => !STALE_TOOLS.includes(t));
     if (c.tools.alsoAllow.length !== before) changed = true;
-    for (const tool of REQUIRED_TOOLS) {
-      if (!c.tools.alsoAllow.includes(tool)) {
-        c.tools.alsoAllow.push(tool);
-        changed = true;
+    if (!isGlobal) {
+      for (const tool of REQUIRED_TOOLS) {
+        if (!c.tools.alsoAllow.includes(tool)) {
+          c.tools.alsoAllow.push(tool);
+          changed = true;
+        }
       }
     }
   }
@@ -231,10 +258,23 @@ function ensureConfig(filePath) {
   if (!isGlobal && !c.plugins?.entries) {
     if (!c.plugins) c.plugins = {};
     c.plugins.entries = {
-      'research-claw-core': { enabled: true, config: { dbPath: '.research-claw/library.db', autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' } },
+      'research-claw-core': { enabled: true, config: { dbPath: RC_DB_PATH, autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' } },
       'openclaw-weixin': { enabled: true },
     };
     changed = true;
+  }
+
+  if (!isGlobal && c.plugins?.entries?.['research-claw-core']) {
+    const entry = c.plugins.entries['research-claw-core'];
+    if (!entry.config) {
+      entry.config = {};
+      changed = true;
+    }
+    const nextDbPath = normalizeRcDbPath(filePath, entry.config.dbPath);
+    if (entry.config.dbPath !== nextDbPath) {
+      entry.config.dbPath = nextDbPath;
+      changed = true;
+    }
   }
 
   // 12. Browser — ensure config exists with RC default profile

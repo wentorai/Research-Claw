@@ -59,6 +59,9 @@ fi
 # Without this, it reads ~/.openclaw/openclaw.json which has no RC settings.
 export OPENCLAW_CONFIG_PATH="$(pwd)/config/openclaw.json"
 
+# --- Migrate legacy project data dir to ~/.research-claw ---
+node "$(dirname "$0")/migrate-rc-data-dir.cjs" 2>/dev/null || true
+
 # Token auth — must be set BEFORE ensure-config so it can align config to this value.
 # Default 'research-claw' matches Dashboard's DEFAULT_TOKEN for zero-config local use.
 # Remote users override via: export OPENCLAW_GATEWAY_TOKEN=my-secret (before pnpm serve)

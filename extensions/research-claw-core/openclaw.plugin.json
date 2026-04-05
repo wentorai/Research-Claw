@@ -10,7 +10,7 @@
       "dbPath": {
         "type": "string",
         "description": "Path to SQLite database file",
-        "default": ".research-claw/library.db"
+        "default": "~/.research-claw/library.db"
       },
       "autoTrackGit": {
         "type": "boolean",
