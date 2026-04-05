@@ -5,6 +5,7 @@ description: >-
   Covers local library search, 18 academic database APIs (L1),
   web_fetch direct access (L1.5), browser RPA for CNKI/Google Scholar (L2),
   and optional API services (L3). Includes domain routing, recency protocol,
+  search iteration protocol (evaluate → refine → re-search up to 3 rounds),
   and Zotero/EndNote import bridges.
 ---
 
@@ -99,17 +100,28 @@ Always available, require NO API keys. Use as **primary search method**.
 | `search_datacite` / `resolve_datacite_doi` | 50M+ dataset DOIs | Dataset DOI resolution |
 | `search_ror` | 100K+ institutions | Institution disambiguation |
 
-### Layer 1.5 — `web_fetch` Direct Access (no API key, faster than browser)
+### Layer 1.5 — `web_fetch` Direct Access (relaxed — any public academic URL)
 
-Between L1 API tools and L2 browser, use `web_fetch` to directly access known URLs.
+Between L1 API tools and L2 browser, use `web_fetch` to directly access **any publicly accessible academic URL** (not limited to known URLs).
 
-**Useful direct URLs:**
+**Allowed targets (non-exhaustive):**
 - **arXiv RSS** (latest by category): `https://rss.arxiv.org/rss/{category}` (e.g. `cs.CV`)
 - **arXiv API** (structured): `https://export.arxiv.org/api/query?search_query=ti:transformer&sortBy=submittedDate&sortOrder=descending&max_results=20`
+- **Semantic Scholar API**: `https://api.semanticscholar.org/graph/v1/paper/search`
+- **CORE API**: `https://api.core.ac.uk/v3/search/works`
+- **OA full-text links** — URLs returned by `find_oa_version` (Unpaywall)
+- **Author/lab homepages** — publication lists, preprint links
+- **Conference proceedings pages** — NeurIPS, ICML, ACL, AAAI proceedings
+- **Preprint servers** — bioRxiv, medRxiv, SSRN landing pages
 - **PubMed RSS**: subscribe URLs from PubMed search results
-- **Conference pages**: known proceedings URLs (NeurIPS, ICML, ACL, etc.)
+- **Repository metadata** — GitHub/GitLab README for research software
 
-**When to use `web_fetch`**: You know the exact URL; page is static HTML; extracting content from a specific page.
+**RESTRICTIONS (do NOT `web_fetch`):**
+- Pages requiring login/authentication
+- Paywalled full-text (use `find_oa_version` first)
+- Pages with anti-scraping measures that return empty content
+
+**When to use `web_fetch`**: Any public academic URL; page is static HTML or API endpoint; extracting content from a specific page.
 **When to use `browser` instead**: Form interaction needed; JavaScript rendering required; multi-page navigation.
 
 ### Layer 2 — Browser RPA (databases without public APIs)
@@ -132,8 +144,12 @@ IEEE Xplore, ACM DL, SpringerLink, any user-specified database.
 found" → `browser action=tabs` for active targetIds. Context overflow → extract
 from last snapshot and close.
 
-**Hard rules:** Max 3 snapshots per session. Never paginate. Never click into
-individual papers (use `resolve_doi`/`web_fetch` instead). Always close browser.
+**Operational limits (revised):**
+- Max **8** browser snapshots per search session
+- Pagination: **allowed** up to **3 pages** of results
+- Click into paper detail pages: **allowed** for extracting abstract, citation count, and metadata
+- **STILL FORBIDDEN**: downloading PDFs, submitting forms, creating accounts, entering personal data (standard GDPR/cookie consent banners may be dismissed with a single click)
+- **MUST** always close browser after search is complete
 
 ### Layer 3 — API Key Required (optional, user configures)
 
@@ -151,6 +167,8 @@ Never ask users to register for third-party API keys.
 
 ## 2. Domain → Tool Routing
 
+Domain routing below is a **STARTING POINT, not a hard constraint**. If primary
+tools return insufficient results, expand to other tools (see §15 Search Iteration Protocol).
 **Do NOT** send queries to the wrong domain's tool.
 
 | Domain | Primary Tools | NEVER use | Notes |
@@ -344,6 +362,47 @@ Rate each paper **high / medium / low** based on: venue quality, citation count
 (adjusted for age), methodology soundness, reproducibility, and relevance to the
 user's question. Only add high + medium papers to the library unless user requests
 otherwise.
+
+---
+
+## 15. Search Iteration Protocol
+
+After **every** search execution, you **MUST** evaluate results before presenting
+them to the user. Do NOT treat one-shot search as final.
+
+### Evaluation Checklist (执行完每次搜索后必须评估)
+
+1. **Quantity**: ≥5 relevant papers? If **NO** → broaden keywords OR switch source
+2. **Recency**: Includes papers from last 2 years? If **NO** → add date filter
+3. **Coverage**: Different methodologies/schools covered? If **NO** → cross-source search
+4. **Key papers**: High-citation papers included? If **NO** → re-search with `search_openalex(sort_by='cited_by_count')` or `search_crossref(sort='cited-by')`
+
+### Iteration Rules
+
+- **Maximum 3 search iterations** per topic
+- Each iteration: use a **different tool** OR **different keywords** (NEVER repeat the same query)
+- After each iteration, report a **brief summary** to the user (what was found, what is still missing)
+- If 3 iterations exhausted and still insufficient → **inform user** and suggest `web_fetch` (L1.5), Layer 2 browser, or Layer 3 APIs
+
+### Cross-Source Search (supplements §2 domain routing)
+
+§2 domain routing is a **starting point**. When primary results are insufficient:
+
+1. **Primary search**: Use 1–2 tools from §2 domain routing
+2. **Supplementary search**: If primary results fail the Evaluation Checklist → expand to other L1 tools or `web_fetch`
+3. **Merge & dedup**: Deduplicate by DOI / title across all sources before presenting
+
+### Iteration Decision Flow
+
+```
+Search executed
+  → Run Evaluation Checklist (4 criteria above)
+  → ALL pass? → Present results, DONE
+  → ANY fail?
+      → Iteration count < 3?
+          YES → Refine (different tool / keywords / filters) → re-search → re-evaluate
+          NO  → Present best results + inform user of gaps + suggest next steps
+```
 
 ---
 
