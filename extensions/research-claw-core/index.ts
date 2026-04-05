@@ -442,8 +442,14 @@ const plugin: PluginDefinition = {
         },
       });
     }
+    } // end if (!_registrationDone) — tools only
 
     // ── 5. Register RPC methods (78 WS total) ────────────────────────
+    // NOTE: RPC + HTTP routes MUST be registered on EVERY register() call.
+    // OC calls register() twice: discovery pass (tools only) and gateway pass
+    // (where registerGatewayMethod actually wires up the WS handler).
+    // The _registrationDone guard above covers tools only — tools registered
+    // on the first pass are visible globally, but gateway methods are NOT.
     // Rate limiting not needed: local satellite, no network exposure (ws://127.0.0.1:28789 only)
     //
     // Bridge: our RPC handlers use a simple (params) => result signature,
@@ -804,7 +810,10 @@ const plugin: PluginDefinition = {
       },
     });
 
-    // ── 7. Register hooks (6) ────────────────────────────────────────
+    // ── 7. Register hooks ─────────────────────────────────────────────
+    // Hooks MUST only be registered once — duplicate registration causes
+    // handlers to fire multiple times per event.
+    if (!_registrationDone) {
 
     // Hook 1: Inject research context into agent prompt
     //
