@@ -29,7 +29,12 @@ set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/research-claw}"
 PORT="${PORT:-28789}"
-REPO="https://github.com/wentorai/Research-Claw.git"
+# Default: Gitee (China mainland accessible). Fallback: GitHub.
+# Override: REPO=https://github.com/wentorai/Research-Claw.git curl ... | bash
+GITEE_REPO="https://gitee.com/Ruby_Callipygian_5cb5/ResearchClaw.git"
+GITHUB_REPO="https://github.com/wentorai/Research-Claw.git"
+REPO_OVERRIDE="${REPO:-}"
+REPO="${REPO:-$GITEE_REPO}"
 NODE_MIN=22
 PNPM_VERSION=9
 ISSUES_URL="https://github.com/wentorai/Research-Claw/issues"
@@ -471,11 +476,21 @@ if [ -d "$INSTALL_DIR/.git" ]; then
 else
   info "Cloning to $INSTALL_DIR ..."
   if ! git clone --depth 1 "$REPO" "$INSTALL_DIR" 2>&1; then
-    warn "Failed to clone repository. Possible causes:"
-    warn "  - Network issue (GitHub unreachable)"
-    warn "  - VPN/proxy interference (try disabling VPN virtual adapter mode)"
-    warn "  - Firewall blocking GitHub"
-    die "Clone failed. Check your network and try again."
+    # If default Gitee failed and user didn't override REPO, try GitHub fallback
+    if [ -z "${REPO_OVERRIDE:-}" ] && [ "$REPO" = "$GITEE_REPO" ]; then
+      warn "Gitee clone failed — trying GitHub fallback..."
+      if ! git clone --depth 1 "$GITHUB_REPO" "$INSTALL_DIR" 2>&1; then
+        warn "Failed to clone from both Gitee and GitHub. Possible causes:"
+        warn "  - Network issue (both Gitee and GitHub unreachable)"
+        warn "  - VPN/proxy interference (try disabling VPN virtual adapter mode)"
+        die "Clone failed. Check your network and try again."
+      fi
+    else
+      warn "Failed to clone repository. Possible causes:"
+      warn "  - Network issue (repository unreachable)"
+      warn "  - VPN/proxy interference (try disabling VPN virtual adapter mode)"
+      die "Clone failed. Check your network and try again."
+    fi
   fi
   cd "$INSTALL_DIR"
   ok "Cloned"

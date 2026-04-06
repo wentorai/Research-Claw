@@ -1,6 +1,7 @@
 services:
   research-claw:
-    image: ghcr.io/wentorai/research-claw:latest
+    image: crpi-i37tqr5mfyhrq1z0.cn-hangzhou.personal.cr.aliyuncs.com/wentorai/research-claw:latest
+    # 海外用户替换为: ghcr.io/wentorai/research-claw:latest
     build:
       context: .
       # 海外用户取消注释以使用默认源（跳过中国镜像）：
