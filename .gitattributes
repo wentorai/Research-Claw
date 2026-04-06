@@ -1,0 +1,8 @@
+# Force LF line endings for all files that run inside Linux containers.
+# Windows git clone with core.autocrlf=true converts LF→CRLF, which breaks
+# shell scripts in Docker (#!/bin/sh\r → "no such file or directory").
+*.sh text eol=lf
+*.cjs text eol=lf
+*.mjs text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf

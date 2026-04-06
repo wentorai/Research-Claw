@@ -54,9 +54,12 @@ RUN npx playwright-core@1.58.2 install --with-deps chromium \
 # ── Miniforge3 (scientific Python) ───────────────────────────────────
 # Provides conda + Python for agent's system.run data analysis/visualization.
 # Installed to /opt/miniforge3 — does not conflict with system python3.
+# Default: TUNA mirror (China mainland). Fallback: GitHub releases.
 RUN ARCH="$(uname -m)" \
-    && curl -fsSL "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${ARCH}.sh" \
-       -o /tmp/miniforge.sh \
+    && (curl -fsSL --connect-timeout 10 "https://mirrors.tuna.tsinghua.edu.cn/github-release/conda-forge/miniforge/LatestRelease/Miniforge3-Linux-${ARCH}.sh" \
+        -o /tmp/miniforge.sh 2>/dev/null \
+    || curl -fsSL "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${ARCH}.sh" \
+        -o /tmp/miniforge.sh) \
     && bash /tmp/miniforge.sh -b -p /opt/miniforge3 \
     && rm /tmp/miniforge.sh
 
@@ -133,7 +136,10 @@ RUN printf '#!/bin/sh\nexec node /app/node_modules/openclaw/dist/entry.js "$@"\n
     && chmod +x /usr/local/bin/openclaw
 
 COPY scripts/docker-entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Strip Windows CRLF line endings — git clone on Windows with core.autocrlf=true
+# converts LF→CRLF, causing "exec /entrypoint.sh: no such file or directory"
+# because the shebang becomes #!/bin/sh\r (not a valid interpreter path).
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 28789
 
