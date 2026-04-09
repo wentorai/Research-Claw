@@ -848,6 +848,7 @@ export class WorkspaceService {
     size: number;
     committed: boolean;
     commit_hash?: string;
+    is_new: boolean;
   }> {
     const fullPath = this.resolvePath(filePath);
 
@@ -911,6 +912,7 @@ export class WorkspaceService {
       size: fileStat.size,
       committed,
       commit_hash: commitHash,
+      is_new: isNew,
     };
   }
 

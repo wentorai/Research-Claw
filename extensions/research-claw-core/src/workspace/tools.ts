@@ -15,6 +15,7 @@
 // functionally equivalent and avoid an additional abstraction layer.
 
 import * as path from 'node:path';
+import * as net from 'node:net';
 import type { WorkspaceService, TreeNode } from './service.js';
 import {
   convertFile,
@@ -47,6 +48,68 @@ const EXT_MIME: Record<string, string> = {
 
 function fail(message: string): unknown {
   return { content: [{ type: 'text', text: `Error: ${message}` }], details: { error: message } };
+}
+
+// ---------------------------------------------------------------------------
+// SSRF guard — block requests to private/internal networks
+// ---------------------------------------------------------------------------
+
+const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** Hostnames that must never be fetched. */
+const BLOCKED_HOSTS = new Set([
+  'localhost', '0.0.0.0', '[::]', '[::1]',
+  'metadata.google.internal',   // GCP metadata
+  'metadata.internal',
+]);
+
+/** Check if an IPv4 address belongs to a private/reserved range. */
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((p) => isNaN(p))) return false;
+  const [a, b] = parts as [number, number, number, number];
+  if (a === 10) return true;                          // 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;             // 192.168.0.0/16
+  if (a === 127) return true;                          // 127.0.0.0/8
+  if (a === 169 && b === 254) return true;             // 169.254.0.0/16 (link-local + cloud metadata)
+  if (a === 0) return true;                            // 0.0.0.0/8
+  return false;
+}
+
+/** Validate a URL is safe for outbound fetch (not internal/private). */
+function validateDownloadUrl(urlStr: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(urlStr);
+  } catch {
+    return 'Invalid URL format';
+  }
+
+  if (!parsed.protocol.startsWith('http')) {
+    return 'Only HTTP/HTTPS URLs are supported';
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  if (BLOCKED_HOSTS.has(hostname)) {
+    return `Blocked host: ${hostname}`;
+  }
+
+  // Check if hostname is an IP address
+  if (net.isIPv4(hostname)) {
+    if (isPrivateIPv4(hostname)) {
+      return `Blocked: private/internal IP address ${hostname}`;
+    }
+  } else if (net.isIPv6(hostname) || hostname.startsWith('[')) {
+    // Block all IPv6 literals — too many reserved ranges to enumerate safely
+    const raw = hostname.replace(/^\[|\]$/g, '');
+    if (raw === '::1' || raw === '::' || raw.startsWith('fe80') || raw.startsWith('fc') || raw.startsWith('fd')) {
+      return `Blocked: private/internal IPv6 address`;
+    }
+  }
+
+  return null; // safe
 }
 
 // ---------------------------------------------------------------------------
@@ -187,15 +250,6 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
           );
         }
 
-        // Check if this is an overwrite (for user-facing warning)
-        let wasExisting = false;
-        try {
-          await service.read(filePath);
-          wasExisting = true;
-        } catch {
-          // File doesn't exist — new file
-        }
-
         const result = await service.save(filePath, content, commitMessage);
 
         // Build file_card JSON block so the LLM includes it in its response
@@ -211,7 +265,7 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
           git_status: gitStatus,
         });
 
-        const overwriteNote = wasExisting
+        const overwriteNote = !result.is_new
           ? `\n⚠️ Overwrote existing file. Previous version is in git history.`
           : '';
         return ok(
@@ -839,22 +893,18 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
         const filePath = params.path.trim();
         const commitMessage = typeof params.commit_message === 'string' ? params.commit_message : undefined;
 
-        // Validate URL format
-        let parsedUrl: URL;
-        try {
-          parsedUrl = new URL(url);
-        } catch {
-          return fail('Invalid URL format');
-        }
-        if (!parsedUrl.protocol.startsWith('http')) {
-          return fail('Only HTTP/HTTPS URLs are supported');
+        // SSRF guard: block private/internal network addresses
+        const urlError = validateDownloadUrl(url);
+        if (urlError) {
+          return fail(urlError);
         }
 
-        // Download the file
+        // Download the file with size limit
         let response: Response;
         try {
           response = await fetch(url, {
             headers: { 'User-Agent': 'Research-Claw/1.0' },
+            redirect: 'follow',
             signal: AbortSignal.timeout(60_000), // 60s timeout
           });
         } catch (err) {
@@ -865,7 +915,43 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
           return fail(`Download failed: HTTP ${response.status} ${response.statusText}`);
         }
 
-        const buffer = Buffer.from(await response.arrayBuffer());
+        // Pre-check Content-Length if available
+        const contentLength = response.headers.get('content-length');
+        if (contentLength) {
+          const declaredSize = parseInt(contentLength, 10);
+          if (declaredSize > MAX_DOWNLOAD_BYTES) {
+            return fail(
+              `File too large: ${(declaredSize / 1024 / 1024).toFixed(1)} MB. ` +
+              `Maximum download size is ${MAX_DOWNLOAD_BYTES / 1024 / 1024} MB.`,
+            );
+          }
+        }
+
+        // Stream-read with size enforcement (Content-Length can be absent or lying)
+        const chunks: Uint8Array[] = [];
+        let totalBytes = 0;
+        const reader = response.body?.getReader();
+        if (!reader) {
+          return fail('Download failed: no response body');
+        }
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            totalBytes += value.byteLength;
+            if (totalBytes > MAX_DOWNLOAD_BYTES) {
+              reader.cancel();
+              return fail(
+                `Download aborted: exceeded ${MAX_DOWNLOAD_BYTES / 1024 / 1024} MB limit.`,
+              );
+            }
+            chunks.push(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+
+        const buffer = Buffer.concat(chunks);
 
         if (buffer.length === 0) {
           return fail('Downloaded file is empty');
