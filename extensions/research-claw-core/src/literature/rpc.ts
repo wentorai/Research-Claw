@@ -47,6 +47,11 @@ interface ErrorShape {
 function classifyError(err: unknown): ErrorShape {
   const message = err instanceof Error ? err.message : String(err);
 
+  // Order matters: "not deleted" must be checked before "not found" because
+  // restore/purge throws "Paper not found or not deleted" which contains both.
+  if (message.includes('not deleted')) {
+    return { code: ErrorCode.PAPER_NOT_DELETED, message };
+  }
   if (message.includes('Paper not found')) {
     return { code: ErrorCode.PAPER_NOT_FOUND, message };
   }
@@ -67,9 +72,6 @@ function classifyError(err: unknown): ErrorShape {
   }
   if (message.includes('cannot cite itself')) {
     return { code: ErrorCode.SELF_CITATION, message };
-  }
-  if (message.includes('not deleted')) {
-    return { code: ErrorCode.PAPER_NOT_DELETED, message };
   }
   if (message.includes('BibTeX') || message.includes('bibtex') || message.includes('parse')) {
     return { code: ErrorCode.BIBTEX_PARSE_ERROR, message };

@@ -44,7 +44,7 @@ describe('GAP-1: Tag Orphan Cleanup', () => {
     db.close();
   });
 
-  it('cleans up orphaned tags after deleting the last paper with that tag', () => {
+  it('cleans up orphaned tags after purging the last paper with that tag', () => {
     // Add 3 papers with different tag combinations
     const p1 = svc.add(makePaper({ doi: '10.1/a', title: 'Paper A', tags: ['vit', 'thyroid'] }));
     const p2 = svc.add(makePaper({ doi: '10.1/b', title: 'Paper B', tags: ['vit', 'cnn'] }));
@@ -54,10 +54,13 @@ describe('GAP-1: Tag Orphan Cleanup', () => {
     let tags = svc.getTags();
     expect(tags).toHaveLength(3);
 
-    // Delete p2 (only paper with 'cnn')
+    // Soft-delete p2: tags are preserved (soft-delete is reversible)
     svc.delete(p2.id);
+    tags = svc.getTags();
+    expect(tags.map((t) => t.name)).toContain('cnn'); // still visible (paper could be restored)
 
-    // After deletion: 'cnn' should be removed (orphaned)
+    // Purge p2: now 'cnn' should be cleaned up (permanent removal)
+    svc.purge(p2.id);
     tags = svc.getTags();
     const tagNames = tags.map((t) => t.name);
     expect(tagNames).not.toContain('cnn');
@@ -65,12 +68,13 @@ describe('GAP-1: Tag Orphan Cleanup', () => {
     expect(tagNames).toContain('thyroid');
   });
 
-  it('preserves tags that still have associated papers', () => {
+  it('preserves tags that still have associated papers after purge', () => {
     const p1 = svc.add(makePaper({ doi: '10.1/a', title: 'Paper A', tags: ['ml', 'nlp'] }));
     const p2 = svc.add(makePaper({ doi: '10.1/b', title: 'Paper B', tags: ['ml'] }));
 
-    // Delete p1 — 'nlp' becomes orphaned, but 'ml' still has p2
+    // Purge p1 — 'nlp' becomes orphaned, but 'ml' still has p2
     svc.delete(p1.id);
+    svc.purge(p1.id);
 
     const tags = svc.getTags();
     const tagNames = tags.map((t) => t.name);
@@ -82,14 +86,21 @@ describe('GAP-1: Tag Orphan Cleanup', () => {
     expect(mlTag!.paper_count).toBe(1);
   });
 
-  it('cleans up all tags after deleting all papers', () => {
+  it('cleans up all tags after purging all papers', () => {
     const p1 = svc.add(makePaper({ doi: '10.1/a', title: 'Paper A', tags: ['tag1', 'tag2'] }));
     const p2 = svc.add(makePaper({ doi: '10.1/b', title: 'Paper B', tags: ['tag2', 'tag3'] }));
 
     svc.delete(p1.id);
     svc.delete(p2.id);
 
-    const tags = svc.getTags();
+    // Soft-delete preserves tags for restore
+    let tags = svc.getTags();
+    expect(tags).toHaveLength(3);
+
+    // Purge cleans up orphans
+    svc.purge(p1.id);
+    svc.purge(p2.id);
+    tags = svc.getTags();
     expect(tags).toHaveLength(0);
   });
 
@@ -109,8 +120,9 @@ describe('GAP-1: Tag Orphan Cleanup', () => {
   it('cleanup is idempotent (calling twice does not error)', () => {
     const p1 = svc.add(makePaper({ doi: '10.1/a', tags: ['orphan-test'] }));
     svc.delete(p1.id);
+    svc.purge(p1.id);
 
-    // First cleanup already happened inside delete()
+    // Cleanup already happened inside purge()
     // Call it again manually — should not throw
     expect(() => svc.cleanupOrphanedTags()).not.toThrow();
 

@@ -369,23 +369,28 @@ function getTagsForPapers(db: BetterSqlite3.Database, paperIds: string[]): Map<s
   const result = new Map<string, string[]>();
   if (paperIds.length === 0) return result;
 
-  const placeholders = paperIds.map(() => '?').join(', ');
-  const rows = db
-    .prepare(
-      `SELECT pt.paper_id, t.name FROM rc_paper_tags pt
-       JOIN rc_tags t ON t.id = pt.tag_id
-       WHERE pt.paper_id IN (${placeholders})
-       ORDER BY t.name`,
-    )
-    .all(...paperIds) as Array<{ paper_id: string; name: string }>;
+  // SQLite SQLITE_MAX_VARIABLE_NUMBER default is 999; chunk to stay safe
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < paperIds.length; i += CHUNK_SIZE) {
+    const chunk = paperIds.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const rows = db
+      .prepare(
+        `SELECT pt.paper_id, t.name FROM rc_paper_tags pt
+         JOIN rc_tags t ON t.id = pt.tag_id
+         WHERE pt.paper_id IN (${placeholders})
+         ORDER BY t.name`,
+      )
+      .all(...chunk) as Array<{ paper_id: string; name: string }>;
 
-  for (const row of rows) {
-    let tags = result.get(row.paper_id);
-    if (!tags) {
-      tags = [];
-      result.set(row.paper_id, tags);
+    for (const row of rows) {
+      let tags = result.get(row.paper_id);
+      if (!tags) {
+        tags = [];
+        result.set(row.paper_id, tags);
+      }
+      tags.push(row.name);
     }
-    tags.push(row.name);
   }
 
   return result;
@@ -1162,8 +1167,9 @@ END`);
       )
       .run(now(), id);
 
-    // Clean up orphaned tags after soft-deleting a paper
-    this.cleanupOrphanedTags();
+    // Note: do NOT clean up orphaned tags here — soft-deleted papers can be
+    // restored, and tag cleanup would CASCADE-delete junction rows, losing
+    // the tag associations permanently. Tags are cleaned on purge() instead.
   }
 
   // ── 5b. restore ─────────────────────────────────────────────────────

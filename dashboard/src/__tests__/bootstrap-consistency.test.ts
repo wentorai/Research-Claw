@@ -102,6 +102,7 @@ const WORKSPACE_DIR = path.resolve(__dirname, '../../../workspace');
 const RC_PROMPT_DIR = path.join(WORKSPACE_DIR, '.ResearchClaw');
 const AGENTS_MD_PATH = path.join(RC_PROMPT_DIR, 'AGENTS.md');
 const TOOLS_MD_PATH = path.join(RC_PROMPT_DIR, 'TOOLS.md');
+const TOOLS_MD_EXAMPLE_PATH = path.join(RC_PROMPT_DIR, 'TOOLS.md.example');
 
 let agentsMd = '';
 let toolsMd = '';
@@ -115,7 +116,13 @@ try {
 try {
   toolsMd = fs.readFileSync(TOOLS_MD_PATH, 'utf-8');
 } catch {
-  // File may not exist in CI — tests will be skipped
+  // TOOLS.md is an L3 user-level file (gitignored); fall back to .example template
+  // which has identical structure and is tracked in git.
+  try {
+    toolsMd = fs.readFileSync(TOOLS_MD_EXAMPLE_PATH, 'utf-8');
+  } catch {
+    // Neither file exists — tests will be skipped
+  }
 }
 
 const hasBootstrapFiles = agentsMd.length > 0 && toolsMd.length > 0;
