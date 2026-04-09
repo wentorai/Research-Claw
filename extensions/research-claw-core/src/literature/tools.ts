@@ -183,6 +183,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags (AND logic)' },
         year: { type: 'number', description: 'Filter by publication year' },
         collection_id: { type: 'string', description: 'Filter by collection ID' },
+        has_pdf: { type: 'boolean', description: 'Filter by whether a PDF file is attached' },
         sort: { type: 'string', enum: ['added_at', 'year', 'title', 'rating'], description: 'Sort field (default: added_at, descending)' },
         limit: { type: 'number', description: 'Maximum results (default 50, max 500)' },
         offset: { type: 'number', description: 'Pagination offset' },
@@ -195,6 +196,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         if (Array.isArray(params.tags)) filter.tags = params.tags.filter((t): t is string => typeof t === 'string');
         if (typeof params.year === 'number') filter.year = params.year;
         if (typeof params.collection_id === 'string') filter.collection_id = params.collection_id;
+        if (typeof params.has_pdf === 'boolean') filter.has_pdf = params.has_pdf;
 
         const result = service.list({
           filter: Object.keys(filter).length > 0 ? filter as PaperFilter : undefined,
@@ -898,6 +900,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
               for (const item of items) {
                 if (!item.title || item.itemType === 'attachment' || item.itemType === 'note') continue;
                 const paperInput = ZoteroWebAPI.toPaperInput(item);
+                paperInput.source = 'zotero_local';
                 const dupMatches = service.duplicateCheck({ doi: paperInput.doi, title: paperInput.title, arxiv_id: paperInput.arxiv_id });
                 if (dupMatches.length > 0) { duplicates++; continue; }
                 const added = service.add(paperInput);

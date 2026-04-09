@@ -805,11 +805,11 @@ export class LiteratureService {
   }
 
   ensureFtsIntegrity(): void {
-    const row = this.db
+    const ftsExists = this.db
       .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='rc_papers_fts'`)
       .get() as { name: string } | undefined;
 
-    if (!row) {
+    if (!ftsExists) {
       this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS rc_papers_fts USING fts5(
   title,
   authors,
@@ -819,15 +819,18 @@ export class LiteratureService {
   content='rc_papers',
   content_rowid='rowid'
 )`);
+    }
 
-      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_insert
+    // Ensure triggers exist regardless of FTS table state — handles partial
+    // migrations where the table was created but triggers were not.
+    this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_insert
   AFTER INSERT ON rc_papers
 BEGIN
   INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes, keywords)
     VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords);
 END`);
 
-      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_update
+    this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_update
   AFTER UPDATE ON rc_papers
 BEGIN
   INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
@@ -836,13 +839,15 @@ BEGIN
     VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords);
 END`);
 
-      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_delete
+    this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_delete
   BEFORE DELETE ON rc_papers
 BEGIN
   INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
     VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords);
 END`);
 
+    // Rebuild FTS index if the table was just created and papers exist
+    if (!ftsExists) {
       this.db.exec(`INSERT INTO rc_papers_fts(rc_papers_fts) VALUES('rebuild')`);
     }
   }

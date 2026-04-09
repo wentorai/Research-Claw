@@ -517,7 +517,9 @@
       "year": "Year",
       "doi": "DOI",
       "tags": "Tags",
-      "noAbstract": "No abstract available"
+      "noAbstract": "No abstract available",
+      "noIdentifier": "Paper has no DOI, arXiv ID, or URL",
+      "addFailed": "Failed to add paper to library"
     },
     "task": {
       "viewInPanel": "View in Tasks Panel",

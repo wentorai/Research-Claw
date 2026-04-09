@@ -517,7 +517,9 @@
       "year": "年份",
       "doi": "DOI",
       "tags": "标签",
-      "noAbstract": "无摘要"
+      "noAbstract": "无摘要",
+      "noIdentifier": "该论文没有 DOI、arXiv ID 或 URL",
+      "addFailed": "添加到文献库失败"
     },
     "task": {
       "viewInPanel": "在任务面板中查看",

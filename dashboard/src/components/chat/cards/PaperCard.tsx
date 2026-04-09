@@ -71,11 +71,12 @@ export default function PaperCard(props: PaperCardType) {
       useLibraryStore.getState().loadPapers();
       useLibraryStore.getState().loadTags();
     } catch {
-      // Error handled by gateway layer
+      message.error(t('card.paper.addFailed'));
     }
-  }, [client, props]);
+  }, [client, props, t]);
 
   const handleViewInLibrary = useCallback(() => {
+    // TODO: pass library_id to LibraryPanel for auto-scroll to specific paper
     useUiStore.getState().setRightPanelTab('library');
   }, []);
 
