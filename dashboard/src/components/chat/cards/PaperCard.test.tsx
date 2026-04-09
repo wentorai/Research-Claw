@@ -24,7 +24,11 @@ vi.mock('@/stores/gateway', () => ({
     selector({ client: { request: mockRequest } }),
 }));
 vi.mock('@/stores/library', () => ({
-  useLibraryStore: { getState: () => ({ loadPapers: vi.fn() }) },
+  useLibraryStore: { getState: () => ({ loadPapers: vi.fn(), loadTags: vi.fn() }) },
+}));
+const mockSetRightPanelTab = vi.fn();
+vi.mock('@/stores/ui', () => ({
+  useUiStore: { getState: () => ({ setRightPanelTab: mockSetRightPanelTab }) },
 }));
 
 // Mock antd message
@@ -97,9 +101,17 @@ describe('PaperCard', () => {
     expect(screen.getByTestId('status-badge')).toBeInTheDocument();
   });
 
-  it('shows "In Library" when library_id is set', () => {
+  it('shows "View in Library" when library_id is set', () => {
     render(<PaperCard {...fullPaper} library_id="lib-123" />);
-    expect(screen.getByText('card.paper.inLibrary')).toBeInTheDocument();
+    const btn = screen.getByText('card.paper.viewInLibrary');
+    expect(btn).toBeInTheDocument();
+    expect(btn.closest('button')).not.toBeDisabled();
+  });
+
+  it('opens library panel when "View in Library" is clicked', () => {
+    render(<PaperCard {...fullPaper} library_id="lib-123" />);
+    fireEvent.click(screen.getByText('card.paper.viewInLibrary'));
+    expect(mockSetRightPanelTab).toHaveBeenCalledWith('library');
   });
 
   it('calls rc.lit.add when Add to Library is clicked', async () => {

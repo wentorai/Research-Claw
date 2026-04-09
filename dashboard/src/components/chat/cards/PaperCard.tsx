@@ -7,6 +7,7 @@ import CardContainer from './CardContainer';
 import { useConfigStore } from '@/stores/config';
 import { useGatewayStore } from '@/stores/gateway';
 import { useLibraryStore } from '@/stores/library';
+import { useUiStore } from '@/stores/ui';
 import { getThemeTokens } from '@/styles/theme';
 import type { PaperCard as PaperCardType } from '@/types/cards';
 
@@ -73,6 +74,10 @@ export default function PaperCard(props: PaperCardType) {
       // Error handled by gateway layer
     }
   }, [client, props]);
+
+  const handleViewInLibrary = useCallback(() => {
+    useUiStore.getState().setRightPanelTab('library');
+  }, []);
 
   const handleCite = useCallback(async () => {
     // Generate a BibTeX key: firstAuthorSurname + year + firstTitleWord
@@ -215,16 +220,16 @@ export default function PaperCard(props: PaperCardType) {
         <Button
           size="small"
           icon={<BookOutlined />}
-          disabled={added || !hasVerifiableId}
-          onClick={handleAddToLibrary}
-          aria-label={added ? t('card.paper.inLibrary') : t('card.paper.addToLibrary')}
-          title={!hasVerifiableId ? t('card.paper.noIdentifier', { defaultValue: 'Paper has no DOI, arXiv ID, or URL' }) : undefined}
+          disabled={!added && !hasVerifiableId}
+          onClick={added ? handleViewInLibrary : handleAddToLibrary}
+          aria-label={added ? t('card.paper.viewInLibrary') : t('card.paper.addToLibrary')}
+          title={!hasVerifiableId && !added ? t('card.paper.noIdentifier', { defaultValue: 'Paper has no DOI, arXiv ID, or URL' }) : undefined}
           style={{
             borderColor: tokens.accent.blue,
-            color: (added || !hasVerifiableId) ? tokens.text.muted : tokens.accent.blue,
+            color: (!added && !hasVerifiableId) ? tokens.text.muted : tokens.accent.blue,
           }}
         >
-          {added ? t('card.paper.inLibrary') : t('card.paper.addToLibrary')}
+          {added ? t('card.paper.viewInLibrary') : t('card.paper.addToLibrary')}
         </Button>
 
         <Button

@@ -11,7 +11,7 @@
 // functionally equivalent and avoid an additional abstraction layer.
 
 import { existsSync } from 'node:fs';
-import { LiteratureService, type Paper, type PaperInput, type PaperPatch } from './service.js';
+import { LiteratureService, type Paper, type PaperFilter, type PaperInput, type PaperPatch } from './service.js';
 import type { ToolDefinition } from '../types.js';
 import { ZoteroBridge } from './zotero.js';
 import { EndNoteBridge } from './endnote.js';
@@ -170,7 +170,46 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 3. library_update_paper ───────────────────────────────────────────
+  // ── 3. library_list_papers ────────────────────────────────────────────
+
+  tools.push({
+    name: 'library_list_papers',
+    description:
+      'List papers in the local research library with optional filters. Use this to browse papers by status, tags, year, or collection.',
+    parameters: {
+      type: 'object',
+      properties: {
+        read_status: { type: 'string', enum: ['unread', 'reading', 'read', 'reviewed'], description: 'Filter by reading status' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags (AND logic)' },
+        year: { type: 'number', description: 'Filter by publication year' },
+        collection_id: { type: 'string', description: 'Filter by collection ID' },
+        sort: { type: 'string', enum: ['added_at', 'year', 'title', 'rating'], description: 'Sort field (default: added_at, descending)' },
+        limit: { type: 'number', description: 'Maximum results (default 50, max 500)' },
+        offset: { type: 'number', description: 'Pagination offset' },
+      },
+    },
+    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+      try {
+        const filter: Record<string, unknown> = {};
+        if (typeof params.read_status === 'string') filter.read_status = params.read_status;
+        if (Array.isArray(params.tags)) filter.tags = params.tags.filter((t): t is string => typeof t === 'string');
+        if (typeof params.year === 'number') filter.year = params.year;
+        if (typeof params.collection_id === 'string') filter.collection_id = params.collection_id;
+
+        const result = service.list({
+          filter: Object.keys(filter).length > 0 ? filter as PaperFilter : undefined,
+          sort: typeof params.sort === 'string' ? params.sort : undefined,
+          limit: typeof params.limit === 'number' ? params.limit : undefined,
+          offset: typeof params.offset === 'number' ? params.offset : undefined,
+        });
+        return ok(`Found ${result.total} paper(s) (showing ${result.items.length})`, result);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 4. library_update_paper ───────────────────────────────────────────
 
   tools.push({
     name: 'library_update_paper',
@@ -254,7 +293,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 4. library_get_paper ──────────────────────────────────────────────
+  // ── 5. library_get_paper ──────────────────────────────────────────────
 
   tools.push({
     name: 'library_get_paper',
@@ -284,7 +323,33 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 5. library_export_bibtex ──────────────────────────────────────────
+  // ── 6. library_delete_paper ──────────────────────────────────────────
+
+  tools.push({
+    name: 'library_delete_paper',
+    description: 'Delete a paper from the local research library (soft-delete — can be restored).',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Paper ID' },
+      },
+      required: ['id'],
+    },
+    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+      try {
+        if (typeof params.id !== 'string' || !params.id.trim()) {
+          return fail('id is required and must be a non-empty string');
+        }
+        const id = params.id.trim();
+        service.delete(id);
+        return ok(`Deleted paper ${id}`, { deleted: id });
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 7. library_export_bibtex ──────────────────────────────────────────
 
   tools.push({
     name: 'library_export_bibtex',
@@ -317,7 +382,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 6. library_reading_stats ──────────────────────────────────────────
+  // ── 8. library_reading_stats ──────────────────────────────────────────
 
   tools.push({
     name: 'library_reading_stats',
@@ -345,7 +410,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 7. library_batch_add ──────────────────────────────────────────────
+  // ── 9. library_batch_add ──────────────────────────────────────────────
 
   tools.push({
     name: 'library_batch_add',
@@ -467,17 +532,17 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 8. library_manage_collection ──────────────────────────────────────
+  // ── 10. library_manage_collection ─────────────────────────────────────
 
   tools.push({
     name: 'library_manage_collection',
     description:
-      'Manage paper collections: create, update, delete a collection, ' +
+      'Manage paper collections: list, create, update, delete a collection, ' +
       'or add/remove papers from a collection.',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'Action: create, update, delete, add_paper, remove_paper' },
+        action: { type: 'string', enum: ['list', 'create', 'update', 'delete', 'add_paper', 'remove_paper'], description: 'Action to perform' },
         id: { type: 'string', description: 'Collection ID (required for update/delete/add_paper/remove_paper)' },
         name: { type: 'string', description: 'Collection name (for create/update)' },
         description: { type: 'string', description: 'Collection description (for create/update)' },
@@ -492,6 +557,12 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
           return fail('action is required and must be a non-empty string');
         }
         const action = params.action.trim();
+
+        if (action === 'list') {
+          const collections = service.listCollections();
+          return ok(`Found ${collections.length} collection(s)`, { collections });
+        }
+
         const result = service.manageCollection(action, {
           id: typeof params.id === 'string' ? params.id : undefined,
           name: typeof params.name === 'string' ? params.name : undefined,
@@ -506,7 +577,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 9. library_tag_paper ──────────────────────────────────────────────
+  // ── 11. library_tag_paper ─────────────────────────────────────────────
 
   tools.push({
     name: 'library_tag_paper',
@@ -551,7 +622,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 10. library_add_note ──────────────────────────────────────────────
+  // ── 12. library_add_note ──────────────────────────────────────────────
 
   tools.push({
     name: 'library_add_note',
@@ -590,7 +661,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 11. library_import_bibtex ─────────────────────────────────────────
+  // ── 13. library_import_bibtex ─────────────────────────────────────────
 
   tools.push({
     name: 'library_import_bibtex',
@@ -620,7 +691,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 12. library_citation_graph ────────────────────────────────────────
+  // ── 14. library_citation_graph ────────────────────────────────────────
 
   tools.push({
     name: 'library_citation_graph',
@@ -729,146 +800,296 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
     },
   });
 
-  // ── 13. library_zotero_detect ──────────────────────────────────────────
+  // ── 15. library_zotero ───────────────────────────────────────────────
+
   tools.push({
-    name: 'library_zotero_detect',
-    description: 'Detect if Zotero is installed locally. Returns library stats (paper count, collections, tags) and database path.',
+    name: 'library_zotero',
+    description: 'Interact with Zotero reference manager. Supports local SQLite import, Zotero Local API, and Zotero Web API.',
     parameters: {
       type: 'object',
       properties: {
-        db_path: { type: 'string', description: 'Custom path to zotero.sqlite' },
+        action: { type: 'string', enum: ['detect', 'import', 'search', 'create', 'update', 'delete'], description: 'Action to perform' },
+        method: { type: 'string', enum: ['sqlite', 'local_api', 'web_api'], description: 'Which Zotero interface to use. For detect, tries all if not specified. For import, auto-selects based on detect. For search/create/update/delete, defaults to web_api.' },
+        query: { type: 'string', description: 'Search query (for search action)' },
+        paper_id: { type: 'string', description: 'RC library paper ID (for create action — local paper to push)' },
+        zotero_key: { type: 'string', description: 'Zotero item key (for update/delete actions)' },
+        version: { type: 'number', description: 'Zotero item version for optimistic locking (for update/delete actions)' },
+        fields: { type: 'object', description: 'Fields to update (for update action)' },
+        collection: { type: 'string', description: 'Zotero collection name or key (for import/search)' },
+        limit: { type: 'number', description: 'Maximum items (for import/search)' },
+        db_path: { type: 'string', description: 'Custom path to zotero.sqlite (for sqlite method)' },
       },
+      required: ['action'],
     },
     execute: async (_toolCallId: string, params: Record<string, unknown>) => {
       try {
-        const customDbPath = typeof params.db_path === 'string' ? params.db_path : undefined;
-        const result = ZoteroBridge.detect(customDbPath);
-        if (!result.available) {
-          if (result.environment === 'docker') {
+        if (typeof params.action !== 'string' || !params.action.trim()) {
+          return fail('action is required and must be a non-empty string');
+        }
+        const action = params.action.trim();
+        const method = typeof params.method === 'string' ? params.method : undefined;
+
+        // ── detect ──
+        if (action === 'detect') {
+          const results: Record<string, unknown> = {};
+
+          if (!method || method === 'sqlite') {
+            const customDbPath = typeof params.db_path === 'string' ? params.db_path : undefined;
+            const sqliteResult = ZoteroBridge.detect(customDbPath);
+            results.sqlite = sqliteResult;
+          }
+          if (!method || method === 'local_api') {
+            const { ZoteroLocalAPI } = await import('./zotero-local-api.js');
+            const localResult = await ZoteroLocalAPI.detect();
+            results.local_api = localResult;
+          }
+          if (!method || method === 'web_api') {
+            const { ZoteroWebAPI } = await import('./zotero-web-api.js');
+            const config = ZoteroWebAPI.getConfig();
+            if (!config) {
+              results.web_api = { configured: false };
+            } else {
+              results.web_api = await ZoteroWebAPI.validateCredentials(config);
+            }
+          }
+
+          const parts: string[] = [];
+          const sq = results.sqlite as Record<string, unknown> | undefined;
+          if (sq?.available) parts.push(`SQLite: ${(sq.stats as Record<string, number>)?.total_items ?? 0} items`);
+          const la = results.local_api as Record<string, unknown> | undefined;
+          if (la?.available) parts.push(`Local API: available`);
+          const wa = results.web_api as Record<string, unknown> | undefined;
+          if (wa?.configured) parts.push(`Web API: connected`);
+          if (parts.length === 0) parts.push('No Zotero interfaces available');
+
+          return ok(`Zotero detect: ${parts.join(', ')}`, results);
+        }
+
+        // ── import ──
+        if (action === 'import') {
+          const collection = typeof params.collection === 'string' ? params.collection : undefined;
+          const limit = typeof params.limit === 'number' ? params.limit : undefined;
+          const query = typeof params.query === 'string' ? params.query : undefined;
+
+          if (method === 'sqlite' || (!method && !query)) {
+            const customDbPath = typeof params.db_path === 'string' ? params.db_path : undefined;
+            const detect = ZoteroBridge.detect(customDbPath);
+            if (detect.available && detect.db_path) {
+              const result = ZoteroBridge.importAll(detect.db_path, service, { collection, limit });
+              return ok(
+                `Imported ${result.imported} paper(s) from Zotero SQLite (${result.duplicates} duplicates skipped)`,
+                result,
+              );
+            }
+            if (method === 'sqlite') return fail('Zotero SQLite database not found');
+          }
+
+          if (method === 'local_api' || (!method && !query)) {
+            const { ZoteroLocalAPI } = await import('./zotero-local-api.js');
+            const { ZoteroWebAPI } = await import('./zotero-web-api.js');
+            const detect = await ZoteroLocalAPI.detect();
+            if (detect.available) {
+              const items = query
+                ? await ZoteroLocalAPI.searchItems(query, { limit: limit ?? 25 })
+                : await ZoteroLocalAPI.listItems({ limit: limit ?? 25, collection });
+              let imported = 0;
+              let duplicates = 0;
+              const ids: string[] = [];
+              for (const item of items) {
+                if (!item.title || item.itemType === 'attachment' || item.itemType === 'note') continue;
+                const paperInput = ZoteroWebAPI.toPaperInput(item);
+                const dupMatches = service.duplicateCheck({ doi: paperInput.doi, title: paperInput.title, arxiv_id: paperInput.arxiv_id });
+                if (dupMatches.length > 0) { duplicates++; continue; }
+                const added = service.add(paperInput);
+                ids.push(added.id);
+                imported++;
+              }
+              return ok(
+                `Imported ${imported} paper(s) via Zotero Local API (${duplicates} duplicates skipped)`,
+                { imported, duplicates, items: ids },
+              );
+            }
+            if (method === 'local_api') return fail('Zotero Local API not reachable. Ensure Zotero is running with Local API enabled.');
+          }
+
+          if (method === 'web_api' || !method) {
+            const { ZoteroWebAPI } = await import('./zotero-web-api.js');
+            const config = ZoteroWebAPI.getConfig();
+            if (!config) return fail('Zotero Web API not configured. Set ZOTERO_API_KEY + ZOTERO_USER_ID.');
+            const items = query
+              ? await ZoteroWebAPI.searchItems(config, query, { limit: limit ?? 25 })
+              : await ZoteroWebAPI.listItems(config, { limit: limit ?? 25, collection });
+            let imported = 0;
+            let duplicates = 0;
+            const ids: string[] = [];
+            for (const item of items) {
+              if (!item.title || item.itemType === 'attachment' || item.itemType === 'note') continue;
+              const paperInput = ZoteroWebAPI.toPaperInput(item);
+              const dupMatches = service.duplicateCheck({ doi: paperInput.doi, title: paperInput.title, arxiv_id: paperInput.arxiv_id });
+              if (dupMatches.length > 0) { duplicates++; continue; }
+              const added = service.add(paperInput);
+              ids.push(added.id);
+              imported++;
+            }
             return ok(
-              'Zotero database not accessible — Docker container filesystem is isolated from host. ' +
-              'Alternatives: (1) Mount ~/Zotero as a Docker volume, (2) Export BibTeX/RIS from Zotero ' +
-              'and use library_import_bibtex or library_import_ris.',
+              `Imported ${imported} paper(s) via Zotero Web API (${duplicates} duplicates skipped)`,
+              { imported, duplicates, items: ids },
+            );
+          }
+
+          return fail('No Zotero interface available for import');
+        }
+
+        // ── search ──
+        if (action === 'search') {
+          if (typeof params.query !== 'string' || !params.query.trim()) {
+            return fail('query is required for search action');
+          }
+          const { ZoteroWebAPI } = await import('./zotero-web-api.js');
+          const config = ZoteroWebAPI.getConfig();
+          if (!config) return fail('Zotero Web API not configured.');
+          const items = await ZoteroWebAPI.searchItems(config, params.query, {
+            limit: typeof params.limit === 'number' ? params.limit : 25,
+          });
+          return ok(`Found ${items.length} item(s) in Zotero cloud library`, { items });
+        }
+
+        // ── create ──
+        if (action === 'create') {
+          if (typeof params.paper_id !== 'string' || !params.paper_id.trim()) {
+            return fail('paper_id is required for create action');
+          }
+          const { ZoteroWebAPI } = await import('./zotero-web-api.js');
+          const config = ZoteroWebAPI.getConfig();
+          if (!config) return fail('Zotero Web API not configured.');
+          const paper = service.get(params.paper_id);
+          if (!paper) return fail(`Paper ${params.paper_id} not found in RC library`);
+          const result = await ZoteroWebAPI.createItem(config, {
+            itemType: paper.paper_type === 'journal_article' ? 'journalArticle' :
+                      paper.paper_type === 'conference_paper' ? 'conferencePaper' :
+                      paper.paper_type === 'preprint' ? 'preprint' :
+                      paper.paper_type === 'book' ? 'book' :
+                      paper.paper_type === 'thesis' ? 'thesis' : 'document',
+            title: paper.title,
+            creators: (paper.authors as string[])?.map((name: string) => ({
+              creatorType: 'author',
+              name,
+            })) ?? [],
+            DOI: paper.doi ?? '',
+            url: paper.url ?? '',
+            abstractNote: paper.abstract ?? '',
+            date: paper.year ? String(paper.year) : '',
+          });
+          if (!result) return fail('Failed to create item in Zotero');
+          return ok(`Created item in Zotero cloud: key=${result.key}`, result);
+        }
+
+        // ── update ──
+        if (action === 'update') {
+          if (typeof params.zotero_key !== 'string' || !params.zotero_key.trim()) {
+            return fail('zotero_key is required for update action');
+          }
+          if (typeof params.version !== 'number') {
+            return fail('version is required for update action');
+          }
+          const { ZoteroWebAPI } = await import('./zotero-web-api.js');
+          const config = ZoteroWebAPI.getConfig();
+          if (!config) return fail('Zotero Web API not configured.');
+          const success = await ZoteroWebAPI.updateItem(
+            config,
+            params.zotero_key,
+            params.version,
+            params.fields as Record<string, unknown> ?? {},
+          );
+          return success
+            ? ok(`Updated Zotero item: ${params.zotero_key}`, { key: params.zotero_key })
+            : fail('Failed to update item in Zotero. Check key, version, and permissions.');
+        }
+
+        // ── delete ──
+        if (action === 'delete') {
+          if (typeof params.zotero_key !== 'string' || !params.zotero_key.trim()) {
+            return fail('zotero_key is required for delete action');
+          }
+          if (typeof params.version !== 'number') {
+            return fail('version is required for delete action');
+          }
+          const { ZoteroWebAPI } = await import('./zotero-web-api.js');
+          const config = ZoteroWebAPI.getConfig();
+          if (!config) return fail('Zotero Web API not configured.');
+          const success = await ZoteroWebAPI.deleteItem(config, params.zotero_key, params.version);
+          return success
+            ? ok(`Deleted Zotero item: ${params.zotero_key}`, { key: params.zotero_key })
+            : fail('Failed to delete item from Zotero. Check key, version, and permissions.');
+        }
+
+        return fail(`Unknown action: ${action}`);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 16. library_endnote ────────────────────────────────────────────────
+
+  tools.push({
+    name: 'library_endnote',
+    description: 'Interact with EndNote reference manager. Detect local .enl library or import papers from it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['detect', 'import'], description: 'Action to perform' },
+        enl_path: { type: 'string', description: 'Custom path to .enl file' },
+        limit: { type: 'number', description: 'Maximum papers to import (for import action, default: all)' },
+      },
+      required: ['action'],
+    },
+    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+      try {
+        if (typeof params.action !== 'string' || !params.action.trim()) {
+          return fail('action is required and must be a non-empty string');
+        }
+        const action = params.action.trim();
+        const customEnlPath = typeof params.enl_path === 'string' ? params.enl_path : undefined;
+
+        if (action === 'detect') {
+          const result = EndNoteBridge.detect(customEnlPath);
+          if (!result.available) {
+            if (existsSync('/.dockerenv')) {
+              return ok(
+                'EndNote library not accessible — Docker container filesystem is isolated from host. ' +
+                'Alternatives: (1) Mount the EndNote library directory as a Docker volume, ' +
+                '(2) Export BibTeX/RIS from EndNote and use library_import_bibtex or library_import_ris.',
+                result,
+              );
+            }
+            return ok(
+              'No EndNote library found on this machine. ' +
+              'You can specify a custom path to your .enl file via the enl_path parameter.',
               result,
             );
           }
           return ok(
-            'Zotero not installed or database not at default path (~/Zotero/zotero.sqlite). ' +
-            'You can specify a custom path via the db_path parameter.',
+            `EndNote library found: ${result.record_count} records (schema v${result.schema_version})`,
             result,
           );
         }
-        return ok(
-          `Zotero found: ${result.stats?.total_items ?? 0} items, ${result.stats?.total_collections ?? 0} collections`,
-          result,
-        );
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
 
-  // ── 14. library_zotero_import ──────────────────────────────────────────
-  tools.push({
-    name: 'library_zotero_import',
-    description:
-      'Import papers from the local Zotero library into Research-Claw. ' +
-      'Automatically deduplicates by DOI/arXiv ID. Optionally filter by collection name.',
-    parameters: {
-      type: 'object',
-      properties: {
-        collection: { type: 'string', description: 'Only import from this Zotero collection' },
-        limit: { type: 'number', description: 'Maximum papers to import (default: all)' },
-        db_path: { type: 'string', description: 'Custom path to zotero.sqlite' },
-      },
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const customDbPath = typeof params.db_path === 'string' ? params.db_path : undefined;
-        const detect = ZoteroBridge.detect(customDbPath);
-        if (!detect.available || !detect.db_path) {
-          return fail('Zotero not found on this machine');
-        }
-        const result = ZoteroBridge.importAll(detect.db_path, service, {
-          collection: typeof params.collection === 'string' ? params.collection : undefined,
-          limit: typeof params.limit === 'number' ? params.limit : undefined,
-        });
-        return ok(
-          `Imported ${result.imported} paper(s) from Zotero (${result.duplicates} duplicates skipped)`,
-          result,
-        );
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 15. library_endnote_detect ─────────────────────────────────────────
-  tools.push({
-    name: 'library_endnote_detect',
-    description: 'Detect if an EndNote library (.enl file) exists locally. Returns library path, record count, and schema version.',
-    parameters: {
-      type: 'object',
-      properties: {
-        enl_path: { type: 'string', description: 'Custom path to .enl file' },
-      },
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const customEnlPath = typeof params.enl_path === 'string' ? params.enl_path : undefined;
-        const result = EndNoteBridge.detect(customEnlPath);
-        if (!result.available) {
-          if (existsSync('/.dockerenv')) {
-            return ok(
-              'EndNote library not accessible — Docker container filesystem is isolated from host. ' +
-              'Alternatives: (1) Mount the EndNote library directory as a Docker volume, ' +
-              '(2) Export BibTeX/RIS from EndNote and use library_import_bibtex or library_import_ris.',
-              result,
-            );
+        if (action === 'import') {
+          const detect = EndNoteBridge.detect(customEnlPath);
+          if (!detect.available || !detect.library_path) {
+            return fail('No EndNote library found on this machine');
           }
+          const result = EndNoteBridge.importAll(detect.library_path, service, {
+            limit: typeof params.limit === 'number' ? params.limit : undefined,
+          });
           return ok(
-            'No EndNote library found on this machine. ' +
-            'You can specify a custom path to your .enl file via the enl_path parameter.',
+            `Imported ${result.imported} paper(s) from EndNote (${result.duplicates} duplicates skipped)`,
             result,
           );
         }
-        return ok(
-          `EndNote library found: ${result.record_count} records (schema v${result.schema_version})`,
-          result,
-        );
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
 
-  // ── 16. library_endnote_import ─────────────────────────────────────────
-  tools.push({
-    name: 'library_endnote_import',
-    description:
-      'Import papers from the local EndNote library (.enl file) into Research-Claw. ' +
-      'Automatically deduplicates by DOI.',
-    parameters: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Maximum papers to import (default: all)' },
-        enl_path: { type: 'string', description: 'Custom path to .enl file' },
-      },
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const customEnlPath = typeof params.enl_path === 'string' ? params.enl_path : undefined;
-        const detect = EndNoteBridge.detect(customEnlPath);
-        if (!detect.available || !detect.library_path) {
-          return fail('No EndNote library found on this machine');
-        }
-        const result = EndNoteBridge.importAll(detect.library_path, service, {
-          limit: typeof params.limit === 'number' ? params.limit : undefined,
-        });
-        return ok(
-          `Imported ${result.imported} paper(s) from EndNote (${result.duplicates} duplicates skipped)`,
-          result,
-        );
+        return fail(`Unknown action: ${action}`);
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -876,6 +1097,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
   });
 
   // ── 17. library_import_ris ──────────────────────────────────────────────
+
   tools.push({
     name: 'library_import_ris',
     description:
@@ -902,331 +1124,6 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
           `Imported ${result.added.length} paper(s) from RIS (${result.duplicates.length} duplicates skipped)`,
           result,
         );
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 18. library_zotero_local_detect ──────────────────────────────────
-  tools.push({
-    name: 'library_zotero_local_detect',
-    description:
-      'Detect if Zotero Local API is reachable (localhost:23119). ' +
-      'Requires Zotero desktop running with "Allow other applications" enabled in Advanced settings.',
-    parameters: { type: 'object', properties: {} },
-    execute: async () => {
-      try {
-        const { ZoteroLocalAPI } = await import('./zotero-local-api.js');
-        const result = await ZoteroLocalAPI.detect();
-        if (!result.available) {
-          return ok(
-            'Zotero Local API not reachable. Ensure Zotero is running and ' +
-            '"Allow other applications on this computer to communicate with Zotero" ' +
-            'is enabled in Zotero Settings → Advanced.',
-            result,
-          );
-        }
-        return ok(`Zotero Local API available: ${result.itemCount ?? 'unknown'} items`, result);
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 19. library_zotero_local_import ─────────────────────────────────
-  tools.push({
-    name: 'library_zotero_local_import',
-    description:
-      'Import papers from Zotero via its Local API (localhost:23119). ' +
-      'Read-only, auto-dedup. Zotero must be running.',
-    parameters: {
-      type: 'object',
-      properties: {
-        collection: { type: 'string', description: 'Only import from this Zotero collection key' },
-        limit: { type: 'number', description: 'Maximum papers to import (default: 25)' },
-        query: { type: 'string', description: 'Search query to filter items' },
-      },
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const { ZoteroLocalAPI } = await import('./zotero-local-api.js');
-        const { ZoteroWebAPI } = await import('./zotero-web-api.js');
-
-        const detect = await ZoteroLocalAPI.detect();
-        if (!detect.available) {
-          return fail(
-            'Zotero Local API not reachable. Ensure Zotero is running with Local API enabled.',
-          );
-        }
-
-        const query = typeof params.query === 'string' ? params.query : undefined;
-        const limit = typeof params.limit === 'number' ? params.limit : 25;
-        const collection = typeof params.collection === 'string' ? params.collection : undefined;
-
-        const items = query
-          ? await ZoteroLocalAPI.searchItems(query, { limit })
-          : await ZoteroLocalAPI.listItems({ limit, collection });
-
-        let imported = 0;
-        let duplicates = 0;
-        const ids: string[] = [];
-
-        for (const item of items) {
-          if (!item.title || item.itemType === 'attachment' || item.itemType === 'note') continue;
-          const paperInput = ZoteroWebAPI.toPaperInput(item);
-          const dupMatches = service.duplicateCheck({ doi: paperInput.doi, title: paperInput.title, arxiv_id: paperInput.arxiv_id });
-          if (dupMatches.length > 0) { duplicates++; continue; }
-          const added = service.add(paperInput);
-          ids.push(added.id);
-          imported++;
-        }
-
-        return ok(
-          `Imported ${imported} paper(s) via Zotero Local API (${duplicates} duplicates skipped)`,
-          { imported, duplicates, items: ids },
-        );
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 20. library_zotero_web_detect ───────────────────────────────────
-  tools.push({
-    name: 'library_zotero_web_detect',
-    description:
-      'Validate Zotero Web API credentials (API Key + User ID). ' +
-      'Configure via ZOTERO_API_KEY and ZOTERO_USER_ID environment variables.',
-    parameters: { type: 'object', properties: {} },
-    execute: async () => {
-      try {
-        const { ZoteroWebAPI } = await import('./zotero-web-api.js');
-        const config = ZoteroWebAPI.getConfig();
-        if (!config) {
-          return ok(
-            'Zotero Web API not configured. To set up:\n' +
-            '1. Go to https://www.zotero.org/settings/keys\n' +
-            '2. Your User ID is shown at the top of the page\n' +
-            '3. Click "Create new private key" → enable Library Read+Write access → Save\n' +
-            '4. Add to openclaw.json: env.vars.ZOTERO_API_KEY and env.vars.ZOTERO_USER_ID\n' +
-            '5. Restart the gateway to apply.',
-            { configured: false },
-          );
-        }
-        const result = await ZoteroWebAPI.validateCredentials(config);
-        if (!result.configured) {
-          return ok('Zotero Web API credentials invalid. Check API Key and User ID.', result);
-        }
-        return ok(
-          `Zotero Web API connected: ${result.totalItems ?? 'unknown'} items, ` +
-          `rate limit remaining: ${result.rateLimitRemaining ?? 'unknown'}`,
-          result,
-        );
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 21. library_zotero_web_import ───────────────────────────────────
-  tools.push({
-    name: 'library_zotero_web_import',
-    description:
-      'Import papers from Zotero cloud library via Web API v3. Read-only, auto-dedup.',
-    parameters: {
-      type: 'object',
-      properties: {
-        collection: { type: 'string', description: 'Zotero collection key to filter' },
-        limit: { type: 'number', description: 'Max papers (default: 25)' },
-        query: { type: 'string', description: 'Search query' },
-      },
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const { ZoteroWebAPI } = await import('./zotero-web-api.js');
-        const config = ZoteroWebAPI.getConfig();
-        if (!config) return fail('Zotero Web API not configured. Set ZOTERO_API_KEY + ZOTERO_USER_ID.');
-
-        const query = typeof params.query === 'string' ? params.query : undefined;
-        const limit = typeof params.limit === 'number' ? params.limit : 25;
-        const collection = typeof params.collection === 'string' ? params.collection : undefined;
-
-        const items = query
-          ? await ZoteroWebAPI.searchItems(config, query, { limit })
-          : await ZoteroWebAPI.listItems(config, { limit, collection });
-
-        let imported = 0;
-        let duplicates = 0;
-        const ids: string[] = [];
-
-        for (const item of items) {
-          if (!item.title || item.itemType === 'attachment' || item.itemType === 'note') continue;
-          const paperInput = ZoteroWebAPI.toPaperInput(item);
-          const dupMatches = service.duplicateCheck({ doi: paperInput.doi, title: paperInput.title, arxiv_id: paperInput.arxiv_id });
-          if (dupMatches.length > 0) { duplicates++; continue; }
-          const added = service.add(paperInput);
-          ids.push(added.id);
-          imported++;
-        }
-
-        return ok(
-          `Imported ${imported} paper(s) via Zotero Web API (${duplicates} duplicates skipped)`,
-          { imported, duplicates, items: ids },
-        );
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 22. library_zotero_web_search ───────────────────────────────────
-  tools.push({
-    name: 'library_zotero_web_search',
-    description: 'Search papers in Zotero cloud library via Web API v3.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query' },
-        limit: { type: 'number', description: 'Max results (default: 25)' },
-      },
-      required: ['query'],
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const { ZoteroWebAPI } = await import('./zotero-web-api.js');
-        const config = ZoteroWebAPI.getConfig();
-        if (!config) return fail('Zotero Web API not configured.');
-        if (typeof params.query !== 'string') return fail('query is required');
-
-        const items = await ZoteroWebAPI.searchItems(config, params.query, {
-          limit: typeof params.limit === 'number' ? params.limit : 25,
-        });
-
-        return ok(`Found ${items.length} item(s) in Zotero cloud library`, { items });
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 23. library_zotero_web_create ───────────────────────────────────
-  tools.push({
-    name: 'library_zotero_web_create',
-    description:
-      'Create a new item in Zotero cloud library via Web API v3. ' +
-      'REQUIRES user approval (approval_card, risk_level: medium).',
-    parameters: {
-      type: 'object',
-      properties: {
-        paper_id: { type: 'string', description: 'RC library paper ID to sync to Zotero' },
-      },
-      required: ['paper_id'],
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const { ZoteroWebAPI } = await import('./zotero-web-api.js');
-        const config = ZoteroWebAPI.getConfig();
-        if (!config) return fail('Zotero Web API not configured.');
-        if (typeof params.paper_id !== 'string') return fail('paper_id is required');
-
-        const paper = service.get(params.paper_id);
-        if (!paper) return fail(`Paper ${params.paper_id} not found in RC library`);
-
-        const result = await ZoteroWebAPI.createItem(config, {
-          itemType: paper.paper_type === 'journal_article' ? 'journalArticle' :
-                    paper.paper_type === 'conference_paper' ? 'conferencePaper' :
-                    paper.paper_type === 'preprint' ? 'preprint' :
-                    paper.paper_type === 'book' ? 'book' :
-                    paper.paper_type === 'thesis' ? 'thesis' : 'document',
-          title: paper.title,
-          creators: (paper.authors as string[])?.map((name: string) => ({
-            creatorType: 'author',
-            name,
-          })) ?? [],
-          DOI: paper.doi ?? '',
-          url: paper.url ?? '',
-          abstractNote: paper.abstract ?? '',
-          date: paper.year ? String(paper.year) : '',
-        });
-
-        if (!result) return fail('Failed to create item in Zotero');
-        return ok(`Created item in Zotero cloud: key=${result.key}`, result);
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 24. library_zotero_web_update ───────────────────────────────────
-  tools.push({
-    name: 'library_zotero_web_update',
-    description:
-      'Update an existing item in Zotero cloud library via Web API v3. ' +
-      'REQUIRES user approval (approval_card, risk_level: medium).',
-    parameters: {
-      type: 'object',
-      properties: {
-        zotero_key: { type: 'string', description: 'Zotero item key to update' },
-        version: { type: 'number', description: 'Current item version (for optimistic locking)' },
-        fields: {
-          type: 'object',
-          description: 'Fields to update (e.g. { title, DOI, abstractNote })',
-        },
-      },
-      required: ['zotero_key', 'version', 'fields'],
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const { ZoteroWebAPI } = await import('./zotero-web-api.js');
-        const config = ZoteroWebAPI.getConfig();
-        if (!config) return fail('Zotero Web API not configured.');
-        if (typeof params.zotero_key !== 'string') return fail('zotero_key is required');
-        if (typeof params.version !== 'number') return fail('version is required');
-
-        const success = await ZoteroWebAPI.updateItem(
-          config,
-          params.zotero_key,
-          params.version,
-          params.fields as Record<string, unknown> ?? {},
-        );
-
-        return success
-          ? ok(`Updated Zotero item: ${params.zotero_key}`, { key: params.zotero_key })
-          : fail('Failed to update item in Zotero. Check key, version, and permissions.');
-      } catch (err) {
-        return fail(err instanceof Error ? err.message : String(err));
-      }
-    },
-  });
-
-  // ── 25. library_zotero_web_delete ───────────────────────────────────
-  tools.push({
-    name: 'library_zotero_web_delete',
-    description:
-      'Delete an item from Zotero cloud library via Web API v3. ' +
-      'REQUIRES user approval (approval_card, risk_level: high). Irreversible.',
-    parameters: {
-      type: 'object',
-      properties: {
-        zotero_key: { type: 'string', description: 'Zotero item key to delete' },
-        version: { type: 'number', description: 'Current item version (for optimistic locking)' },
-      },
-      required: ['zotero_key', 'version'],
-    },
-    execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-      try {
-        const { ZoteroWebAPI } = await import('./zotero-web-api.js');
-        const config = ZoteroWebAPI.getConfig();
-        if (!config) return fail('Zotero Web API not configured.');
-        if (typeof params.zotero_key !== 'string') return fail('zotero_key is required');
-        if (typeof params.version !== 'number') return fail('version is required');
-
-        const success = await ZoteroWebAPI.deleteItem(config, params.zotero_key, params.version);
-
-        return success
-          ? ok(`Deleted Zotero item: ${params.zotero_key}`, { key: params.zotero_key })
-          : fail('Failed to delete item from Zotero. Check key, version, and permissions.');
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }

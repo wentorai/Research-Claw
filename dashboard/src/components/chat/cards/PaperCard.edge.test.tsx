@@ -29,7 +29,10 @@ vi.mock('@/stores/gateway', () => ({
     selector({ client: { request: mockRequest } }),
 }));
 vi.mock('@/stores/library', () => ({
-  useLibraryStore: { getState: () => ({ loadPapers: vi.fn() }) },
+  useLibraryStore: { getState: () => ({ loadPapers: vi.fn(), loadTags: vi.fn() }) },
+}));
+vi.mock('@/stores/ui', () => ({
+  useUiStore: { getState: () => ({ setRightPanelTab: vi.fn() }) },
 }));
 
 // Mock antd message

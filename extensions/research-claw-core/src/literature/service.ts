@@ -365,6 +365,32 @@ function getTagsForPaper(db: BetterSqlite3.Database, paperId: string): string[] 
   return rows.map((r) => r.name);
 }
 
+function getTagsForPapers(db: BetterSqlite3.Database, paperIds: string[]): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  if (paperIds.length === 0) return result;
+
+  const placeholders = paperIds.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT pt.paper_id, t.name FROM rc_paper_tags pt
+       JOIN rc_tags t ON t.id = pt.tag_id
+       WHERE pt.paper_id IN (${placeholders})
+       ORDER BY t.name`,
+    )
+    .all(...paperIds) as Array<{ paper_id: string; name: string }>;
+
+  for (const row of rows) {
+    let tags = result.get(row.paper_id);
+    if (!tags) {
+      tags = [];
+      result.set(row.paper_id, tags);
+    }
+    tags.push(row.name);
+  }
+
+  return result;
+}
+
 function ensureTag(db: BetterSqlite3.Database, tagName: string, color?: string): string {
   const normalized = tagName.trim().toLowerCase();
   const existing = db
@@ -770,6 +796,50 @@ export class LiteratureService {
 
   constructor(db: BetterSqlite3.Database) {
     this.db = db;
+    this.ensureFtsIntegrity();
+  }
+
+  ensureFtsIntegrity(): void {
+    const row = this.db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='rc_papers_fts'`)
+      .get() as { name: string } | undefined;
+
+    if (!row) {
+      this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS rc_papers_fts USING fts5(
+  title,
+  authors,
+  abstract,
+  notes,
+  keywords,
+  content='rc_papers',
+  content_rowid='rowid'
+)`);
+
+      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_insert
+  AFTER INSERT ON rc_papers
+BEGIN
+  INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes, keywords)
+    VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords);
+END`);
+
+      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_update
+  AFTER UPDATE ON rc_papers
+BEGIN
+  INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
+    VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords);
+  INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes, keywords)
+    VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords);
+END`);
+
+      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_delete
+  BEFORE DELETE ON rc_papers
+BEGIN
+  INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
+    VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords);
+END`);
+
+      this.db.exec(`INSERT INTO rc_papers_fts(rc_papers_fts) VALUES('rebuild')`);
+    }
   }
 
   // ── 1. add ──────────────────────────────────────────────────────────
@@ -830,52 +900,56 @@ export class LiteratureService {
     const bibtexKey = input.bibtex_key || generateBibtexKey(authors, input.year, input.title);
     const metadata = input.metadata ? JSON.stringify(input.metadata) : '{}';
 
-    this.db
-      .prepare(
-        `INSERT INTO rc_papers
-         (id, title, authors, abstract, doi, url, arxiv_id, pdf_path, source, source_id,
-          venue, year, added_at, updated_at, read_status, rating, notes, bibtex_key, metadata,
-          keywords, language, paper_type, volume, issue, pages, publisher, issn, isbn, discipline, citation_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        input.title,
-        JSON.stringify(authors),
-        input.abstract ?? null,
-        input.doi ?? null,
-        input.url ?? null,
-        input.arxiv_id ?? null,
-        input.pdf_path ?? null,
-        input.source ?? null,
-        input.source_id ?? null,
-        input.venue ?? null,
-        input.year ?? null,
-        timestamp,
-        timestamp,
-        input.notes ?? null,
-        bibtexKey,
-        metadata,
-        JSON.stringify(input.keywords ?? []),
-        input.language ?? null,
-        input.paper_type ?? null,
-        input.volume ?? null,
-        input.issue ?? null,
-        input.pages ?? null,
-        input.publisher ?? null,
-        input.issn ?? null,
-        input.isbn ?? null,
-        input.discipline ?? null,
-        input.citation_count ?? null,
-      );
+    const txn = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO rc_papers
+           (id, title, authors, abstract, doi, url, arxiv_id, pdf_path, source, source_id,
+            venue, year, added_at, updated_at, read_status, rating, notes, bibtex_key, metadata,
+            keywords, language, paper_type, volume, issue, pages, publisher, issn, isbn, discipline, citation_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          input.title,
+          JSON.stringify(authors),
+          input.abstract ?? null,
+          input.doi ?? null,
+          input.url ?? null,
+          input.arxiv_id ?? null,
+          input.pdf_path ?? null,
+          input.source ?? null,
+          input.source_id ?? null,
+          input.venue ?? null,
+          input.year ?? null,
+          timestamp,
+          timestamp,
+          input.notes ?? null,
+          bibtexKey,
+          metadata,
+          JSON.stringify(input.keywords ?? []),
+          input.language ?? null,
+          input.paper_type ?? null,
+          input.volume ?? null,
+          input.issue ?? null,
+          input.pages ?? null,
+          input.publisher ?? null,
+          input.issn ?? null,
+          input.isbn ?? null,
+          input.discipline ?? null,
+          input.citation_count ?? null,
+        );
 
-    if (input.tags && input.tags.length > 0) {
-      attachTags(this.db, id, input.tags);
-    }
+      if (input.tags && input.tags.length > 0) {
+        attachTags(this.db, id, input.tags);
+      }
 
-    const tags = getTagsForPaper(this.db, id);
-    const inserted = this.db.prepare('SELECT * FROM rc_papers WHERE id = ?').get(id) as PaperRow;
-    return rowToPaper(inserted, tags);
+      const tags = getTagsForPaper(this.db, id);
+      const inserted = this.db.prepare('SELECT * FROM rc_papers WHERE id = ?').get(id) as PaperRow;
+      return rowToPaper(inserted, tags);
+    });
+
+    return txn();
   }
 
   // ── 2. get ──────────────────────────────────────────────────────────
@@ -986,7 +1060,8 @@ export class LiteratureService {
     const selectSql = `SELECT p.* ${fromClause} ${whereClause} ORDER BY p.${safeSort} ${sortDirection} LIMIT ? OFFSET ?`;
     const rows = this.db.prepare(selectSql).all(...bindValues, limit, offset) as PaperRow[];
 
-    const items = rows.map((row) => rowToPaper(row, getTagsForPaper(this.db, row.id)));
+    const tagsMap = getTagsForPapers(this.db, rows.map((r) => r.id));
+    const items = rows.map((row) => rowToPaper(row, tagsMap.get(row.id) ?? []));
 
     return { items, total };
   }
@@ -1091,6 +1166,45 @@ export class LiteratureService {
     this.cleanupOrphanedTags();
   }
 
+  // ── 5b. restore ─────────────────────────────────────────────────────
+
+  restore(id: string): Paper {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM rc_papers WHERE id = ? AND metadata IS NOT NULL AND json_extract(metadata, '$.deleted_at') IS NOT NULL`,
+      )
+      .get(id) as PaperRow | undefined;
+    if (!row) {
+      throw new Error(`Paper not found or not deleted: ${id}`);
+    }
+
+    this.db
+      .prepare(
+        `UPDATE rc_papers SET metadata = json_remove(metadata, '$.deleted_at'), updated_at = ? WHERE id = ?`,
+      )
+      .run(now(), id);
+
+    const restored = this.db.prepare('SELECT * FROM rc_papers WHERE id = ?').get(id) as PaperRow;
+    const tags = getTagsForPaper(this.db, id);
+    return rowToPaper(restored, tags);
+  }
+
+  // ── 5c. purge ───────────────────────────────────────────────────────
+
+  purge(id: string): void {
+    const row = this.db
+      .prepare(
+        `SELECT id FROM rc_papers WHERE id = ? AND metadata IS NOT NULL AND json_extract(metadata, '$.deleted_at') IS NOT NULL`,
+      )
+      .get(id) as { id: string } | undefined;
+    if (!row) {
+      throw new Error(`Paper not found or not deleted: ${id}`);
+    }
+
+    this.db.prepare('DELETE FROM rc_papers WHERE id = ?').run(id);
+    this.cleanupOrphanedTags();
+  }
+
   /**
    * Remove tags that have no associated non-deleted papers.
    * Called after paper deletion and untag to prevent tag list pollution.
@@ -1156,7 +1270,8 @@ export class LiteratureService {
           : selectStmt.all(query, safeLimit, offset)
       ) as PaperRow[];
 
-      const items = rows.map((r) => rowToPaper(r, getTagsForPaper(this.db, r.id)));
+      const tagsMap = getTagsForPapers(this.db, rows.map((r) => r.id));
+      const items = rows.map((r) => rowToPaper(r, tagsMap.get(r.id) ?? []));
       return { items, total: countRow.cnt };
     } catch {
       // FTS5 parse error — fall back to LIKE
@@ -1206,7 +1321,8 @@ export class LiteratureService {
           : likeSelectStmt.all(likeQuery, likeQuery, likeQuery, likeQuery, safeLimit, offset)
       ) as PaperRow[];
 
-      const items = rows.map((r) => rowToPaper(r, getTagsForPaper(this.db, r.id)));
+      const tagsMap = getTagsForPapers(this.db, rows.map((r) => r.id));
+      const items = rows.map((r) => rowToPaper(r, tagsMap.get(r.id) ?? []));
       return { items, total: countRow.cnt };
     }
   }

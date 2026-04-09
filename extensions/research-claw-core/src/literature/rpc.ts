@@ -5,13 +5,15 @@
  * Each handler extracts params, calls the LiteratureService,
  * and responds via the gateway method callback.
  *
- * Error codes: rc.lit.* uses -32001 to -32012
+ * Error codes: rc.lit.* uses -32001 to -32013
  *   -32001 PAPER_NOT_FOUND, -32002 DUPLICATE_PAPER, -32003 TAG_NOT_FOUND,
  *   -32004 COLLECTION_NOT_FOUND, -32005 SESSION_NOT_FOUND,
  *   -32006 SESSION_ALREADY_ENDED, -32007 SELF_CITATION,
- *   -32010 BIBTEX_PARSE_ERROR, -32011 VALIDATION_ERROR, -32012 FTS_QUERY_ERROR
+ *   -32010 BIBTEX_PARSE_ERROR, -32011 VALIDATION_ERROR, -32012 FTS_QUERY_ERROR,
+ *   -32013 PAPER_NOT_DELETED
  */
 
+import { existsSync } from 'node:fs';
 import { type LiteratureService, type PaperInput, type PaperPatch, type PaperFilter } from './service.js';
 import type { RegisterMethod } from '../types.js';
 import { ZoteroBridge } from './zotero.js';
@@ -31,6 +33,7 @@ const ErrorCode = {
   BIBTEX_PARSE_ERROR: -32010,
   VALIDATION_ERROR: -32011,
   FTS_QUERY_ERROR: -32012,
+  PAPER_NOT_DELETED: -32013,
 } as const;
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -64,6 +67,9 @@ function classifyError(err: unknown): ErrorShape {
   }
   if (message.includes('cannot cite itself')) {
     return { code: ErrorCode.SELF_CITATION, message };
+  }
+  if (message.includes('not deleted')) {
+    return { code: ErrorCode.PAPER_NOT_DELETED, message };
   }
   if (message.includes('BibTeX') || message.includes('bibtex') || message.includes('parse')) {
     return { code: ErrorCode.BIBTEX_PARSE_ERROR, message };
@@ -170,7 +176,9 @@ export function registerLiteratureRpc(registerMethod: RegisterMethod, service: L
       const citing_count = citations.citing.length;
       const cited_by_count = citations.cited_by.length;
 
-      return { ...paper, reading_sessions, citing_count, cited_by_count };
+      const pdf_exists = paper.pdf_path ? existsSync(paper.pdf_path) : false;
+
+      return { ...paper, pdf_exists, reading_sessions, citing_count, cited_by_count };
     } catch (err) {
       throw classifyError(err);
     }
@@ -265,6 +273,29 @@ export function registerLiteratureRpc(registerMethod: RegisterMethod, service: L
       const id = requireString(params, 'id');
       service.delete(id);
       return { ok: true };
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 5b. rc.lit.restore ──────────────────────────────────────────────
+
+  registerMethod('rc.lit.restore', async (params: Record<string, unknown>) => {
+    try {
+      const id = requireString(params, 'id');
+      return service.restore(id);
+    } catch (err) {
+      throw classifyError(err);
+    }
+  });
+
+  // ── 5c. rc.lit.purge ────────────────────────────────────────────────
+
+  registerMethod('rc.lit.purge', async (params: Record<string, unknown>) => {
+    try {
+      const id = requireString(params, 'id');
+      service.purge(id);
+      return { purged: id };
     } catch (err) {
       throw classifyError(err);
     }
