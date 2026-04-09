@@ -140,7 +140,7 @@ export default function ProviderPickerModal({
     const q = normalize(query);
     if (!q) return pickerPresets;
     return pickerPresets.filter((p) => providerSearchText(p).includes(q));
-  }, [query]);
+  }, [query, pickerPresets]);
 
   const presetIds = useMemo(() => new Set(presets.map((p) => p.id)), [presets]);
   const sections = useMemo(() => buildSections(t), [t]);
@@ -199,7 +199,7 @@ export default function ProviderPickerModal({
       footer={null}
       width={720}
       destroyOnClose
-      styles={{ body: { paddingTop: 8 } }}
+      styles={{ body: { paddingTop: 8, display: 'flex', flexDirection: 'column', maxHeight: 'calc(80vh - 110px)' } }}
     >
       <Input
         value={query}
@@ -207,43 +207,45 @@ export default function ProviderPickerModal({
         allowClear
         prefix={<SearchOutlined />}
         placeholder={t('providerPicker.searchPlaceholder')}
-        style={{ marginBottom: 12 }}
+        style={{ marginBottom: 12, flexShrink: 0 }}
       />
 
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        {sections.map((section) => {
-          const visible = section.providerIds.filter((id) => presetIds.has(id));
-          if (visible.length === 0) return null;
-          return (
-            <div key={section.id}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ opacity: 0.8 }}>{section.icon}</span>
-                <Text strong style={{ fontSize: 13 }}>
-                  {section.title}
-                </Text>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {sections.map((section) => {
+            const visible = section.providerIds.filter((id) => presetIds.has(id));
+            if (visible.length === 0) return null;
+            return (
+              <div key={section.id}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ opacity: 0.8 }}>{section.icon}</span>
+                  <Text strong style={{ fontSize: 13 }}>
+                    {section.title}
+                  </Text>
+                </div>
+                {section.id === 'direct' && section.groups?.length ? (
+                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                    {section.groups.map((g) => {
+                      const gVisible = g.providerIds.filter((id) => presetIds.has(id));
+                      if (gVisible.length === 0) return null;
+                      return (
+                        <div key={g.id}>
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                            {g.title}
+                          </Text>
+                          {renderCards(gVisible)}
+                        </div>
+                      );
+                    })}
+                  </Space>
+                ) : (
+                  renderCards(visible)
+                )}
               </div>
-              {section.id === 'direct' && section.groups?.length ? (
-                <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                  {section.groups.map((g) => {
-                    const gVisible = g.providerIds.filter((id) => presetIds.has(id));
-                    if (gVisible.length === 0) return null;
-                    return (
-                      <div key={g.id}>
-                        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-                          {g.title}
-                        </Text>
-                        {renderCards(gVisible)}
-                      </div>
-                    );
-                  })}
-                </Space>
-              ) : (
-                renderCards(visible)
-              )}
-            </div>
-          );
-        })}
-      </Space>
+            );
+          })}
+        </Space>
+      </div>
     </Modal>
   );
 }

@@ -16,6 +16,7 @@ import { Modal, Input, Button, Typography, Steps, Alert, Space, Tooltip } from '
 import { LinkOutlined, CopyOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../stores/gateway';
+import { oauthProviderLabel } from '../utils/oauth-providers';
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -111,7 +112,7 @@ export default function OAuthModal({ open, provider, onClose, onSuccess }: OAuth
     });
   };
 
-  const providerLabel = provider === 'openai-codex' ? 'OpenAI Codex (ChatGPT)' : provider;
+  const providerLabel = oauthProviderLabel(provider);
 
   return (
     <Modal

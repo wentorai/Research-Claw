@@ -907,7 +907,7 @@ export default function SettingsPanel() {
         </div>
       </SettingRow>
       {isOAuthProviderSelected && (
-        <div style={{ marginTop: -6, marginBottom: 6, marginLeft: 100 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -4, marginBottom: 4 }}>
           <Button
             size="small"
             icon={<KeyOutlined />}

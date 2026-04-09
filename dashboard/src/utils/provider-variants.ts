@@ -132,13 +132,12 @@ export function isRepresentative(providerId: string): boolean {
 }
 
 /**
- * Build the list of provider ids shown in the picker:
- * - For grouped providers, only show the representative id (hide other variants).
- * - For all others, show as-is.
+ * Build the list of provider ids shown in the picker.
+ * Currently returns all preset ids — variants are selected directly
+ * in the picker (grouped by region) rather than collapsed behind a
+ * representative card.
  */
 export function providerIdsForPicker(): string[] {
-  // Variants are now selected directly in the picker (grouped by region),
-  // so we keep *all* preset ids visible there.
   return PROVIDER_PRESETS.map((p) => p.id);
 }
 
