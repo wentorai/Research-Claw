@@ -779,7 +779,13 @@ function RecentChanges({ commits, tokens, hasMore, onLoadMore, loadingMore }: {
 
   return (
     <div style={{ padding: '0 16px 8px' }}>
-      <Text strong style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: tokens.text.muted }}>
+      <Text strong style={{
+        fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5,
+        color: tokens.text.muted,
+        position: 'sticky', top: 0, zIndex: 1,
+        background: tokens.bg.primary,
+        display: 'block', paddingBottom: 2,
+      }}>
         {t('workspace.recentChanges')}
       </Text>
       <div style={{ marginTop: 6 }}>
@@ -1260,7 +1266,11 @@ export default function WorkspacePanel() {
       onDragLeave={handlePanelDragLeave}
       onDrop={handlePanelDrop}
     >
-      <RecentChanges commits={commits} tokens={tokens} hasMore={hasMoreCommits} onLoadMore={loadMoreCommits} loadingMore={loadingMoreCommits} />
+      {/* Recent changes — constrained height with independent scroll so it
+          never squeezes the file tree out of view on "load more" */}
+      <div style={{ maxHeight: '40%', overflowY: 'auto', flexShrink: 0 }}>
+        <RecentChanges commits={commits} tokens={tokens} hasMore={hasMoreCommits} onLoadMore={loadMoreCommits} loadingMore={loadingMoreCommits} />
+      </div>
 
       {commits.length > 0 && tree.length > 0 && (
         <div style={{ borderTop: `1px solid ${tokens.border.default}`, margin: '4px 16px' }} />
