@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { AutoComplete, Button, Input, Select, Typography, Space, Alert, Card, Divider, Segmented } from 'antd';
+import { AutoComplete, Button, Collapse, Input, Select, Typography, Space, Alert, Card, Divider, Segmented } from 'antd';
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -11,11 +11,13 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 import OAuthModal from '../OAuthModal';
+import { isOAuthProvider } from '../../utils/oauth-providers';
 import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../../stores/gateway';
 import { useConfigStore } from '../../stores/config';
 import { buildSaveConfig, extractConfigFields, isLocalProvider } from '../../utils/config-patch';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset, type ProviderPreset } from '../../utils/provider-presets';
+import ProviderPickerModal, { providerLabel } from '../providers/ProviderPickerModal';
 
 const { Title, Text } = Typography;
 
@@ -63,15 +65,6 @@ async function fetchOllamaModels(
   }
 }
 
-/** Shared filter for provider Select: searches both label and id */
-const providerFilterOption = (input: string, option?: { label?: unknown; value?: unknown }) => {
-  const search = input.toLowerCase();
-  return (
-    String(option?.label ?? '').toLowerCase().includes(search) ||
-    String(option?.value ?? '').toLowerCase().includes(search)
-  );
-};
-
 export default function SetupWizard() {
   const { t } = useTranslation();
   const client = useGatewayStore((s) => s.client);
@@ -98,6 +91,9 @@ export default function SetupWizard() {
   // --- Network ---
   const [proxyEnabled, setProxyEnabled] = useState(false);
   const [proxyUrl, setProxyUrl] = useState('http://127.0.0.1:7890');
+
+  // --- UI ---
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // --- Ollama model discovery ---
   const [ollamaModels, setOllamaModels] = useState<OllamaTagModel[]>([]);
@@ -146,8 +142,8 @@ export default function SetupWizard() {
     if (preset.models.length > 0 && !textModel) {
       setTextModel(preset.models[0].id);
     }
-    // `openai-codex` uses OAuth profiles; do not prompt for API key here.
-    if (id === 'openai-codex') {
+    // OAuth providers use auth profiles; do not prompt for API key here.
+    if (isOAuthProvider(id)) {
       setApiKey('');
     }
     // Local providers don't need API key; clear it and reset Ollama state
@@ -223,11 +219,13 @@ export default function SetupWizard() {
     return () => clearTimeout(timer);
   }, [restarting, connState]);
 
-  const isOpenAICodexOAuth = provider === 'openai-codex';
+  const isOAuthProviderSelected = isOAuthProvider(provider);
   const isOllamaLocal = isLocalProvider(provider);
   const [oauthModalOpen, setOauthModalOpen] = useState(false);
+  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  const [visionProviderPickerOpen, setVisionProviderPickerOpen] = useState(false);
   const canStart =
-    (isOpenAICodexOAuth || isOllamaLocal || apiKey.trim().length > 0 || hasExistingConfig.current) &&
+    (isOAuthProviderSelected || isOllamaLocal || apiKey.trim().length > 0 || hasExistingConfig.current) &&
     baseUrl.trim().length > 0 &&
     textModel.trim().length > 0;
 
@@ -372,54 +370,28 @@ export default function SetupWizard() {
             <Text strong style={{ display: 'block', marginBottom: 4 }}>
               {t('setup.provider')}
             </Text>
-            <Select
-              showSearch
+            <Button
+              block
+              onClick={() => setProviderPickerOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <ApiOutlined />
+                <span>{providerLabel(provider, t)}</span>
+              </span>
+              <span style={{ opacity: 0.7 }}>{provider}</span>
+            </Button>
+            <ProviderPickerModal
+              open={providerPickerOpen}
               value={provider}
-              onChange={handleProviderChange}
-              style={{ width: '100%' }}
-              filterOption={providerFilterOption}
-              options={PROVIDER_PRESETS.map((p) => {
-                const lbl = p.id === 'custom' ? t('setup.providerCustom') : p.label;
-                return { value: p.id, label: lbl, title: lbl as string };
-              })}
+              title={t('setup.provider')}
+              onSelect={(id) => {
+                setProviderPickerOpen(false);
+                handleProviderChange(id);
+              }}
+              onClose={() => setProviderPickerOpen(false)}
             />
           </div>
-
-          {/* ── API URL ── */}
-          <div>
-            <Text strong style={{ display: 'block', marginBottom: 4 }}>
-              {t('setup.baseUrl')}
-            </Text>
-            <Input
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={isOllamaLocal ? 'http://127.0.0.1:11434' : t('setup.baseUrlPlaceholder')}
-            />
-            {provider === 'ollama' && (
-              <Text type="secondary" style={{ fontSize: 11, marginTop: 2, display: 'block' }}>
-                {t('setup.ollamaBaseUrlHint')}
-              </Text>
-            )}
-          </div>
-
-          {/* ── API Protocol (shown for Custom only) ── */}
-          {provider === 'custom' && (
-            <div>
-              <Text strong style={{ display: 'block', marginBottom: 4 }}>
-                {t('setup.apiProtocol')}
-              </Text>
-              <Select
-                value={api}
-                onChange={setApi}
-                style={{ width: '100%' }}
-                options={[
-                  { value: 'openai-completions', label: 'OpenAI Compatible' },
-                  { value: 'openai-responses', label: 'OpenAI Responses' },
-                  { value: 'anthropic-messages', label: 'Anthropic Compatible' },
-                ]}
-              />
-            </div>
-          )}
 
           {/* ── API Key (hidden for local providers) ── */}
           {!isOllamaLocal && (
@@ -430,15 +402,15 @@ export default function SetupWizard() {
               <Input
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                disabled={isOpenAICodexOAuth}
+                disabled={isOAuthProviderSelected}
                 placeholder={
-                  isOpenAICodexOAuth
+                  isOAuthProviderSelected
                     ? t('setup.openaiCodexOauthNoApiKey')
                     : (hasExistingConfig.current && !apiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder'))
                 }
                 prefix={<ApiOutlined />}
               />
-              {isOpenAICodexOAuth && (
+              {isOAuthProviderSelected && (
                 <div style={{ marginTop: 6 }}>
                   <Button
                     size="small"
@@ -519,6 +491,88 @@ export default function SetupWizard() {
             />
           </div>
 
+          <Collapse
+            activeKey={advancedOpen ? ['advanced'] : []}
+            onChange={(keys) => setAdvancedOpen((keys as string[]).includes('advanced'))}
+            size="small"
+            items={[
+              {
+                key: 'advanced',
+                label: t('setup.advanced'),
+                children: (
+                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                    {/* ── API URL ── */}
+                    <div>
+                      <Text strong style={{ display: 'block', marginBottom: 4 }}>
+                        {t('setup.baseUrl')}
+                      </Text>
+                      <Input
+                        value={baseUrl}
+                        onChange={(e) => setBaseUrl(e.target.value)}
+                        placeholder={isOllamaLocal ? 'http://127.0.0.1:11434' : t('setup.baseUrlPlaceholder')}
+                      />
+                      {provider === 'ollama' && (
+                        <Text type="secondary" style={{ fontSize: 11, marginTop: 2, display: 'block' }}>
+                          {t('setup.ollamaBaseUrlHint')}
+                        </Text>
+                      )}
+                    </div>
+
+                    {/* ── API Protocol (shown for Custom only) ── */}
+                    {provider === 'custom' && (
+                      <div>
+                        <Text strong style={{ display: 'block', marginBottom: 4 }}>
+                          {t('setup.apiProtocol')}
+                        </Text>
+                        <Select
+                          value={api}
+                          onChange={setApi}
+                          style={{ width: '100%' }}
+                          options={[
+                            { value: 'openai-completions', label: 'OpenAI Compatible' },
+                            { value: 'openai-responses', label: 'OpenAI Responses' },
+                            { value: 'anthropic-messages', label: 'Anthropic Compatible' },
+                          ]}
+                        />
+                      </div>
+                    )}
+
+                    {/* ── Network ── */}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <Text style={{ fontSize: 13 }}>
+                          <GlobalOutlined style={{ marginRight: 6 }} />
+                          {t('setup.proxyEnabled')}
+                        </Text>
+                        <Segmented
+                          value={proxyEnabled ? 'on' : 'off'}
+                          onChange={(v) => setProxyEnabled(v === 'on')}
+                          options={[
+                            { label: 'OFF', value: 'off' },
+                            { label: 'ON', value: 'on' },
+                          ]}
+                          size="small"
+                        />
+                      </div>
+                      {proxyEnabled && (
+                        <>
+                          <Input
+                            value={proxyUrl}
+                            onChange={(e) => setProxyUrl(e.target.value)}
+                            placeholder="http://127.0.0.1:7890"
+                          />
+                          <Text type="secondary" style={{ fontSize: 11, marginTop: 2, display: 'block' }}>
+                            {t('setup.proxyHint')}
+                          </Text>
+                        </>
+                      )}
+                    </div>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+
           <Divider style={{ margin: '4px 0' }} />
 
           {/* ── Vision toggle ── */}
@@ -549,16 +603,26 @@ export default function SetupWizard() {
                 <Text strong style={{ display: 'block', marginBottom: 4 }}>
                   {t('setup.visionProvider')}
                 </Text>
-                <Select
-                  showSearch
+                <Button
+                  block
+                  onClick={() => setVisionProviderPickerOpen(true)}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <ApiOutlined />
+                    <span>{providerLabel(visionProvider, t)}</span>
+                  </span>
+                  <span style={{ opacity: 0.7 }}>{visionProvider}</span>
+                </Button>
+                <ProviderPickerModal
+                  open={visionProviderPickerOpen}
                   value={visionProvider}
-                  onChange={handleVisionProviderChange}
-                  style={{ width: '100%' }}
-                  filterOption={providerFilterOption}
-                  options={PROVIDER_PRESETS.map((p) => ({
-                    value: p.id,
-                    label: p.id === 'custom' ? t('setup.providerCustom') : p.label,
-                  }))}
+                  title={t('setup.visionProvider')}
+                  onSelect={(id) => {
+                    setVisionProviderPickerOpen(false);
+                    handleVisionProviderChange(id);
+                  }}
+                  onClose={() => setVisionProviderPickerOpen(false)}
                 />
               </div>
 
@@ -608,39 +672,6 @@ export default function SetupWizard() {
               )}
             </>
           )}
-
-          <Divider style={{ margin: '4px 0' }} />
-
-          {/* ── Network ── */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ fontSize: 13 }}>
-                <GlobalOutlined style={{ marginRight: 6 }} />
-                {t('setup.proxyEnabled')}
-              </Text>
-              <Segmented
-                value={proxyEnabled ? 'on' : 'off'}
-                onChange={(v) => setProxyEnabled(v === 'on')}
-                options={[
-                  { label: 'OFF', value: 'off' },
-                  { label: 'ON', value: 'on' },
-                ]}
-                size="small"
-              />
-            </div>
-            {proxyEnabled && (
-              <>
-                <Input
-                  value={proxyUrl}
-                  onChange={(e) => setProxyUrl(e.target.value)}
-                  placeholder="http://127.0.0.1:7890"
-                />
-                <Text type="secondary" style={{ fontSize: 11, marginTop: 2, display: 'block' }}>
-                  {t('setup.proxyHint')}
-                </Text>
-              </>
-            )}
-          </div>
 
           {error && (
             <Alert

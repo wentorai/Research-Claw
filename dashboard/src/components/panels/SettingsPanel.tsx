@@ -3,6 +3,7 @@ import {
   App,
   AutoComplete,
   Button,
+  Collapse,
   Divider,
   Input,
   Segmented,
@@ -12,6 +13,7 @@ import {
 } from 'antd';
 import { CopyOutlined, KeyOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons';
 import OAuthModal from '../OAuthModal';
+import ProviderPickerModal, { providerLabel } from '../providers/ProviderPickerModal';
 import { useTranslation } from 'react-i18next';
 import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
@@ -24,17 +26,9 @@ import {
   mergeProjectConfigsPreservingProviders,
 } from '../../utils/config-patch';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
+import { isOAuthProvider } from '../../utils/oauth-providers';
 
 const { Text } = Typography;
-
-/** Shared filter for provider Select: searches both label and id */
-const providerFilterOption = (input: string, option?: { label?: unknown; value?: unknown }) => {
-  const search = input.toLowerCase();
-  return (
-    String(option?.label ?? '').toLowerCase().includes(search) ||
-    String(option?.value ?? '').toLowerCase().includes(search)
-  );
-};
 
 // --- Setting row layout ---
 
@@ -318,6 +312,7 @@ export default function SettingsPanel() {
 
   const [saving, setSaving] = useState(false);
   const pendingRestart = useConfigStore((s) => s.pendingConfigRestart);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Controls whether the next gatewayConfig change should sync into form fields.
   // True on mount (initial load) and after explicit refresh / save-restart.
@@ -340,16 +335,18 @@ export default function SettingsPanel() {
   const textModelCacheRef = useRef<Record<string, string>>({});
   const visionModelCacheRef = useRef<Record<string, string>>({});
 
-  const isOpenAICodexOAuth = provider === 'openai-codex';
+  const isOAuthProviderSelected = isOAuthProvider(provider);
   const visionSeparateProvider = visionProvider !== provider;
   const [oauthModalOpen, setOauthModalOpen] = useState(false);
+  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  const [visionProviderPickerOpen, setVisionProviderPickerOpen] = useState(false);
   const [textApiKeyDeletePending, setTextApiKeyDeletePending] = useState(false);
   const [visionApiKeyDeletePending, setVisionApiKeyDeletePending] = useState(false);
   const [authConfiguredByProvider, setAuthConfiguredByProvider] = useState<Record<string, boolean>>({});
 
   const supportsAuthProfiles = useCallback((id: string) => (
     id !== 'custom' &&
-    id !== 'openai-codex' &&
+    !isOAuthProvider(id) &&
     id !== 'ollama' &&
     id !== 'vllm'
   ), []);
@@ -379,7 +376,7 @@ export default function SettingsPanel() {
   }, [supportsAuthProfiles]);
 
   const providerHasSavedKey = useCallback((id: string) => {
-    if (!id || id === 'openai-codex') return false;
+    if (!id) return false;
     const cached = apiKeyCacheRef.current[id] || visionApiKeyCacheRef.current[id];
     if (cached?.trim()) return true;
     if (authConfiguredByProvider[id]) return true;
@@ -393,12 +390,12 @@ export default function SettingsPanel() {
   const currentVisionProviderHasSavedKey = !visionApiKeyDeletePending && providerHasSavedKey(visionProvider);
 
   const textApiKeyStatus = useMemo(() => {
-    if (isOpenAICodexOAuth) return t('setup.openaiCodexOauthNoApiKey');
+    if (isOAuthProviderSelected) return t('setup.openaiCodexOauthNoApiKey');
     if (textApiKeyDeletePending) return t('settings.apiKeyDeletePending');
     if (apiKey.trim()) return t('settings.apiKeyWillUpdate');
     if (apiKeyConfigured || currentProviderHasSavedKey) return '';
     return t('settings.apiKeyMissing');
-  }, [apiKey, apiKeyConfigured, currentProviderHasSavedKey, isOpenAICodexOAuth, t, textApiKeyDeletePending]);
+  }, [apiKey, apiKeyConfigured, currentProviderHasSavedKey, isOAuthProviderSelected, t, textApiKeyDeletePending]);
 
   const visionApiKeyStatus = useMemo(() => {
     if (!visionEnabled || !visionSeparateProvider) return null;
@@ -471,7 +468,7 @@ export default function SettingsPanel() {
         setApiKey('');
       }
     }
-    if (id === 'openai-codex') {
+    if (isOAuthProvider(id)) {
       setApiKey('');
       setApiKeyConfigured(false);
     }
@@ -830,46 +827,32 @@ export default function SettingsPanel() {
 
       {/* ── Provider + Model section ── */}
       <SettingRow label={t('settings.provider')}>
-        <Select
-          showSearch
-          value={provider}
-          onChange={handleProviderChange}
-          size="small"
-          style={{ width: 220 }}
-          filterOption={providerFilterOption}
-          options={PROVIDER_PRESETS.map((p) => {
-            const lbl = p.id === 'custom' ? t('setup.providerCustom') : p.label;
-            const configured = providerHasSavedKey(p.id) ? ` · ${t('settings.providerConfigured')}` : '';
-            return { value: p.id, label: `${lbl}${configured}`, title: `${lbl}${configured}` };
-          })}
-        />
-      </SettingRow>
-
-      <SettingRow label={t('settings.baseUrl')}>
-        <Input
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          size="small"
-          style={{ width: 220 }}
-          placeholder="https://api.openai.com/v1"
-        />
-      </SettingRow>
-
-      {provider === 'custom' && (
-        <SettingRow label={t('settings.apiProtocol')}>
-          <Select
-            value={api}
-            onChange={setApi}
+        <>
+          <Button
             size="small"
-            style={{ width: 220 }}
-            options={[
-              { value: 'openai-completions', label: 'OpenAI Compatible' },
-              { value: 'openai-responses', label: 'OpenAI Responses' },
-              { value: 'anthropic-messages', label: 'Anthropic Compatible' },
-            ]}
+            style={{ width: 220, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+            onClick={() => setProviderPickerOpen(true)}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {providerLabel(provider, t)}
+              {providerHasSavedKey(provider) ? ` · ${t('settings.providerConfigured')}` : ''}
+            </span>
+            <span style={{ opacity: 0.65, marginLeft: 8, flexShrink: 0 }}>
+              {provider}
+            </span>
+          </Button>
+          <ProviderPickerModal
+            open={providerPickerOpen}
+            value={provider}
+            title={t('settings.provider')}
+            onSelect={(id) => {
+              setProviderPickerOpen(false);
+              handleProviderChange(id);
+            }}
+            onClose={() => setProviderPickerOpen(false)}
           />
-        </SettingRow>
-      )}
+        </>
+      </SettingRow>
 
       <SettingRow label={t('settings.apiKeyLabel')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
@@ -886,14 +869,14 @@ export default function SettingsPanel() {
             }}
             size="small"
             style={{ width: 220 }}
-            disabled={isOpenAICodexOAuth}
+            disabled={isOAuthProviderSelected}
             placeholder={
-              isOpenAICodexOAuth
+              isOAuthProviderSelected
                 ? t('setup.openaiCodexOauthNoApiKey')
                 : (currentProviderHasSavedKey && !apiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder'))
             }
           />
-          {!isOpenAICodexOAuth && (
+          {!isOAuthProviderSelected && (
             <>
               {textApiKeyStatus ? (
                 <Text type="secondary" style={{ fontSize: 11 }}>
@@ -923,7 +906,7 @@ export default function SettingsPanel() {
           )}
         </div>
       </SettingRow>
-      {isOpenAICodexOAuth && (
+      {isOAuthProviderSelected && (
         <div style={{ marginTop: -6, marginBottom: 6, marginLeft: 100 }}>
           <Button
             size="small"
@@ -958,6 +941,47 @@ export default function SettingsPanel() {
         />
       </SettingRow>
 
+      <Collapse
+        activeKey={advancedOpen ? ['advanced'] : []}
+        onChange={(keys) => setAdvancedOpen((keys as string[]).includes('advanced'))}
+        size="small"
+        items={[
+          {
+            key: 'advanced',
+            label: t('setup.advanced'),
+            children: (
+              <>
+                <SettingRow label={t('settings.baseUrl')}>
+                  <Input
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    size="small"
+                    style={{ width: 220 }}
+                    placeholder="https://api.openai.com/v1"
+                  />
+                </SettingRow>
+
+                {provider === 'custom' && (
+                  <SettingRow label={t('settings.apiProtocol')}>
+                    <Select
+                      value={api}
+                      onChange={setApi}
+                      size="small"
+                      style={{ width: 220 }}
+                      options={[
+                        { value: 'openai-completions', label: 'OpenAI Compatible' },
+                        { value: 'openai-responses', label: 'OpenAI Responses' },
+                        { value: 'anthropic-messages', label: 'Anthropic Compatible' },
+                      ]}
+                    />
+                  </SettingRow>
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
+
       {/* ── Vision section ── */}
       <Divider style={{ margin: '4px 0 8px' }} />
 
@@ -976,18 +1000,31 @@ export default function SettingsPanel() {
       {visionEnabled && (
         <>
           <SettingRow label={t('settings.visionProvider')}>
-            <Select
-              showSearch
-              value={visionProvider}
-              onChange={handleVisionProviderChange}
-              size="small"
-              style={{ width: 220 }}
-              filterOption={providerFilterOption}
-              options={PROVIDER_PRESETS.map((p) => ({
-                value: p.id,
-                label: `${p.id === 'custom' ? t('setup.providerCustom') : p.label}${providerHasSavedKey(p.id) ? ` · ${t('settings.providerConfigured')}` : ''}`,
-              }))}
-            />
+            <>
+              <Button
+                size="small"
+                style={{ width: 220, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                onClick={() => setVisionProviderPickerOpen(true)}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {providerLabel(visionProvider, t)}
+                  {providerHasSavedKey(visionProvider) ? ` · ${t('settings.providerConfigured')}` : ''}
+                </span>
+                <span style={{ opacity: 0.65, marginLeft: 8, flexShrink: 0 }}>
+                  {visionProvider}
+                </span>
+              </Button>
+              <ProviderPickerModal
+                open={visionProviderPickerOpen}
+                value={visionProvider}
+                title={t('settings.visionProvider')}
+                onSelect={(id) => {
+                  setVisionProviderPickerOpen(false);
+                  handleVisionProviderChange(id);
+                }}
+                onClose={() => setVisionProviderPickerOpen(false)}
+              />
+            </>
           </SettingRow>
 
           <SettingRow label={t('settings.visionModel')}>
