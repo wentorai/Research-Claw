@@ -17,6 +17,22 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-04-10 — Workspace CRUD Overhaul
+
+- [2026-04-10] [Modules] [Claude] fix(P0): `service.move()` git tracking — only destination path was staged, source deletion left as permanent unstaged `D` entry in `git status`. New `commitMove()` in GitTracker atomically stages both paths in one batch, git correctly records rename.
+- [2026-04-10] [Modules] [Claude] fix(P0): `service.move()` silent overwrite — `fsp.rename()` overwrites existing destination on POSIX without warning. Added pre-check: throws `WS_WRITE_FAILED` if destination exists, preserving both files.
+- [2026-04-10] [Modules] [Claude] feat: `workspace_delete` agent tool (#9) — LLM can now delete files (previously only dashboard `rc.ws.delete` RPC). Requires `confirm=true` safety guard. Returns `restore_hint` guiding user to `workspace_restore`.
+- [2026-04-10] [Modules] [Claude] feat: `workspace_append` agent tool (#10) — atomic append without read+concat+save round-trip. Reduces 3 tool calls to 1, prevents accidental full-file overwrite by LLM. Supports custom separator, binary guard, auto file_card emission.
+- [2026-04-10] [Modules] [Claude] feat: `workspace_download` agent tool (#11) — fetch URL → save binary to workspace. Enables PDF download to `sources/papers/` (previously impossible due to `BINARY_SAVE_GUARD`). SSRF guard blocks private IPs (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x), localhost, cloud metadata endpoints. Streaming download with 50MB size limit prevents OOM.
+- [2026-04-10] [Modules] [Claude] fix: `workspace_save` overwrite detection — added `is_new` field to `service.save()` return (zero-cost, reuses internal `isNew` check). Tool shows `⚠️ Overwrote existing file` warning. Replaces prior implementation that called `service.read()` for each save (full file read just for existence check).
+- [2026-04-10] [Modules] [Claude] fix: `service.delete()` return type — added optional `restore_hint` field ("File is recoverable from git history. Use workspace_restore to undo.") when git commit succeeds.
+- [2026-04-10] [Modules] [Claude] fix: `workspace_save` description — added `outputs/` vs `uploads/` directory convention hint for LLM.
+- [2026-04-10] [Prompt] [Claude] feat: workspace-sop/SKILL.md — tool table 8→11, added Delete/Append/Download rows, new "Download & Import" section, "Prefer append" write discipline, updated cross-module triggers (PDF download→library, paper→BibTeX append).
+- [2026-04-10] [Prompt] [Claude] feat: AGENTS.md §2 module map 8→11 tools, §3.1 card emission table includes `workspace_append`/`workspace_download`, §4 cross-module handoff +2 items (PDF download indexing, BibTeX append).
+- [2026-04-10] [Prompt] [Claude] feat: coding-sop/SKILL.md — added "Output paths" rule (all script outputs MUST use workspace-relative paths), added `workspace_append`/`workspace_download` to §8 tool reference.
+- [2026-04-10] [Infra] [Claude] test: `workspace-crud.test.ts` — 31 functional tests covering service-level (save is_new, move dest guard, move git tracking, delete restore_hint) + tool-level (workspace_delete confirm guard, workspace_append create/append/separator/binary/sequential, workspace_download SSRF 10 cases, workspace_move dest rejection).
+- [2026-04-10] [Infra] [Claude] Tests: 3 workspace files, 24 + 27 + 31 = 82 total pass
+
 ### 2026-04-05 — Prompt Architecture Overhaul
 
 - [2026-04-05] [Prompt] [Siyuan] feat: AGENTS.md v4.0 → v4.1 — prompt architecture overhaul borrowing Claude Code system prompt patterns. New §3 Quick Paths, §3.1 Card Emission Protocol (tool→card mapping with CRITICAL warnings), §3.2 Search Fallback Chain (L1 API → L1.5 web_fetch with concrete arXiv/PubMed URLs → L2 browser → ask user), §3.3 Domain→Tool Quick Reference. §9 expanded from pointer to full inline schemas for all 6 card types. ~12.9K chars (was ~8K).
