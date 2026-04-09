@@ -3,5 +3,10 @@
   "name": "Wentor Connect",
   "version": "0.6.0",
   "description": "PLACEHOLDER — Wentor platform account & skills sync. Deferred to post-MVP.",
-  "main": "dist/index.js"
+  "main": "dist/index.js",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
 }

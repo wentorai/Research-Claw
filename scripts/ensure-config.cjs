@@ -122,10 +122,21 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
-  // 3. Remove stale wentor-connect plugin entry (placeholder, never functional)
+  // 3. Remove stale wentor-connect plugin (placeholder, never functional)
   if (c.plugins?.entries?.['wentor-connect']) {
     delete c.plugins.entries['wentor-connect'];
     changed = true;
+  }
+  // 3b. Also purge wentor-connect from allow list
+  if (Array.isArray(c.plugins?.allow) && c.plugins.allow.includes('wentor-connect')) {
+    c.plugins.allow = c.plugins.allow.filter(id => id !== 'wentor-connect');
+    changed = true;
+  }
+  // 3c. Also purge wentor-connect from load paths
+  if (Array.isArray(c.plugins?.load?.paths)) {
+    const before = c.plugins.load.paths.length;
+    c.plugins.load.paths = c.plugins.load.paths.filter(p => !p.includes('wentor-connect'));
+    if (c.plugins.load.paths.length !== before) changed = true;
   }
 
   // 4. Remove stale tool names from alsoAllow
