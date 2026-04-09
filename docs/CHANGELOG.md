@@ -33,6 +33,89 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 - [2026-04-10] [Infra] [Claude] test: `workspace-crud.test.ts` — 31 functional tests covering service-level (save is_new, move dest guard, move git tracking, delete restore_hint) + tool-level (workspace_delete confirm guard, workspace_append create/append/separator/binary/sequential, workspace_download SSRF 10 cases, workspace_move dest rejection).
 - [2026-04-10] [Infra] [Claude] Tests: 3 workspace files, 24 + 27 + 31 = 82 total pass
 
+### 2026-04-09 — Literature Library Comprehensive Improvements
+
+> Branch: `fix/literature-library-improvements` (3 commits)
+> Scope: 10 files modified, 1 file created, 1662 tests pass (477 plugin + 1185 dashboard)
+> Review: deep code review by feature-dev:code-reviewer agent, 9 issues found → all resolved
+
+#### P0 — Data Integrity
+
+- [2026-04-09] [Modules] [Claude] fix(P0): `add()` transaction atomicity — INSERT + attachTags + re-fetch wrapped in `db.transaction()`. Previously a crash between INSERT and attachTags left papers without tags. Pattern matches `batchAdd()`/`importBibtex()`.
+  - File: `extensions/research-claw-core/src/literature/service.ts` (lines 903–952)
+
+- [2026-04-09] [Modules] [Claude] fix(P0): soft-delete no longer destroys tag associations — `delete()` removed `cleanupOrphanedTags()` call. Previously, CASCADE from tag cleanup permanently deleted `rc_paper_tags` junction rows, making `restore()` lose all tags. Tags now only cleaned on `purge()`.
+  - File: `extensions/research-claw-core/src/literature/service.ts` (lines 1159–1167)
+
+- [2026-04-09] [Modules] [Claude] fix(P0): `classifyError()` ordering — `"Paper not found or not deleted"` was matching `PAPER_NOT_FOUND` (-32001) before `PAPER_NOT_DELETED` (-32013). Reordered 'not deleted' check first. `rc.lit.restore`/`rc.lit.purge` now return correct error codes.
+  - File: `extensions/research-claw-core/src/literature/rpc.ts` (lines 50–73)
+
+#### P1 — New Tools (25 → 17 tools)
+
+- [2026-04-09] [Modules] [Claude] feat: `library_delete_paper` tool — LLM can now soft-delete papers by ID. Previously no agent tool for deletion; users had to use the dashboard panel manually.
+  - File: `extensions/research-claw-core/src/literature/tools.ts` (tool #6)
+
+- [2026-04-09] [Modules] [Claude] feat: `library_list_papers` tool — LLM can browse/filter library by read_status, tags (AND), year, collection_id, has_pdf, with sort and pagination. Previously LLM could only `library_search` (requires query string) and could not filter by status or browse.
+  - File: `extensions/research-claw-core/src/literature/tools.ts` (tool #3)
+
+- [2026-04-09] [Modules] [Claude] feat: `library_manage_collection` gains `list` action — LLM can now enumerate all collections. Previously the tool only supported create/update/delete/add_paper/remove_paper; model was blind to the user's collection structure.
+  - File: `extensions/research-claw-core/src/literature/tools.ts` (tool #10, lines 557–562)
+
+- [2026-04-09] [Modules] [Claude] refactor: consolidate 10 Zotero tools → 1 `library_zotero` — actions: detect, import, search, create, update, delete. Methods: sqlite, local_api, web_api. Auto-cascade on detect/import (sqlite → local_api → web_api). Reduces tool definition token consumption ~35%.
+  - File: `extensions/research-claw-core/src/literature/tools.ts` (tool #15, lines 805–1031)
+
+- [2026-04-09] [Modules] [Claude] refactor: consolidate 2 EndNote tools → 1 `library_endnote` — actions: detect, import. Docker awareness preserved. Custom `enl_path` parameter retained.
+  - File: `extensions/research-claw-core/src/literature/tools.ts` (tool #16, lines 1035–1097)
+
+#### P1 — Dashboard UX
+
+- [2026-04-09] [Dashboard] [Claude] feat: PaperCard "In Library" → clickable "View in Library" — opens right panel library tab via `useUiStore.setRightPanelTab('library')`. Previously button was disabled when paper was already in library. TODO: auto-scroll to specific paper.
+  - File: `dashboard/src/components/chat/cards/PaperCard.tsx` (lines 78–80, 220–232)
+
+- [2026-04-09] [Dashboard] [Claude] fix: PaperCard "Add to Library" silent failure — catch block now shows `message.error()` toast. Previously errors were silently discarded with no user feedback.
+  - File: `dashboard/src/components/chat/cards/PaperCard.tsx` (line 73–75)
+
+- [2026-04-09] [Dashboard] [Claude] fix: missing i18n keys `card.paper.viewInLibrary`, `card.paper.noIdentifier`, `card.paper.addFailed` — added to both en.json and zh-CN.json. Chinese users previously saw English fallback for hallucination guard tooltip.
+  - Files: `dashboard/src/i18n/en.json`, `dashboard/src/i18n/zh-CN.json`
+
+#### P2 — Data Layer Improvements
+
+- [2026-04-09] [Modules] [Claude] feat: `restore()` method — recovers soft-deleted papers via `json_remove(metadata, '$.deleted_at')`. Tags preserved (junction rows untouched by soft-delete). Throws `PAPER_NOT_DELETED` (-32013) if paper is not in deleted state.
+  - File: `extensions/research-claw-core/src/literature/service.ts` (lines 1171–1190)
+
+- [2026-04-09] [Modules] [Claude] feat: `purge()` method — permanently removes soft-deleted papers via `DELETE FROM rc_papers` (CASCADE cleans junction tables). Calls `cleanupOrphanedTags()`. Throws `PAPER_NOT_DELETED` if paper is not in deleted state.
+  - File: `extensions/research-claw-core/src/literature/service.ts` (lines 1194–1206)
+
+- [2026-04-09] [Modules] [Claude] feat: `rc.lit.restore` / `rc.lit.purge` RPC handlers + `PAPER_NOT_DELETED` error code (-32013) — enables future dashboard "trash/recycle bin" UI.
+  - File: `extensions/research-claw-core/src/literature/rpc.ts` (lines 281–302)
+
+- [2026-04-09] [Modules] [Claude] feat: `rc.lit.get` returns `pdf_exists: boolean` — uses `existsSync()` to check if `pdf_path` file actually exists on disk. Dashboard can now detect broken PDF links.
+  - File: `extensions/research-claw-core/src/literature/rpc.ts` (lines 179–181)
+
+#### P3 — Performance & Resilience
+
+- [2026-04-09] [Modules] [Claude] perf: N+1 → batch tag fetch — new `getTagsForPapers(db, paperIds)` helper fetches all tags in one `WHERE IN` query. Used in `list()` and `search()` (both FTS and LIKE paths). 30 papers: 31 queries → 2 queries. Chunked at 500 IDs to stay within SQLite's 999 placeholder limit.
+  - File: `extensions/research-claw-core/src/literature/service.ts` (lines 368–400)
+
+- [2026-04-09] [Modules] [Claude] fix: `ensureFtsIntegrity()` — triggers now created unconditionally (`IF NOT EXISTS`) regardless of FTS table state. Previously, triggers were skipped when FTS table existed but triggers were missing (partial migration scenario), causing silent stale search results. FTS rebuild only runs when table was freshly created.
+  - File: `extensions/research-claw-core/src/literature/service.ts` (lines 807–853)
+
+- [2026-04-09] [Modules] [Claude] fix: Zotero Local API import now sets `source: 'zotero_local'` — overrides `ZoteroWebAPI.toPaperInput()` which hardcodes `source: 'zotero_web'`. Papers imported via local Zotero are now correctly attributed for source-based filtering.
+  - File: `extensions/research-claw-core/src/literature/tools.ts` (line 901)
+
+#### Infra — Tests
+
+- [2026-04-09] [Infra] [Claude] fix: `bootstrap-consistency.test.ts` — TOOLS.md path resolution falls back to `.example` file in worktree/CI where the user-level file is gitignored.
+  - File: `dashboard/src/__tests__/bootstrap-consistency.test.ts`
+
+- [2026-04-09] [Infra] [Claude] test: `literature-improvements.test.ts` — 38 new functional tests covering: transaction atomicity (2), batch tag fetch (3), FTS auto-rebuild (3), restore/purge lifecycle (8), full CRUD lifecycle (1), list with filters (5), collection list (1), tool definitions (6), tool execution with real payloads (8).
+  - File: `extensions/research-claw-core/src/__tests__/literature-improvements.test.ts`
+
+- [2026-04-09] [Infra] [Claude] refactor: `literature-tags.test.ts` — GAP-1 tag orphan cleanup tests updated to use `purge()` instead of `delete()` for cleanup verification, reflecting the new behavior where soft-delete preserves tags.
+  - File: `extensions/research-claw-core/src/__tests__/literature-tags.test.ts`
+
+- [2026-04-09] [Infra] [Claude] Tests: 65 dashboard files (1185) + 14 plugin files (477) = 1662 total pass, 0 fail
+
 ### 2026-04-05 — Prompt Architecture Overhaul
 
 - [2026-04-05] [Prompt] [Siyuan] feat: AGENTS.md v4.0 → v4.1 — prompt architecture overhaul borrowing Claude Code system prompt patterns. New §3 Quick Paths, §3.1 Card Emission Protocol (tool→card mapping with CRITICAL warnings), §3.2 Search Fallback Chain (L1 API → L1.5 web_fetch with concrete arXiv/PubMed URLs → L2 browser → ask user), §3.3 Domain→Tool Quick Reference. §9 expanded from pointer to full inline schemas for all 6 card types. ~12.9K chars (was ~8K).
