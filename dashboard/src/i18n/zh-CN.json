@@ -507,7 +507,6 @@
   "card": {
     "paper": {
       "addToLibrary": "添加到文献库",
-      "inLibrary": "已在文献库中",
       "viewInLibrary": "在文献库中查看",
       "cite": "引用",
       "openPdf": "打开 PDF",

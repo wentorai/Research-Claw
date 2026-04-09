@@ -82,14 +82,15 @@ export default function PaperCard(props: PaperCardType) {
 
   const handleCite = useCallback(async () => {
     // Generate a BibTeX key: firstAuthorSurname + year + firstTitleWord
-    const surname = (props.authors[0] ?? 'unknown').split(/[,\s]/)[0].toLowerCase().replace(/[^a-z]/g, '');
+    const authors = props.authors ?? [];
+    const surname = (authors[0] ?? 'unknown').split(/[,\s]/)[0].toLowerCase().replace(/[^a-z]/g, '');
     const yr = props.year ?? '';
     const titleWord = (props.title.split(/\s+/).find((w) => w.length > 3) ?? 'paper').toLowerCase().replace(/[^a-z]/g, '');
     const citeKey = `${surname}${yr}${titleWord}`;
 
     const bibtex = `@article{${citeKey},
   title={${props.title}},
-  author={${props.authors.join(' and ')}},${props.venue ? `\n  journal={${props.venue}},` : ''}${props.year ? `\n  year={${props.year}},` : ''}${props.doi ? `\n  doi={${props.doi}},` : ''}
+  author={${authors.join(' and ')}},${props.venue ? `\n  journal={${props.venue}},` : ''}${props.year ? `\n  year={${props.year}},` : ''}${props.doi ? `\n  doi={${props.doi}},` : ''}
 }`;
     try {
       await navigator.clipboard.writeText(bibtex);
@@ -129,7 +130,7 @@ export default function PaperCard(props: PaperCardType) {
           {t('card.paper.authors')}:{' '}
         </Text>
         <Text style={{ fontSize: 12, color: tokens.text.secondary }}>
-          {props.authors.join(', ')}
+          {(props.authors ?? []).join(', ')}
         </Text>
       </div>
 

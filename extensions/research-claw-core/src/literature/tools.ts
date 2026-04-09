@@ -184,7 +184,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
         year: { type: 'number', description: 'Filter by publication year' },
         collection_id: { type: 'string', description: 'Filter by collection ID' },
         has_pdf: { type: 'boolean', description: 'Filter by whether a PDF file is attached' },
-        sort: { type: 'string', enum: ['added_at', 'year', 'title', 'rating'], description: 'Sort field (default: added_at, descending)' },
+        sort: { type: 'string', enum: ['added_at', 'updated_at', 'year', 'title', 'rating'], description: 'Sort field (default: added_at, descending)' },
         limit: { type: 'number', description: 'Maximum results (default 50, max 500)' },
         offset: { type: 'number', description: 'Pagination offset' },
       },
@@ -343,8 +343,12 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
           return fail('id is required and must be a non-empty string');
         }
         const id = params.id.trim();
+        const paper = service.get(id);
         service.delete(id);
-        return ok(`Deleted paper ${id}`, { deleted: id });
+        return ok(
+          `Deleted paper "${paper?.title ?? id}" (id: ${id})`,
+          { deleted: id, title: paper?.title },
+        );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -886,7 +890,7 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
             if (method === 'sqlite') return fail('Zotero SQLite database not found');
           }
 
-          if (method === 'local_api' || (!method && !query)) {
+          if (method === 'local_api' || !method) {
             const { ZoteroLocalAPI } = await import('./zotero-local-api.js');
             const { ZoteroWebAPI } = await import('./zotero-web-api.js');
             const detect = await ZoteroLocalAPI.detect();
@@ -948,13 +952,29 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
           if (typeof params.query !== 'string' || !params.query.trim()) {
             return fail('query is required for search action');
           }
-          const { ZoteroWebAPI } = await import('./zotero-web-api.js');
-          const config = ZoteroWebAPI.getConfig();
-          if (!config) return fail('Zotero Web API not configured.');
-          const items = await ZoteroWebAPI.searchItems(config, params.query, {
-            limit: typeof params.limit === 'number' ? params.limit : 25,
-          });
-          return ok(`Found ${items.length} item(s) in Zotero cloud library`, { items });
+          const searchLimit = typeof params.limit === 'number' ? params.limit : 25;
+
+          // local_api search (when explicitly requested or auto-cascade)
+          if (method === 'local_api' || !method) {
+            const { ZoteroLocalAPI } = await import('./zotero-local-api.js');
+            const detect = await ZoteroLocalAPI.detect();
+            if (detect.available) {
+              const items = await ZoteroLocalAPI.searchItems(params.query, { limit: searchLimit });
+              return ok(`Found ${items.length} item(s) in local Zotero`, { items, method: 'local_api' });
+            }
+            if (method === 'local_api') return fail('Zotero Local API not reachable.');
+          }
+
+          // web_api search (explicit or fallback)
+          if (method === 'web_api' || !method) {
+            const { ZoteroWebAPI } = await import('./zotero-web-api.js');
+            const config = ZoteroWebAPI.getConfig();
+            if (!config) return fail('Zotero Web API not configured.');
+            const items = await ZoteroWebAPI.searchItems(config, params.query, { limit: searchLimit });
+            return ok(`Found ${items.length} item(s) in Zotero cloud library`, { items, method: 'web_api' });
+          }
+
+          return fail(`Search is not supported with method: ${method}`);
         }
 
         // ── create ──

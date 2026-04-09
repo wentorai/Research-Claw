@@ -809,8 +809,11 @@ export class LiteratureService {
       .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='rc_papers_fts'`)
       .get() as { name: string } | undefined;
 
-    if (!ftsExists) {
-      this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS rc_papers_fts USING fts5(
+    // Wrap all DDL in a transaction — partial crash during FTS setup must not
+    // leave the table without triggers (next startup would skip rebuild).
+    this.db.transaction(() => {
+      if (!ftsExists) {
+        this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS rc_papers_fts USING fts5(
   title,
   authors,
   abstract,
@@ -819,18 +822,18 @@ export class LiteratureService {
   content='rc_papers',
   content_rowid='rowid'
 )`);
-    }
+      }
 
-    // Ensure triggers exist regardless of FTS table state — handles partial
-    // migrations where the table was created but triggers were not.
-    this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_insert
+      // Ensure triggers exist regardless of FTS table state — handles partial
+      // migrations where the table was created but triggers were not.
+      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_insert
   AFTER INSERT ON rc_papers
 BEGIN
   INSERT INTO rc_papers_fts(rowid, title, authors, abstract, notes, keywords)
     VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords);
 END`);
 
-    this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_update
+      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_update
   AFTER UPDATE ON rc_papers
 BEGIN
   INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
@@ -839,17 +842,18 @@ BEGIN
     VALUES (new.rowid, new.title, new.authors, new.abstract, new.notes, new.keywords);
 END`);
 
-    this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_delete
+      this.db.exec(`CREATE TRIGGER IF NOT EXISTS rc_papers_fts_delete
   BEFORE DELETE ON rc_papers
 BEGIN
   INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
     VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords);
 END`);
 
-    // Rebuild FTS index if the table was just created and papers exist
-    if (!ftsExists) {
-      this.db.exec(`INSERT INTO rc_papers_fts(rc_papers_fts) VALUES('rebuild')`);
-    }
+      // Rebuild FTS index if the table was just created and papers exist
+      if (!ftsExists) {
+        this.db.exec(`INSERT INTO rc_papers_fts(rc_papers_fts) VALUES('rebuild')`);
+      }
+    })();
   }
 
   // ── 1. add ──────────────────────────────────────────────────────────
@@ -1180,40 +1184,46 @@ END`);
   // ── 5b. restore ─────────────────────────────────────────────────────
 
   restore(id: string): Paper {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM rc_papers WHERE id = ? AND metadata IS NOT NULL AND json_extract(metadata, '$.deleted_at') IS NOT NULL`,
-      )
-      .get(id) as PaperRow | undefined;
-    if (!row) {
-      throw new Error(`Paper not found or not deleted: ${id}`);
-    }
+    const txn = this.db.transaction(() => {
+      const row = this.db
+        .prepare(
+          `SELECT * FROM rc_papers WHERE id = ? AND metadata IS NOT NULL AND json_extract(metadata, '$.deleted_at') IS NOT NULL`,
+        )
+        .get(id) as PaperRow | undefined;
+      if (!row) {
+        throw new Error(`Paper not found or not deleted: ${id}`);
+      }
 
-    this.db
-      .prepare(
-        `UPDATE rc_papers SET metadata = json_remove(metadata, '$.deleted_at'), updated_at = ? WHERE id = ?`,
-      )
-      .run(now(), id);
+      this.db
+        .prepare(
+          `UPDATE rc_papers SET metadata = json_remove(metadata, '$.deleted_at'), updated_at = ? WHERE id = ?`,
+        )
+        .run(now(), id);
 
-    const restored = this.db.prepare('SELECT * FROM rc_papers WHERE id = ?').get(id) as PaperRow;
-    const tags = getTagsForPaper(this.db, id);
-    return rowToPaper(restored, tags);
+      const restored = this.db.prepare('SELECT * FROM rc_papers WHERE id = ?').get(id) as PaperRow;
+      const tags = getTagsForPaper(this.db, id);
+      return rowToPaper(restored, tags);
+    });
+    return txn();
   }
 
   // ── 5c. purge ───────────────────────────────────────────────────────
 
   purge(id: string): void {
-    const row = this.db
-      .prepare(
-        `SELECT id FROM rc_papers WHERE id = ? AND metadata IS NOT NULL AND json_extract(metadata, '$.deleted_at') IS NOT NULL`,
-      )
-      .get(id) as { id: string } | undefined;
-    if (!row) {
-      throw new Error(`Paper not found or not deleted: ${id}`);
-    }
+    const txn = this.db.transaction(() => {
+      const row = this.db
+        .prepare(
+          `SELECT id FROM rc_papers WHERE id = ? AND metadata IS NOT NULL AND json_extract(metadata, '$.deleted_at') IS NOT NULL`,
+        )
+        .get(id) as { id: string } | undefined;
+      if (!row) {
+        throw new Error(`Paper not found or not deleted: ${id}`);
+      }
 
-    this.db.prepare('DELETE FROM rc_papers WHERE id = ?').run(id);
-    this.cleanupOrphanedTags();
+      this.db.prepare('DELETE FROM rc_papers WHERE id = ?').run(id);
+      this.cleanupOrphanedTags();
+    });
+    txn();
   }
 
   /**
@@ -1286,16 +1296,18 @@ END`);
       return { items, total: countRow.cnt };
     } catch {
       // FTS5 parse error — fall back to LIKE
-      const likeQuery = `%${query}%`;
+      // Escape LIKE wildcards to prevent injection of % and _
+      const escaped = query.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+      const likeQuery = `%${escaped}%`;
 
       const likeCountSql = collectionId
         ? `SELECT COUNT(*) as cnt FROM rc_papers p
            ${collJoin}
            WHERE ${NOT_DELETED}
-           AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)`
+           AND (p.title LIKE ? ESCAPE '\\' OR p.abstract LIKE ? ESCAPE '\\' OR p.authors LIKE ? ESCAPE '\\' OR p.notes LIKE ? ESCAPE '\\')`
         : `SELECT COUNT(*) as cnt FROM rc_papers p
            WHERE ${NOT_DELETED}
-           AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)`;
+           AND (p.title LIKE ? ESCAPE '\\' OR p.abstract LIKE ? ESCAPE '\\' OR p.authors LIKE ? ESCAPE '\\' OR p.notes LIKE ? ESCAPE '\\')`;
 
       const likeCountStmt = this.db.prepare(likeCountSql);
       const countRow = (
@@ -1308,12 +1320,12 @@ END`);
         ? `SELECT p.* FROM rc_papers p
            ${collJoin}
            WHERE ${NOT_DELETED}
-           AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)
+           AND (p.title LIKE ? ESCAPE '\\' OR p.abstract LIKE ? ESCAPE '\\' OR p.authors LIKE ? ESCAPE '\\' OR p.notes LIKE ? ESCAPE '\\')
            ORDER BY p.added_at DESC
            LIMIT ? OFFSET ?`
         : `SELECT p.* FROM rc_papers p
            WHERE ${NOT_DELETED}
-           AND (p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.notes LIKE ?)
+           AND (p.title LIKE ? ESCAPE '\\' OR p.abstract LIKE ? ESCAPE '\\' OR p.authors LIKE ? ESCAPE '\\' OR p.notes LIKE ? ESCAPE '\\')
            ORDER BY p.added_at DESC
            LIMIT ? OFFSET ?`;
 
@@ -1877,11 +1889,11 @@ END`);
       );
     }
 
-    const added: Paper[] = [];
-    const duplicates: Paper[] = [];
-    const errors: Array<{ index: number; error: string }> = [];
-
     const txn = this.db.transaction(() => {
+      const added: Paper[] = [];
+      const duplicates: Paper[] = [];
+      const errors: Array<{ index: number; error: string }> = [];
+
       for (let i = 0; i < papers.length; i++) {
         try {
           const result = this.add(papers[i]);
@@ -1895,11 +1907,11 @@ END`);
           errors.push({ index: i, error: message });
         }
       }
+
+      return { added, duplicates, errors };
     });
 
-    txn();
-
-    return { added, duplicates, errors };
+    return txn();
   }
 
   // ── 20. importBibtex ────────────────────────────────────────────────

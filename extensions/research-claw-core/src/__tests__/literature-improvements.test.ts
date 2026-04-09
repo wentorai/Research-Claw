@@ -167,6 +167,24 @@ describe('Literature Improvements', () => {
     });
   });
 
+  // ── delete edge cases ──────────────────────────────────────────────────
+
+  describe('delete edge cases', () => {
+    it('delete throws for non-existent paper', () => {
+      expect(() => svc.delete('nonexistent-id')).toThrow('Paper not found');
+    });
+
+    it('soft-delete reduces tag paper_count to 0 but preserves tag', () => {
+      const paper = svc.add(uniquePaper({ tags: ['ephemeral'] }));
+      svc.delete(paper.id);
+
+      const tags = svc.getTags();
+      const tag = tags.find((t) => t.name === 'ephemeral');
+      expect(tag).toBeDefined();
+      expect(tag!.paper_count).toBe(0);
+    });
+  });
+
   // ── restore / purge lifecycle ─────────────────────────────────────────
 
   describe('restore and purge', () => {
@@ -197,13 +215,14 @@ describe('Literature Improvements', () => {
       expect(restored.tags).toEqual(['ml', 'nlp']);
     });
 
-    it('restore throws for non-deleted paper', () => {
+    it('restore throws for non-deleted paper (distinct from not-found)', () => {
       const paper = svc.add(makePaper());
-      expect(() => svc.restore(paper.id)).toThrow(/not deleted/);
+      // Paper exists but is NOT soft-deleted — must throw with "not deleted" message
+      expect(() => svc.restore(paper.id)).toThrow('Paper not found or not deleted');
     });
 
     it('restore throws for non-existent paper', () => {
-      expect(() => svc.restore('nonexistent-id')).toThrow(/not found or not deleted/);
+      expect(() => svc.restore('nonexistent-id')).toThrow('Paper not found or not deleted');
     });
 
     it('purge permanently removes a soft-deleted paper', () => {
@@ -230,7 +249,11 @@ describe('Literature Improvements', () => {
 
     it('purge throws for non-deleted paper', () => {
       const paper = svc.add(makePaper());
-      expect(() => svc.purge(paper.id)).toThrow(/not deleted/);
+      expect(() => svc.purge(paper.id)).toThrow('Paper not found or not deleted');
+    });
+
+    it('purge throws for non-existent paper', () => {
+      expect(() => svc.purge('nonexistent-id')).toThrow('Paper not found or not deleted');
     });
 
     it('purge cascades to junction tables', () => {

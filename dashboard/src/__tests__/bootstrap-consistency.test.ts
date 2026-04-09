@@ -22,12 +22,14 @@ import * as path from 'node:path';
 // Ground truth: actual tools and RPCs from the plugin source code
 // ---------------------------------------------------------------------------
 
-/** 25 literature agent tools (from literature/tools.ts) */
+/** 17 literature agent tools (from literature/tools.ts) */
 const ACTUAL_LITERATURE_TOOLS = [
   'library_add_paper',
   'library_search',
+  'library_list_papers',
   'library_update_paper',
   'library_get_paper',
+  'library_delete_paper',
   'library_export_bibtex',
   'library_reading_stats',
   'library_batch_add',
@@ -36,19 +38,9 @@ const ACTUAL_LITERATURE_TOOLS = [
   'library_add_note',
   'library_import_bibtex',
   'library_citation_graph',
+  'library_zotero',
+  'library_endnote',
   'library_import_ris',
-  'library_zotero_detect',
-  'library_zotero_import',
-  'library_endnote_detect',
-  'library_endnote_import',
-  'library_zotero_local_detect',
-  'library_zotero_local_import',
-  'library_zotero_web_detect',
-  'library_zotero_web_import',
-  'library_zotero_web_search',
-  'library_zotero_web_create',
-  'library_zotero_web_update',
-  'library_zotero_web_delete',
 ] as const;
 
 /** 10 task agent tools (from tasks/tools.ts) */
@@ -65,7 +57,7 @@ const ACTUAL_TASK_TOOLS = [
   'send_notification',
 ] as const;
 
-/** 8 workspace agent tools (from workspace/tools.ts) */
+/** 11 workspace agent tools (from workspace/tools.ts) */
 const ACTUAL_WORKSPACE_TOOLS = [
   'workspace_save',
   'workspace_read',
@@ -75,6 +67,9 @@ const ACTUAL_WORKSPACE_TOOLS = [
   'workspace_restore',
   'workspace_move',
   'workspace_export',
+  'workspace_delete',
+  'workspace_append',
+  'workspace_download',
 ] as const;
 
 /** 5 monitor agent tools (from monitor/tools.ts) */
@@ -86,7 +81,7 @@ const ACTUAL_MONITOR_TOOLS = [
   'monitor_note',
 ] as const;
 
-/** All 48 agent tools (25 + 10 + 8 + 5) */
+/** All 43 agent tools (17 + 10 + 11 + 5) */
 const ALL_AGENT_TOOLS = [
   ...ACTUAL_LITERATURE_TOOLS,
   ...ACTUAL_TASK_TOOLS,
@@ -183,10 +178,10 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
   // ── AGENTS.md — Module Map (§2) tool counts ───────────────────────────
 
   describe('AGENTS.md — §2 Module Map tool counts', () => {
-    it('states Library has 25 tools', () => {
+    it('states Library has 17 tools', () => {
       if (!hasBootstrapFiles) return;
-      expect(agentsMd).toMatch(/Library\s+\(25 tools\)/);
-      expect(ACTUAL_LITERATURE_TOOLS.length).toBe(25);
+      expect(agentsMd).toMatch(/Library\s+\(17 tools\)/);
+      expect(ACTUAL_LITERATURE_TOOLS.length).toBe(17);
     });
 
     it('states Tasks has 10 tools', () => {
@@ -195,10 +190,10 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
       expect(ACTUAL_TASK_TOOLS.length).toBe(10);
     });
 
-    it('states Workspace has 8 tools', () => {
+    it('states Workspace has 11 tools', () => {
       if (!hasBootstrapFiles) return;
-      expect(agentsMd).toMatch(/Workspace\s+\(8 tools\)/);
-      expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(8);
+      expect(agentsMd).toMatch(/Workspace\s+\(11 tools\)/);
+      expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(11);
     });
 
     it('states Monitor has 5 tools', () => {
@@ -212,8 +207,8 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
       expect(agentsMd).toMatch(/Memory\s+\(2 tools\)/);
     });
 
-    it('total local agent tool count is 48 (25 + 10 + 8 + 5)', () => {
-      expect(ALL_AGENT_TOOLS.length).toBe(48);
+    it('total local agent tool count is 43 (17 + 10 + 11 + 5)', () => {
+      expect(ALL_AGENT_TOOLS.length).toBe(43);
     });
   });
 

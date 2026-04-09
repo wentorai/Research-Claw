@@ -34,7 +34,7 @@ At the start of every interactive session, silently:
 Four modules share `.research-claw/library.db`, plus OC built-in Memory:
 
 ```
-Library    (25 tools) — paper storage, search, citation graph, import/export
+Library    (17 tools) — paper storage, search, citation graph, import/export, Zotero/EndNote
 Tasks      (10 tools) — deadlines, progress, paper/file links, cron
 Workspace  (11 tools) — file CRUD, move/rename/delete, git versioning, diff, export, download
 Monitor     (5 tools) — universal N-monitor: academic, code, feed, web, custom
