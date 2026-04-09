@@ -1096,7 +1096,7 @@ export class WorkspaceService {
    *
    * @param filePath - Relative path within workspace
    */
-  async delete(filePath: string): Promise<{ ok: boolean; path: string; committed: boolean }> {
+  async delete(filePath: string): Promise<{ ok: boolean; path: string; committed: boolean; restore_hint?: string }> {
     const fullPath = this.resolvePath(filePath);
 
     // Check file exists
@@ -1136,7 +1136,10 @@ export class WorkspaceService {
       }
     }
 
-    return { ok: true, path: filePath, committed };
+    const restoreHint = committed
+      ? 'File is recoverable from git history. Use workspace_restore to undo.'
+      : undefined;
+    return { ok: true, path: filePath, committed, restore_hint: restoreHint };
   }
 
   // -----------------------------------------------------------------------
@@ -1167,6 +1170,19 @@ export class WorkspaceService {
       );
     }
 
+    // Guard: reject if destination already exists (prevent silent overwrite)
+    try {
+      await fsp.access(fullDest, fs.constants.F_OK);
+      throw new WorkspaceError(
+        `Destination already exists: ${destPath}. Rename or delete it first.`,
+        WS_WRITE_FAILED,
+        { from: srcPath, to: destPath },
+      );
+    } catch (e) {
+      if (e instanceof WorkspaceError) throw e;
+      // ENOENT — destination does not exist, which is what we want
+    }
+
     // Create destination parent directory if needed
     const destDir = path.dirname(fullDest);
     await fsp.mkdir(destDir, { recursive: true });
@@ -1181,8 +1197,8 @@ export class WorkspaceService {
       this.tracker.invalidateStatusCache();
 
       try {
-        // Stage both old (deleted) and new (added) paths
-        const result = await this.tracker.commitFile(
+        const result = await this.tracker.commitMove(
+          srcPath,
           destPath,
           `Move: ${path.basename(srcPath)} → ${destPath}`,
         );

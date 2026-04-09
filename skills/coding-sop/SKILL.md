@@ -158,6 +158,15 @@ Common patterns:
 - `exec("Rscript outputs/scripts/analysis.R")` — R script
 - `exec("python3 -c \"import pandas; ...\"")` — quick inspection
 
+**Output paths**: All script outputs (figures, data, reports) MUST use
+workspace-relative paths. Set the working directory to workspace root before
+execution, and use paths like `outputs/figures/`, `outputs/reports/`.
+Template for Python:
+```python
+import os
+os.chdir(os.environ.get('WORKSPACE_ROOT', '.'))
+```
+
 ## 6. Reproducibility Protocol
 
 ### 6.1 Environment Recording
@@ -200,6 +209,9 @@ debugging, beamer/multi-chapter LaTeX, interactive visualizations. For these, th
 - **workspace_save**: persist code to `outputs/scripts/` (or `outputs/notebooks/`),
   figures to `outputs/figures/`, processed data to `sources/data/`.
   Commit message prefix: `Add:` / `Update:`.
+- **workspace_append**: add results to an existing report or data file without
+  overwriting. Preferred over read + save for incremental updates.
+- **workspace_download**: save binary outputs (plots, exports) from URLs.
 - **exec**: run scripts from workspace root. Default timeout 120s (increase for
   long-running). Always inspect both stdout and stderr. On failure: fix code,
   `workspace_save` again, re-run.

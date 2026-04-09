@@ -52,7 +52,7 @@ outputs/
 | `Delete:` | File removed |
 | `Export:` | Binary format converted from text source |
 
-## Tool Chain (8 tools)
+## Tool Chain (11 tools)
 
 | Tool | Purpose |
 |------|---------|
@@ -64,6 +64,9 @@ outputs/
 | `workspace_restore` | Checkout historical version + commit as Restore: |
 | `workspace_move` | Rename/move file + commit |
 | `workspace_export` | Convert text → binary format (md→docx/pdf, csv→xlsx) |
+| `workspace_delete` | Delete a file + auto-commit (requires confirm=true) → recoverable via `workspace_restore` |
+| `workspace_append` | Append content to an existing file (or create) → emits `file_card` |
+| `workspace_download` | Download URL → save binary to workspace (PDFs, images) → emits `file_card` |
 
 ## Version Control Operations
 
@@ -72,11 +75,14 @@ outputs/
 - **Diff**: `workspace_diff` (default: uncommitted vs HEAD).
 - **Proactive**: Mention git history after overwrites. Note `workspace_restore`
   on delete.
+- **Delete**: `workspace_delete` (requires confirm=true). Always mention
+  `workspace_restore` as recovery option.
 
 ## Write Discipline
 
 - **Pre-check mandatory**: Before any `workspace_save` (overwrite), you MUST call `workspace_read` or `workspace_list` to verify existence and content to prevent accidental data loss.
 - **Append vs. Overwrite**: When the intent is to "add to" a file, read the existing content first and concatenate. **Never** overwrite a multi-section file with only the new snippet.
+- **Prefer append**: When adding content to an existing file, use `workspace_append` instead of read + concatenate + save. It prevents accidental overwrites and uses fewer tokens.
 - **Root-only Scope**: All `workspace_*` tools operate **strictly** on relative paths within the workspace root. 
 - **Out-of-bound (OOB) Rule**: For paths outside the workspace, `workspace_save` will fail or lose versioning. Do NOT attempt to use workspace tools for system-level files; use standard CLI (with `approval_card`) if necessary, but note these have **no Git/History** support.
 
@@ -121,6 +127,16 @@ install MiKTeX for PDF support.
 **Note:** `.pptx` generation is NOT supported by `workspace_export`. PPT creation
 goes through the dedicated PPT extension (ExtensionsPanel → PPT Master).
 
+## Download & Import
+
+Use `workspace_download` to save PDFs, images, and other binary files from URLs:
+
+```
+workspace_download({ url: "https://arxiv.org/pdf/2301.00001", path: "sources/papers/paper.pdf" })
+```
+
+After downloading a PDF to `sources/papers/`, offer `library_add_paper` to index it.
+
 ## CLI Execution Safety
 
 **Safe without approval** (no `approval_card` needed):
@@ -133,7 +149,8 @@ goes through the dedicated PPT extension (ExtensionsPanel → PPT Master).
 
 ## Cross-Module Triggers
 
-- PDF saved to `sources/papers/` → offer `library_add_paper`
+- PDF saved/downloaded to `sources/papers/` → offer `library_add_paper`
+- Paper added to library → suggest `workspace_save` BibTeX to `sources/references/refs.bib` via `workspace_append`
 - Code file created → suggest `task_create` to track the work
 - Analysis output generated → emit `file_card` + `task_complete` if linked
 

@@ -73,6 +73,8 @@ export interface GitTracker {
   init(): Promise<void>;
   isAvailable(): Promise<boolean>;
   commitFile(path: string, message: string): Promise<CommitResult>;
+  /** Stage both source (deletion) and destination (addition) for a move/rename. */
+  commitMove(fromPath: string, toPath: string, message: string): Promise<CommitResult>;
   getLog(filePath?: string, limit?: number, offset?: number): Promise<LogResult>;
   getDiff(path?: string, fromCommit?: string, toCommit?: string): Promise<DiffResult>;
   restoreFile(path: string, commitHash: string): Promise<RestoreResult>;
@@ -678,6 +680,53 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
           // flushPending() internally resolves snapshotted resolvers on both
           // success and error, so .catch() is only needed to suppress
           // unhandled rejection warnings
+          flushPending().catch(() => {});
+        }, commitDebounceMs);
+      });
+    },
+
+    // -------------------------------------------------------------------
+    // commitMove(fromPath, toPath, message)
+    // -------------------------------------------------------------------
+    async commitMove(fromPath: string, toPath: string, message: string): Promise<CommitResult> {
+      if (!enabled || destroyed) return { committed: false };
+
+      const fromAbs = safePath(root, fromPath);
+      const fromRel = relPath(root, fromAbs);
+      const toAbs = safePath(root, toPath);
+      const toRel = relPath(root, toAbs);
+
+      // Check destination file size (source is already deleted/renamed)
+      try {
+        const fileStat = await stat(toAbs);
+        if (fileStat.size > maxFileSize) {
+          await ensureGitignored(toRel);
+          return { committed: false };
+        }
+      } catch {
+        // Destination missing = nothing to commit
+        return { committed: false };
+      }
+
+      // Add BOTH paths to pending batch atomically (before any flush)
+      pendingFiles.set(fromRel, message);
+      pendingFiles.set(toRel, message);
+
+      // No debounce — commit immediately
+      if (commitDebounceMs <= 0) {
+        return flushPending();
+      }
+
+      // Debounced: reset timer, return a promise resolved on flush
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+      }
+
+      return new Promise<CommitResult>((resolvePromise) => {
+        debounceResolvers.push(resolvePromise);
+
+        debounceTimer = setTimeout(() => {
+          debounceTimer = null;
           flushPending().catch(() => {});
         }, commitDebounceMs);
       });

@@ -36,7 +36,7 @@ Four modules share `.research-claw/library.db`, plus OC built-in Memory:
 ```
 Library    (25 tools) — paper storage, search, citation graph, import/export
 Tasks      (10 tools) — deadlines, progress, paper/file links, cron
-Workspace   (8 tools) — file CRUD, move/rename, git versioning, diff, export
+Workspace  (11 tools) — file CRUD, move/rename/delete, git versioning, diff, export, download
 Monitor     (5 tools) — universal N-monitor: academic, code, feed, web, custom
 SkillSearch (1 tool)  — on-demand skill loading from 438 research methodology skills
 Memory      (2 tools) — search and read indexed memory files
@@ -120,7 +120,7 @@ bridge, and PDF import, read the **Search SOP** skill.
 |:----------|:-------------|
 | `library_add_paper` / `library_batch_add` | `paper_card` |
 | `task_create` / `task_complete` / `task_update` | `task_card` |
-| `workspace_save` / `workspace_export` | `file_card` — **COPY from tool output verbatim, NEVER fabricate** |
+| `workspace_save` / `workspace_export` / `workspace_append` / `workspace_download` | `file_card` — **COPY from tool output verbatim, NEVER fabricate** |
 | HiL decision needed (§5) | `approval_card` — **MUST include `approval_id` from `exec.approval.requested`** |
 | Phase/session summary | `progress_card` (agent-composed) |
 | `monitor_report` | `monitor_digest` (agent-composed from report results) |
@@ -171,6 +171,8 @@ Full routing table + filter capabilities → load **Search SOP** skill.
 4. **task_complete** → output `progress_card` summarizing accomplishments.
 5. **Phase 1 complete** → output `progress_card` with search summary; suggest Phase 2.
 6. **Phase 3 cites paper** → `library_search` first; if missing, add before citing.
+7. **PDF downloaded to sources/papers/** → offer `library_add_paper` to index it.
+8. **Paper added to library** → suggest saving BibTeX to `sources/references/` via `workspace_append`.
 
 ## §5 Human-in-Loop Protocol
 

@@ -1,8 +1,9 @@
 /**
- * workspace/tools — 8 Agent Tool Registrations
+ * workspace/tools — 11 Agent Tool Registrations
  *
  * Registers workspace_save, workspace_read, workspace_list, workspace_diff,
- * workspace_history, workspace_restore, workspace_move, and workspace_export
+ * workspace_history, workspace_restore, workspace_move, workspace_export,
+ * workspace_delete, workspace_append, and workspace_download
  * as OpenClaw agent tools.
  *
  * All tools delegate to WorkspaceService (no direct DB or Git access).
@@ -122,7 +123,7 @@ function matchPattern(filePath: string, pattern: string): boolean {
 import type { ToolDefinition } from '../types.js';
 
 /**
- * Create the 8 workspace agent tools.
+ * Create the 11 workspace agent tools.
  *
  * @param service   - WorkspaceService instance to delegate operations to
  * @returns Array of tool definitions to register
@@ -135,8 +136,9 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
   tools.push({
     name: 'workspace_save',
     description:
-      'Save or create a file in the research workspace. Automatically commits the change to Git. ' +
-      'Use paths relative to the workspace root (e.g. "outputs/drafts/review.md").',
+      'Save or create a text file in the research workspace. Automatically commits to Git. ' +
+      'Convention: agent-generated files → outputs/, user uploads → uploads/. ' +
+      'Use paths relative to workspace root (e.g. "outputs/drafts/review.md").',
     parameters: {
       type: 'object',
       required: ['path', 'content'],
@@ -185,6 +187,15 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
           );
         }
 
+        // Check if this is an overwrite (for user-facing warning)
+        let wasExisting = false;
+        try {
+          await service.read(filePath);
+          wasExisting = true;
+        } catch {
+          // File doesn't exist — new file
+        }
+
         const result = await service.save(filePath, content, commitMessage);
 
         // Build file_card JSON block so the LLM includes it in its response
@@ -200,8 +211,11 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
           git_status: gitStatus,
         });
 
+        const overwriteNote = wasExisting
+          ? `\n⚠️ Overwrote existing file. Previous version is in git history.`
+          : '';
         return ok(
-          `Saved ${result.path} (${result.size} bytes, committed: ${result.committed})\n\nInclude this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
+          `Saved ${result.path} (${result.size} bytes, committed: ${result.committed})${overwriteNote}\n\nInclude this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
           { path: result.path, size: result.size, committed: result.committed, commit_hash: result.commit_hash },
         );
       } catch (err) {
@@ -632,6 +646,251 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
             committed,
             commit_hash: commitHash,
           },
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // -----------------------------------------------------------------------
+  // 9. workspace_delete
+  // -----------------------------------------------------------------------
+  tools.push({
+    name: 'workspace_delete',
+    description:
+      'Delete a file from the research workspace. The deletion is committed to Git, ' +
+      'so the file can be recovered with workspace_restore if needed. ' +
+      'Requires confirm=true as a safety guard.',
+    parameters: {
+      type: 'object',
+      required: ['path', 'confirm'],
+      properties: {
+        path: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 512,
+          description: 'File path relative to workspace root',
+        },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true to confirm deletion',
+        },
+      },
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>) {
+      try {
+        if (typeof params.path !== 'string' || !params.path.trim()) {
+          return fail('path is required and must be a non-empty string');
+        }
+        if (params.confirm !== true) {
+          return fail('confirm must be true to delete a file. This is a safety guard.');
+        }
+        const filePath = params.path.trim();
+
+        const result = await service.delete(filePath);
+
+        const hint = result.restore_hint
+          ? `\n${result.restore_hint}`
+          : '';
+
+        return ok(
+          `Deleted ${filePath} (committed: ${result.committed})${hint}`,
+          { path: result.path, committed: result.committed },
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // -----------------------------------------------------------------------
+  // 10. workspace_append
+  // -----------------------------------------------------------------------
+  tools.push({
+    name: 'workspace_append',
+    description:
+      'Append content to an existing file in the research workspace. ' +
+      'If the file does not exist, creates it. This avoids the need to read, ' +
+      'concatenate, and rewrite — reducing token usage and preventing accidental overwrites. ' +
+      'Convention: agent-generated files go under outputs/, user-uploaded under uploads/.',
+    parameters: {
+      type: 'object',
+      required: ['path', 'content'],
+      properties: {
+        path: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 512,
+          description: 'File path relative to workspace root',
+        },
+        content: {
+          type: 'string',
+          description: 'Content to append',
+        },
+        separator: {
+          type: 'string',
+          description: 'Separator between existing content and appended content. Default: "\\n\\n"',
+        },
+        commit_message: {
+          type: 'string',
+          maxLength: 200,
+          description: 'Custom git commit message. If omitted, auto-generated.',
+        },
+      },
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>) {
+      try {
+        if (typeof params.path !== 'string' || !params.path.trim()) {
+          return fail('path is required and must be a non-empty string');
+        }
+        if (typeof params.content !== 'string') {
+          return fail('content is required and must be a string');
+        }
+        const filePath = params.path.trim();
+        const appendContent = params.content;
+        const separator = typeof params.separator === 'string' ? params.separator : '\n\n';
+        const commitMessage = typeof params.commit_message === 'string' ? params.commit_message : undefined;
+
+        // Guard: reject binary extensions (same as workspace_save)
+        const ext = path.extname(filePath).toLowerCase();
+        if (BINARY_SAVE_GUARD.has(ext)) {
+          return fail(`Cannot append to "${ext}" files — binary format.`);
+        }
+
+        // Try to read existing content; if file doesn't exist, start fresh
+        let existing = '';
+        try {
+          const readResult = await service.read(filePath);
+          existing = readResult.content;
+        } catch {
+          // File does not exist — will be created
+        }
+
+        const finalContent = existing
+          ? existing + separator + appendContent
+          : appendContent;
+
+        const result = await service.save(filePath, finalContent, commitMessage ?? `Append: ${path.basename(filePath)}`);
+
+        // Build file_card
+        const fileExt = path.extname(filePath).slice(1).toLowerCase();
+        const mimeType = EXT_MIME[fileExt] ?? 'application/octet-stream';
+        const gitStatus = result.committed ? 'committed' : 'new';
+        const cardJson = JSON.stringify({
+          type: 'file_card',
+          name: path.basename(filePath),
+          path: result.path,
+          size_bytes: result.size,
+          mime_type: mimeType,
+          git_status: gitStatus,
+        });
+
+        return ok(
+          `Appended to ${result.path} (${result.size} bytes, committed: ${result.committed})\n\nInclude this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
+          { path: result.path, size: result.size, committed: result.committed },
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // -----------------------------------------------------------------------
+  // 11. workspace_download (binary URL → workspace)
+  // -----------------------------------------------------------------------
+  tools.push({
+    name: 'workspace_download',
+    description:
+      'Download a file from a URL and save it to the workspace. ' +
+      'Use this for saving PDFs, images, or other binary files from the web ' +
+      '(e.g., arXiv papers to sources/papers/). Supports any URL that returns a file. ' +
+      'Unlike workspace_save, this tool handles binary formats correctly.',
+    parameters: {
+      type: 'object',
+      required: ['url', 'path'],
+      properties: {
+        url: {
+          type: 'string',
+          description: 'URL to download from (must be a direct file link)',
+        },
+        path: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 512,
+          description: 'Destination path relative to workspace root (e.g. "sources/papers/paper.pdf")',
+        },
+        commit_message: {
+          type: 'string',
+          maxLength: 200,
+          description: 'Custom git commit message. If omitted, auto-generated.',
+        },
+      },
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>) {
+      try {
+        if (typeof params.url !== 'string' || !params.url.trim()) {
+          return fail('url is required and must be a non-empty string');
+        }
+        if (typeof params.path !== 'string' || !params.path.trim()) {
+          return fail('path is required and must be a non-empty string');
+        }
+        const url = params.url.trim();
+        const filePath = params.path.trim();
+        const commitMessage = typeof params.commit_message === 'string' ? params.commit_message : undefined;
+
+        // Validate URL format
+        let parsedUrl: URL;
+        try {
+          parsedUrl = new URL(url);
+        } catch {
+          return fail('Invalid URL format');
+        }
+        if (!parsedUrl.protocol.startsWith('http')) {
+          return fail('Only HTTP/HTTPS URLs are supported');
+        }
+
+        // Download the file
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            headers: { 'User-Agent': 'Research-Claw/1.0' },
+            signal: AbortSignal.timeout(60_000), // 60s timeout
+          });
+        } catch (err) {
+          return fail(`Download failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
+        if (!response.ok) {
+          return fail(`Download failed: HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        if (buffer.length === 0) {
+          return fail('Downloaded file is empty');
+        }
+
+        // Save to workspace (service.save accepts Buffer for binary)
+        const message = commitMessage ?? `Download: ${path.basename(filePath)}`;
+        const result = await service.save(filePath, buffer, message);
+
+        // Build file_card
+        const fileExt = path.extname(filePath).slice(1).toLowerCase();
+        const mimeType = EXT_MIME[fileExt] ?? (response.headers.get('content-type') ?? 'application/octet-stream');
+        const gitStatus = result.committed ? 'committed' : 'new';
+        const cardJson = JSON.stringify({
+          type: 'file_card',
+          name: path.basename(filePath),
+          path: result.path,
+          size_bytes: result.size,
+          mime_type: mimeType,
+          git_status: gitStatus,
+        });
+
+        return ok(
+          `Downloaded ${url} → ${result.path} (${result.size} bytes, committed: ${result.committed})\n\nInclude this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
+          { path: result.path, size: result.size, committed: result.committed, source_url: url },
         );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
