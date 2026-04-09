@@ -546,9 +546,22 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
         filePath = filePath.substring(arrowIndex + 4);
       }
 
-      // Strip git's quoting for paths with spaces/CJK characters
+      // Strip git's quoting for paths with spaces/CJK characters.
+      // Git's core.quotePath (default: true) uses C-style quoting:
+      //   "path with spaces"  → \" escapes
+      //   "论文.pdf"          → \350\256\272\346\226\207.pdf (octal escapes)
       if (filePath.startsWith('"') && filePath.endsWith('"')) {
-        filePath = filePath.slice(1, -1).replace(/\\"/g, '"');
+        filePath = filePath.slice(1, -1)
+          .replace(/\\"/g, '"')
+          .replace(/\\([0-7]{3})/g, (_match, oct: string) => {
+            return String.fromCharCode(parseInt(oct, 8));
+          });
+        // Octal escapes produce Latin-1 bytes; decode as UTF-8
+        try {
+          filePath = Buffer.from(filePath, 'latin1').toString('utf-8');
+        } catch {
+          // If decoding fails, keep as-is
+        }
       }
       // Normalize path separators for consistent lookup
       filePath = filePath.replace(/\\/g, '/');

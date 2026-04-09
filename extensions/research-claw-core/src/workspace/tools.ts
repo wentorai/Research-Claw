@@ -56,9 +56,10 @@ function fail(message: string): unknown {
 
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
 
-/** Hostnames that must never be fetched. */
+/** Hostnames that must never be fetched (URL.hostname returns WITHOUT brackets for IPv6). */
 const BLOCKED_HOSTS = new Set([
-  'localhost', '0.0.0.0', '[::]', '[::1]',
+  'localhost', '0.0.0.0',
+  '::1', '::', // IPv6 loopback / unspecified (URL parser strips brackets)
   'metadata.google.internal',   // GCP metadata
   'metadata.internal',
 ]);
@@ -75,6 +76,17 @@ function isPrivateIPv4(ip: string): boolean {
   if (a === 169 && b === 254) return true;             // 169.254.0.0/16 (link-local + cloud metadata)
   if (a === 0) return true;                            // 0.0.0.0/8
   return false;
+}
+
+/**
+ * Extract the IPv4 from an IPv4-mapped IPv6 address (::ffff:a.b.c.d).
+ * Returns the IPv4 string if mapped, otherwise null.
+ */
+function extractMappedIPv4(ipv6: string): string | null {
+  const lower = ipv6.toLowerCase();
+  // Match ::ffff:1.2.3.4 (with or without leading zeros)
+  const match = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(lower);
+  return match ? match[1]! : null;
 }
 
 /** Validate a URL is safe for outbound fetch (not internal/private). */
@@ -101,12 +113,18 @@ function validateDownloadUrl(urlStr: string): string | null {
     if (isPrivateIPv4(hostname)) {
       return `Blocked: private/internal IP address ${hostname}`;
     }
-  } else if (net.isIPv6(hostname) || hostname.startsWith('[')) {
-    // Block all IPv6 literals — too many reserved ranges to enumerate safely
-    const raw = hostname.replace(/^\[|\]$/g, '');
-    if (raw === '::1' || raw === '::' || raw.startsWith('fe80') || raw.startsWith('fc') || raw.startsWith('fd')) {
-      return `Blocked: private/internal IPv6 address`;
+  } else if (net.isIPv6(hostname) || hostname.includes(':')) {
+    // IPv4-mapped IPv6 bypass check (::ffff:127.0.0.1)
+    const mappedV4 = extractMappedIPv4(hostname);
+    if (mappedV4) {
+      if (isPrivateIPv4(mappedV4)) {
+        return `Blocked: private/internal IP address (IPv4-mapped) ${hostname}`;
+      }
+      return null; // public IPv4-mapped address is OK
     }
+    // Block ALL other IPv6 literal addresses — too many reserved ranges
+    // (fe80::, fc00::, fd::, ::1, etc.) to enumerate safely
+    return 'Blocked: IPv6 literal addresses are not allowed. Use a hostname or IPv4.';
   }
 
   return null; // safe
@@ -728,6 +746,7 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
         },
         confirm: {
           type: 'boolean',
+          const: true,
           description: 'Must be true to confirm deletion',
         },
       },
@@ -899,16 +918,41 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
           return fail(urlError);
         }
 
-        // Download the file with size limit
-        let response: Response;
-        try {
-          response = await fetch(url, {
-            headers: { 'User-Agent': 'Research-Claw/1.0' },
-            redirect: 'follow',
-            signal: AbortSignal.timeout(60_000), // 60s timeout
-          });
-        } catch (err) {
-          return fail(`Download failed: ${err instanceof Error ? err.message : String(err)}`);
+        // Download with manual redirect handling to validate each hop (SSRF C1 fix)
+        const MAX_REDIRECTS = 5;
+        let currentUrl = url;
+        let response: Response | undefined;
+        for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+          try {
+            response = await fetch(currentUrl, {
+              headers: { 'User-Agent': 'Research-Claw/1.0' },
+              redirect: 'manual', // validate each redirect target
+              signal: AbortSignal.timeout(60_000),
+            });
+          } catch (err) {
+            return fail(`Download failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+
+          // Handle redirects: validate the Location target before following
+          if (response.status >= 300 && response.status < 400) {
+            const location = response.headers.get('location');
+            if (!location) {
+              return fail(`Redirect (${response.status}) without Location header`);
+            }
+            // Resolve relative redirects against current URL
+            const redirectTarget = new URL(location, currentUrl).href;
+            const redirectError = validateDownloadUrl(redirectTarget);
+            if (redirectError) {
+              return fail(`Redirect blocked: ${redirectTarget} — ${redirectError}`);
+            }
+            currentUrl = redirectTarget;
+            continue;
+          }
+          break;
+        }
+
+        if (!response || (response.status >= 300 && response.status < 400)) {
+          return fail(`Too many redirects (>${MAX_REDIRECTS})`);
         }
 
         if (!response.ok) {
@@ -940,7 +984,7 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
             if (done) break;
             totalBytes += value.byteLength;
             if (totalBytes > MAX_DOWNLOAD_BYTES) {
-              reader.cancel();
+              await reader.cancel();
               return fail(
                 `Download aborted: exceeded ${MAX_DOWNLOAD_BYTES / 1024 / 1024} MB limit.`,
               );

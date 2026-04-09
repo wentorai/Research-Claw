@@ -1173,6 +1173,8 @@ export class WorkspaceService {
     }
 
     // Guard: reject if destination already exists (prevent silent overwrite)
+    // NOTE: TOCTOU between access() and rename() — Node.js has no cross-platform
+    // atomic rename-if-not-exists. Acceptable for single-user local tool.
     try {
       await fsp.access(fullDest, fs.constants.F_OK);
       throw new WorkspaceError(

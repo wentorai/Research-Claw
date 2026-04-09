@@ -145,6 +145,39 @@ describe('WorkspaceService CRUD fixes', () => {
     });
   });
 
+  // ── CJK filename git status ─────────────────────────────────────────
+
+  describe('CJK filename git status (requires git)', () => {
+    it('correctly tracks Chinese filenames', async () => {
+      const config = makeConfig(tmpDir, true);
+      svc = new WorkspaceService(config);
+
+      try {
+        await svc.init();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('not found') || msg.includes('GIT_NOT_FOUND')) return;
+        throw err;
+      }
+
+      // Save a file with Chinese name
+      await svc.save('outputs/论文草稿.md', '# 测试内容');
+
+      // The tree should show the file with correct git status
+      const { tree } = await svc.tree('outputs', 3);
+      const cjkFile = tree.find((n) => n.name === '论文草稿.md');
+      expect(cjkFile).toBeDefined();
+      // After save+commit, status should be 'committed' (not 'untracked' due to encoding bug)
+      expect(cjkFile!.git_status).toBe('committed');
+
+      // Modify the file — status should change to 'modified'
+      await svc.save('outputs/论文草稿.md', '# 更新内容');
+      // git status check uses the batch status map, which must correctly decode octal escapes
+      const readResult = await svc.read('outputs/论文草稿.md');
+      expect(readResult.git_status).toBe('committed'); // just committed, so committed
+    });
+  });
+
   // ── move() git tracking ───────────────────────────────────────────────
 
   describe('move() git tracking (requires git)', () => {
@@ -474,6 +507,52 @@ describe('Workspace tool-level functional tests', () => {
       const tool = findTool('workspace_download');
       const result = await tool.execute('t1', {
         url: 'http://metadata.google.internal/computeMetadata/v1/',
+        path: 'sources/test.txt',
+      });
+      const text = getToolText(result);
+      expect(text).toContain('Error');
+      expect(text).toContain('Blocked');
+    });
+
+    it('blocks IPv4-mapped IPv6 (::ffff:127.0.0.1)', async () => {
+      const tool = findTool('workspace_download');
+      const result = await tool.execute('t1', {
+        url: 'http://[::ffff:127.0.0.1]/',
+        path: 'sources/test.txt',
+      });
+      const text = getToolText(result);
+      expect(text).toContain('Error');
+      // URL parser normalizes ::ffff:127.0.0.1 → ::ffff:7f00:1 (hex),
+      // so it hits the "block all IPv6 literals" path, not the mapped-IPv4 path
+      expect(text).toContain('IPv6');
+    });
+
+    it('blocks IPv4-mapped IPv6 metadata (::ffff:169.254.169.254)', async () => {
+      const tool = findTool('workspace_download');
+      const result = await tool.execute('t1', {
+        url: 'http://[::ffff:169.254.169.254]/latest/meta-data/',
+        path: 'sources/test.txt',
+      });
+      const text = getToolText(result);
+      expect(text).toContain('Error');
+      expect(text).toContain('IPv6');
+    });
+
+    it('blocks generic IPv6 literal addresses', async () => {
+      const tool = findTool('workspace_download');
+      const result = await tool.execute('t1', {
+        url: 'http://[fe80::1]/internal',
+        path: 'sources/test.txt',
+      });
+      const text = getToolText(result);
+      expect(text).toContain('Error');
+      expect(text).toContain('IPv6');
+    });
+
+    it('blocks IPv6 loopback ::1', async () => {
+      const tool = findTool('workspace_download');
+      const result = await tool.execute('t1', {
+        url: 'http://[::1]/',
         path: 'sources/test.txt',
       });
       const text = getToolText(result);
