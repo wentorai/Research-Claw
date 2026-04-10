@@ -12,10 +12,12 @@
  *   1. plugins.allow — OC 2026.3.12+ requires explicit trust list
  *   2. discovery.mdns/wideArea — OC 2026.3.13 mDNS crash prevention
  *   3. Stale plugin entries (wentor-connect placeholder)
- *   4. Stale tool names in tools.alsoAllow
+ *   4. tools.alsoAllow — remove entirely (redundant with profile "full")
  *   5. gateway.auth.token alignment with Dashboard DEFAULT_TOKEN
  *   6. channels.discord.botToken → token (fix stale example config key)
  *  10. agents.defaults.sandbox.mode = "off" (RC has no Docker sandbox)
+ *  14. plugins.installs — provenance records for loaded plugins
+ *  15. dangerouslyDisableDeviceAuth — remove (unnecessary on loopback)
  */
 'use strict';
 
@@ -27,11 +29,14 @@ const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins', 'openclaw-weix
 const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins'];
 const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin'];
 const RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
-const REQUIRED_TOOLS = ['ppt_init', 'ppt_export'];
-const STALE_TOOLS = [
-  'search_papers', 'get_paper', 'get_citations',
-  'radar_configure', 'radar_get_config', 'radar_scan',
-];
+// Provenance install records for all RC plugins (eliminates "loaded without
+// install/load-path provenance" warnings from OC's plugin loader)
+const PLUGIN_INSTALL_RECORDS = {
+  'research-claw-core': { source: 'path', sourcePath: './extensions/research-claw-core' },
+  'openclaw-weixin':    { source: 'path', sourcePath: './extensions/openclaw-weixin' },
+  'research-plugins':   { source: 'npm',  spec: '@wentorai/research-plugins',
+                          installPath: '~/.openclaw/extensions/research-plugins' },
+};
 
 function normalizeRcDbPath(configPath, rawPath) {
   if (!rawPath || typeof rawPath !== 'string') return RC_DB_PATH;
@@ -139,19 +144,14 @@ function ensureConfig(filePath) {
     if (c.plugins.load.paths.length !== before) changed = true;
   }
 
-  // 4. Remove stale tool names from alsoAllow
+  // 4. Remove tools.alsoAllow entirely — redundant with profile "full".
+  //    OC's "full" profile skips the tool-policy step (empty policy → undefined),
+  //    meaning ALL tools (core + plugin) are allowed. alsoAllow entries were never
+  //    evaluated but triggered "unknown entries" warnings at config-parse time
+  //    because plugin tools aren't registered yet at that point.
   if (c.tools?.alsoAllow) {
-    const before = c.tools.alsoAllow.length;
-    c.tools.alsoAllow = c.tools.alsoAllow.filter(t => !STALE_TOOLS.includes(t));
-    if (c.tools.alsoAllow.length !== before) changed = true;
-    if (!isGlobal) {
-      for (const tool of REQUIRED_TOOLS) {
-        if (!c.tools.alsoAllow.includes(tool)) {
-          c.tools.alsoAllow.push(tool);
-          changed = true;
-        }
-      }
-    }
+    delete c.tools.alsoAllow;
+    changed = true;
   }
 
   // 5. gateway.auth.token must match the expected token (env var or default 'research-claw').
@@ -223,7 +223,6 @@ function ensureConfig(filePath) {
         'http://127.0.0.1:28789', 'http://localhost:28789',
         'http://127.0.0.1:5175', 'http://localhost:5175',
       ],
-      dangerouslyDisableDeviceAuth: true,
     };
     changed = true;
   }
@@ -286,6 +285,29 @@ function ensureConfig(filePath) {
       entry.config.dbPath = nextDbPath;
       changed = true;
     }
+  }
+
+  // 14. plugins.installs — provenance records so OC's loader treats each plugin
+  //     as intentionally tracked (eliminates "loaded without install/load-path
+  //     provenance" warnings). Idempotent: only adds missing records.
+  if (!isGlobal) {
+    if (!c.plugins) c.plugins = {};
+    if (!c.plugins.installs) c.plugins.installs = {};
+    for (const [id, record] of Object.entries(PLUGIN_INSTALL_RECORDS)) {
+      if (!c.plugins.installs[id]) {
+        c.plugins.installs[id] = { ...record };
+        changed = true;
+      }
+    }
+  }
+
+  // 15. Remove dangerouslyDisableDeviceAuth — unnecessary on loopback.
+  //     When gateway.bind is "loopback", all connections from 127.0.0.1 are
+  //     auto-approved by OC's device-auth pairing flow. The flag was only needed
+  //     for LAN-bound gateways; Docker sets it independently in docker-entrypoint.sh.
+  if (!isGlobal && c.gateway?.controlUi?.dangerouslyDisableDeviceAuth !== undefined) {
+    delete c.gateway.controlUi.dangerouslyDisableDeviceAuth;
+    changed = true;
   }
 
   // 12. Browser — ensure config exists with RC default profile

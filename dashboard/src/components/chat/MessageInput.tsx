@@ -38,6 +38,9 @@ export default function MessageInput() {
   const [historyPopupOpen, setHistoryPopupOpen] = useState(false);
   /** Stashed draft text when browsing history — restored on ArrowDown past end. */
   const draftRef = useRef<string | null>(null);
+  /** Explicit IME composition tracking — protects against remote desktop tools
+   *  (e.g. ToDesk) that break React's built-in composition detection. */
+  const composingRef = useRef(false);
 
   const isConnected = connState === 'connected';
   const canSend = (text.trim().length > 0 || attachments.length > 0) && isConnected && !sending;
@@ -200,9 +203,19 @@ export default function MessageInput() {
     }
   }, [text, attachments, isConnected, sending, send, sessionKey, inputHistory]);
 
+  const handleCompositionStart = () => {
+    composingRef.current = true;
+  };
+
+  const handleCompositionEnd = () => {
+    composingRef.current = false;
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Do not intercept during IME composition (e.g. Chinese pinyin input)
-    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    // Do not intercept during IME composition (e.g. Chinese pinyin input).
+    // composingRef is the primary guard — survives remote desktop tools
+    // (ToDesk, etc.) that may not set isComposing correctly.
+    if (composingRef.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
     // Let slash command menu handle navigation keys first
     if (slashMenu.handleKeyDown(e)) return;
 
@@ -419,6 +432,8 @@ export default function MessageInput() {
           value={text}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           onPaste={handlePaste}
           placeholder={t('chat.placeholder')}
           disabled={!isConnected || sending}

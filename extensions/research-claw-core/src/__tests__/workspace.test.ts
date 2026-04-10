@@ -244,6 +244,77 @@ describe('WorkspaceService', () => {
       await expect(svc.read('nonexistent.txt')).rejects.toThrow(WorkspaceError);
     });
 
+    // ── .ResearchClaw/ fallback for relocatable prompt files ──────────
+
+    it('reads HEARTBEAT.md from .ResearchClaw/ when missing at root', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      // Place file only in .ResearchClaw/ (simulates post-migration state)
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'HEARTBEAT.md'), '# Heartbeat\ntest');
+
+      const result = await svc.read('HEARTBEAT.md');
+      expect(result.content).toBe('# Heartbeat\ntest');
+      expect(result.encoding).toBe('utf-8');
+    });
+
+    it('prefers root file over .ResearchClaw/ when both exist', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      // Place file at both locations — root should win
+      fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), 'root version');
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'AGENTS.md'), 'rc version');
+
+      const result = await svc.read('AGENTS.md');
+      expect(result.content).toBe('root version');
+    });
+
+    it('does NOT fallback for non-relocatable files', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      // Place a non-relocatable file only in .ResearchClaw/
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'random.md'), 'should not be found');
+
+      await expect(svc.read('random.md')).rejects.toThrow(WorkspaceError);
+    });
+
+    it('fallback works for all RELOCATABLE_PROMPT_FILES', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      const relocatable = [
+        'AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md',
+        'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md',
+      ];
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+
+      for (const f of relocatable) {
+        fs.writeFileSync(path.join(rcDir, f), `content of ${f}`);
+      }
+
+      for (const f of relocatable) {
+        const result = await svc.read(f);
+        expect(result.content).toBe(`content of ${f}`);
+      }
+    });
+
+    it('fallback throws when file missing from both root and .ResearchClaw/', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      // HEARTBEAT.md is relocatable but doesn't exist anywhere
+      await expect(svc.read('HEARTBEAT.md')).rejects.toThrow(WorkspaceError);
+    });
+
     it('reports file as not committed when git is disabled', async () => {
       svc = new WorkspaceService(makeConfig(tmpDir));
       await svc.init();
