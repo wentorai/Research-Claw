@@ -415,6 +415,24 @@ describe('API key status guidance', () => {
     expect(screen.getAllByText('settings.apiKeyDeletePending').length).toBeGreaterThan(0);
   });
 
+  it('removes "configured" suffix from provider button after clearing API key', () => {
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+        apiKey: '__OPENCLAW_REDACTED__',
+      }),
+    });
+
+    render(<SettingsPanel />);
+
+    // Before clear: suffix is visible
+    expect(screen.getByText(/settings\.providerConfigured/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText('settings.clearApiKey'));
+
+    // After clear: suffix must disappear immediately
+    expect(screen.queryByText(/settings\.providerConfigured/)).toBeNull();
+  });
+
   it('does not keep the existing-key placeholder after clear is requested', () => {
     useConfigStore.setState({
       gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {

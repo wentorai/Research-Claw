@@ -847,7 +847,7 @@ export default function SettingsPanel() {
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {providerLabel(provider, t)}
-              {providerHasSavedKey(provider) ? ` · ${t('settings.providerConfigured')}` : ''}
+              {currentProviderHasSavedKey ? ` · ${t('settings.providerConfigured')}` : ''}
             </span>
             <span style={{ opacity: 0.65, marginLeft: 8, flexShrink: 0 }}>
               {provider}
@@ -1021,7 +1021,7 @@ export default function SettingsPanel() {
               >
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {providerLabel(visionProvider, t)}
-                  {providerHasSavedKey(visionProvider) ? ` · ${t('settings.providerConfigured')}` : ''}
+                  {currentVisionProviderHasSavedKey ? ` · ${t('settings.providerConfigured')}` : ''}
                 </span>
                 <span style={{ opacity: 0.65, marginLeft: 8, flexShrink: 0 }}>
                   {visionProvider}
