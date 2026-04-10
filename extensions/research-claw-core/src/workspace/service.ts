@@ -265,6 +265,9 @@ const HIDDEN_ROOT_ENTRIES = new Set([
   // Prompt files that remain at root during migration or as legacy
   'AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md',
   'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md', 'BOOTSTRAP.md.done',
+  // .bak remnants from migration cleanup
+  'AGENTS.md.bak', 'SOUL.md.bak', 'TOOLS.md.bak', 'IDENTITY.md.bak',
+  'USER.md.bak', 'HEARTBEAT.md.bak', 'BOOTSTRAP.md.bak',
   'MEMORY.md',
   // OS/tool artifacts
   '.DS_Store', 'Thumbs.db', '.gitignore',
@@ -516,12 +519,15 @@ export class WorkspaceService {
       try {
         // Skip if destination already exists (already migrated)
         await fsp.access(destPath, fs.constants.F_OK);
-        // Already migrated — clean up stale root copy if still present
+        // Already migrated — rename stale root copy to .bak if still present.
+        // Uses .bak instead of delete so OC internal code paths that might
+        // read from root get a graceful file-not-found rather than crashing.
         try {
           await fsp.access(rootPath, fs.constants.F_OK);
-          await fsp.unlink(rootPath);
+          const bakPath = rootPath + '.bak';
+          await fsp.rename(rootPath, bakPath);
         } catch {
-          // No stale root copy — nothing to clean
+          // No stale root copy (or already .bak'd) — nothing to do
         }
         continue;
       } catch {

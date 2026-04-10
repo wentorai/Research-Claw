@@ -243,7 +243,7 @@ describe('WorkspaceService CRUD fixes', () => {
   // ── migratePromptFiles stale root cleanup ─────────────────────────
 
   describe('migratePromptFiles stale root cleanup', () => {
-    it('removes stale root files when .ResearchClaw/ copy exists', async () => {
+    it('renames stale root files to .bak when .ResearchClaw/ copy exists', async () => {
       svc = new WorkspaceService(makeConfig(tmpDir));
       // Pre-populate: simulate already-migrated state with stale root leftover
       const rcDir = path.join(tmpDir, '.ResearchClaw');
@@ -255,9 +255,13 @@ describe('WorkspaceService CRUD fixes', () => {
 
       await svc.init(); // triggers migratePromptFiles()
 
-      // Root files should be cleaned up
+      // Root originals should be renamed to .bak
       expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
       expect(fs.existsSync(path.join(tmpDir, 'HEARTBEAT.md'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md.bak'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'HEARTBEAT.md.bak'))).toBe(true);
+      // .bak content is the old stale version
+      expect(fs.readFileSync(path.join(tmpDir, 'AGENTS.md.bak'), 'utf-8')).toBe('old stale version');
       // .ResearchClaw/ files untouched
       expect(fs.readFileSync(path.join(rcDir, 'AGENTS.md'), 'utf-8')).toBe('new version');
       expect(fs.readFileSync(path.join(rcDir, 'HEARTBEAT.md'), 'utf-8')).toBe('heartbeat v2');
@@ -286,12 +290,14 @@ describe('WorkspaceService CRUD fixes', () => {
 
       await svc.init();
       expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'SOUL.md.bak'))).toBe(true);
 
-      // Second init — should not crash or recreate root file
+      // Second init — should not crash, .bak stays, no double-rename
       svc.destroy();
       svc = new WorkspaceService(makeConfig(tmpDir));
       await svc.init();
       expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'SOUL.md.bak'))).toBe(true);
       expect(fs.readFileSync(path.join(rcDir, 'SOUL.md'), 'utf-8')).toBe('soul content');
     });
 
