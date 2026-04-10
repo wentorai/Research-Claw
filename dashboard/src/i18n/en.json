@@ -499,6 +499,8 @@
     "copied": "Copied!",
     "confirmLogin": "Confirm Login",
     "success": "Authentication successful! Token has been saved. You can now save your settings.",
+    "successSaving": "Authentication successful! Saving settings and restarting gateway…",
+    "successTokenSaved": "Authentication successful! Token saved, but settings save failed. Please click the save button manually.",
     "close": "Close"
   },
   "panel": {

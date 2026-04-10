@@ -617,6 +617,133 @@ export default function SettingsPanel() {
     loadGatewayConfig();
   }, [loadGatewayConfig, refreshAuthStatuses]);
 
+  /** Core save logic shared by handleSave (with confirm dialog) and OAuth auto-save. */
+  const performSave = useCallback(async () => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) throw new Error(t('oauth.notConnected'));
+    if (!baseUrl.trim() || !textModel.trim()) throw new Error(t('settings.validationMissing'));
+
+    setSaving(true);
+    try {
+      const configSnapshot = await client.request<{
+        parsed?: Record<string, unknown>;
+        config?: Record<string, unknown>;
+        hash?: string;
+      }>('config.get', {});
+      const latestProjectConfig = (configSnapshot.parsed ?? configSnapshot.config ?? null) as Record<string, unknown> | null;
+      const mergedProjectConfig = mergeProjectConfigsPreservingProviders(
+        latestProjectConfig,
+        projectConfigCacheRef.current,
+      );
+
+      // Use `parsed` (raw project JSON before OC validation/normalization)
+      // so that resolveExistingApiKey finds keys at their original paths.
+      // Matches SetupWizard.tsx:148. Without this, OC's config normalization
+      // may restructure provider fields, causing apiKey lookups to fail.
+      const cachedTextKey = apiKeyCacheRef.current[provider]?.trim();
+      const cachedVisionKey = visionSeparateProvider
+        ? visionApiKeyCacheRef.current[visionProvider]?.trim()
+        : undefined;
+
+      // If the input box is empty and we have an in-memory cached key for
+      // this provider, send it to preserve configuration without retyping.
+      const apiKeyToSend = deleteTextApiKeyRef.current
+        ? undefined
+        : apiKey.trim() || cachedTextKey || undefined;
+      const visionApiKeyToSend = deleteVisionApiKeyRef.current
+        ? undefined
+        : (visionSeparateProvider ? (visionApiKey.trim() || cachedVisionKey || undefined) : undefined);
+
+      if (supportsAuthProfiles(provider)) {
+        if (deleteTextApiKeyRef.current) {
+          await client.request('rc.auth.clearApiKey', { provider });
+          setAuthConfiguredByProvider((prev) => ({ ...prev, [provider]: false }));
+        } else if (apiKeyToSend) {
+          await client.request('rc.auth.setApiKey', { provider, apiKey: apiKeyToSend });
+          setAuthConfiguredByProvider((prev) => ({ ...prev, [provider]: true }));
+        }
+      }
+      if (visionEnabled && visionSeparateProvider && supportsAuthProfiles(visionProvider)) {
+        if (deleteVisionApiKeyRef.current) {
+          await client.request('rc.auth.clearApiKey', { provider: visionProvider });
+          setAuthConfiguredByProvider((prev) => ({ ...prev, [visionProvider]: false }));
+        } else if (visionApiKeyToSend) {
+          await client.request('rc.auth.setApiKey', { provider: visionProvider, apiKey: visionApiKeyToSend });
+          setAuthConfiguredByProvider((prev) => ({ ...prev, [visionProvider]: true }));
+        }
+      }
+
+      // Restore other cached providers so `config.apply` doesn't accidentally
+      // drop non-active providers when `config.get` omits them.
+      const restoreProviders: Record<string, { modelId: string; apiKey: string }> = {};
+      for (const [pId, k] of Object.entries(apiKeyCacheRef.current)) {
+        const key = k?.trim() ?? '';
+        if (!key) continue;
+        if (pId === provider) continue;
+        const modelId = textModelCacheRef.current[pId] || getPreset(pId).models?.[0]?.id;
+        if (!modelId) continue;
+        restoreProviders[pId] = { modelId, apiKey: key };
+      }
+      if (visionSeparateProvider) {
+        for (const [vpId, k] of Object.entries(visionApiKeyCacheRef.current)) {
+          const key = k?.trim() ?? '';
+          if (!key) continue;
+          if (vpId === provider) continue;
+          const modelId = visionModelCacheRef.current[vpId] || getPreset(vpId).models?.[0]?.id;
+          if (!modelId) continue;
+          restoreProviders[vpId] = { modelId, apiKey: key };
+        }
+      }
+
+      const fullConfig = buildSaveConfig(
+        mergedProjectConfig,
+        {
+          provider,
+          baseUrl: baseUrl.trim(),
+          api,
+          apiKey: apiKeyToSend,
+          textModel: textModel.trim(),
+          visionEnabled,
+          visionProvider: visionEnabled ? visionProvider : undefined,
+          visionModel: visionEnabled ? visionModel.trim() || undefined : undefined,
+          visionBaseUrl: visionEnabled && visionSeparateProvider ? visionBaseUrl.trim() || undefined : undefined,
+          visionApiKey: visionEnabled && visionSeparateProvider ? visionApiKeyToSend : undefined,
+          visionApi: visionEnabled && visionSeparateProvider ? visionApi : undefined,
+          proxyUrl: proxyEnabled ? proxyUrl.trim() : '',
+          apiKeyConfigured,
+          visionApiKeyConfigured,
+          deleteTextApiKey: deleteTextApiKeyRef.current,
+          deleteVisionApiKey: deleteVisionApiKeyRef.current,
+          webSearchEnabled,
+          webSearchProvider: webSearchEnabled ? webSearchProvider : undefined,
+          webSearchApiKey: webSearchEnabled ? (webSearchApiKey.trim() || undefined) : undefined,
+          webSearchApiKeyConfigured,
+          heartbeatEnabled,
+          heartbeatInterval,
+          restoreProviders: Object.keys(restoreProviders).length ? restoreProviders : undefined,
+        },
+      );
+
+      await client.request('config.apply', {
+        raw: JSON.stringify(fullConfig),
+        baseHash: configSnapshot.hash,
+      });
+
+      projectConfigCacheRef.current = fullConfig;
+
+      deleteTextApiKeyRef.current = false;
+      deleteVisionApiKeyRef.current = false;
+      setTextApiKeyDeletePending(false);
+      setVisionApiKeyDeletePending(false);
+      void refreshAuthStatuses([provider, visionProvider]);
+
+      syncNeeded.current = true;
+      useConfigStore.getState().setPendingConfigRestart(true);
+    } finally {
+      setSaving(false);
+    }
+  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, t, refreshAuthStatuses, supportsAuthProfiles]);
+
   const handleSave = useCallback(() => {
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
@@ -659,131 +786,15 @@ export default function SettingsPanel() {
         },
       },
       onOk: async () => {
-        setSaving(true);
         try {
-          const configSnapshot = await client.request<{
-            parsed?: Record<string, unknown>;
-            config?: Record<string, unknown>;
-            hash?: string;
-          }>('config.get', {});
-          const latestProjectConfig = (configSnapshot.parsed ?? configSnapshot.config ?? null) as Record<string, unknown> | null;
-          const mergedProjectConfig = mergeProjectConfigsPreservingProviders(
-            latestProjectConfig,
-            projectConfigCacheRef.current,
-          );
-
-          // Use `parsed` (raw project JSON before OC validation/normalization)
-          // so that resolveExistingApiKey finds keys at their original paths.
-          // Matches SetupWizard.tsx:148. Without this, OC's config normalization
-          // may restructure provider fields, causing apiKey lookups to fail.
-          const cachedTextKey = apiKeyCacheRef.current[provider]?.trim();
-          const cachedVisionKey = visionSeparateProvider
-            ? visionApiKeyCacheRef.current[visionProvider]?.trim()
-            : undefined;
-
-          // If the input box is empty and we have an in-memory cached key for
-          // this provider, send it to preserve configuration without retyping.
-          const apiKeyToSend = deleteTextApiKeyRef.current
-            ? undefined
-            : apiKey.trim() || cachedTextKey || undefined;
-          const visionApiKeyToSend = deleteVisionApiKeyRef.current
-            ? undefined
-            : (visionSeparateProvider ? (visionApiKey.trim() || cachedVisionKey || undefined) : undefined);
-
-          if (supportsAuthProfiles(provider)) {
-            if (deleteTextApiKeyRef.current) {
-              await client.request('rc.auth.clearApiKey', { provider });
-              setAuthConfiguredByProvider((prev) => ({ ...prev, [provider]: false }));
-            } else if (apiKeyToSend) {
-              await client.request('rc.auth.setApiKey', { provider, apiKey: apiKeyToSend });
-              setAuthConfiguredByProvider((prev) => ({ ...prev, [provider]: true }));
-            }
-          }
-          if (visionEnabled && visionSeparateProvider && supportsAuthProfiles(visionProvider)) {
-            if (deleteVisionApiKeyRef.current) {
-              await client.request('rc.auth.clearApiKey', { provider: visionProvider });
-              setAuthConfiguredByProvider((prev) => ({ ...prev, [visionProvider]: false }));
-            } else if (visionApiKeyToSend) {
-              await client.request('rc.auth.setApiKey', { provider: visionProvider, apiKey: visionApiKeyToSend });
-              setAuthConfiguredByProvider((prev) => ({ ...prev, [visionProvider]: true }));
-            }
-          }
-
-          // Restore other cached providers so `config.apply` doesn't accidentally
-          // drop non-active providers when `config.get` omits them.
-          const restoreProviders: Record<string, { modelId: string; apiKey: string }> = {};
-          for (const [pId, k] of Object.entries(apiKeyCacheRef.current)) {
-            const key = k?.trim() ?? '';
-            if (!key) continue;
-            if (pId === provider) continue;
-            const modelId = textModelCacheRef.current[pId] || getPreset(pId).models?.[0]?.id;
-            if (!modelId) continue;
-            restoreProviders[pId] = { modelId, apiKey: key };
-          }
-          if (visionSeparateProvider) {
-            for (const [vpId, k] of Object.entries(visionApiKeyCacheRef.current)) {
-              const key = k?.trim() ?? '';
-              if (!key) continue;
-              if (vpId === provider) continue;
-              const modelId = visionModelCacheRef.current[vpId] || getPreset(vpId).models?.[0]?.id;
-              if (!modelId) continue;
-              restoreProviders[vpId] = { modelId, apiKey: key };
-            }
-          }
-
-          const fullConfig = buildSaveConfig(
-            mergedProjectConfig,
-            {
-              provider,
-              baseUrl: baseUrl.trim(),
-              api,
-              apiKey: apiKeyToSend,
-              textModel: textModel.trim(),
-              visionEnabled,
-              visionProvider: visionEnabled ? visionProvider : undefined,
-              visionModel: visionEnabled ? visionModel.trim() || undefined : undefined,
-              visionBaseUrl: visionEnabled && visionSeparateProvider ? visionBaseUrl.trim() || undefined : undefined,
-              visionApiKey: visionEnabled && visionSeparateProvider ? visionApiKeyToSend : undefined,
-              visionApi: visionEnabled && visionSeparateProvider ? visionApi : undefined,
-              proxyUrl: proxyEnabled ? proxyUrl.trim() : '',
-              apiKeyConfigured,
-              visionApiKeyConfigured,
-              deleteTextApiKey: deleteTextApiKeyRef.current,
-              deleteVisionApiKey: deleteVisionApiKeyRef.current,
-              webSearchEnabled,
-              webSearchProvider: webSearchEnabled ? webSearchProvider : undefined,
-              webSearchApiKey: webSearchEnabled ? (webSearchApiKey.trim() || undefined) : undefined,
-              webSearchApiKeyConfigured,
-              heartbeatEnabled,
-              heartbeatInterval,
-              restoreProviders: Object.keys(restoreProviders).length ? restoreProviders : undefined,
-            },
-          );
-
-          await client.request('config.apply', {
-            raw: JSON.stringify(fullConfig),
-            baseHash: configSnapshot.hash,
-          });
-
-          projectConfigCacheRef.current = fullConfig;
-
-          deleteTextApiKeyRef.current = false;
-          deleteVisionApiKeyRef.current = false;
-          setTextApiKeyDeletePending(false);
-          setVisionApiKeyDeletePending(false);
-          void refreshAuthStatuses([provider, visionProvider]);
-
+          await performSave();
           message.success(t('settings.saved'));
-          syncNeeded.current = true;
-          useConfigStore.getState().setPendingConfigRestart(true);
         } catch {
           message.error(t('settings.saveFailed'));
-        } finally {
-          setSaving(false);
         }
       },
     });
-  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, t, modal, message, refreshAuthStatuses, supportsAuthProfiles]);
+  }, [performSave, baseUrl, textModel, t, modal, message]);
 
   const handleSavePrompt = useCallback(() => {
     message.success(t('settings.saved'));
@@ -920,6 +931,7 @@ export default function SettingsPanel() {
             open={oauthModalOpen}
             provider={provider}
             onClose={() => setOauthModalOpen(false)}
+            onSuccess={performSave}
           />
         </div>
       )}

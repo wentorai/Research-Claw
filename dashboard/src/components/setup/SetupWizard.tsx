@@ -229,12 +229,11 @@ export default function SetupWizard() {
     baseUrl.trim().length > 0 &&
     textModel.trim().length > 0;
 
-  const handleStart = async () => {
-    if (!client?.isConnected) return;
+  /** Core save logic shared by handleStart (button click) and OAuth auto-save. */
+  const performStart = useCallback(async () => {
+    if (!client?.isConnected) throw new Error(t('oauth.notConnected'));
 
     setSaving(true);
-    setError('');
-
     try {
       const configSnapshot = await client.request<{
         parsed?: Record<string, unknown>;
@@ -270,6 +269,15 @@ export default function SetupWizard() {
       setRestarting(true);
     } catch (err) {
       setSaving(false);
+      throw err;
+    }
+  }, [client, provider, baseUrl, api, apiKey, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApiKey, visionApi, proxyEnabled, proxyUrl, t]);
+
+  const handleStart = async () => {
+    setError('');
+    try {
+      await performStart();
+    } catch (err) {
       setError(err instanceof Error ? err.message : t('setup.configureFailed'));
     }
   };
@@ -423,6 +431,7 @@ export default function SetupWizard() {
                     open={oauthModalOpen}
                     provider={provider}
                     onClose={() => setOauthModalOpen(false)}
+                    onSuccess={performStart}
                   />
                 </div>
               )}

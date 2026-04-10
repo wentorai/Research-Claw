@@ -10,9 +10,10 @@
  *   3. Browser redirects to localhost:1455 (may fail in Docker — that's OK)
  *   4. User pastes the redirect URL from browser address bar
  *   5. Plugin exchanges code for tokens → stores in auth-profiles.json
+ *   6. If onSuccess provided → auto-save settings + close modal
  */
 import { useState } from 'react';
-import { Modal, Input, Button, Typography, Steps, Alert, Space, Tooltip } from 'antd';
+import { Modal, Input, Button, Typography, Steps, Alert, Space, Spin, Tooltip } from 'antd';
 import { LinkOutlined, CopyOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../stores/gateway';
@@ -25,7 +26,8 @@ interface OAuthModalProps {
   open: boolean;
   provider: string;
   onClose: () => void;
-  onSuccess?: () => void;
+  /** If provided, called after OAuth succeeds to auto-save settings. Must throw on failure. */
+  onSuccess?: () => Promise<void>;
 }
 
 export default function OAuthModal({ open, provider, onClose, onSuccess }: OAuthModalProps) {
@@ -38,6 +40,8 @@ export default function OAuthModal({ open, provider, onClose, onSuccess }: OAuth
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const reset = () => {
     setStep(0);
@@ -48,6 +52,8 @@ export default function OAuthModal({ open, provider, onClose, onSuccess }: OAuth
     setError('');
     setSuccess(false);
     setCopied(false);
+    setAutoSaving(false);
+    setSaveError('');
   };
 
   const handleOpen = () => {
@@ -97,7 +103,24 @@ export default function OAuthModal({ open, provider, onClose, onSuccess }: OAuth
       });
       setSuccess(true);
       setStep(2);
-      onSuccess?.();
+
+      // Auto-save settings if parent provided onSuccess
+      if (onSuccess) {
+        setAutoSaving(true);
+        setLoading(false);
+        try {
+          await onSuccess();
+          // reset()+onClose() unmounts via destroyOnHidden — return early
+          // to avoid setState on unmounted component in the outer finally.
+          reset();
+          onClose();
+          return;
+        } catch (err) {
+          setAutoSaving(false);
+          setSaveError(err instanceof Error ? err.message : String(err));
+          return;
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -118,11 +141,12 @@ export default function OAuthModal({ open, provider, onClose, onSuccess }: OAuth
     <Modal
       title={`${providerLabel} OAuth`}
       open={open}
-      onCancel={() => { reset(); onClose(); }}
+      onCancel={() => { if (!autoSaving) { reset(); onClose(); } }}
       footer={null}
       width={520}
+      closable={!autoSaving}
       afterOpenChange={(visible) => { if (visible) handleOpen(); }}
-      destroyOnClose
+      destroyOnHidden
     >
       <Steps
         current={step}
@@ -205,12 +229,39 @@ export default function OAuthModal({ open, provider, onClose, onSuccess }: OAuth
       {step === 2 && success && (
         <div style={{ textAlign: 'center', padding: '20px 0' }}>
           <CheckCircleOutlined style={{ fontSize: 48, color: '#34d399' }} />
-          <Paragraph style={{ marginTop: 12, fontSize: 14 }}>
-            {t('oauth.success')}
-          </Paragraph>
-          <Button onClick={() => { reset(); onClose(); }}>
-            {t('oauth.close')}
-          </Button>
+          {autoSaving ? (
+            <>
+              <Paragraph style={{ marginTop: 12, fontSize: 14 }}>
+                {t('oauth.successSaving')}
+              </Paragraph>
+              <Spin style={{ marginTop: 8 }} />
+            </>
+          ) : saveError ? (
+            <>
+              <Paragraph style={{ marginTop: 12, fontSize: 14 }}>
+                {t('oauth.successTokenSaved')}
+              </Paragraph>
+              <Alert
+                type="error"
+                message={saveError}
+                showIcon
+                style={{ marginTop: 8, marginBottom: 12, textAlign: 'left' }}
+              />
+              <Button onClick={() => { reset(); onClose(); }}>
+                {t('oauth.close')}
+              </Button>
+            </>
+          ) : (
+            /* No onSuccess provided — original manual-save behavior */
+            <>
+              <Paragraph style={{ marginTop: 12, fontSize: 14 }}>
+                {t('oauth.success')}
+              </Paragraph>
+              <Button onClick={() => { reset(); onClose(); }}>
+                {t('oauth.close')}
+              </Button>
+            </>
+          )}
         </div>
       )}
     </Modal>

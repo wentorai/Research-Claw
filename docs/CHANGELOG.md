@@ -17,6 +17,13 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-04-10 — OAuth Auto-Save UX
+
+- [2026-04-10] [Dashboard] [Claude] fix(UX): OAuth auto-save — closing the OAuth success dialog now automatically saves settings and triggers gateway restart, instead of requiring a separate manual "保存" click. Extracted `performSave` from `handleSave` (SettingsPanel) and `performStart` from `handleStart` (SetupWizard) as reusable async callbacks. OAuthModal blocks close during save, shows error with manual fallback on failure.
+  - Files: `OAuthModal.tsx`, `SettingsPanel.tsx`, `SetupWizard.tsx`, `zh-CN.json`, `en.json`
+  - Tests: `oauth-auto-save.test.tsx` — 6 tests (auto-save trigger, auto-close, saving spinner, error fallback, backward compat, OAuth-fail guard)
+  - Also: `destroyOnClose` → `destroyOnHidden` (Ant Design deprecation fix)
+
 ### 2026-04-10 — Workspace CRUD Overhaul
 
 - [2026-04-10] [Modules] [Claude] fix(P0): `service.move()` git tracking — only destination path was staged, source deletion left as permanent unstaged `D` entry in `git status`. New `commitMove()` in GitTracker atomically stages both paths in one batch, git correctly records rename.
