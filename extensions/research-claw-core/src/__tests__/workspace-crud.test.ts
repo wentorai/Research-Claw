@@ -239,6 +239,203 @@ describe('WorkspaceService CRUD fixes', () => {
       expect(result.restore_hint).toBeUndefined();
     });
   });
+
+  // ── migratePromptFiles stale root cleanup ─────────────────────────
+
+  describe('migratePromptFiles stale root cleanup', () => {
+    it('removes stale root files when .ResearchClaw/ copy exists', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      // Pre-populate: simulate already-migrated state with stale root leftover
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'AGENTS.md'), 'new version');
+      fs.writeFileSync(path.join(rcDir, 'HEARTBEAT.md'), 'heartbeat v2');
+      fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), 'old stale version');
+      fs.writeFileSync(path.join(tmpDir, 'HEARTBEAT.md'), 'old heartbeat');
+
+      await svc.init(); // triggers migratePromptFiles()
+
+      // Root files should be cleaned up
+      expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'HEARTBEAT.md'))).toBe(false);
+      // .ResearchClaw/ files untouched
+      expect(fs.readFileSync(path.join(rcDir, 'AGENTS.md'), 'utf-8')).toBe('new version');
+      expect(fs.readFileSync(path.join(rcDir, 'HEARTBEAT.md'), 'utf-8')).toBe('heartbeat v2');
+    });
+
+    it('does not delete root files when .ResearchClaw/ copy is missing', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      // Only root file, no .ResearchClaw/ copy — should migrate, not delete
+      fs.writeFileSync(path.join(tmpDir, 'USER.md'), 'user data');
+
+      await svc.init();
+
+      // File should have been moved to .ResearchClaw/, not deleted
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      expect(fs.existsSync(path.join(tmpDir, 'USER.md'))).toBe(false);
+      expect(fs.existsSync(path.join(rcDir, 'USER.md'))).toBe(true);
+      expect(fs.readFileSync(path.join(rcDir, 'USER.md'), 'utf-8')).toBe('user data');
+    });
+
+    it('is idempotent — multiple init() calls produce same result', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'SOUL.md'), 'soul content');
+      fs.writeFileSync(path.join(tmpDir, 'SOUL.md'), 'stale soul');
+
+      await svc.init();
+      expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(false);
+
+      // Second init — should not crash or recreate root file
+      svc.destroy();
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(false);
+      expect(fs.readFileSync(path.join(rcDir, 'SOUL.md'), 'utf-8')).toBe('soul content');
+    });
+
+    it('does not touch non-relocatable files at root', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      // A non-relocatable file at root should survive
+      fs.writeFileSync(path.join(tmpDir, 'MEMORY.md'), 'memory data');
+      fs.writeFileSync(path.join(tmpDir, 'custom-notes.md'), 'my notes');
+
+      await svc.init();
+
+      expect(fs.existsSync(path.join(tmpDir, 'MEMORY.md'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'custom-notes.md'))).toBe(true);
+    });
+  });
+
+  // ── before_tool_call path redirect logic ──────────────────────────
+
+  describe('path redirect logic for OC built-in tools', () => {
+    /**
+     * Simulates the path redirect logic from index.ts before_tool_call hook.
+     * This is the same algorithm, extracted for testability.
+     */
+    const RELOCATABLE_FILES = new Set([
+      'AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md',
+      'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md',
+    ]);
+
+    function redirectPath(
+      toolName: string,
+      params: Record<string, unknown>,
+      wsRoot: string,
+    ): { params: { path: string } } | Record<string, never> {
+      if (toolName !== 'read' && toolName !== 'write' && toolName !== 'edit') {
+        return {};
+      }
+      const rawPath =
+        typeof params.path === 'string' ? params.path :
+        typeof params.file_path === 'string' ? params.file_path :
+        undefined;
+      if (!rawPath) return {};
+      const basename = path.basename(rawPath);
+      if (!RELOCATABLE_FILES.has(basename) || rawPath !== basename) return {};
+      const rcPath = path.join(wsRoot, '.ResearchClaw', basename);
+      if (fs.existsSync(rcPath)) {
+        return { params: { path: `.ResearchClaw/${basename}` } };
+      }
+      return {};
+    }
+
+    it('redirects read("HEARTBEAT.md") to .ResearchClaw/', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.writeFileSync(path.join(rcDir, 'HEARTBEAT.md'), '# HB');
+
+      const result = redirectPath('read', { path: 'HEARTBEAT.md' }, tmpDir);
+      expect(result).toEqual({ params: { path: '.ResearchClaw/HEARTBEAT.md' } });
+    });
+
+    it('redirects read with file_path param', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.writeFileSync(path.join(rcDir, 'AGENTS.md'), '# A');
+
+      const result = redirectPath('read', { file_path: 'AGENTS.md' }, tmpDir);
+      expect(result).toEqual({ params: { path: '.ResearchClaw/AGENTS.md' } });
+    });
+
+    it('redirects write("SOUL.md") to .ResearchClaw/', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.writeFileSync(path.join(rcDir, 'SOUL.md'), '# Soul');
+
+      const result = redirectPath('write', { path: 'SOUL.md', content: 'new' }, tmpDir);
+      expect(result).toEqual({ params: { path: '.ResearchClaw/SOUL.md' } });
+    });
+
+    it('redirects edit("TOOLS.md") to .ResearchClaw/', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.writeFileSync(path.join(rcDir, 'TOOLS.md'), '# Tools');
+
+      const result = redirectPath('edit', { path: 'TOOLS.md' }, tmpDir);
+      expect(result).toEqual({ params: { path: '.ResearchClaw/TOOLS.md' } });
+    });
+
+    it('does NOT redirect nested paths like outputs/HEARTBEAT.md', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.writeFileSync(path.join(rcDir, 'HEARTBEAT.md'), '# HB');
+
+      const result = redirectPath('read', { path: 'outputs/HEARTBEAT.md' }, tmpDir);
+      expect(result).toEqual({});
+    });
+
+    it('does NOT redirect non-relocatable files', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.writeFileSync(path.join(rcDir, 'random.md'), '# Random');
+
+      const result = redirectPath('read', { path: 'random.md' }, tmpDir);
+      expect(result).toEqual({});
+    });
+
+    it('does NOT redirect when .ResearchClaw/ file does not exist', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      // .ResearchClaw/ exists but HEARTBEAT.md is NOT in it
+      const result = redirectPath('read', { path: 'HEARTBEAT.md' }, tmpDir);
+      expect(result).toEqual({});
+    });
+
+    it('does NOT redirect for non-read/write/edit tools', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.writeFileSync(path.join(rcDir, 'HEARTBEAT.md'), '# HB');
+
+      expect(redirectPath('exec', { path: 'HEARTBEAT.md' }, tmpDir)).toEqual({});
+      expect(redirectPath('workspace_read', { path: 'HEARTBEAT.md' }, tmpDir)).toEqual({});
+      expect(redirectPath('search', { path: 'HEARTBEAT.md' }, tmpDir)).toEqual({});
+    });
+
+    it('all 7 relocatable files are covered', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+
+      const all = ['AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md'];
+      for (const f of all) {
+        fs.writeFileSync(path.join(rcDir, f), `content of ${f}`);
+        const result = redirectPath('read', { path: f }, tmpDir);
+        expect(result).toEqual({ params: { path: `.ResearchClaw/${f}` } });
+      }
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

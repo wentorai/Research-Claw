@@ -1126,6 +1126,33 @@ const plugin: PluginDefinition = {
         return {}; // Always allow — let the built-in cron tool proceed
       }
 
+      // ── .ResearchClaw path redirect for OC built-in tools ─────────
+      // OpenClaw's read/write/edit resolve paths relative to workspace root.
+      // After system-file migration, HEARTBEAT.md etc. live in .ResearchClaw/.
+      // Rewrite the path param so OC tools find the file at the correct location.
+      // Only redirects bare filenames (not nested paths like "outputs/HEARTBEAT.md")
+      // and only when the file actually exists in .ResearchClaw/.
+      if (
+        (evt.toolName === 'read' || evt.toolName === 'write' || evt.toolName === 'edit') &&
+        _wsConfig?.root
+      ) {
+        const rawPath =
+          typeof evt.params?.path === 'string' ? evt.params.path :
+          typeof evt.params?.file_path === 'string' ? evt.params.file_path :
+          undefined;
+        if (rawPath) {
+          const basename = path.basename(rawPath);
+          // Only redirect bare filenames matching relocatable prompt files
+          if (RELOCATABLE_FILES.has(basename) && rawPath === basename) {
+            const rcPath = path.join(_wsConfig.root, '.ResearchClaw', basename);
+            if (fs.existsSync(rcPath)) {
+              const redirected = `.ResearchClaw/${basename}`;
+              return { params: { path: redirected } };
+            }
+          }
+        }
+      }
+
       // ── Exec safety guard ──────────────────────────────────────────
       if (evt.toolName !== 'exec') return {};
 

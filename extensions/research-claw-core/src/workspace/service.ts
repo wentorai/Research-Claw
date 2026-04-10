@@ -516,6 +516,13 @@ export class WorkspaceService {
       try {
         // Skip if destination already exists (already migrated)
         await fsp.access(destPath, fs.constants.F_OK);
+        // Already migrated — clean up stale root copy if still present
+        try {
+          await fsp.access(rootPath, fs.constants.F_OK);
+          await fsp.unlink(rootPath);
+        } catch {
+          // No stale root copy — nothing to clean
+        }
         continue;
       } catch {
         // destPath does not exist — check if source exists at root
@@ -757,18 +764,36 @@ export class WorkspaceService {
     encoding: 'utf-8' | 'base64';
     modified_at: string;
   }> {
-    const fullPath = this.resolvePath(filePath);
+    let fullPath = this.resolvePath(filePath);
 
-    // Check file exists and is a regular file
+    // Check file exists and is a regular file.
+    // Fallback: relocatable prompt files may have been migrated to .ResearchClaw/
+    // by migratePromptFiles(). The agent:bootstrap hook redirects at startup, but
+    // runtime workspace_read tool calls bypass the hook and land here directly.
     let fileStat: fs.Stats;
     try {
       fileStat = await fsp.stat(fullPath);
     } catch {
-      throw new WorkspaceError(
-        `File not found: ${filePath}`,
-        WS_FILE_NOT_FOUND,
-        { path: filePath },
-      );
+      const basename = path.basename(fullPath);
+      if ((RELOCATABLE_PROMPT_FILES as readonly string[]).includes(basename)) {
+        const rcPath = path.join(this.root, '.ResearchClaw', basename);
+        try {
+          fileStat = await fsp.stat(rcPath);
+          fullPath = rcPath;
+        } catch {
+          throw new WorkspaceError(
+            `File not found: ${filePath}`,
+            WS_FILE_NOT_FOUND,
+            { path: filePath },
+          );
+        }
+      } else {
+        throw new WorkspaceError(
+          `File not found: ${filePath}`,
+          WS_FILE_NOT_FOUND,
+          { path: filePath },
+        );
+      }
     }
 
     if (!fileStat.isFile()) {
