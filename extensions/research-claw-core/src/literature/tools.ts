@@ -810,7 +810,9 @@ export function createLiteratureTools(service: LiteratureService): ToolDefinitio
 
   tools.push({
     name: 'library_zotero',
-    description: 'Interact with Zotero reference manager. Supports local SQLite import, Zotero Local API, and Zotero Web API.',
+    description: 'Interact with Zotero reference manager. Supports three interfaces: ' +
+      'sqlite (detect + import only), local_api (detect/import/search), web_api (all actions). ' +
+      'Omit method to auto-detect the best available interface.',
     parameters: {
       type: 'object',
       properties: {
