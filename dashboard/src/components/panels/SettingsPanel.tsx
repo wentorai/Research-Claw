@@ -27,6 +27,7 @@ import {
 } from '../../utils/config-patch';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
 import { isOAuthProvider } from '../../utils/oauth-providers';
+import { RC_VERSION } from '../../version';
 
 const { Text } = Typography;
 
@@ -89,7 +90,7 @@ function AboutSection() {
 
   const handleCopyDiagnostics = async () => {
     const diagnostics = [
-      `Research-Claw v0.6.0`,
+      `Research-Claw v${RC_VERSION}`,
       `Powered by OpenClaw ${serverVersion ?? 'unknown'}`,
       `Gateway: ws://127.0.0.1:28789`,
       `Platform: ${navigator.platform}`,
@@ -194,7 +195,7 @@ function AboutSection() {
               letterSpacing: 1,
             }}
           >
-            Research-Claw v0.6.0
+            Research-Claw v{RC_VERSION}
           </span>
         </a>
       </div>

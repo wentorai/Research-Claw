@@ -8,6 +8,7 @@ import type {
 } from './types';
 import { MIN_PROTOCOL, MAX_PROTOCOL } from './types';
 import { ReconnectScheduler } from './reconnect';
+import { RC_VERSION } from '../version';
 import { getDeviceIdentity, buildV3Payload } from './device-identity';
 import {
   loadDeviceAuthToken,
@@ -463,7 +464,7 @@ export class GatewayClient {
         maxProtocol: MAX_PROTOCOL,
         client: {
           id: clientId,
-          version: this.opts.clientVersion ?? '0.6.0',
+          version: this.opts.clientVersion ?? RC_VERSION,
           platform,
           mode: clientMode,
           displayName: this.opts.clientName ?? 'Research-Claw Dashboard',

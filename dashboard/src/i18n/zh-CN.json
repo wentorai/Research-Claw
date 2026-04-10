@@ -464,7 +464,7 @@
     "tokensOut": "输出",
     "heartbeat": "心跳",
     "version": "v{{version}}",
-    "versionFallback": "v0.6.0",
+    "versionFallback": "v0.6.1",
     "modelDefault": "（默认）",
     "modelNA": "N/A"
   },
