@@ -77,14 +77,13 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         useConfigStore.setState({ _configRetryCount: 0 });
         // Auto-fetch config on every (re)connection
         useConfigStore.getState().loadGatewayConfig();
-        // Subscribe to session changes (aligned with OC UI: sessions.subscribe).
-        // NOTE: sessions.subscribe is not in OC v2026.3.13 npm dist yet (unreleased).
-        // The call will silently fail. When OC publishes a version with this method,
-        // session list will auto-sync across clients. Until then, we rely on
-        // post-chat-final session reload.
-        client.request('sessions.subscribe', {}).catch(() => {
-          // Expected: method not yet available in current OC version
-        });
+        // TODO: Enable sessions.subscribe when OC baseline is upgraded past v2026.3.13.
+        // sessions.subscribe was added to OC main in commit 7b61ca1b06 (2026-03-18)
+        // but is not in the v2026.3.13 npm dist we currently pin. Calling it produces
+        // a console.warn "unknown method" in GatewayClient before .catch() can silence
+        // it. Until OC publishes a version with this method, session sync relies on
+        // post-chat-final reload (chat.ts:820) + onHello loadSessions (line 102 below).
+        // Re-enable:  client.request('sessions.subscribe', {}).catch(() => {});
         // Reset cron reconciliation flag so enabled presets re-register
         // with the gateway after a restart. Uses dynamic import to avoid
         // circular dependency (same pattern as chat store above).
