@@ -371,6 +371,61 @@ describe('Issue 7: Version and GitHub link', () => {
   });
 });
 
+describe('Issue 7b: Auto-update check throttling', () => {
+  it('throttles repeated auto update checks within the same session window', async () => {
+    const updatePayload = {
+      current: '0.6.2',
+      latest: '0.6.3',
+      latestTag: 'v0.6.3',
+      upToDate: false,
+      releaseUrl: 'https://github.com/wentorai/Research-Claw/releases/tag/v0.6.3',
+      publishedAt: null,
+      repoRoot: '/tmp/research-claw',
+      shellUpdateHint: "cd '/tmp/research-claw' && git pull --ff-only && pnpm install && pnpm build",
+    };
+    const mockRequest = vi.fn().mockResolvedValue(updatePayload);
+
+    useGatewayStore.setState({
+      client: createMockClient(mockRequest),
+      state: 'connected',
+    });
+
+    await useUiStore.getState().maybeNotifyAppUpdate();
+    await useUiStore.getState().maybeNotifyAppUpdate();
+
+    const updateChecks = mockRequest.mock.calls.filter((call: unknown[]) => call[0] === 'rc.app.check_updates');
+    expect(updateChecks).toHaveLength(1);
+    expect(useUiStore.getState().notifications).toHaveLength(1);
+  });
+
+  it('allows preloaded manual check results to bypass throttling without a second RPC', async () => {
+    const updatePayload = {
+      current: '0.6.2',
+      latest: '0.6.3',
+      latestTag: 'v0.6.3',
+      upToDate: false,
+      releaseUrl: 'https://github.com/wentorai/Research-Claw/releases/tag/v0.6.3',
+      publishedAt: null,
+      repoRoot: '/tmp/research-claw',
+      shellUpdateHint: "cd '/tmp/research-claw' && git pull --ff-only && pnpm install && pnpm build",
+    };
+    const mockRequest = vi.fn().mockResolvedValue(updatePayload);
+
+    useGatewayStore.setState({
+      client: createMockClient(mockRequest),
+      state: 'connected',
+    });
+
+    sessionStorage.setItem('rc-app-update-last-check-at', String(Date.now()));
+
+    await useUiStore.getState().maybeNotifyAppUpdate(updatePayload);
+
+    const updateChecks = mockRequest.mock.calls.filter((call: unknown[]) => call[0] === 'rc.app.check_updates');
+    expect(updateChecks).toHaveLength(0);
+    expect(useUiStore.getState().notifications).toHaveLength(1);
+  });
+});
+
 // ============================================================
 // Issue 8: Notification System
 // ============================================================

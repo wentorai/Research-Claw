@@ -21,6 +21,7 @@ import { useConfigStore } from '../stores/config';
 import { getThemeTokens } from '../styles/theme';
 import { relativeTime } from '../utils/relativeTime';
 import type { Notification as AppNotification } from '../stores/ui';
+import { confirmApplyAppUpdate } from '../utils/app-update-ui';
 
 const { Text } = Typography;
 
@@ -66,57 +67,7 @@ function UpdateNotificationActions({
 
   const applyUpdate = (e: MouseEvent) => {
     e.stopPropagation();
-    const modalTokens = getThemeTokens(configTheme);
-    modal.confirm({
-      title: t('settings.updateApplyConfirm'),
-      content: t('settings.updateApplyDesc'),
-      okText: t('settings.updateApply'),
-      cancelText: t('settings.cancel'),
-      centered: true,
-      styles: {
-        mask: { backdropFilter: 'blur(4px)' },
-        content: {
-          background: modalTokens.bg.surface,
-          borderRadius: 12,
-          border: `1px solid ${modalTokens.border.default}`,
-          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-          padding: '20px 24px',
-        },
-        header: { background: 'transparent', borderBottom: 'none', padding: 0, marginBottom: 8 },
-        body: { padding: 0, color: modalTokens.text.secondary },
-        footer: { borderTop: 'none', marginTop: 16, padding: 0 },
-      },
-      onOk: async () => {
-        const client = useGatewayStore.getState().client;
-        if (!client?.isConnected) {
-          message.warning(t('settings.updateNeedConnection'));
-          return Promise.reject(new Error('offline'));
-        }
-        try {
-          const r = await client.request<{ ok: boolean; log?: string }>('rc.app.wentor_install', {});
-          modal.success({
-            title: t('settings.updateApplySuccess'),
-            width: 560,
-            content: (
-              <pre
-                style={{
-                  maxHeight: 320,
-                  overflow: 'auto',
-                  fontSize: 11,
-                  margin: 0,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {r.log ?? ''}
-              </pre>
-            ),
-          });
-        } catch (err) {
-          message.error(err instanceof Error ? err.message : t('settings.updateApplyFailed'));
-        }
-      },
-    });
+    confirmApplyAppUpdate({ modal, message, theme: configTheme, t });
   };
 
   return (

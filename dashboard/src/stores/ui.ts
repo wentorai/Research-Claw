@@ -41,6 +41,8 @@ const PANEL_OPEN_STORAGE = 'rc-right-panel-open';
 const LEFT_NAV_COLLAPSED_STORAGE = 'rc-left-nav-collapsed';
 const SHOW_SYSTEM_FILES_STORAGE = 'rc-show-system-files';
 const CRON_FOLD_STORAGE = 'rc-cron-sessions-folded';
+const APP_UPDATE_LAST_CHECK_STORAGE = 'rc-app-update-last-check-at';
+const APP_UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
 const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'extensions', 'settings']);
 
@@ -112,6 +114,25 @@ function saveNotifications(notifications: Notification[]): void {
       JSON.stringify(notifications.slice(0, MAX_NOTIFICATIONS)),
     );
   } catch { /* storage full — non-fatal */ }
+}
+
+function loadLastAppUpdateCheckAt(): number | null {
+  try {
+    const raw = sessionStorage.getItem(APP_UPDATE_LAST_CHECK_STORAGE);
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastAppUpdateCheckAt(timestamp: number): void {
+  try {
+    sessionStorage.setItem(APP_UPDATE_LAST_CHECK_STORAGE, String(timestamp));
+  } catch {
+    /* storage unavailable — non-fatal */
+  }
 }
 
 /** Sort notifications by timestamp descending (newest first). Direct string comparison — ISO 8601 is lexicographically sortable. */
@@ -353,6 +374,12 @@ export const useUiStore = create<UiState>()((set, get) => ({
       if (r === undefined) {
         const client = useGatewayStore.getState().client;
         if (!client?.isConnected) return;
+        const now = Date.now();
+        const lastCheckedAt = loadLastAppUpdateCheckAt();
+        if (lastCheckedAt && now - lastCheckedAt < APP_UPDATE_CHECK_INTERVAL_MS) {
+          return;
+        }
+        saveLastAppUpdateCheckAt(now);
         r = await client.request<CheckUpdatesPayload>('rc.app.check_updates', {});
       }
       if (!r || typeof r.current !== 'string') return;
