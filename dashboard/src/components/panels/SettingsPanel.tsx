@@ -11,7 +11,7 @@ import {
   Spin,
   Typography,
 } from 'antd';
-import { CopyOutlined, KeyOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CloudDownloadOutlined, CopyOutlined, KeyOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons';
 import OAuthModal from '../OAuthModal';
 import ProviderPickerModal, { providerLabel } from '../providers/ProviderPickerModal';
 import { useTranslation } from 'react-i18next';
@@ -28,6 +28,7 @@ import {
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
 import { isOAuthProvider } from '../../utils/oauth-providers';
 import { RC_VERSION } from '../../version';
+import type { CheckUpdatesPayload } from '@/types/app-updates';
 
 const { Text } = Typography;
 
@@ -77,6 +78,8 @@ function AboutSection() {
   const tokens = useMemo(() => getThemeTokens(configTheme), [configTheme]);
   const [restarting, setRestarting] = useState(false);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<CheckUpdatesPayload | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
 
   // Reset restarting state when gateway reconnects with fresh config
   const gatewayConfigForReset = useConfigStore((s) => s.gatewayConfig);
@@ -87,6 +90,105 @@ function AboutSection() {
       if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
     }
   }, [gatewayConfigForReset, restarting]);
+
+  const runCheckUpdates = useCallback(async () => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) {
+      message.warning(t('settings.updateNeedConnection'));
+      return;
+    }
+    setUpdateChecking(true);
+    let payload: CheckUpdatesPayload | null = null;
+    try {
+      const r = await client.request<CheckUpdatesPayload>('rc.app.check_updates', {});
+      if (!r || typeof r.current !== 'string') {
+        setUpdateInfo(null);
+        return;
+      }
+      payload = r;
+      setUpdateInfo(r);
+      if (r.error) {
+        message.warning(r.error);
+      } else if (r.upToDate) {
+        message.success(t('settings.updateUpToDate'));
+      } else {
+        message.info(
+          t('settings.updateAvailable', { current: r.current, latest: r.latest ?? '?' }),
+        );
+      }
+    } catch {
+      message.error(t('settings.updateCheckFailed'));
+      setUpdateInfo(null);
+    } finally {
+      setUpdateChecking(false);
+      if (payload) void useUiStore.getState().maybeNotifyAppUpdate(payload);
+    }
+  }, [message, t]);
+
+  const handleCopyUpdateCommands = async () => {
+    const hint = updateInfo?.shellUpdateHint;
+    if (!hint) return;
+    try {
+      await navigator.clipboard.writeText(hint);
+      message.success(t('settings.updateCommandsCopied'));
+    } catch {
+      message.error(t('settings.copyFailed'));
+    }
+  };
+
+  const handleApplyUpdate = () => {
+    const modalTokens = getThemeTokens(configTheme);
+    modal.confirm({
+      title: t('settings.updateApplyConfirm'),
+      content: t('settings.updateApplyDesc'),
+      okText: t('settings.updateApply'),
+      cancelText: t('settings.cancel'),
+      centered: true,
+      styles: {
+        mask: { backdropFilter: 'blur(4px)' },
+        content: {
+          background: modalTokens.bg.surface,
+          borderRadius: 12,
+          border: `1px solid ${modalTokens.border.default}`,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          padding: '20px 24px',
+        },
+        header: { background: 'transparent', borderBottom: 'none', padding: 0, marginBottom: 8 },
+        body: { padding: 0, color: modalTokens.text.secondary },
+        footer: { borderTop: 'none', marginTop: 16, padding: 0 },
+      },
+      onOk: async () => {
+        const client = useGatewayStore.getState().client;
+        if (!client?.isConnected) {
+          message.warning(t('settings.updateNeedConnection'));
+          return Promise.reject(new Error('offline'));
+        }
+        try {
+          const r = await client.request<{ ok: boolean; log?: string }>('rc.app.apply_update', {});
+          modal.success({
+            title: t('settings.updateApplySuccess'),
+            width: 560,
+            content: (
+              <pre
+                style={{
+                  maxHeight: 320,
+                  overflow: 'auto',
+                  fontSize: 11,
+                  margin: 0,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {r.log ?? ''}
+              </pre>
+            ),
+          });
+        } catch (e) {
+          message.error(e instanceof Error ? e.message : t('settings.updateApplyFailed'));
+        }
+      },
+    });
+  };
 
   const handleCopyDiagnostics = async () => {
     const diagnostics = [
@@ -195,10 +297,34 @@ function AboutSection() {
               letterSpacing: 1,
             }}
           >
-            Research-Claw v{RC_VERSION}
+            {t('settings.aboutVersion', { version: RC_VERSION })}
           </span>
         </a>
       </div>
+
+      {updateInfo && !updateInfo.error && (
+        <Text
+          style={{
+            fontSize: 12,
+            color: tokens.text.muted,
+            display: 'block',
+            textAlign: 'center',
+            marginBottom: 8,
+          }}
+        >
+          {updateInfo.upToDate
+            ? t('settings.updateStatusCurrent', { latest: updateInfo.latest ?? '—' })
+            : t('settings.updateStatusNew', {
+                current: updateInfo.current,
+                latest: updateInfo.latest ?? '—',
+              })}
+        </Text>
+      )}
+      {updateInfo?.error && (
+        <Text type="warning" style={{ fontSize: 12, display: 'block', textAlign: 'center', marginBottom: 8 }}>
+          {t('settings.updateCheckPartial')}: {updateInfo.error}
+        </Text>
+      )}
 
       {infoRows.map((row) => (
         <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13 }}>
@@ -225,10 +351,42 @@ function AboutSection() {
       <Divider style={{ margin: '12px 0 8px' }} />
 
       <Button
+        icon={<ReloadOutlined />}
+        size="small"
+        loading={updateChecking}
+        onClick={runCheckUpdates}
+        block
+      >
+        {t('settings.updateCheck')}
+      </Button>
+
+      <Button
+        icon={<CopyOutlined />}
+        size="small"
+        onClick={handleCopyUpdateCommands}
+        disabled={!updateInfo?.shellUpdateHint}
+        block
+        style={{ marginTop: 8 }}
+      >
+        {t('settings.updateCopyCommands')}
+      </Button>
+
+      <Button
+        icon={<CloudDownloadOutlined />}
+        size="small"
+        onClick={handleApplyUpdate}
+        block
+        style={{ marginTop: 8 }}
+      >
+        {t('settings.updateApply')}
+      </Button>
+
+      <Button
         icon={<CopyOutlined />}
         size="small"
         onClick={handleCopyDiagnostics}
         block
+        style={{ marginTop: 8 }}
       >
         {t('settings.aboutDiagnostics')}
       </Button>

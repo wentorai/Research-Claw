@@ -78,6 +78,10 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         useConfigStore.setState({ _configRetryCount: 0 });
         // Auto-fetch config on every (re)connection
         useConfigStore.getState().loadGatewayConfig();
+        // GitHub version check -> notification bell when a newer release exists
+        void import('./ui').then(({ useUiStore }) => {
+          void useUiStore.getState().maybeNotifyAppUpdate();
+        });
         // TODO: Enable sessions.subscribe when OC baseline is upgraded past v2026.3.13.
         // sessions.subscribe was added to OC main in commit 7b61ca1b06 (2026-03-18)
         // but is not in the v2026.3.13 npm dist we currently pin. Calling it produces

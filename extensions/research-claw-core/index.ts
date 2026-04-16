@@ -6,8 +6,8 @@
  *
  * Registration totals:
  *   - 40 agent tools (17 literature + 10 task + 7 workspace + 5 monitor + 1 skill_search)
- *   - 79 WS RPC methods + 1 HTTP route = 80 interface methods
- *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* = 79 WS; POST /rc/upload = 1 HTTP)
+ *   - 82 WS RPC methods + 1 HTTP route = 83 interface methods
+ *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* = 82 WS; POST /rc/upload = 1 HTTP)
  *   - 10 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×3, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  */
@@ -38,6 +38,7 @@ import { registerPptRpc } from './src/ppt/rpc.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
+import { checkUpdates, applyUpdate, runWentorInstall } from './src/app-updates.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -670,6 +671,17 @@ const plugin: PluginDefinition = {
         return result;
       }
     });
+
+    // App updates — GitHub release vs local package.json; optional pull + build (Settings → About)
+    registerMethod('rc.app.check_updates', () => {
+      const repoRoot = api.resolvePath('.');
+      return checkUpdates(repoRoot);
+    });
+    registerMethod('rc.app.apply_update', () => {
+      const repoRoot = api.resolvePath('.');
+      return applyUpdate(repoRoot, api.logger);
+    });
+    registerMethod('rc.app.wentor_install', () => runWentorInstall(api.logger));
 
     // ── 6. Register HTTP route: POST /rc/upload ──────────────────────
     api.registerHttpRoute({

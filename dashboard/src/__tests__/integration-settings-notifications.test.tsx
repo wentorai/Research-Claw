@@ -2,7 +2,7 @@
  * Integration Tests: Issues 6, 7, 8
  *
  * Issue 6: Settings save confirmation dialog (Modal.confirm before config.apply)
- * Issue 7: Version (from root package.json) + glow header + GitHub link
+ * Issue 7: Version header + glow + GitHub link + update check RPC
  * Issue 8: Notification system (Channel A polling, Channel B card extraction, dedup, read persistence)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -19,9 +19,17 @@ vi.mock('antd', async () => {
   // App.useApp() must return theme-aware modal/message instances
   const MockApp = Object.assign(
     (props: Record<string, unknown>) => (actual.App as unknown as (p: unknown) => unknown)(props),
-    { ...actual.App, useApp: () => ({
-      modal: { confirm: (...args: unknown[]) => mockModalConfirm(...args) },
-      message: { success: mockMessageSuccess, error: mockMessageError },
+    { ...actual.App,     useApp: () => ({
+      modal: {
+        confirm: (...args: unknown[]) => mockModalConfirm(...args),
+        success: vi.fn(),
+      },
+      message: {
+        success: mockMessageSuccess,
+        error: mockMessageError,
+        warning: vi.fn(),
+        info: vi.fn(),
+      },
       notification: {},
     }) },
   );
@@ -32,8 +40,15 @@ vi.mock('antd', async () => {
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, opts?: Record<string, unknown>) => {
+      if (key === 'settings.aboutVersion' && opts && 'version' in opts) {
+        return `Research-Claw v${String(opts.version)}`;
+      }
       if (opts && 'version' in opts) return key.replace('{{version}}', String(opts.version));
       if (opts && 'count' in opts) return `${key}:${opts.count}`;
+      if (opts && 'current' in opts && 'latest' in opts) {
+        return `${key}:${String(opts.current)}:${String(opts.latest)}`;
+      }
+      if (opts && 'latest' in opts) return `${key}:${String(opts.latest)}`;
       return key;
     },
     i18n: { changeLanguage: vi.fn() },
@@ -47,6 +62,19 @@ import { useUiStore } from '../stores/ui';
 import { useGatewayStore } from '../stores/gateway';
 import { useConfigStore } from '../stores/config';
 import { useChatStore } from '../stores/chat';
+
+function stubCheckUpdatesResponse() {
+  return {
+    current: RC_VERSION,
+    latest: RC_VERSION,
+    latestTag: `v${RC_VERSION}`,
+    upToDate: true as const,
+    releaseUrl: 'https://github.com/wentorai/Research-Claw/releases',
+    publishedAt: null,
+    repoRoot: '/tmp/research-claw',
+    shellUpdateHint: "cd '/tmp/research-claw' && git pull --ff-only && pnpm install && pnpm build",
+  };
+}
 
 // --- Helpers ---
 
@@ -86,8 +114,9 @@ function minimalGatewayConfig() {
 beforeEach(() => {
   mockModalConfirm.mockReset();
 
-  // Reset localStorage
+  // Reset localStorage + sessionStorage (About auto-update check uses sessionStorage)
   localStorage.clear();
+  sessionStorage.clear();
 
   // Reset stores to default state
   useGatewayStore.setState({
@@ -136,9 +165,9 @@ afterEach(() => {
 
 describe('Issue 6: Settings save confirmation dialog', () => {
   it('shows Modal.confirm when save button is clicked', async () => {
-    const mockRequest = vi.fn().mockResolvedValue({
-      config: minimalGatewayConfig(),
-      hash: 'abc123',
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
+      return Promise.resolve({ config: minimalGatewayConfig(), hash: 'abc123' });
     });
 
     useGatewayStore.setState({
@@ -176,9 +205,9 @@ describe('Issue 6: Settings save confirmation dialog', () => {
   });
 
   it('does NOT call config.apply before user confirms the dialog', async () => {
-    const mockRequest = vi.fn().mockResolvedValue({
-      config: minimalGatewayConfig(),
-      hash: 'abc123',
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
+      return Promise.resolve({ config: minimalGatewayConfig(), hash: 'abc123' });
     });
 
     useGatewayStore.setState({
@@ -207,6 +236,7 @@ describe('Issue 6: Settings save confirmation dialog', () => {
 
   it('calls config.apply after user confirms the dialog', async () => {
     const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
       if (method === 'config.get') {
         return Promise.resolve({
           config: minimalGatewayConfig(),
@@ -268,10 +298,13 @@ describe('Issue 6: Settings save confirmation dialog', () => {
 
 describe('Issue 7: Version and GitHub link', () => {
   const expectedVersionText = `Research-Claw v${RC_VERSION}`;
-
   beforeEach(() => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
+      return Promise.resolve({});
+    });
     useGatewayStore.setState({
-      client: createMockClient(),
+      client: createMockClient(mockRequest),
       state: 'connected',
       serverVersion: '0.5.8',
     });
@@ -332,7 +365,6 @@ describe('Issue 7: Version and GitHub link', () => {
     const versionHeader = screen.getByText(expectedVersionText);
     expect(versionHeader).toBeInTheDocument();
 
-    // The version header should be styled with the red glow color
     const parentLink = versionHeader.closest('a');
     expect(parentLink).not.toBeNull();
     expect(parentLink!.getAttribute('href')).toBe('https://github.com/wentorai/Research-Claw');

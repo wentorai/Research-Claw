@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { useMemo, useState } from 'react';
-import { Badge, Button, Dropdown, Empty, Typography } from 'antd';
+import { App, Badge, Button, Dropdown, Empty, Typography } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -10,9 +10,11 @@ import {
   WarningOutlined,
   InfoCircleOutlined,
   CheckOutlined,
+  CloudDownloadOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUiStore } from '../stores/ui';
+import { useGatewayStore } from '../stores/gateway';
 import { useSessionsStore } from '../stores/sessions';
 import { normalizeSessionKey } from '../utils/session-key';
 import { useConfigStore } from '../stores/config';
@@ -34,7 +36,105 @@ function getNotificationIcon(type: AppNotification['type'], tokens: ReturnType<t
       return <InfoCircleOutlined style={{ color: tokens.accent.blue }} />;
     case 'error':
       return <WarningOutlined style={{ color: tokens.accent.red }} />;
+    case 'update':
+      return <CloudDownloadOutlined style={{ color: tokens.accent.blue }} />;
+    default:
+      return <InfoCircleOutlined style={{ color: tokens.accent.blue }} />;
   }
+}
+
+function UpdateNotificationActions({
+  meta,
+}: {
+  meta: NonNullable<AppNotification['updateMeta']>;
+}) {
+  const { t } = useTranslation();
+  const { modal, message } = App.useApp();
+  const configTheme = useConfigStore((s) => s.theme);
+
+  const copyHint = async (e: MouseEvent) => {
+    e.stopPropagation();
+    const hint = meta.shellHint;
+    if (!hint) return;
+    try {
+      await navigator.clipboard.writeText(hint);
+      message.success(t('settings.updateCommandsCopied'));
+    } catch {
+      message.error(t('settings.copyFailed'));
+    }
+  };
+
+  const applyUpdate = (e: MouseEvent) => {
+    e.stopPropagation();
+    const modalTokens = getThemeTokens(configTheme);
+    modal.confirm({
+      title: t('settings.updateApplyConfirm'),
+      content: t('settings.updateApplyDesc'),
+      okText: t('settings.updateApply'),
+      cancelText: t('settings.cancel'),
+      centered: true,
+      styles: {
+        mask: { backdropFilter: 'blur(4px)' },
+        content: {
+          background: modalTokens.bg.surface,
+          borderRadius: 12,
+          border: `1px solid ${modalTokens.border.default}`,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          padding: '20px 24px',
+        },
+        header: { background: 'transparent', borderBottom: 'none', padding: 0, marginBottom: 8 },
+        body: { padding: 0, color: modalTokens.text.secondary },
+        footer: { borderTop: 'none', marginTop: 16, padding: 0 },
+      },
+      onOk: async () => {
+        const client = useGatewayStore.getState().client;
+        if (!client?.isConnected) {
+          message.warning(t('settings.updateNeedConnection'));
+          return Promise.reject(new Error('offline'));
+        }
+        try {
+          const r = await client.request<{ ok: boolean; log?: string }>('rc.app.wentor_install', {});
+          modal.success({
+            title: t('settings.updateApplySuccess'),
+            width: 560,
+            content: (
+              <pre
+                style={{
+                  maxHeight: 320,
+                  overflow: 'auto',
+                  fontSize: 11,
+                  margin: 0,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {r.log ?? ''}
+              </pre>
+            ),
+          });
+        } catch (err) {
+          message.error(err instanceof Error ? err.message : t('settings.updateApplyFailed'));
+        }
+      },
+    });
+  };
+
+  return (
+    <div
+      role="group"
+      aria-label={t('notification.updateTitle', { latest: meta.latest })}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}
+    >
+      <Button size="small" onClick={(e) => void copyHint(e)} disabled={!meta.shellHint}>
+        {t('notification.updateCopyCommand')}
+      </Button>
+      <Button size="small" type="primary" onClick={applyUpdate}>
+        {t('notification.updateApplyShort')}
+      </Button>
+    </div>
+  );
 }
 
 function NotificationItem({
@@ -153,6 +253,9 @@ function NotificationItem({
               {item.body}
             </ReactMarkdown>
           </div>
+        )}
+        {item.type === 'update' && item.updateMeta && (
+          <UpdateNotificationActions meta={item.updateMeta} />
         )}
         <Text
           style={{
