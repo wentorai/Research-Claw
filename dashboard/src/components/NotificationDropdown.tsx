@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { useMemo, useState } from 'react';
-import { Badge, Button, Dropdown, Empty, Typography } from 'antd';
+import { App, Badge, Button, Dropdown, Empty, Typography } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -10,15 +10,18 @@ import {
   WarningOutlined,
   InfoCircleOutlined,
   CheckOutlined,
+  CloudDownloadOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUiStore } from '../stores/ui';
+import { useGatewayStore } from '../stores/gateway';
 import { useSessionsStore } from '../stores/sessions';
 import { normalizeSessionKey } from '../utils/session-key';
 import { useConfigStore } from '../stores/config';
 import { getThemeTokens } from '../styles/theme';
 import { relativeTime } from '../utils/relativeTime';
 import type { Notification as AppNotification } from '../stores/ui';
+import { confirmApplyAppUpdate } from '../utils/app-update-ui';
 
 const { Text } = Typography;
 
@@ -34,7 +37,57 @@ function getNotificationIcon(type: AppNotification['type'], tokens: ReturnType<t
       return <InfoCircleOutlined style={{ color: tokens.accent.blue }} />;
     case 'error':
       return <WarningOutlined style={{ color: tokens.accent.red }} />;
+    case 'update':
+      return <CloudDownloadOutlined style={{ color: tokens.accent.blue }} />;
+    default:
+      return <InfoCircleOutlined style={{ color: tokens.accent.blue }} />;
   }
+}
+
+function UpdateNotificationActions({
+  meta,
+}: {
+  meta: NonNullable<AppNotification['updateMeta']>;
+}) {
+  const { t } = useTranslation();
+  const { modal, message } = App.useApp();
+  const configTheme = useConfigStore((s) => s.theme);
+  const appUpdateRunning = useUiStore((s) => s.appUpdateRunning);
+
+  const copyHint = async (e: MouseEvent) => {
+    e.stopPropagation();
+    const hint = meta.shellHint;
+    if (!hint) return;
+    try {
+      await navigator.clipboard.writeText(hint);
+      message.success(t('settings.updateCommandsCopied'));
+    } catch {
+      message.error(t('settings.copyFailed'));
+    }
+  };
+
+  const applyUpdate = (e: MouseEvent) => {
+    e.stopPropagation();
+    if (appUpdateRunning) return;
+    confirmApplyAppUpdate({ modal, message, theme: configTheme, t });
+  };
+
+  return (
+    <div
+      role="group"
+      aria-label={t('notification.updateTitle', { latest: meta.latest })}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}
+    >
+      <Button size="small" onClick={(e) => void copyHint(e)} disabled={!meta.shellHint}>
+        {t('notification.updateCopyCommand')}
+      </Button>
+      <Button size="small" type="primary" onClick={applyUpdate} loading={appUpdateRunning} disabled={appUpdateRunning}>
+        {t('notification.updateApplyShort')}
+      </Button>
+    </div>
+  );
 }
 
 function NotificationItem({
@@ -153,6 +206,9 @@ function NotificationItem({
               {item.body}
             </ReactMarkdown>
           </div>
+        )}
+        {item.type === 'update' && item.updateMeta && (
+          <UpdateNotificationActions meta={item.updateMeta} />
         )}
         <Text
           style={{

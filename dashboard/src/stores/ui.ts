@@ -1,13 +1,17 @@
 import { create } from 'zustand';
+import i18n from '../i18n';
+import type { CheckUpdatesPayload } from '../types/app-updates';
 import { useGatewayStore } from './gateway';
 
 export type PanelTab = 'library' | 'workspace' | 'tasks' | 'monitor' | 'extensions' | 'settings';
 
 export type AgentStatus = 'idle' | 'thinking' | 'tool_running' | 'streaming' | 'error' | 'disconnected';
 
+const NOTIFICATION_TYPES = new Set<string>(['deadline', 'heartbeat', 'system', 'error', 'update']);
+
 export interface Notification {
   id: string;
-  type: 'deadline' | 'heartbeat' | 'system' | 'error';
+  type: 'deadline' | 'heartbeat' | 'system' | 'error' | 'update';
   title: string;
   body?: string;
   timestamp: string;
@@ -17,6 +21,13 @@ export interface Notification {
   dedupKey?: string;
   /** Session key to navigate to when the notification is clicked (Layer 2, #33). */
   targetSessionKey?: string;
+  /** When type is `update` — persisted for actions in the notification dropdown. */
+  updateMeta?: {
+    current: string;
+    latest: string;
+    releaseUrl: string | null;
+    shellHint?: string;
+  };
 }
 
 // ── Persist notification + read state across refreshes via localStorage ──
@@ -30,6 +41,8 @@ const PANEL_OPEN_STORAGE = 'rc-right-panel-open';
 const LEFT_NAV_COLLAPSED_STORAGE = 'rc-left-nav-collapsed';
 const SHOW_SYSTEM_FILES_STORAGE = 'rc-show-system-files';
 const CRON_FOLD_STORAGE = 'rc-cron-sessions-folded';
+const APP_UPDATE_LAST_CHECK_STORAGE = 'rc-app-update-last-check-at';
+const APP_UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
 const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'extensions', 'settings']);
 
@@ -71,6 +84,15 @@ function saveReadKeys(keys: Set<string>): void {
   } catch { /* storage full — non-fatal */ }
 }
 
+function normalizeLoadedNotification(n: Notification): Notification {
+  const type = NOTIFICATION_TYPES.has(n.type) ? n.type : 'system';
+  if (type !== 'update') {
+    const { updateMeta: _u, ...rest } = n;
+    return { ...rest, type };
+  }
+  return { ...n, type };
+}
+
 function loadNotifications(): Notification[] {
   try {
     const raw = localStorage.getItem(NOTIFICATIONS_STORAGE);
@@ -78,7 +100,7 @@ function loadNotifications(): Notification[] {
       const arr = JSON.parse(raw) as Notification[];
       // Validate: must be array of objects with required fields
       if (Array.isArray(arr) && arr.every((n) => n && typeof n === 'object' && n.id && n.timestamp && n.title)) {
-        return arr.slice(0, MAX_NOTIFICATIONS);
+        return arr.slice(0, MAX_NOTIFICATIONS).map((n) => normalizeLoadedNotification(n as Notification));
       }
     }
   } catch { /* ignore corrupt data */ }
@@ -92,6 +114,25 @@ function saveNotifications(notifications: Notification[]): void {
       JSON.stringify(notifications.slice(0, MAX_NOTIFICATIONS)),
     );
   } catch { /* storage full — non-fatal */ }
+}
+
+function loadLastAppUpdateCheckAt(): number | null {
+  try {
+    const raw = sessionStorage.getItem(APP_UPDATE_LAST_CHECK_STORAGE);
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastAppUpdateCheckAt(timestamp: number): void {
+  try {
+    sessionStorage.setItem(APP_UPDATE_LAST_CHECK_STORAGE, String(timestamp));
+  } catch {
+    /* storage unavailable — non-fatal */
+  }
 }
 
 /** Sort notifications by timestamp descending (newest first). Direct string comparison — ISO 8601 is lexicographically sortable. */
@@ -119,6 +160,12 @@ interface UiState {
   /** Whether cron sessions are folded in the session list (Layer 3, #33). */
   cronSessionsFolded: boolean;
 
+  /** Last check_updates result — shared between gateway auto-check and Settings → About. */
+  appUpdateInfo: CheckUpdatesPayload | null;
+
+  /** True while rc.app.apply_update is in progress — locks the update button across components. */
+  appUpdateRunning: boolean;
+
   setRightPanelTab: (tab: PanelTab) => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
@@ -132,6 +179,13 @@ interface UiState {
   clearNotifications: () => void;
   /** Poll rc.notifications.pending for overdue/upcoming tasks. */
   checkNotifications: () => Promise<void>;
+  /**
+   * Compare local version to GitHub; enqueue a notification when an update exists.
+   * Called after gateway hello. Pass `preloaded` from Settings → About to avoid a second RPC.
+   */
+  maybeNotifyAppUpdate: (preloaded?: CheckUpdatesPayload | null) => Promise<void>;
+  setAppUpdateInfo: (info: CheckUpdatesPayload | null) => void;
+  setAppUpdateRunning: (running: boolean) => void;
   triggerWorkspaceRefresh: () => void;
   requestWorkspacePreview: (path: string) => void;
   clearPendingPreview: () => void;
@@ -153,6 +207,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
   pendingPreviewPath: null,
   showSystemFiles: loadBoolean(SHOW_SYSTEM_FILES_STORAGE, false),
   cronSessionsFolded: loadBoolean(CRON_FOLD_STORAGE, true),
+  appUpdateInfo: null,
+  appUpdateRunning: false,
 
   setRightPanelTab: (tab: PanelTab) => {
     try { localStorage.setItem(PANEL_TAB_STORAGE, tab); } catch { /* non-fatal */ }
@@ -321,4 +377,74 @@ export const useUiStore = create<UiState>()((set, get) => ({
       // Non-fatal — notification check failure should not disrupt the UI
     }
   },
+
+  setAppUpdateInfo: (info: CheckUpdatesPayload | null) => {
+    set({ appUpdateInfo: info });
+  },
+
+  setAppUpdateRunning: (running: boolean) => {
+    set({ appUpdateRunning: running });
+  },
+
+  maybeNotifyAppUpdate: async (preloaded?: CheckUpdatesPayload | null) => {
+    try {
+      let r: CheckUpdatesPayload | undefined | null = preloaded;
+      if (r === undefined) {
+        const client = useGatewayStore.getState().client;
+        if (!client?.isConnected) return;
+        const now = Date.now();
+        const lastCheckedAt = loadLastAppUpdateCheckAt();
+        if (lastCheckedAt && now - lastCheckedAt < APP_UPDATE_CHECK_INTERVAL_MS) {
+          return;
+        }
+        saveLastAppUpdateCheckAt(now);
+        r = await client.request<CheckUpdatesPayload>('rc.app.check_updates', {});
+      }
+      if (!r || typeof r.current !== 'string') return;
+
+      // Share result with Settings → About section
+      set({ appUpdateInfo: r });
+
+      if (r.upToDate) {
+        set((s) => {
+          const next = s.notifications.filter(
+            (n) => !(n.type === 'update' && n.dedupKey?.startsWith('app-update:')),
+          );
+          saveNotifications(next);
+          const unreadCount = next.filter((n) => !n.read).length;
+          return { notifications: next, unreadCount };
+        });
+        return;
+      }
+
+      if (r.error) return;
+
+      const latest = r.latest?.trim() ?? '';
+      if (!latest) return;
+
+      get().addNotification({
+        type: 'update',
+        title: i18n.t('notification.updateTitle', { latest }),
+        body: i18n.t('notification.updateBody', {
+          current: r.current,
+          latest,
+          link: r.releaseUrl || 'https://github.com/wentorai/Research-Claw/releases',
+        }),
+        dedupKey: `app-update:${latest}`,
+        updateMeta: {
+          current: r.current,
+          latest,
+          releaseUrl: r.releaseUrl,
+          shellHint: r.shellUpdateHint,
+        },
+      });
+    } catch {
+      /* non-fatal */
+    }
+  },
 }));
+
+// Dev-only: expose store on window for console debugging
+if (import.meta.env.DEV) {
+  (window as unknown as Record<string, unknown>).__RC_UI__ = useUiStore;
+}
