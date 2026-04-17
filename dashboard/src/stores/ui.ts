@@ -3,7 +3,7 @@ import i18n from '../i18n';
 import type { CheckUpdatesPayload } from '../types/app-updates';
 import { useGatewayStore } from './gateway';
 
-export type PanelTab = 'library' | 'workspace' | 'tasks' | 'monitor' | 'extensions' | 'settings';
+export type PanelTab = 'library' | 'workspace' | 'tasks' | 'monitor' | 'supervisor' | 'extensions' | 'settings';
 
 export type AgentStatus = 'idle' | 'thinking' | 'tool_running' | 'streaming' | 'error' | 'disconnected';
 
@@ -44,7 +44,7 @@ const CRON_FOLD_STORAGE = 'rc-cron-sessions-folded';
 const APP_UPDATE_LAST_CHECK_STORAGE = 'rc-app-update-last-check-at';
 const APP_UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
-const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'extensions', 'settings']);
+const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'supervisor', 'extensions', 'settings']);
 
 function loadPanelTab(): PanelTab {
   try {

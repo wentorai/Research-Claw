@@ -76,12 +76,14 @@
     "allow": [
       "research-claw-core",
       "research-plugins",
-      "openclaw-weixin"
+      "openclaw-weixin",
+      "dual-model-supervisor"
     ],
     "load": {
       "paths": [
         "./extensions/research-claw-core",
-        "./extensions/openclaw-weixin"
+        "./extensions/openclaw-weixin",
+        "./extensions/dual-model-supervisor"
       ]
     },
     "entries": {
@@ -97,6 +99,37 @@
       },
       "openclaw-weixin": {
         "enabled": true
+      },
+      "dual-model-supervisor": {
+        "enabled": true,
+        "config": {
+          "enabled": true,
+          "supervisorModel": "",
+          "reviewMode": "full",
+          "appendReviewToChannelOutput": true,
+          "memoryGuard": {
+            "enabled": true,
+            "keyCategories": [
+              "research_goal",
+              "key_conclusion",
+              "user_preference",
+              "methodology_decision"
+            ]
+          },
+          "courseCorrection": {
+            "enabled": true,
+            "deviationThreshold": 0.5,
+            "forceRegenerate": false,
+            "maxRegenerateAttempts": 3
+          },
+          "highRiskTools": [
+            "exec",
+            "write",
+            "edit",
+            "send_notification",
+            "browser"
+          ]
+        }
       }
     }
   },
@@ -143,18 +176,35 @@
       "memory_search",
       "memory_get"
     ],
-    "sessions": {
-      "visibility": "all"
+    "web": {
+      "fetch": {
+        "ssrfPolicy": {
+          "hostnameAllowlist": [
+            "*.arxiv.org",
+            "*.aclanthology.org",
+            "*.nature.com",
+            "*.stanford.edu",
+            "*.openalex.org",
+            "*.crossref.org",
+            "*.pubmed.ncbi.nlm.nih.gov",
+            "crfm.stanford.edu"
+          ],
+          "allowRfc2544BenchmarkRange": true
+        }
+      },
+      "sessions": {
+        "visibility": "all"
+      }
+    },
+    "commands": {
+      "native": "auto",
+      "nativeSkills": "auto",
+      "restart": true,
+      "ownerDisplay": "raw"
+    },
+    "channels": {},
+    "cron": {
+      "enabled": true
     }
-  },
-  "commands": {
-    "native": "auto",
-    "nativeSkills": "auto",
-    "restart": true,
-    "ownerDisplay": "raw"
-  },
-  "channels": {},
-  "cron": {
-    "enabled": true
   }
 }

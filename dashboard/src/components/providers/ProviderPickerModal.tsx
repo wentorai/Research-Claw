@@ -121,20 +121,37 @@ export default function ProviderPickerModal({
   open,
   value,
   title,
+  excludeProviderIds,
+  includeProviderIds,
   onSelect,
   onClose,
 }: {
   open: boolean;
   value: string;
   title: string;
+  excludeProviderIds?: string[];
+  includeProviderIds?: string[];
   onSelect: (providerId: string) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
 
+  const excludeSet = useMemo(() => new Set(excludeProviderIds ?? []), [excludeProviderIds]);
+  const includeSet = useMemo(
+    () => (includeProviderIds && includeProviderIds.length > 0 ? new Set(includeProviderIds) : null),
+    [includeProviderIds],
+  );
   const pickerIds = useMemo(() => new Set(providerIdsForPicker()), []);
-  const pickerPresets = useMemo(() => PROVIDER_PRESETS.filter((p) => pickerIds.has(p.id)), [pickerIds]);
+  const pickerPresets = useMemo(
+    () =>
+      PROVIDER_PRESETS.filter((p) => {
+        if (!pickerIds.has(p.id) || excludeSet.has(p.id)) return false;
+        if (includeSet && !includeSet.has(p.id)) return false;
+        return true;
+      }),
+    [pickerIds, excludeSet, includeSet],
+  );
 
   const presets = useMemo(() => {
     const q = normalize(query);

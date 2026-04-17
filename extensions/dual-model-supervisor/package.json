@@ -1,0 +1,44 @@
+{
+  "name": "@research-claw/dual-model-supervisor",
+  "version": "0.1.0",
+  "description": "Dual-model supervision: course correction, memory guarding, and safety filtering",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./supervisor-reviewer-providers": {
+      "types": "./dist/supervisor-reviewer-providers.d.ts",
+      "import": "./dist/supervisor-reviewer-providers.js",
+      "default": "./dist/supervisor-reviewer-providers.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.0"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  }
+}

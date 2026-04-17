@@ -62,6 +62,15 @@ export interface ConfigPatchInput {
    * These providers will be added only when absent in `currentConfig.models.providers`.
    */
   restoreProviders?: Record<string, { modelId: string; apiKey: string }>;
+
+  // ── Dual-model supervisor ──
+  supervisorEnabled?: boolean;
+  supervisorModel?: string;
+  supervisorReviewMode?: string;
+  supervisorAppendReviewToChannelOutput?: boolean;
+  supervisorDeviationThreshold?: number;
+  supervisorForceRegenerate?: boolean;
+  supervisorMaxRegenerateAttempts?: number;
 }
 
 export interface ExtractedConfig {
@@ -334,8 +343,8 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
   skills: { load: { extraDirs: ['./skills'] } },
   plugins: {
     enabled: true,
-    allow: ['research-claw-core', 'research-plugins', 'openclaw-weixin'],
-    load: { paths: ['./extensions/research-claw-core', './extensions/openclaw-weixin'] },
+    allow: ['research-claw-core', 'research-plugins', 'openclaw-weixin', 'dual-model-supervisor'],
+    load: { paths: ['./extensions/research-claw-core', './extensions/openclaw-weixin', './extensions/dual-model-supervisor'] },
     entries: {
       'research-claw-core': {
         enabled: true,
@@ -347,6 +356,25 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
         },
       },
       'openclaw-weixin': { enabled: true },
+      'dual-model-supervisor': {
+        enabled: true,
+        config: {
+          enabled: false,
+          supervisorModel: '',
+          reviewMode: 'off',
+          memoryGuard: {
+            enabled: true,
+            keyCategories: ['research_goal', 'key_conclusion', 'user_preference', 'methodology_decision'],
+          },
+          courseCorrection: {
+            enabled: true,
+            deviationThreshold: 0.5,
+            forceRegenerate: false,
+            maxRegenerateAttempts: 3,
+          },
+          highRiskTools: ['exec', 'write', 'edit', 'send_notification', 'browser'],
+        },
+      },
     },
   },
   tools: {
@@ -670,6 +698,51 @@ export function buildSaveConfig(
     };
   } else if (base.env !== undefined) {
     result.env = base.env;
+  }
+
+  // --- Dual-model supervisor plugin config ---
+  if (input.supervisorEnabled !== undefined || input.supervisorModel !== undefined) {
+    const existingPlugins = result.plugins as Record<string, unknown> | undefined;
+    const existingEntries = (existingPlugins?.entries as Record<string, unknown> | undefined) ?? {};
+    const existingSupervisorEntry = existingEntries['dual-model-supervisor'] as Record<string, unknown> | undefined;
+    const existingSupervisorConfig = (existingSupervisorEntry?.config as Record<string, unknown> | undefined) ?? {};
+
+    // Preserve existing supervisor config values when not explicitly overridden
+    const supervisorConfig: Record<string, unknown> = {
+      ...existingSupervisorConfig,
+      enabled: input.supervisorEnabled ?? (existingSupervisorConfig.enabled as boolean) ?? false,
+      supervisorModel: input.supervisorModel ?? (existingSupervisorConfig.supervisorModel as string) ?? '',
+      reviewMode: input.supervisorReviewMode ?? (existingSupervisorConfig.reviewMode as string) ?? 'off',
+      appendReviewToChannelOutput: input.supervisorAppendReviewToChannelOutput ?? (existingSupervisorConfig.appendReviewToChannelOutput as boolean) ?? true,
+    };
+
+    // Only override courseCorrection if any supervisor field is explicitly provided
+    if (input.supervisorDeviationThreshold !== undefined ||
+        input.supervisorForceRegenerate !== undefined ||
+        input.supervisorMaxRegenerateAttempts !== undefined) {
+      const existingCourseCorrection = (existingSupervisorConfig.courseCorrection as Record<string, unknown> | undefined) ?? {};
+      supervisorConfig.courseCorrection = {
+        ...existingCourseCorrection,
+        deviationThreshold: input.supervisorDeviationThreshold ?? (existingCourseCorrection.deviationThreshold as number) ?? 0.5,
+        forceRegenerate: input.supervisorForceRegenerate ?? (existingCourseCorrection.forceRegenerate as boolean) ?? false,
+        maxRegenerateAttempts: input.supervisorMaxRegenerateAttempts ?? (existingCourseCorrection.maxRegenerateAttempts as number) ?? 3,
+      };
+      // Enable courseCorrection when review mode is 'correct' or 'full'
+      (supervisorConfig.courseCorrection as Record<string, unknown>).enabled =
+        supervisorConfig.reviewMode === 'correct' || supervisorConfig.reviewMode === 'full';
+    }
+
+    result.plugins = {
+      ...existingPlugins,
+      entries: {
+        ...existingEntries,
+        'dual-model-supervisor': {
+          ...existingSupervisorEntry,
+          enabled: true,
+          config: supervisorConfig,
+        },
+      },
+    };
   }
 
   return result;
