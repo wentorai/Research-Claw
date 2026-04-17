@@ -159,8 +159,6 @@ export interface SessionState {
   pendingReviewFooter?: string;    // Cached review footer from llm_output (deprecated: for backward compat)
   pendingChannelReviewFooter?: string; // Cached channel-only review footer, waiting to be attached in message_sending when delivering to external channel
   lastReviewReport?: string;       // Most recent review report text (for Dashboard panel display)
-  needsRetroactivePatch?: boolean; // Flag: before_message_write fired before async review completed
-  retroactiveOriginalMessage?: string; // Original message saved for retroactive patch
 }
 
 // ── models.providers.* (aligned with Dashboard GatewayModelDef / openclaw.json) ──

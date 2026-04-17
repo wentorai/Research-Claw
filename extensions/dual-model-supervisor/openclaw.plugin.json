@@ -3,7 +3,7 @@
   "name": "Dual Model Supervisor",
   "version": "0.1.0",
   "description": "Dual-model supervision: course correction, memory guarding, and safety filtering",
-  "main": "dist/index.js",
+  "main": "index.ts",
   "configSchema": {
     "type": "object",
     "properties": {

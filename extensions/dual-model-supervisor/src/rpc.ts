@@ -68,7 +68,22 @@ export function registerSupervisorRpc(
   registerMethod('rc.supervisor.config', async (params) => {
     if (params && typeof params === 'object' && Object.keys(params).length > 0) {
       const current = getActiveConfig();
-      const updated = parseConfig({ ...current, ...params as Record<string, unknown> });
+      // Only accept known config keys — reject arbitrary params
+      const ALLOWED_KEYS = [
+        'enabled', 'supervisorModel', 'reviewMode',
+        'appendReviewToChannelOutput', 'memoryGuard',
+        'courseCorrection', 'highRiskTools',
+      ] as const;
+      const filtered: Record<string, unknown> = {};
+      for (const key of ALLOWED_KEYS) {
+        if (key in (params as Record<string, unknown>)) {
+          filtered[key] = (params as Record<string, unknown>)[key];
+        }
+      }
+      if (Object.keys(filtered).length === 0) {
+        return { ok: true, config: current };
+      }
+      const updated = parseConfig({ ...current, ...filtered });
       setActiveConfig(updated);
       logger.info(`Supervisor config updated: mode=${updated.reviewMode}, model=${updated.supervisorModel}`);
       return { ok: true, config: updated };
@@ -77,11 +92,12 @@ export function registerSupervisorRpc(
   });
 
   registerMethod('rc.supervisor.log', async (params) => {
-    const p = params as { limit?: number; offset?: number; sessionId?: string; type?: string; action?: string };
+    const p = params as { limit?: number; offset?: number; sessionId?: string; type?: import('./core/types.js').AuditLogType; action?: string };
     const entries = auditLog.list({
       limit: p.limit ?? 50,
       offset: p.offset ?? 0,
       sessionId: p.sessionId,
+      type: p.type,
       action: p.action,
     });
     return { entries, total: entries.length };

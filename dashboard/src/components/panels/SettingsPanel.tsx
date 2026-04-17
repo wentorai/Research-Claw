@@ -42,6 +42,11 @@ const SUPERVISOR_REVIEWER_PROVIDER_IDS = [
   'kimi-coding',
   'minimax',
   'minimax-cn',
+  'openai',
+  'anthropic',
+  'gemini',
+  'deepseek',
+  'qwen',
 ] as const;
 
 const { Text } = Typography;
@@ -450,8 +455,8 @@ export default function SettingsPanel() {
 
   // Sync supervisor state from plugin
   useEffect(() => {
-    if (supervisorStatus) {
-      setSupervisorEnabled(supervisorStatus.enabled);
+    if (supervisorConfig?.enabled !== undefined) {
+      setSupervisorEnabled(supervisorConfig.enabled);
     }
     if (supervisorConfig) {
       const model = supervisorConfig.supervisorModel;
@@ -505,7 +510,7 @@ export default function SettingsPanel() {
       setForceRegenerate(supervisorConfig.courseCorrection.forceRegenerate);
       setMaxRegenerateAttempts(supervisorConfig.courseCorrection.maxRegenerateAttempts);
     }
-  }, [supervisorStatus, supervisorConfig, gatewayConfig]);
+  }, [supervisorConfig, gatewayConfig]);
 
   // Load supervisor status on connect
   useEffect(() => {
@@ -619,9 +624,6 @@ export default function SettingsPanel() {
     const firstModel = preset.models[0]?.id ?? '';
     setSupervisorModelId(firstModel);
     setSupervisorModel(firstModel ? `${id}/${firstModel}` : '');
-    if (firstModel) {
-      useSupervisorStore.getState().updateConfig({ supervisorModel: `${id}/${firstModel}` });
-    }
     // Restore cached key state
     if (!id.startsWith('custom') && !deleteSupervisorApiKeyRef.current) {
       const cached = supervisorApiKeyCacheRef.current[id];
@@ -1556,7 +1558,6 @@ export default function SettingsPanel() {
           onChange={(v) => {
             const enabled = v === 'on';
             setSupervisorEnabled(enabled);
-            useSupervisorStore.getState().toggleSupervisor(enabled);
           }}
           options={[
             { label: 'OFF', value: 'off' },
@@ -1608,9 +1609,6 @@ export default function SettingsPanel() {
                   setSupervisorModelId(v);
                   const newRef = v ? `${supervisorProvider}/${v}` : '';
                   setSupervisorModel(newRef);
-                  if (newRef) {
-                    useSupervisorStore.getState().updateConfig({ supervisorModel: newRef });
-                  }
                 }}
                 options={supervisorModelOptions.length > 0 ? supervisorModelOptions : undefined}
                 allowClear
@@ -1637,9 +1635,6 @@ export default function SettingsPanel() {
                     setSupervisorModelId(v.slice(slashIdx + 1));
                   } else {
                     setSupervisorModelId(v);
-                  }
-                  if (v) {
-                    useSupervisorStore.getState().updateConfig({ supervisorModel: v });
                   }
                 }}
                 allowClear

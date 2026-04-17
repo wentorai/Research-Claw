@@ -54,6 +54,7 @@ let _activeConfig: SupervisorConfig | null = null;
 let _hookActiveSessionId: string | null = null;
 
 const _sessionStates = new Map<string, SessionState>();
+let _hooksDone = false;
 
 function getOrCreateSession(sessionId: string): SessionState {
   let state = _sessionStates.get(sessionId);
@@ -292,7 +293,9 @@ const plugin: PluginDefinition = {
       () => _extractConfiguredProviders(api.pluginConfig as Record<string, unknown> | undefined, globalCfg),
     );
 
-    // ── Register hooks ───────────────────────────────────────────
+    // ── Register hooks (guarded: only once across discovery + gateway passes) ──
+
+    if (!_hooksDone) {
 
     api.on('session_start', (ctx: unknown) => {
       const c = ctx as { sessionId?: string };
@@ -412,13 +415,9 @@ const plugin: PluginDefinition = {
       // Mirror sessionId so other hooks (before_message_write) can find it
       if (sessionId && sessionId !== _hookActiveSessionId) {
         _hookActiveSessionId = sessionId;
-        api.logger.info(`[DIAG] llm_output: Updated _hookActiveSessionId to ${sessionId}`);
       }
 
-      api.logger.info(`[DIAG] llm_output ENTERED. sessionId=${sessionId}, hasOutputText=${!!outputText}, outputLen=${outputText?.length ?? 0}, ctxKeys=${Object.keys(context).join(',')}`);
-
       if (!sessionId || !outputText) {
-        api.logger.info(`[DIAG] llm_output EARLY EXIT. sessionId=${sessionId}, hasOutputText=${!!outputText}`);
         return;
       }
 
@@ -434,31 +433,20 @@ const plugin: PluginDefinition = {
         // Review always runs (to record results for Dashboard panel), footer only when channel delivery is enabled
         if (!outputText.includes(SUPERVISOR_REVIEW_SUMMARY_MARKER)) {
           const shouldAttachToChannel = activeCfg.appendReviewToChannelOutput;
-          api.logger.info(`[DIAG] llm_output: Starting ASYNC review for session ${sessionId}. shouldAttachToChannel=${shouldAttachToChannel}`);
-          const reviewStartTime = Date.now();
           outputReviewer.reviewMessageSending(outputText, sessionId, state, {
             attachSummary: shouldAttachToChannel,
           }).then((modified) => {
-            const elapsed = Date.now() - reviewStartTime;
             if (modified !== null) {
               // Cache for channel delivery in message_sending hook
               state.pendingChannelReviewFooter = modified;
-              api.logger.info(`[DIAG] llm_output: ASYNC review COMPLETED in ${elapsed}ms. Channel footer cached (${modified.length} chars)`);
-            } else {
-              api.logger.info(`[DIAG] llm_output: ASYNC review returned null in ${elapsed}ms (no modification needed).`);
             }
           }).catch((err) => {
-            api.logger.error(`[DIAG] llm_output: ASYNC review FAILED: ${err instanceof Error ? err.message : String(err)}`);
+            api.logger.error(`[Supervisor] llm_output async review failed: ${err instanceof Error ? err.message : String(err)}`);
           });
-        } else {
-          api.logger.info(`[DIAG] llm_output: Skipped review. alreadyHasMarker=${outputText.includes(SUPERVISOR_REVIEW_SUMMARY_MARKER)}`);
         }
       } catch (err) {
-        api.logger.error(
-          `[DIAG] llm_output SYNC error: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        api.logger.error(`[Supervisor] llm_output error: ${err instanceof Error ? err.message : String(err)}`);
       }
-      api.logger.info(`[DIAG] llm_output EXITING (sync portion done)`);
     });
 
     // message_sending — append review footer ONLY when delivering through external channels.
@@ -468,15 +456,12 @@ const plugin: PluginDefinition = {
     api.on('message_sending', async (ctx: unknown) => {
       const activeCfg = _activeConfig ?? cfg;
       const context = ctx as { sessionId?: string; message?: string };
-      api.logger.info(`[DIAG] message_sending ENTERED. enabled=${activeCfg.enabled}, reviewMode=${activeCfg.reviewMode}, hasMessage=${!!context.message}, messageLen=${context.message?.length ?? 0}, sessionId=${context.sessionId ?? '(none)'}`);
 
       if (!isSupervisorActive(activeCfg)) {
-        api.logger.info(`[DIAG] message_sending EARLY EXIT: supervisor not active`);
         return {};
       }
 
       if (!context.message) {
-        api.logger.info(`[DIAG] message_sending EARLY EXIT: no message content`);
         return {};
       }
 
@@ -485,10 +470,8 @@ const plugin: PluginDefinition = {
       // Check if this is a channel delivery (Telegram/WeChat/Discord etc.)
       // Only append review footer when delivering through external channels
       const isChannelDelivery = snap.isChannelDelivery;
-      api.logger.info(`[DIAG] message_sending: isChannelDelivery=${isChannelDelivery}, channel=${JSON.stringify(snap.flags.channel)}, source=${JSON.stringify(snap.flags.source)}`);
 
       if (snap.deferReview) {
-        api.logger.info(`[DIAG] message_sending: deferReview=true (isFinal=${snap.flags.isFinal}, isDone=${snap.flags.done}, isComplete=${snap.flags.complete}), returning {}`);
         return {};
       }
 
@@ -497,10 +480,8 @@ const plugin: PluginDefinition = {
 
       // Only attach review footer when delivering through external channels
       if (!isChannelDelivery) {
-        api.logger.info(`[DIAG] message_sending: Not a channel delivery — skipping footer append. Dashboard users see review in Supervisor panel.`);
         // Clear any cached footer to prevent stale data
         if (state.pendingChannelReviewFooter) {
-          api.logger.info(`[DIAG] message_sending: Clearing cached channel footer (${state.pendingChannelReviewFooter.length} chars) — not needed for Dashboard delivery`);
           state.pendingChannelReviewFooter = undefined;
         }
         return {};
@@ -508,7 +489,6 @@ const plugin: PluginDefinition = {
 
       // Channel delivery — check for cached footer first
       if (state.pendingChannelReviewFooter) {
-        api.logger.info(`[DIAG] message_sending: Found CACHED channel footer (${state.pendingChannelReviewFooter.length} chars), returning { message: footer }`);
         const footer = state.pendingChannelReviewFooter;
         state.pendingChannelReviewFooter = undefined;
         return { message: footer };
@@ -516,23 +496,17 @@ const plugin: PluginDefinition = {
 
       // No cached footer — perform live review with footer for channel
       if (!activeCfg.appendReviewToChannelOutput) {
-        api.logger.info(`[DIAG] message_sending: appendReviewToChannelOutput=false, skipping footer for channel delivery`);
         return {};
       }
 
-      api.logger.info(`[DIAG] message_sending: No cached footer, performing LIVE review for channel delivery`);
-      const reviewStartTime = Date.now();
       const modified = await outputReviewer.reviewMessageSending(context.message, sessionId, state, {
         attachSummary: true,
       });
-      const elapsed = Date.now() - reviewStartTime;
 
       if (modified !== null) {
-        api.logger.info(`[DIAG] message_sending: LIVE review completed in ${elapsed}ms. Returning { message: modified } (${modified.length} chars)`);
         return { message: modified };
       }
 
-      api.logger.info(`[DIAG] message_sending: LIVE review returned null in ${elapsed}ms. Returning {}`);
       return {};
     });
 
@@ -564,7 +538,6 @@ const plugin: PluginDefinition = {
 
       // Ensure session state exists so llm_output's async callback can populate it
       getOrCreateSession(sessionId);
-      api.logger.info(`[DIAG] before_message_write: Session state ready for session ${sessionId}, review will be completed by llm_output async callback`);
 
       // Always return empty — we don't modify the message content in before_message_write
       return {};
@@ -658,6 +631,9 @@ const plugin: PluginDefinition = {
         _sessionStates.delete(context.sessionId);
       }
     });
+
+    _hooksDone = true;
+    } // end _hooksDone guard
 
     api.logger.info('Dual Model Supervisor registered (7 hooks + 6 RPC methods)');
   },

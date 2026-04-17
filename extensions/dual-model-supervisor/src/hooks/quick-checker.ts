@@ -8,7 +8,7 @@ const DANGEROUS_PATTERNS = [
   /\brm\s+-rf\s+\//i,
   /\bformat\s+[a-z]:/i,
   /\bdd\s+if=/i,
-  /\b:\(\)\{\s*:\|\:&\s*\}/,  // Fork bomb
+  /:\(\)\s*\{[^}]*:\s*\|\s*:&\s*\}/,  // Fork bomb: :(){ :|:& };:
 ];
 
 const PRIVACY_PATTERNS = [
