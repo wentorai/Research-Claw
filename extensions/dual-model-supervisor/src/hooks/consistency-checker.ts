@@ -13,6 +13,7 @@ import { isCourseCorrectionActive } from '../core/config.js';
 import { messageContentToPlainText, truncateMessagePlainText } from '../utils/message-content.js';
 import { buildSessionContextLines } from '../utils/session-context.js';
 import { findMatchingSummary } from '../utils/summary-matcher.js';
+import { validateConsistencyResult } from '../core/validators.js';
 
 export class ConsistencyChecker {
   private config: SupervisorConfig;
@@ -47,14 +48,16 @@ export class ConsistencyChecker {
       const conversationText = this._buildConversationContext(messages, sessionState);
       const contextParts = buildSessionContextLines(sessionState);
 
-      const userContent = contextParts.length > 0
+      const messagesText = contextParts.length > 0
         ? `## Session Context\n${contextParts.join('\n')}\n\n## Recent Messages\n${conversationText}`
         : conversationText;
+      const userContent = `<user_content>\n${messagesText}\n</user_content>`;
 
-      const result = await this.reviewerClient.review<ConsistencyCheckResult>(
+      const raw = await this.reviewerClient.review<Record<string, unknown>>(
         CONSISTENCY_CHECK_SYSTEM_PROMPT,
         userContent,
       );
+      const result = validateConsistencyResult(raw);
 
       if (!result || !result.hasIssue) {
         await this._checkTargetConclusions(sessionId, sessionState);
@@ -172,7 +175,7 @@ export class ConsistencyChecker {
       contextParts.push(`Target conclusions: ${sessionState.targetConclusions.join('\n- ')}`);
       contextParts.push(`Recent work:\n${recentWorkSummary}`);
 
-      const userContent = contextParts.join('\n\n');
+      const userContent = `<user_content>\n${contextParts.join('\n\n')}\n</user_content>`;
 
       const result = await this.reviewerClient.review<{
         progressAssessment: string;

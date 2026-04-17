@@ -7,6 +7,7 @@ import { ReviewerClient } from '../client/reviewer.js';
 import { QuickChecker } from './quick-checker.js';
 import { AuditLogService } from '../core/audit-log.js';
 import { TOOL_REVIEW_SYSTEM_PROMPT } from '../core/prompts.js';
+import { validateToolReviewResult } from '../core/validators.js';
 
 export class ToolReviewer {
   private config: SupervisorConfig;
@@ -70,11 +71,12 @@ export class ToolReviewer {
       return { block: false };
     }
 
-    const userContent = `## Tool Call\nTool: ${tool}\nParameters: ${JSON.stringify(params, null, 2)}`;
-    const result = await this.reviewerClient.review<ToolReviewResult>(
+    const userContent = `<user_content>\n## Tool Call\nTool: ${tool}\nParameters: ${JSON.stringify(params, null, 2)}\n</user_content>`;
+    const raw = await this.reviewerClient.review<Record<string, unknown>>(
       TOOL_REVIEW_SYSTEM_PROMPT,
       userContent,
     );
+    const result = validateToolReviewResult(raw, Object.keys(params));
 
     if (!result) {
       this.logger.warn(`Tool reviewer unavailable for ${tool}, passing through`);

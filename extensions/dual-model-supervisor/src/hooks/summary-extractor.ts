@@ -10,6 +10,7 @@ import { ReviewerClient } from '../client/reviewer.js';
 import { AuditLogService } from '../core/audit-log.js';
 import { SUMMARY_EXTRACTION_SYSTEM_PROMPT } from '../core/prompts.js';
 import { isSupervisorActive } from '../core/config.js';
+import { validateMessageSummary } from '../core/validators.js';
 
 const MAX_STORED_SUMMARIES = 10;
 
@@ -53,10 +54,12 @@ export class SummaryExtractor {
     sessionState: SessionState,
   ): Promise<void> {
     try {
-      const result = await this.reviewerClient.review<MessageSummary>(
+      const userContent = `<user_content>\n${output}\n</user_content>`;
+      const raw = await this.reviewerClient.review<Record<string, unknown>>(
         SUMMARY_EXTRACTION_SYSTEM_PROMPT,
-        output,
+        userContent,
       );
+      const result = validateMessageSummary(raw);
 
       if (!result) {
         this._storeFallbackSummary(output, sessionState);

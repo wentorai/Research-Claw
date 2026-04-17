@@ -7,6 +7,7 @@ import { ReviewerClient } from '../client/reviewer.js';
 import { AuditLogService } from '../core/audit-log.js';
 import { TASK_PARSING_SYSTEM_PROMPT } from '../core/prompts.js';
 import { isSupervisorActive } from '../core/config.js';
+import { validateTaskParsingResult } from '../core/validators.js';
 
 export class GoalParser {
   private config: SupervisorConfig;
@@ -50,10 +51,12 @@ export class GoalParser {
     sessionState: SessionState,
   ): Promise<void> {
     try {
-      const result = await this.reviewerClient.review<TaskParsingResult>(
+      const userContent = `<user_content>\n${userMessage}\n</user_content>`;
+      const raw = await this.reviewerClient.review<Record<string, unknown>>(
         TASK_PARSING_SYSTEM_PROMPT,
-        userMessage,
+        userContent,
       );
+      const result = validateTaskParsingResult(raw);
 
       if (!result || !result.researchGoal) {
         this.logger.warn('[GoalParser] Reviewer returned no result, using fallback truncation');

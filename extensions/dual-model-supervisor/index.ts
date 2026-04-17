@@ -50,7 +50,11 @@ let _goalParser: GoalParser | null = null;
 let _summaryExtractor: SummaryExtractor | null = null;
 let _activeConfig: SupervisorConfig | null = null;
 
-/** OpenClaw `message_received` often omits `sessionId`; we mirror it from the latest `session_start`. */
+/**
+ * Best-effort session ID tracker for hooks that don't receive sessionId (e.g., before_prompt_build).
+ * WARNING: In multi-session scenarios, this tracks only the LAST active session.
+ * Hooks should prefer context.sessionId when available.
+ */
 let _hookActiveSessionId: string | null = null;
 
 const _sessionStates = new Map<string, SessionState>();
@@ -86,7 +90,6 @@ const DEFAULT_DB_PATH = path.join(os.homedir(), '.research-claw', 'supervisor.db
  * Gate static supervisor rules: OpenClaw may call `before_prompt_build` several times per user turn;
  * each return value is concatenated, which previously duplicated this block 2–3×.
  */
-let _lastStaticSupervisorInjectAt = 0;
 const STATIC_SUPERVISOR_DEBOUNCE_MS = 1500;
 
 const STATIC_SUPERVISOR_RULES_BODY = [
@@ -96,13 +99,16 @@ const STATIC_SUPERVISOR_RULES_BODY = [
   '  - If you have forgotten key information discussed earlier, explicitly state: "I may have lost context, please remind me"',
 ].join('\n');
 
-function takeStaticSupervisorRulesBlock(reviewMode: string): string {
+function takeStaticSupervisorRulesBlock(reviewMode: string, state: SessionState | null): string {
   if (reviewMode === 'off') return '';
   const now = Date.now();
-  if (now - _lastStaticSupervisorInjectAt < STATIC_SUPERVISOR_DEBOUNCE_MS) {
+  const lastInject = state?.lastStaticSupervisorInjectAt ?? 0;
+  if (now - lastInject < STATIC_SUPERVISOR_DEBOUNCE_MS) {
     return '';
   }
-  _lastStaticSupervisorInjectAt = now;
+  if (state) {
+    state.lastStaticSupervisorInjectAt = now;
+  }
   return STATIC_SUPERVISOR_RULES_BODY;
 }
 
@@ -318,10 +324,10 @@ const plugin: PluginDefinition = {
         return {};
       }
 
-      const staticBlock = takeStaticSupervisorRulesBlock(activeCfg.reviewMode);
+      const activeId = _hookActiveSessionId;
+      const lastSession = activeId ? _sessionStates.get(activeId) ?? null : null;
 
-      const sessionIds = Array.from(_sessionStates.keys());
-      const lastSession = sessionIds.length > 0 ? _sessionStates.get(sessionIds[sessionIds.length - 1]!) : null;
+      const staticBlock = takeStaticSupervisorRulesBlock(activeCfg.reviewMode, lastSession);
 
       if (lastSession) {
         const injection = courseCorrector.buildContextInjection(lastSession);
@@ -411,11 +417,6 @@ const plugin: PluginDefinition = {
       const context = ctx as Record<string, unknown>;
       const outputText = extractLlmOutputText(context);
       const sessionId = (context.sessionId as string | undefined) ?? _hookActiveSessionId ?? undefined;
-
-      // Mirror sessionId so other hooks (before_message_write) can find it
-      if (sessionId && sessionId !== _hookActiveSessionId) {
-        _hookActiveSessionId = sessionId;
-      }
 
       if (!sessionId || !outputText) {
         return;

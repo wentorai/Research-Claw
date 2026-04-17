@@ -13,6 +13,7 @@ import { AuditLogService } from '../core/audit-log.js';
 import { isForceRegenerateActive } from '../core/config.js';
 import { OUTPUT_REVIEW_SYSTEM_PROMPT } from '../core/prompts.js';
 import { SUPERVISOR_REVIEW_SUMMARY_MARKER } from './hook-context.js';
+import { validateReviewResult } from '../core/validators.js';
 
 /** Format a deep review result into a compact multi-line footer for appending to output. */
 function formatDeepReviewForAppend(r: ReviewResult): string {
@@ -121,6 +122,13 @@ export class OutputReviewer {
       this.logger.warn('[OutputReviewer] Deep review skipped: no session state');
     }
 
+    // C7: When deep review provides a corrected version, use it instead of the original message
+    let effectiveMessage = message;
+    if (deep?.corrected && deep.correctedVersion) {
+      this.logger.info(`[OutputReviewer] Using corrected version from deep review`);
+      effectiveMessage = deep.correctedVersion;
+    }
+
     if (quickResult.warnings.length > 0) {
       for (const w of quickResult.warnings) {
         this.logger.warn(`[OutputReviewer] Quick check warning: ${w}`);
@@ -136,7 +144,8 @@ export class OutputReviewer {
 
     // Only append footer when explicitly requested (channel delivery scenario)
     if (!attachSummary) {
-      return null;
+      // Return corrected version if available, null otherwise (pass through original)
+      return effectiveMessage !== message ? effectiveMessage : null;
     }
 
     const sections: string[] = [];
@@ -159,7 +168,7 @@ export class OutputReviewer {
       sections.push('  ℹ [Supervisor] Deep review was skipped (no session state). Quick check passed.');
     }
 
-    const finalMessage = `${message}\n\n---\n${SUPERVISOR_REVIEW_SUMMARY_MARKER}\n${sections.join('\n')}`;
+    const finalMessage = `${effectiveMessage}\n\n---\n${SUPERVISOR_REVIEW_SUMMARY_MARKER}\n${sections.join('\n')}`;
     return finalMessage;
   }
 
@@ -186,14 +195,16 @@ export class OutputReviewer {
       contextParts.push(`Recent outputs: ${lastN.join('\n---\n')}`);
     }
 
+    const fencedMessage = `<user_content>\n${message}\n</user_content>`;
     const userContent = contextParts.length > 0
-      ? `## Context\n${contextParts.join('\n\n')}\n\n## Output to Review\n${message}`
-      : message;
+      ? `## Context\n${contextParts.join('\n\n')}\n\n## Output to Review\n${fencedMessage}`
+      : fencedMessage;
 
-    const result = await this.reviewerClient.review<ReviewResult>(
+    const raw = await this.reviewerClient.review<Record<string, unknown>>(
       OUTPUT_REVIEW_SYSTEM_PROMPT,
       userContent,
     );
+    const result = validateReviewResult(raw);
 
     if (!result) {
       this.logger.warn(`[OutputReviewer] Deep review unavailable for session ${sessionId} (reviewer call failed)`);

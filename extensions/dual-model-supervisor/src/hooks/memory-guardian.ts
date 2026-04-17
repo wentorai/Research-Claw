@@ -12,6 +12,7 @@ import { KEY_MEMORY_IDENTIFICATION_PROMPT, MEMORY_LOSS_DETECTION_PROMPT } from '
 import { isMemoryGuardActive } from '../core/config.js';
 import { messageContentToPlainText, truncateMessagePlainText } from '../utils/message-content.js';
 import { findMatchingSummary } from '../utils/summary-matcher.js';
+import { validateKeyMemoryItems, validateMemoryLossItems } from '../core/validators.js';
 
 export class MemoryGuardian {
   private config: SupervisorConfig;
@@ -50,12 +51,13 @@ export class MemoryGuardian {
         .map((m) => `[${m.role}]: ${truncateMessagePlainText(m.content, 12_000)}`)
         .join('\n\n');
 
-      const result = await this.reviewerClient.review<{ keyItems: MemoryItem[] }>(
+      const userContent = `<user_content>\n${conversationText}\n</user_content>`;
+      const raw = await this.reviewerClient.review<Record<string, unknown>>(
         KEY_MEMORY_IDENTIFICATION_PROMPT,
-        conversationText,
+        userContent,
       );
 
-      const keyItems = result?.keyItems ?? [];
+      const keyItems = validateKeyMemoryItems(raw);
       sessionState.preCompactionMemory = keyItems;
 
       if (keyItems.length > 0) {
@@ -143,14 +145,14 @@ export class MemoryGuardian {
           .join('\n');
       }
 
-      const userContent = `## Original Messages\n${originalText}\n\n## Compacted Messages\n${compactedText}`;
+      const userContent = `<user_content>\n## Original Messages\n${originalText}\n\n## Compacted Messages\n${compactedText}\n</user_content>`;
 
-      const result = await this.reviewerClient.review<{ lostItems: MemoryLossItem[] }>(
+      const raw = await this.reviewerClient.review<Record<string, unknown>>(
         MEMORY_LOSS_DETECTION_PROMPT,
         userContent,
       );
 
-      const lostItems = result?.lostItems ?? [];
+      const lostItems = validateMemoryLossItems(raw);
 
       if (lostItems.length > 0) {
         sessionState.lostMemorySummary = lostItems

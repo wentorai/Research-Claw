@@ -13,6 +13,7 @@ import { AuditLogService } from '../core/audit-log.js';
 import { SESSION_ANALYSIS_SYSTEM_PROMPT, FORCE_REGENERATE_CORRECTION_PROMPT } from '../core/prompts.js';
 import { isCourseCorrectionActive, isSupervisorActive, isForceRegenerateActive } from '../core/config.js';
 import { buildSessionContextLines } from '../utils/session-context.js';
+import { validateDeviationAnalysis } from '../core/validators.js';
 
 interface SessionAnalysisResult {
   deviation: number;
@@ -83,14 +84,16 @@ export class CourseCorrector {
         contextParts.push(`Recent outputs (last 3): ${sessionState.recentOutputs.slice(-3).join('\n---\n')}`);
       }
 
-      const userContent = contextParts.length > 0
+      const sessionText = contextParts.length > 0
         ? contextParts.join('\n\n')
         : 'No session context available for analysis.';
+      const userContent = `<user_content>\n${sessionText}\n</user_content>`;
 
-      const result = await this.reviewerClient.review<SessionAnalysisResult>(
+      const raw = await this.reviewerClient.review<Record<string, unknown>>(
         SESSION_ANALYSIS_SYSTEM_PROMPT,
         userContent,
       );
+      const result = validateDeviationAnalysis(raw);
 
       if (!result) return;
 
@@ -181,7 +184,7 @@ export class CourseCorrector {
       contextParts.push(`Previous regeneration attempts: ${previousAttempts}`);
     }
 
-    const userContent = contextParts.join('\n\n');
+    const userContent = `<user_content>\n${contextParts.join('\n\n')}\n</user_content>`;
 
     try {
       const result = await this.reviewerClient.review<ForceRegenerateCorrectionResult>(
