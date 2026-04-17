@@ -1,16 +1,23 @@
 import React, { useEffect, useState } from 'react';
+import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../stores/gateway';
 import { useConfigStore } from '../stores/config';
 import { useChatStore } from '../stores/chat';
+import { useUiStore } from '../stores/ui';
+import { RC_VERSION } from '../version';
+import { confirmApplyAppUpdate } from '../utils/app-update-ui';
 
 export default function StatusBar() {
   const { t } = useTranslation();
+  const { modal, message } = App.useApp();
   const state = useGatewayStore((s) => s.state);
-  const serverVersion = useGatewayStore((s) => s.serverVersion);
   const gatewayConfig = useConfigStore((s) => s.gatewayConfig);
+  const configTheme = useConfigStore((s) => s.theme);
   const tokensIn = useChatStore((s) => s.tokensIn);
   const tokensOut = useChatStore((s) => s.tokensOut);
+  const appUpdateInfo = useUiStore((s) => s.appUpdateInfo);
+  const appUpdateRunning = useUiStore((s) => s.appUpdateRunning);
   const [heartbeatAge, setHeartbeatAge] = useState(0);
 
   // Heartbeat timer — counts seconds since last tick
@@ -26,6 +33,15 @@ export default function StatusBar() {
     if (state === 'connected') {
       setHeartbeatAge(0);
     }
+  }, [state]);
+
+  // Periodic update check — every 15 minutes
+  useEffect(() => {
+    if (state !== 'connected') return;
+    const interval = setInterval(() => {
+      void useUiStore.getState().maybeNotifyAppUpdate();
+    }, 15 * 60 * 1000);
+    return () => clearInterval(interval);
   }, [state]);
 
   const statusColor =
@@ -53,6 +69,13 @@ export default function StatusBar() {
   };
 
   const modelDisplay = gatewayConfig?.agents?.defaults?.model?.primary ?? t('status.modelNA');
+
+  const hasUpdate = appUpdateInfo && !appUpdateInfo.upToDate && !appUpdateInfo.error && appUpdateInfo.latest;
+
+  const handleUpdateClick = () => {
+    if (appUpdateRunning) return;
+    confirmApplyAppUpdate({ modal, message, theme: configTheme, t });
+  };
 
   return (
     <div
@@ -109,9 +132,30 @@ export default function StatusBar() {
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
-      {/* Version */}
+      {/* Update available banner — center-right, prominent */}
+      {hasUpdate && (
+        <>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={handleUpdateClick}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleUpdateClick(); }}
+            style={{
+              color: '#EF4444',
+              cursor: appUpdateRunning ? 'default' : 'pointer',
+              fontWeight: 600,
+              opacity: appUpdateRunning ? 0.5 : 1,
+            }}
+          >
+            {t('status.updateAvailable', { latest: appUpdateInfo.latest })}
+          </span>
+          <div style={{ width: 1, height: 12, background: 'var(--border)' }} />
+        </>
+      )}
+
+      {/* RC Version */}
       <span>
-        {serverVersion ? t('status.version', { version: serverVersion }) : t('status.versionFallback')}
+        {t('status.version', { version: RC_VERSION })}
       </span>
     </div>
   );

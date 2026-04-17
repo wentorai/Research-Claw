@@ -479,8 +479,9 @@
     "tokensIn": "输入",
     "tokensOut": "输出",
     "heartbeat": "心跳",
-    "version": "v{{version}}",
-    "versionFallback": "v0.6.2",
+    "version": "Research-Claw v{{version}}",
+    "versionFallback": "Research-Claw",
+    "updateAvailable": "更新可用 v{{latest}}",
     "modelDefault": "（默认）",
     "modelNA": "N/A"
   },
