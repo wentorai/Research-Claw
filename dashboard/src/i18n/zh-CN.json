@@ -405,6 +405,7 @@
     "updateApplyConfirm": "执行一键更新？",
     "updateApplyDesc": "将自动拉取最新代码并重新构建项目，可能需要数分钟，请勿关闭网关。完成后请重启科研龙虾。",
     "updateApplySuccess": "更新完成",
+    "updateApplySuccessOk": "知道了",
     "updateApplyFailed": "更新失败",
     "updateStatusCurrent": "与 GitHub 发布版本一致（{{latest}}）",
     "updateStatusNew": "本地 {{current}}，GitHub 最新 {{latest}}",

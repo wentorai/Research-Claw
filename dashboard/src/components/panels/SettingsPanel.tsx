@@ -79,7 +79,8 @@ function AboutSection() {
   const tokens = useMemo(() => getThemeTokens(configTheme), [configTheme]);
   const [restarting, setRestarting] = useState(false);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [updateInfo, setUpdateInfo] = useState<CheckUpdatesPayload | null>(null);
+  const updateInfo = useUiStore((s) => s.appUpdateInfo);
+  const setUpdateInfo = useUiStore((s) => s.setAppUpdateInfo);
   const [updateChecking, setUpdateChecking] = useState(false);
 
   // Reset restarting state when gateway reconnects with fresh config
@@ -137,7 +138,10 @@ function AboutSection() {
     }
   };
 
+  const appUpdateRunning = useUiStore((s) => s.appUpdateRunning);
+
   const handleApplyUpdate = () => {
+    if (appUpdateRunning) return;
     confirmApplyAppUpdate({ modal, message, theme: configTheme, t });
   };
 
@@ -313,6 +317,8 @@ function AboutSection() {
         icon={<CloudDownloadOutlined />}
         size="small"
         onClick={handleApplyUpdate}
+        loading={appUpdateRunning}
+        disabled={appUpdateRunning}
         block
         style={{ marginTop: 8 }}
       >

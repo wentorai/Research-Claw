@@ -1,15 +1,11 @@
 /**
  * GitHub release / tag discovery + local update runners.
- * Used by rc.app.check_updates, rc.app.apply_update, rc.app.wentor_install.
+ * Used by rc.app.check_updates, rc.app.apply_update.
  */
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import process from 'node:process';
-
-/** Official Wentor installer (macOS / Linux). */
-export const WENTOR_INSTALL_SCRIPT_LINE = 'curl -fsSL https://wentor.ai/install.sh | bash';
 
 export interface UpdateLogger {
   info: (message: string) => void;
@@ -17,6 +13,28 @@ export interface UpdateLogger {
 }
 
 const DEFAULT_REPO = 'wentorai/Research-Claw';
+
+// ── Server-side update-in-progress state ──────────────────────────
+// Module-level singleton — survives across RPC calls, reset on process restart.
+let _updateInProgress = false;
+
+export function isUpdateRunning(): boolean {
+  return _updateInProgress;
+}
+
+/**
+ * Walk up from `startDir` to find the nearest directory containing `.git`.
+ * Returns the git repo root, or `startDir` if no `.git` is found.
+ */
+export function findGitRoot(startDir: string): string {
+  let dir = path.resolve(startDir);
+  while (true) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return startDir; // reached filesystem root
+    dir = parent;
+  }
+}
 
 const GH_HEADERS: Record<string, string> = {
   Accept: 'application/vnd.github+json',
@@ -122,26 +140,11 @@ export interface CheckUpdatesResult {
   error?: string;
 }
 
-export interface BackupPoint {
-  id: string;
-  timestamp: string;
-  commitHash: string;
-  version: string;
-  description?: string;
-}
-
-export interface RollbackResult {
-  ok: boolean;
-  log: string;
-  previousVersion?: string;
-  newVersion?: string;
-}
-
 export async function checkUpdates(repoRoot: string, repoFullName = DEFAULT_REPO): Promise<CheckUpdatesResult> {
   const current = readLocalVersion(repoRoot);
   const isWindows = process.platform === 'win32';
   const shellUpdateHint = isWindows
-    ? `cd "${repoRoot}"; git pull --ff-only; pnpm install; pnpm build`
+    ? `cd "${repoRoot.replace(/"/g, '`"')}"; git pull --ff-only; pnpm install; pnpm build`
     : `cd '${repoRoot.replace(/'/g, "'\\''")}' && git pull --ff-only && pnpm install && pnpm build`;
 
   try {
@@ -212,39 +215,15 @@ function runCmd(
 }
 
 /**
- * Run Wentor official install via curl | bash (gateway host only — not the browser).
- * macOS / Linux only; may take many minutes.
- */
-export async function runWentorInstall(logger: UpdateLogger): Promise<{ ok: boolean; log: string }> {
-  if (process.platform === 'win32') {
-    throw new Error(
-      'One-click install from the dashboard is only supported on macOS and Linux in this build.',
-    );
-  }
-  const bash = fs.existsSync('/bin/bash') ? '/bin/bash' : 'bash';
-  const cwd = os.homedir();
-  logger.info(`[rc.app.wentor_install] starting (cwd=${cwd})`);
-  const r = await runCmd(
-    bash,
-    ['-lc', `set -euo pipefail; ${WENTOR_INSTALL_SCRIPT_LINE}`],
-    cwd,
-    45 * 60 * 1000,
-  );
-  const log = `${r.stdout}\n${r.stderr}`.trim();
-  if (r.code !== 0) {
-    logger.warn(`[rc.app.wentor_install] failed exit=${r.code}`);
-    throw new Error(log || `Install exited with code ${r.code}`);
-  }
-  logger.info('[rc.app.wentor_install] finished OK');
-  return { ok: true, log: log || '(no output)' };
-}
-
-/**
  * Run update script (git pull --ff-only, pnpm install, pnpm build).
  * - macOS / Linux: scripts/update-research-claw.sh (bash)
  * - Windows: scripts/update-research-claw.ps1 (PowerShell)
  */
 export async function applyUpdate(repoRoot: string, logger: UpdateLogger): Promise<{ ok: boolean; log: string }> {
+  if (_updateInProgress) {
+    throw new Error('An update is already in progress.');
+  }
+
   const isWindows = process.platform === 'win32';
   const gitDir = path.join(repoRoot, '.git');
   if (!fs.existsSync(gitDir)) {
@@ -256,31 +235,33 @@ export async function applyUpdate(repoRoot: string, logger: UpdateLogger): Promi
   let args: string[];
 
   if (isWindows) {
-    // Windows: use PowerShell
     script = path.join(repoRoot, 'scripts', 'update-research-claw.ps1');
     if (!fs.existsSync(script)) {
       throw new Error('update-research-claw.ps1 not found — sync your checkout or update manually.');
     }
     command = 'powershell';
     args = ['-ExecutionPolicy', 'Bypass', '-File', script];
-    logger.info('[rc.app.apply_update] starting update script (PowerShell)');
   } else {
-    // macOS / Linux: use bash
     script = path.join(repoRoot, 'scripts', 'update-research-claw.sh');
     if (!fs.existsSync(script)) {
       throw new Error('update-research-claw.sh not found — sync your checkout or update manually.');
     }
     command = 'bash';
     args = [script];
-    logger.info('[rc.app.apply_update] starting update script (bash)');
   }
 
-  const r = await runCmd(command, args, repoRoot, 30 * 60 * 1000);
-  const log = `${r.stdout}\n${r.stderr}`.trim();
-  if (r.code !== 0) {
-    logger.warn(`[rc.app.apply_update] failed exit=${r.code}`);
-    throw new Error(log || `Update script exited with code ${r.code}`);
+  _updateInProgress = true;
+  logger.info('[rc.app.apply_update] starting update script');
+  try {
+    const r = await runCmd(command, args, repoRoot, 30 * 60 * 1000);
+    const log = `${r.stdout}\n${r.stderr}`.trim();
+    if (r.code !== 0) {
+      logger.warn(`[rc.app.apply_update] failed exit=${r.code}`);
+      throw new Error(log || `Update script exited with code ${r.code}`);
+    }
+    logger.info('[rc.app.apply_update] finished OK');
+    return { ok: true, log: log || '(no output)' };
+  } finally {
+    _updateInProgress = false;
   }
-  logger.info('[rc.app.apply_update] finished OK');
-  return { ok: true, log: log || '(no output)' };
 }

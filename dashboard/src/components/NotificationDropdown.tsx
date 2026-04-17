@@ -52,6 +52,7 @@ function UpdateNotificationActions({
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
   const configTheme = useConfigStore((s) => s.theme);
+  const appUpdateRunning = useUiStore((s) => s.appUpdateRunning);
 
   const copyHint = async (e: MouseEvent) => {
     e.stopPropagation();
@@ -67,6 +68,7 @@ function UpdateNotificationActions({
 
   const applyUpdate = (e: MouseEvent) => {
     e.stopPropagation();
+    if (appUpdateRunning) return;
     confirmApplyAppUpdate({ modal, message, theme: configTheme, t });
   };
 
@@ -81,7 +83,7 @@ function UpdateNotificationActions({
       <Button size="small" onClick={(e) => void copyHint(e)} disabled={!meta.shellHint}>
         {t('notification.updateCopyCommand')}
       </Button>
-      <Button size="small" type="primary" onClick={applyUpdate}>
+      <Button size="small" type="primary" onClick={applyUpdate} loading={appUpdateRunning} disabled={appUpdateRunning}>
         {t('notification.updateApplyShort')}
       </Button>
     </div>

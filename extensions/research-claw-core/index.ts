@@ -38,7 +38,7 @@ import { registerPptRpc } from './src/ppt/rpc.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
-import { checkUpdates, applyUpdate, runWentorInstall } from './src/app-updates.js';
+import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -673,15 +673,18 @@ const plugin: PluginDefinition = {
     });
 
     // App updates — GitHub release vs local package.json; optional pull + build (Settings → About)
+    // api.resolvePath('.') returns the plugin directory, not the project root.
+    // Walk up to find the nearest .git for the actual repo root.
+    const appUpdateRoot = findGitRoot(api.resolvePath('.'));
     registerMethod('rc.app.check_updates', () => {
-      const repoRoot = api.resolvePath('.');
-      return checkUpdates(repoRoot);
+      return checkUpdates(appUpdateRoot);
     });
     registerMethod('rc.app.apply_update', () => {
-      const repoRoot = api.resolvePath('.');
-      return applyUpdate(repoRoot, api.logger);
+      return applyUpdate(appUpdateRoot, api.logger);
     });
-    registerMethod('rc.app.wentor_install', () => runWentorInstall(api.logger));
+    registerMethod('rc.app.update_status', () => {
+      return { running: isUpdateRunning() };
+    });
 
     // ── 6. Register HTTP route: POST /rc/upload ──────────────────────
     api.registerHttpRoute({

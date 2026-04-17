@@ -79,8 +79,27 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // Auto-fetch config on every (re)connection
         useConfigStore.getState().loadGatewayConfig();
         // GitHub version check -> notification bell when a newer release exists
+        // + sync server-side update-in-progress state (survives page refresh)
         void import('./ui').then(({ useUiStore }) => {
           void useUiStore.getState().maybeNotifyAppUpdate();
+          void client.request<{ running: boolean }>('rc.app.update_status', {})
+            .then((s) => {
+              useUiStore.getState().setAppUpdateRunning(s.running);
+              // Poll until update finishes — otherwise button stays locked after refresh
+              if (s.running) {
+                const poll = setInterval(() => {
+                  client.request<{ running: boolean }>('rc.app.update_status', {})
+                    .then((ps) => {
+                      if (!ps.running) {
+                        clearInterval(poll);
+                        useUiStore.getState().setAppUpdateRunning(false);
+                      }
+                    })
+                    .catch(() => clearInterval(poll));
+                }, 5000);
+              }
+            })
+            .catch(() => { /* non-fatal */ });
         });
         // TODO: Enable sessions.subscribe when OC baseline is upgraded past v2026.3.13.
         // sessions.subscribe was added to OC main in commit 7b61ca1b06 (2026-03-18)

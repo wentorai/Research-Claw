@@ -405,6 +405,7 @@
     "updateApplyConfirm": "Run one-click update?",
     "updateApplyDesc": "Automatically pulls the latest changes and rebuilds the project. It may take several minutes — keep the gateway running. Restart Research-Claw when finished.",
     "updateApplySuccess": "Update finished",
+    "updateApplySuccessOk": "OK",
     "updateApplyFailed": "Update failed",
     "updateStatusCurrent": "Matches GitHub release ({{latest}})",
     "updateStatusNew": "Local {{current}}, GitHub latest {{latest}}",

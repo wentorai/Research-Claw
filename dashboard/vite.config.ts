@@ -5,9 +5,6 @@ import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const rcRootPkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8')) as { version?: string };
-const rcAppVersion = typeof rcRootPkg.version === 'string' ? rcRootPkg.version : '0.0.0';
-
 /** Replace __RC_BUILD_HASH__ in public/theme-init.js with a real hash after build. */
 function cacheBust(): Plugin {
   return {
@@ -25,9 +22,6 @@ function cacheBust(): Plugin {
 
 export default defineConfig({
   plugins: [react(), cacheBust()],
-  define: {
-    'import.meta.env.VITE_RC_APP_VERSION': JSON.stringify(rcAppVersion),
-  },
   base: './',
   css: {
     preprocessorOptions: {

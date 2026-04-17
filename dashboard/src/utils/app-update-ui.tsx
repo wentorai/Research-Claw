@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { App } from 'antd';
 import { useGatewayStore } from '../stores/gateway';
+import { useUiStore } from '../stores/ui';
 import { getThemeTokens } from '../styles/theme';
 
 type ModalApi = ReturnType<typeof App.useApp>['modal'];
@@ -57,24 +58,31 @@ export function confirmApplyAppUpdate({
     title: t('settings.updateApplyConfirm'),
     content: t('settings.updateApplyDesc'),
     okText: t('settings.updateApply'),
-    cancelText: t('settings.cancel'),
     centered: true,
+    closable: false,
     styles: buildThemedModalStyles(theme),
+    // Hide the cancel button — once the update starts, it cannot be cancelled server-side
+    cancelButtonProps: { style: { display: 'none' } },
     onOk: async () => {
       const client = useGatewayStore.getState().client;
       if (!client?.isConnected) {
         message.warning(t('settings.updateNeedConnection'));
         return Promise.reject(new Error('offline'));
       }
+      useUiStore.getState().setAppUpdateRunning(true);
       try {
         const r = await client.request<{ ok: boolean; log?: string }>('rc.app.apply_update', {});
         modal.success({
           title: t('settings.updateApplySuccess'),
+          okText: t('settings.updateApplySuccessOk'),
           width: 560,
-          content: renderUpdateLog(r.log ?? ''),
+          styles: buildThemedModalStyles(theme),
+          content: r.log ? renderUpdateLog(r.log) : undefined,
         });
       } catch (err) {
         message.error(err instanceof Error ? err.message : t('settings.updateApplyFailed'));
+      } finally {
+        useUiStore.getState().setAppUpdateRunning(false);
       }
     },
   });

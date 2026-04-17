@@ -160,6 +160,12 @@ interface UiState {
   /** Whether cron sessions are folded in the session list (Layer 3, #33). */
   cronSessionsFolded: boolean;
 
+  /** Last check_updates result — shared between gateway auto-check and Settings → About. */
+  appUpdateInfo: CheckUpdatesPayload | null;
+
+  /** True while rc.app.apply_update is in progress — locks the update button across components. */
+  appUpdateRunning: boolean;
+
   setRightPanelTab: (tab: PanelTab) => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
@@ -178,6 +184,8 @@ interface UiState {
    * Called after gateway hello. Pass `preloaded` from Settings → About to avoid a second RPC.
    */
   maybeNotifyAppUpdate: (preloaded?: CheckUpdatesPayload | null) => Promise<void>;
+  setAppUpdateInfo: (info: CheckUpdatesPayload | null) => void;
+  setAppUpdateRunning: (running: boolean) => void;
   triggerWorkspaceRefresh: () => void;
   requestWorkspacePreview: (path: string) => void;
   clearPendingPreview: () => void;
@@ -199,6 +207,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
   pendingPreviewPath: null,
   showSystemFiles: loadBoolean(SHOW_SYSTEM_FILES_STORAGE, false),
   cronSessionsFolded: loadBoolean(CRON_FOLD_STORAGE, true),
+  appUpdateInfo: null,
+  appUpdateRunning: false,
 
   setRightPanelTab: (tab: PanelTab) => {
     try { localStorage.setItem(PANEL_TAB_STORAGE, tab); } catch { /* non-fatal */ }
@@ -368,6 +378,14 @@ export const useUiStore = create<UiState>()((set, get) => ({
     }
   },
 
+  setAppUpdateInfo: (info: CheckUpdatesPayload | null) => {
+    set({ appUpdateInfo: info });
+  },
+
+  setAppUpdateRunning: (running: boolean) => {
+    set({ appUpdateRunning: running });
+  },
+
   maybeNotifyAppUpdate: async (preloaded?: CheckUpdatesPayload | null) => {
     try {
       let r: CheckUpdatesPayload | undefined | null = preloaded;
@@ -384,7 +402,10 @@ export const useUiStore = create<UiState>()((set, get) => ({
       }
       if (!r || typeof r.current !== 'string') return;
 
-      if (r.upToDate && !r.error) {
+      // Share result with Settings → About section
+      set({ appUpdateInfo: r });
+
+      if (r.upToDate) {
         set((s) => {
           const next = s.notifications.filter(
             (n) => !(n.type === 'update' && n.dedupKey?.startsWith('app-update:')),
