@@ -54,16 +54,16 @@ export function confirmApplyAppUpdate({
   theme: ThemeMode;
   t: Translate;
 }) {
-  modal.confirm({
+  const instance = modal.confirm({
     title: t('settings.updateApplyConfirm'),
     content: t('settings.updateApplyDesc'),
     okText: t('settings.updateApply'),
+    cancelText: t('settings.cancel'),
     centered: true,
-    closable: false,
     styles: buildThemedModalStyles(theme),
-    // Hide the cancel button — once the update starts, it cannot be cancelled server-side
-    cancelButtonProps: { style: { display: 'none' } },
     onOk: async () => {
+      // Disable cancel — server-side process has started, cannot be aborted
+      instance.update({ cancelButtonProps: { disabled: true }, closable: false });
       const client = useGatewayStore.getState().client;
       if (!client?.isConnected) {
         message.warning(t('settings.updateNeedConnection'));

@@ -417,7 +417,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
         return;
       }
 
-      if (r.error || r.upToDate) return;
+      if (r.error) return;
 
       const latest = r.latest?.trim() ?? '';
       if (!latest) return;
@@ -443,3 +443,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
     }
   },
 }));
+
+// Dev-only: expose store on window for console debugging
+if (import.meta.env.DEV) {
+  (window as unknown as Record<string, unknown>).__RC_UI__ = useUiStore;
+}
