@@ -8,7 +8,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Input, Select, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Input, Select, Tag, Typography } from 'antd';
 import {
   ReloadOutlined,
   SafetyCertificateOutlined,
@@ -22,8 +22,6 @@ import {
   UpOutlined,
   DownOutlined,
   SearchOutlined,
-  ExpandAltOutlined,
-  MinusSquareOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -119,6 +117,13 @@ function LogEntryCard({ entry, tokens, locale, t }: { entry: AuditLogEntry; toke
   const actionColor = ACTION_COLORS[entry.action] ?? '#71717A';
   const timeStr = relativeTimeFromMs(entry.timestamp, locale);
 
+  // Fallback title when details is empty: use type label + action label
+  const typeMeta = LOG_TYPE_META[entry.type];
+  const typeLabel = t(typeMeta?.labelKey ?? 'supervisor.typeUnknown', entry.type || 'Unknown');
+  const actionKey = `supervisor.action${entry.action.charAt(0).toUpperCase() + entry.action.slice(1)}` as const;
+  const actionLabel = t(actionKey, entry.action);
+  const displayText = entry.details || `${typeLabel} — ${actionLabel}`;
+
   return (
     <div style={{ padding: '4px 0' }}>
       <div
@@ -156,8 +161,8 @@ function LogEntryCard({ entry, tokens, locale, t }: { entry: AuditLogEntry; toke
           {entry.action.toUpperCase()}
         </Tag>
         {/* Details */}
-        <Text ellipsis style={{ fontSize: 11, color: tokens.text.secondary, flex: 1, minWidth: 0 }}>
-          {entry.details}
+        <Text ellipsis style={{ fontSize: 11, color: entry.details ? tokens.text.secondary : tokens.text.muted, flex: 1, minWidth: 0, fontStyle: entry.details ? undefined : 'italic' }}>
+          {displayText}
         </Text>
         {/* Expand arrow */}
         <span style={{ color: tokens.text.muted, fontSize: 9, flexShrink: 0 }}>
@@ -180,7 +185,7 @@ function LogEntryCard({ entry, tokens, locale, t }: { entry: AuditLogEntry; toke
               {t('supervisor.details', 'Details')}
             </div>
             <Text style={{ fontSize: 13, color: tokens.text.primary, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-              {entry.details}
+              {displayText}
             </Text>
           </div>
           {/* Session ID */}
@@ -249,8 +254,6 @@ export default function SupervisorPanel() {
   const [filterType, setFilterType] = useState<string | undefined>(undefined);
   const [filterAction, setFilterAction] = useState<string | undefined>(undefined);
   const [searchKeyword, setSearchKeyword] = useState('');
-
-  const [allExpanded, setAllExpanded] = useState(false);
 
   // Auto-polling when connected
   useEffect(() => {
@@ -350,25 +353,22 @@ export default function SupervisorPanel() {
             </Tag>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <Tooltip title={allExpanded ? t('supervisor.collapseAll', 'Collapse all') : t('supervisor.expandAll', 'Expand all')}>
-            <Button
-              size="small"
-              type="text"
-              icon={allExpanded ? <MinusSquareOutlined /> : <ExpandAltOutlined />}
-              onClick={() => setAllExpanded(!allExpanded)}
-              style={{ color: tokens.text.muted }}
-            />
-          </Tooltip>
-          <Button
-            size="small"
-            type="text"
-            icon={<ReloadOutlined />}
-            onClick={handleRefresh}
-            style={{ color: tokens.text.muted }}
-          />
-        </div>
+        <Button size="small" icon={<ReloadOutlined />} onClick={handleRefresh} />
       </div>
+
+      {/* ── Disabled banner ─────────────────────────────────────── */}
+      {status && !status.enabled && (
+        <Alert
+          type="info"
+          showIcon
+          message={t('supervisor.disabledBanner', 'Quality control is disabled. Enable it in Settings.')}
+          style={{
+            margin: '8px 12px 0',
+            fontSize: 12,
+            flexShrink: 0,
+          }}
+        />
+      )}
 
       {/* ── Status bar ────────────────────────────────────────── */}
       {status && (
@@ -480,7 +480,6 @@ export default function SupervisorPanel() {
                 tokens={tokens}
                 locale={locale}
                 t={t}
-                forceExpand={allExpanded}
               />
             ))}
           </div>
@@ -505,7 +504,7 @@ export default function SupervisorPanel() {
   );
 }
 
-// ── TypeGroupWrapper (respects allExpanded toggle) ─────────────────────────
+// ── TypeGroupWrapper ─────────────────────────────────────────────────────
 
 function TypeGroupWrapper({
   type,
@@ -513,17 +512,14 @@ function TypeGroupWrapper({
   tokens,
   locale,
   t,
-  forceExpand,
 }: {
   type: string;
   entries: AuditLogEntry[];
   tokens: ReturnType<typeof getThemeTokens>;
   locale: string;
   t: TFunction;
-  forceExpand: boolean;
 }) {
-  const [internalExpanded, setInternalExpanded] = useState(false);
-  const expanded = forceExpand || internalExpanded;
+  const [expanded, setExpanded] = useState(false);
 
   const meta = LOG_TYPE_META[type];
   const icon = meta?.icon ?? <SafetyCertificateOutlined />;
@@ -533,16 +529,16 @@ function TypeGroupWrapper({
   return (
     <div style={{ marginBottom: 4 }}>
       <div
-        onClick={() => { if (!forceExpand) setInternalExpanded(!internalExpanded); }}
+        onClick={() => setExpanded(!expanded)}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!forceExpand) setInternalExpanded(!internalExpanded); } }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           padding: '8px 10px',
-          cursor: forceExpand ? 'default' : 'pointer',
+          cursor: 'pointer',
           borderRadius: 6,
           borderLeft: `3px solid ${color}`,
           background: expanded ? tokens.bg.surfaceHover : 'transparent',
@@ -561,11 +557,9 @@ function TypeGroupWrapper({
         }}>
           {entries.length}
         </Tag>
-        {!forceExpand && (
-          <span style={{ color: tokens.text.muted, fontSize: 10 }}>
-            {expanded ? <UpOutlined /> : <DownOutlined />}
-          </span>
-        )}
+        <span style={{ color: tokens.text.muted, fontSize: 10 }}>
+          {expanded ? <UpOutlined /> : <DownOutlined />}
+        </span>
       </div>
 
       {expanded && (

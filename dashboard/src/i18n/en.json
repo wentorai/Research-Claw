@@ -368,7 +368,8 @@
       "actionBlock": "Block",
       "actionCorrect": "Correct",
       "actionWarn": "Warn",
-      "actionInfo": "Info"
+      "actionInfo": "Info",
+      "disabledBanner": "Quality control is disabled. Enable it in Settings."
     },
   "settings": {
     "title": "Settings",

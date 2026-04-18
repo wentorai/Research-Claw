@@ -368,7 +368,8 @@
       "actionBlock": "拦截",
       "actionCorrect": "纠正偏移",
       "actionWarn": "警告",
-      "actionInfo": "信息"
+      "actionInfo": "信息",
+      "disabledBanner": "智能质量管控已关闭。请在设置中开启此功能。"
     },
   "settings": {
     "title": "设置",
