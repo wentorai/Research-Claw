@@ -27,6 +27,7 @@ export function registerSupervisorRpc(
   logger: PluginLogger,
   getSessionStates?: () => Map<string, import('./core/types.js').SessionState>,
   getConfiguredProviders?: () => ConfiguredProvider[],
+  persistConfig?: (cfg: SupervisorConfig) => void,
 ): void {
   registerMethod('rc.supervisor.status', async () => {
     const cfg = getActiveConfig();
@@ -83,8 +84,17 @@ export function registerSupervisorRpc(
       if (Object.keys(filtered).length === 0) {
         return { ok: true, config: current };
       }
-      const updated = parseConfig({ ...current, ...filtered });
+      // Deep-merge nested config objects to preserve sub-fields on partial updates
+      const merged: Record<string, unknown> = { ...current, ...filtered };
+      if (filtered.memoryGuard && typeof filtered.memoryGuard === 'object' && current.memoryGuard) {
+        merged.memoryGuard = { ...current.memoryGuard, ...(filtered.memoryGuard as Record<string, unknown>) };
+      }
+      if (filtered.courseCorrection && typeof filtered.courseCorrection === 'object' && current.courseCorrection) {
+        merged.courseCorrection = { ...current.courseCorrection, ...(filtered.courseCorrection as Record<string, unknown>) };
+      }
+      const updated = parseConfig(merged);
       setActiveConfig(updated);
+      persistConfig?.(updated);
       logger.info(`Supervisor config updated: mode=${updated.reviewMode}, model=${updated.supervisorModel}`);
       return { ok: true, config: updated };
     }
@@ -117,6 +127,7 @@ export function registerSupervisorRpc(
       reviewMode: enabled && current.reviewMode === 'off' ? 'correct' as const : current.reviewMode,
     };
     setActiveConfig(updated);
+    persistConfig?.(updated);
     logger.info(`Supervisor ${enabled ? 'enabled' : 'disabled'}`);
     return { ok: true, enabled: updated.enabled, reviewMode: updated.reviewMode };
   });

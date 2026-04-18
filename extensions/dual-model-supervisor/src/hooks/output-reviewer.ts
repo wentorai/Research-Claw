@@ -195,10 +195,10 @@ export class OutputReviewer {
       contextParts.push(`Recent outputs: ${lastN.join('\n---\n')}`);
     }
 
-    const fencedMessage = `<user_content>\n${message}\n</user_content>`;
-    const userContent = contextParts.length > 0
-      ? `## Context\n${contextParts.join('\n\n')}\n\n## Output to Review\n${fencedMessage}`
-      : fencedMessage;
+    const innerContent = contextParts.length > 0
+      ? `## Context\n${contextParts.join('\n\n')}\n\n## Output to Review\n${message}`
+      : message;
+    const userContent = `<user_content>\n${innerContent}\n</user_content>`;
 
     const raw = await this.reviewerClient.review<Record<string, unknown>>(
       OUTPUT_REVIEW_SYSTEM_PROMPT,

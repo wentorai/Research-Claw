@@ -9,6 +9,7 @@
  *   - Dashboard RPC (rc.supervisor.*)
  */
 
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';
@@ -279,6 +280,34 @@ const plugin: PluginDefinition = {
       });
     };
 
+    // ── Config persistence callback ────────────────────────────────
+    const configPath = path.join(process.cwd(), 'config', 'openclaw.json');
+    const persistConfig = (newCfg: SupervisorConfig): void => {
+      try {
+        if (!fs.existsSync(configPath)) return;
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const ocConfig = JSON.parse(raw);
+        if (!ocConfig.plugins) ocConfig.plugins = {};
+        if (!ocConfig.plugins.entries) ocConfig.plugins.entries = {};
+        if (!ocConfig.plugins.entries['dual-model-supervisor']) {
+          ocConfig.plugins.entries['dual-model-supervisor'] = {};
+        }
+        ocConfig.plugins.entries['dual-model-supervisor'].config = {
+          enabled: newCfg.enabled,
+          supervisorModel: newCfg.supervisorModel,
+          reviewMode: newCfg.reviewMode,
+          appendReviewToChannelOutput: newCfg.appendReviewToChannelOutput,
+          memoryGuard: newCfg.memoryGuard,
+          courseCorrection: newCfg.courseCorrection,
+          highRiskTools: newCfg.highRiskTools,
+        };
+        fs.writeFileSync(configPath, JSON.stringify(ocConfig, null, 2) + '\n', 'utf8');
+        api.logger.info('Supervisor config persisted to openclaw.json');
+      } catch (err) {
+        api.logger.warn(`Failed to persist supervisor config: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+
     registerSupervisorRpc(
       registerMethod,
       auditLog,
@@ -297,6 +326,7 @@ const plugin: PluginDefinition = {
       api.logger,
       () => _sessionStates,
       () => _extractConfiguredProviders(api.pluginConfig as Record<string, unknown> | undefined, globalCfg),
+      persistConfig,
     );
 
     // ── Register hooks (guarded: only once across discovery + gateway passes) ──
