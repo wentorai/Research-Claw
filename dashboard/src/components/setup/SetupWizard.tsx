@@ -507,13 +507,13 @@ export default function SetupWizard() {
             items={[
               {
                 key: 'advanced',
-                label: t('setup.advanced'),
+                label: t('setup.advancedTextEndpoint'),
                 children: (
                   <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                     {/* ── API URL ── */}
                     <div>
                       <Text strong style={{ display: 'block', marginBottom: 4 }}>
-                        {t('setup.baseUrl')}
+                        {t('setup.customApiUrl')}
                       </Text>
                       <Input
                         value={baseUrl}

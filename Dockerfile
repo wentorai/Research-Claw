@@ -76,7 +76,9 @@ RUN PIP_INDEX_URL="$(echo ${NPM_REGISTRY} | grep -q npmmirror && echo https://py
       networkx sympy biopython \
       nbformat jupyter-core \
       svgwrite cairosvg \
-    && /opt/miniforge3/bin/python3 -c "import numpy; print(f'numpy {numpy.__version__} OK')"
+      'markitdown[all]' markitdown-mcp \
+    && /opt/miniforge3/bin/python3 -c "import numpy; print(f'numpy {numpy.__version__} OK')" \
+    && /opt/miniforge3/bin/python3 -c "import markitdown; print(f'markitdown {markitdown.__version__} OK')"
 
 ENV PATH="/opt/miniforge3/bin:$PATH"
 

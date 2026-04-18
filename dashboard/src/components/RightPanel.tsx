@@ -12,12 +12,14 @@ const TaskPanel = lazy(() => import('./panels/TaskPanel'));
 const MonitorPanel = lazy(() => import('./panels/MonitorPanel'));
 const ExtensionsPanel = lazy(() => import('./panels/ExtensionsPanel'));
 const SettingsPanel = lazy(() => import('./panels/SettingsPanel'));
+const SupervisorPanel = lazy(() => import('./panels/SupervisorPanel'));
 
 const TAB_TITLE_KEYS: Record<PanelTab, string> = {
   library: 'library.title',
   workspace: 'workspace.title',
   tasks: 'tasks.title',
   monitor: 'monitor.title',
+  supervisor: 'supervisor.title',
   extensions: 'extensions.title',
   settings: 'settings.title',
 };
@@ -32,6 +34,8 @@ function PanelContent({ tab }: { tab: PanelTab }) {
       return <TaskPanel />;
     case 'monitor':
       return <MonitorPanel />;
+    case 'supervisor':
+      return <SupervisorPanel />;
     case 'extensions':
       return <ExtensionsPanel />;
     case 'settings':

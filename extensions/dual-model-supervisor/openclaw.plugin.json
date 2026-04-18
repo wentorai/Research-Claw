@@ -1,0 +1,65 @@
+{
+  "id": "dual-model-supervisor",
+  "name": "Dual Model Supervisor",
+  "version": "0.1.0",
+  "description": "Dual-model supervision: course correction, memory guarding, and safety filtering",
+  "main": "index.ts",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "description": "Enable or disable the supervisor system",
+        "default": false
+      },
+      "supervisorModel": {
+        "type": "string",
+        "description": "Reviewer model in provider/model format (e.g. openai/gpt-4o-mini). Leave empty to disable.",
+        "default": ""
+      },
+      "reviewMode": {
+        "type": "string",
+        "enum": ["off", "filter-only", "correct", "full"],
+        "description": "off=disabled, filter-only=safety filtering only, correct=filter+course correction, full=filter+correction+memory guard",
+        "default": "off"
+      },
+      "memoryGuard": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable memory guardian (compaction protection + loss detection)",
+            "default": true
+          },
+          "keyCategories": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Categories of information to protect from compaction",
+            "default": ["research_goal", "key_conclusion", "user_preference", "methodology_decision"]
+          }
+        }
+      },
+      "courseCorrection": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable course correction (deviation detection + re-injection)",
+            "default": true
+          },
+          "deviationThreshold": {
+            "type": "number",
+            "description": "Deviation score threshold (0-1) above which correction is triggered",
+            "default": 0.5
+          }
+        }
+      },
+      "highRiskTools": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Tools whose calls will be reviewed before execution",
+        "default": ["exec", "write", "edit", "send_notification", "browser"]
+      }
+    }
+  }
+}

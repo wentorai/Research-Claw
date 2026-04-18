@@ -6,6 +6,7 @@ import {
   FolderOutlined,
   CheckSquareOutlined,
   EyeOutlined,
+  SafetyCertificateOutlined,
   SettingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -39,6 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'workspace', icon: <FolderOutlined />, labelKey: 'nav.workspace' },
   { key: 'tasks', icon: <CheckSquareOutlined />, labelKey: 'nav.tasks' },
   { key: 'monitor', icon: <EyeOutlined />, labelKey: 'nav.monitor' },
+  { key: 'supervisor', icon: <SafetyCertificateOutlined />, labelKey: 'nav.supervisor' },
   { key: 'extensions', icon: <ApiOutlined />, labelKey: 'nav.extensions' },
   { key: 'settings', icon: <SettingOutlined />, labelKey: 'nav.settings' },
 ];
