@@ -1,7 +1,7 @@
 {
   "id": "research-claw-core",
   "name": "Research-Claw Core",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Literature library, task management, and workspace tracking for academic research",
   "main": "dist/index.js",
   "configSchema": {
