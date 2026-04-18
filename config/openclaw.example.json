@@ -64,6 +64,14 @@
       "mode": "none"
     }
   },
+  "mcp": {
+    "servers": {
+      "markitdown": {
+        "command": "markitdown-mcp",
+        "args": []
+      }
+    }
+  },
   "skills": {
     "load": {
       "extraDirs": [
