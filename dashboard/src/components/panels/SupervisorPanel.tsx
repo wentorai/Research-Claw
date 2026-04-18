@@ -29,6 +29,7 @@ import { useGatewayStore } from '../../stores/gateway';
 import { useSupervisorStore, type AuditLogEntry } from '../../stores/supervisor';
 import { getThemeTokens } from '../../styles/theme';
 import { useConfigStore } from '../../stores/config';
+import { useUiStore } from '../../stores/ui';
 
 const { Text } = Typography;
 
@@ -361,7 +362,18 @@ export default function SupervisorPanel() {
         <Alert
           type="info"
           showIcon
-          message={t('supervisor.disabledBanner', 'Quality control is disabled. Enable it in Settings.')}
+          message={
+            <span>
+              {t('supervisor.disabledBanner', 'Quality control is disabled.')}
+              {' '}
+              <a
+                onClick={() => useUiStore.getState().setRightPanelTab('settings')}
+                style={{ cursor: 'pointer' }}
+              >
+                {t('supervisor.goToSettings', 'Go to Settings')}
+              </a>
+            </span>
+          }
           style={{
             margin: '8px 12px 0',
             fontSize: 12,

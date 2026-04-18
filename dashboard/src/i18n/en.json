@@ -369,7 +369,8 @@
       "actionCorrect": "Correct",
       "actionWarn": "Warn",
       "actionInfo": "Info",
-      "disabledBanner": "Quality control is disabled. Enable it in Settings."
+      "disabledBanner": "Quality control is disabled.",
+      "goToSettings": "Go to Settings"
     },
   "settings": {
     "title": "Settings",
