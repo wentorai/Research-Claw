@@ -83,7 +83,7 @@ describe('checkUpdates', () => {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version: string };
 
     // Mock fetch to fail so we exercise the error path
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network unreachable')) as typeof fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network unreachable')) as unknown as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(result.current).toBe(pkg.version);
@@ -93,7 +93,7 @@ describe('checkUpdates', () => {
   });
 
   it('returns error message when GitHub API fails', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('DNS resolution failed')) as typeof fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('DNS resolution failed')) as unknown as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(result.error).toBe('DNS resolution failed');
@@ -110,7 +110,7 @@ describe('checkUpdates', () => {
         html_url: 'https://github.com/wentorai/Research-Claw/releases/tag/v99.99.99',
         published_at: '2026-04-17T00:00:00Z',
       }),
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(result.upToDate).toBe(false);
@@ -129,7 +129,7 @@ describe('checkUpdates', () => {
         html_url: `https://github.com/wentorai/Research-Claw/releases/tag/v${pkg.version}`,
         published_at: '2026-04-17T00:00:00Z',
       }),
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(result.upToDate).toBe(true);
@@ -137,7 +137,7 @@ describe('checkUpdates', () => {
   });
 
   it('generates correct shell update hints', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('offline')) as typeof fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
     const result = await checkUpdates(repoRoot);
     // On macOS/Linux (CI), hint should use single quotes + &&
     if (process.platform !== 'win32') {
@@ -161,7 +161,7 @@ describe('checkUpdates', () => {
           { name: 'not-semver' },
         ],
       };
-    });
+    }) as unknown as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(callCount).toBe(2); // releases + tags
