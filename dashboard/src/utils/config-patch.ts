@@ -711,7 +711,7 @@ export function buildSaveConfig(
     const supervisorConfig: Record<string, unknown> = {
       ...existingSupervisorConfig,
       enabled: input.supervisorEnabled ?? (existingSupervisorConfig.enabled as boolean) ?? false,
-      supervisorModel: input.supervisorModel ?? (existingSupervisorConfig.supervisorModel as string) ?? '',
+      supervisorModel: input.supervisorModel !== undefined ? input.supervisorModel : (existingSupervisorConfig.supervisorModel as string) ?? '',
       reviewMode: input.supervisorReviewMode ?? (existingSupervisorConfig.reviewMode as string) ?? 'off',
       appendReviewToChannelOutput: input.supervisorAppendReviewToChannelOutput ?? (existingSupervisorConfig.appendReviewToChannelOutput as boolean) ?? true,
     };

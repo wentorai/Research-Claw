@@ -6,12 +6,14 @@ import {
   Collapse,
   Divider,
   Input,
+  Radio,
   Segmented,
   Select,
   Spin,
+  Tooltip,
   Typography,
 } from 'antd';
-import { CloudDownloadOutlined, CopyOutlined, KeyOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CloudDownloadOutlined, CopyOutlined, KeyOutlined, PoweroffOutlined, QuestionCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import OAuthModal from '../OAuthModal';
 import ProviderPickerModal, { providerLabel } from '../providers/ProviderPickerModal';
 import { useTranslation } from 'react-i18next';
@@ -58,7 +60,7 @@ function SettingRow({
   description,
   children,
 }: {
-  label: string;
+  label: React.ReactNode;
   description?: string;
   children: React.ReactNode;
 }) {
@@ -443,6 +445,7 @@ export default function SettingsPanel() {
   const [supervisorApiKey, setSupervisorApiKey] = useState('');
   const [supervisorApiKeyConfigured, setSupervisorApiKeyConfigured] = useState(false);
   const [supervisorApiKeyDeletePending, setSupervisorApiKeyDeletePending] = useState(false);
+  const [supervisorUseMainModel, setSupervisorUseMainModel] = useState(true);
   const [reviewMode, setReviewMode] = useState<'filter-only' | 'correct' | 'full'>('correct');
   const [appendReviewToChannelOutput, setAppendReviewToChannelOutput] = useState(true);
   const [deviationThreshold, setDeviationThreshold] = useState(0.5);
@@ -461,6 +464,14 @@ export default function SettingsPanel() {
     if (supervisorConfig) {
       const model = supervisorConfig.supervisorModel;
       setSupervisorModel(model);
+
+      // Determine inherit-main-model radio state
+      if (!model || model === '') {
+        setSupervisorUseMainModel(true);
+      } else {
+        setSupervisorUseMainModel(false);
+      }
+
       // Parse "provider/modelId" format
       const slashIdx = model.indexOf('/');
       let parsedProvider = '';
@@ -1054,8 +1065,8 @@ export default function SettingsPanel() {
           restoreProviders: Object.keys(restoreProviders).length ? restoreProviders : undefined,
           // Dual-model supervisor config
           supervisorEnabled,
-          supervisorModel: supervisorEnabled && supervisorProvider && supervisorModelId
-            ? `${supervisorProvider}/${supervisorModelId}`
+          supervisorModel: supervisorEnabled
+            ? (supervisorUseMainModel ? '' : (supervisorProvider && supervisorModelId ? `${supervisorProvider}/${supervisorModelId}` : undefined))
             : undefined,
           supervisorReviewMode: supervisorEnabled ? reviewMode : undefined,
           supervisorAppendReviewToChannelOutput: supervisorEnabled ? appendReviewToChannelOutput : undefined,
@@ -1085,7 +1096,7 @@ export default function SettingsPanel() {
     } finally {
       setSaving(false);
     }
-  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
+  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
 
   const handleSave = useCallback(() => {
     const client = useGatewayStore.getState().client;
@@ -1569,143 +1580,173 @@ export default function SettingsPanel() {
 
       {supervisorEnabled && (
         <>
-          <SettingRow label={t('settings.supervisorProvider')} description={t('settings.supervisorProviderHint')}>
-            <>
-              <Button
-                size="small"
-                style={{ width: 220, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                onClick={() => setSupervisorProviderPickerOpen(true)}
-              >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {supervisorProvider ? providerLabel(supervisorProvider, t) : t('settings.supervisorProviderPlaceholder')}
-                  {supervisorProvider && currentSupervisorProviderHasSavedKey ? ` · ${t('settings.providerConfigured')}` : ''}
-                </span>
-                {supervisorProvider && (
-                  <span style={{ opacity: 0.65, marginLeft: 8, flexShrink: 0 }}>
-                    {supervisorProvider}
+          <SettingRow label={t('settings.supervisorModelSource')}>
+            <Radio.Group
+              value={supervisorUseMainModel ? 'inherit' : 'independent'}
+              onChange={(e) => {
+                const useMain = e.target.value === 'inherit';
+                setSupervisorUseMainModel(useMain);
+                if (useMain) {
+                  setSupervisorProvider('');
+                  setSupervisorModelId('');
+                  setSupervisorModel('');
+                }
+              }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              <Radio value="inherit">
+                {t('settings.supervisorInheritMain')}
+                {provider && textModel && (
+                  <span style={{ color: tokens.text.muted, marginLeft: 8 }}>
+                    ({providerLabel(provider, t)} / {textModel})
                   </span>
                 )}
-              </Button>
-              <ProviderPickerModal
-                open={supervisorProviderPickerOpen}
-                value={supervisorProvider}
-                title={t('settings.supervisorProvider')}
-                excludeProviderIds={provider ? [provider] : undefined}
-                includeProviderIds={[...SUPERVISOR_REVIEWER_PROVIDER_IDS]}
-                onSelect={(id) => {
-                  setSupervisorProviderPickerOpen(false);
-                  handleSupervisorProviderChange(id);
-                }}
-                onClose={() => setSupervisorProviderPickerOpen(false)}
-              />
-            </>
+              </Radio>
+              <Radio value="independent">
+                {t('settings.supervisorIndependent')}
+              </Radio>
+            </Radio.Group>
           </SettingRow>
 
-          {supervisorProvider && (
-            <SettingRow label={t('settings.supervisorModel')} description={t('settings.supervisorModelHint')}>
-              <AutoComplete
-                value={supervisorModelId}
-                onChange={(v) => {
-                  setSupervisorModelId(v);
-                  const newRef = v ? `${supervisorProvider}/${v}` : '';
-                  setSupervisorModel(newRef);
-                }}
-                options={supervisorModelOptions.length > 0 ? supervisorModelOptions : undefined}
-                allowClear
-                size="small"
-                style={{ width: 220 }}
-                placeholder="model-id"
-                filterOption={(input, option) =>
-                  (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
-                }
-              />
-            </SettingRow>
-          )}
-
-          {!supervisorProvider && (
-            <SettingRow label={t('settings.supervisorModel')} description={t('settings.supervisorModelHint')}>
-              <AutoComplete
-                value={supervisorModel}
-                onChange={(v) => {
-                  setSupervisorModel(v);
-                  // Parse provider/modelId
-                  const slashIdx = v.indexOf('/');
-                  if (slashIdx >= 0) {
-                    setSupervisorProvider(v.slice(0, slashIdx));
-                    setSupervisorModelId(v.slice(slashIdx + 1));
-                  } else {
-                    setSupervisorModelId(v);
-                  }
-                }}
-                allowClear
-                size="small"
-                style={{ width: 220 }}
-                placeholder="provider/model-id"
-                filterOption={(input, option) =>
-                  String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
-                }
-              />
-            </SettingRow>
-          )}
-
-          {/* Supervisor API Key — shown when provider is selected */}
-          {supervisorProvider && (
-            <SettingRow label={t('settings.apiKeyLabel')}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
-                <Input
-                  value={supervisorApiKey}
-                  onChange={(e) => {
-                    deleteSupervisorApiKeyRef.current = false;
-                    setSupervisorApiKeyDeletePending(false);
-                    const v = e.target.value;
-                    setSupervisorApiKey(v);
-                    if (v.trim()) {
-                      supervisorApiKeyCacheRef.current[supervisorProvider] = v.trim();
-                    }
-                  }}
-                  size="small"
-                  style={{ width: 220 }}
-                  disabled={supervisorIsOAuth}
-                  placeholder={
-                    supervisorIsOAuth
-                      ? t('setup.openaiCodexOauthNoApiKey')
-                      : (currentSupervisorProviderHasSavedKey && !supervisorApiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder'))
-                  }
-                />
-                {!supervisorIsOAuth && (
-                  <>
-                    {supervisorApiKeyStatus ? (
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {supervisorApiKeyStatus}
-                      </Text>
-                    ) : null}
-                    {(currentSupervisorProviderHasSavedKey || !!supervisorApiKey.trim()) && (
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', width: 220 }}>
-                        <Button
-                          size="small"
-                          type="link"
-                          danger
-                          style={{ padding: '0 4px', flexShrink: 0 }}
-                          onClick={() => {
-                            deleteSupervisorApiKeyRef.current = true;
-                            setSupervisorApiKeyDeletePending(true);
-                            setSupervisorApiKey('');
-                            setSupervisorApiKeyConfigured(false);
-                            delete supervisorApiKeyCacheRef.current[supervisorProvider];
-                          }}
-                        >
-                          {t('settings.clearApiKey')}
-                        </Button>
-                      </div>
+          {!supervisorUseMainModel && (
+            <>
+              <SettingRow label={t('settings.supervisorProvider')} description={t('settings.supervisorProviderHint')}>
+                <>
+                  <Button
+                    size="small"
+                    style={{ width: 220, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                    onClick={() => setSupervisorProviderPickerOpen(true)}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {supervisorProvider ? providerLabel(supervisorProvider, t) : t('settings.supervisorProviderPlaceholder')}
+                      {supervisorProvider && currentSupervisorProviderHasSavedKey ? ` · ${t('settings.providerConfigured')}` : ''}
+                    </span>
+                    {supervisorProvider && (
+                      <span style={{ opacity: 0.65, marginLeft: 8, flexShrink: 0 }}>
+                        {supervisorProvider}
+                      </span>
                     )}
-                  </>
-                )}
-              </div>
-            </SettingRow>
-          )}
+                  </Button>
+                  <ProviderPickerModal
+                    open={supervisorProviderPickerOpen}
+                    value={supervisorProvider}
+                    title={t('settings.supervisorProvider')}
+                    excludeProviderIds={provider ? [provider] : undefined}
+                    includeProviderIds={[...SUPERVISOR_REVIEWER_PROVIDER_IDS]}
+                    onSelect={(id) => {
+                      setSupervisorProviderPickerOpen(false);
+                      handleSupervisorProviderChange(id);
+                    }}
+                    onClose={() => setSupervisorProviderPickerOpen(false)}
+                  />
+                </>
+              </SettingRow>
 
-          {/* Supervisor Advanced Settings */}
-          {supervisorProvider && (
+              {supervisorProvider && (
+                <SettingRow label={t('settings.supervisorModel')} description={t('settings.supervisorModelHint')}>
+                  <AutoComplete
+                    value={supervisorModelId}
+                    onChange={(v) => {
+                      setSupervisorModelId(v);
+                      const newRef = v ? `${supervisorProvider}/${v}` : '';
+                      setSupervisorModel(newRef);
+                    }}
+                    options={supervisorModelOptions.length > 0 ? supervisorModelOptions : undefined}
+                    allowClear
+                    size="small"
+                    style={{ width: 220 }}
+                    placeholder="model-id"
+                    filterOption={(input, option) =>
+                      (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                </SettingRow>
+              )}
+
+              {!supervisorProvider && (
+                <SettingRow label={t('settings.supervisorModel')} description={t('settings.supervisorModelHint')}>
+                  <AutoComplete
+                    value={supervisorModel}
+                    onChange={(v) => {
+                      setSupervisorModel(v);
+                      // Parse provider/modelId
+                      const slashIdx = v.indexOf('/');
+                      if (slashIdx >= 0) {
+                        setSupervisorProvider(v.slice(0, slashIdx));
+                        setSupervisorModelId(v.slice(slashIdx + 1));
+                      } else {
+                        setSupervisorModelId(v);
+                      }
+                    }}
+                    allowClear
+                    size="small"
+                    style={{ width: 220 }}
+                    placeholder="provider/model-id"
+                    filterOption={(input, option) =>
+                      String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                </SettingRow>
+              )}
+
+              {/* Supervisor API Key — shown when provider is selected */}
+              {supervisorProvider && (
+                <SettingRow label={t('settings.apiKeyLabel')}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                    <Input
+                      value={supervisorApiKey}
+                      onChange={(e) => {
+                        deleteSupervisorApiKeyRef.current = false;
+                        setSupervisorApiKeyDeletePending(false);
+                        const v = e.target.value;
+                        setSupervisorApiKey(v);
+                        if (v.trim()) {
+                          supervisorApiKeyCacheRef.current[supervisorProvider] = v.trim();
+                        }
+                      }}
+                      size="small"
+                      style={{ width: 220 }}
+                      disabled={supervisorIsOAuth}
+                      placeholder={
+                        supervisorIsOAuth
+                          ? t('setup.openaiCodexOauthNoApiKey')
+                          : (currentSupervisorProviderHasSavedKey && !supervisorApiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder'))
+                      }
+                    />
+                    {!supervisorIsOAuth && (
+                      <>
+                        {supervisorApiKeyStatus ? (
+                          <Text type="secondary" style={{ fontSize: 11 }}>
+                            {supervisorApiKeyStatus}
+                          </Text>
+                        ) : null}
+                        {(currentSupervisorProviderHasSavedKey || !!supervisorApiKey.trim()) && (
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', width: 220 }}>
+                            <Button
+                              size="small"
+                              type="link"
+                              danger
+                              style={{ padding: '0 4px', flexShrink: 0 }}
+                              onClick={() => {
+                                deleteSupervisorApiKeyRef.current = true;
+                                setSupervisorApiKeyDeletePending(true);
+                                setSupervisorApiKey('');
+                                setSupervisorApiKeyConfigured(false);
+                                delete supervisorApiKeyCacheRef.current[supervisorProvider];
+                              }}
+                            >
+                              {t('settings.clearApiKey')}
+                            </Button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </SettingRow>
+              )}
+
+              {/* Supervisor Advanced Settings */}
+              {supervisorProvider && (
             <Collapse
               activeKey={supervisorAdvancedOpen ? ['supervisorAdvanced'] : []}
               onChange={(keys) => setSupervisorAdvancedOpen((keys as string[]).includes('supervisorAdvanced'))}
@@ -1749,6 +1790,8 @@ export default function SettingsPanel() {
               ]}
             />
           )}
+            </>
+          )}
 
           <SettingRow label={t('settings.reviewMode')} description={t('settings.reviewModeHint')}>
             <Select
@@ -1756,11 +1799,22 @@ export default function SettingsPanel() {
               onChange={(v) => setReviewMode(v)}
               size="small"
               style={{ width: 220 }}
+              popupMatchSelectWidth={false}
               options={[
                 { value: 'filter-only', label: t('settings.reviewModeFilter') },
                 { value: 'correct', label: t('settings.reviewModeCorrect') },
                 { value: 'full', label: t('settings.reviewModeFull') },
               ]}
+              optionRender={(option) => (
+                <div style={{ padding: '4px 0' }}>
+                  <div style={{ fontWeight: 500 }}>{option.label}</div>
+                  <div style={{ fontSize: 12, color: tokens.text.muted, marginTop: 2 }}>
+                    {option.value === 'filter-only' && t('settings.reviewModeFilterDesc')}
+                    {option.value === 'correct' && t('settings.reviewModeCorrectDesc')}
+                    {option.value === 'full' && t('settings.reviewModeFullDesc')}
+                  </div>
+                </div>
+              )}
             />
           </SettingRow>
 
@@ -1776,7 +1830,17 @@ export default function SettingsPanel() {
             />
           </SettingRow>
 
-          <SettingRow label={t('settings.deviationThreshold')} description={t('settings.deviationThresholdHint')}>
+          <SettingRow
+            label={
+              <span>
+                {t('settings.deviationThreshold')}
+                <Tooltip title={t('settings.deviationThresholdTooltip')}>
+                  <QuestionCircleOutlined style={{ marginLeft: 4, color: tokens.text.muted, fontSize: 12 }} />
+                </Tooltip>
+              </span>
+            }
+            description={t('settings.deviationThresholdHint')}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: 220 }}>
               <input
                 type="range"
@@ -1806,7 +1870,17 @@ export default function SettingsPanel() {
           </SettingRow>
 
           {forceRegenerate && (
-            <SettingRow label={t('settings.maxRegenerateAttempts')} description={t('settings.maxRegenerateAttemptsHint')}>
+            <SettingRow
+              label={
+                <span>
+                  {t('settings.maxRegenerateAttempts')}
+                  <Tooltip title={t('settings.maxRegenerateAttemptsTooltip')}>
+                    <QuestionCircleOutlined style={{ marginLeft: 4, color: tokens.text.muted, fontSize: 12 }} />
+                  </Tooltip>
+                </span>
+              }
+              description={t('settings.maxRegenerateAttemptsHint')}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: 220 }}>
                 <input
                   type="range"

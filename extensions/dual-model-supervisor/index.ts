@@ -194,7 +194,12 @@ const plugin: PluginDefinition = {
     const globalCfg = api.config;
     const mergedProviders = _extractProviders(api.pluginConfig as Record<string, unknown> | undefined, globalCfg);
 
-    api.logger.info(`Dual Model Supervisor initializing (enabled=${cfg.enabled}, mode=${cfg.reviewMode}, model=${cfg.supervisorModel || '(none)'})`);
+    // Extract main model reference for fallback when supervisorModel is empty
+    const mainModel = (globalCfg?.agents as Record<string, unknown>)?.defaults as Record<string, unknown>;
+    const mainModelPrimary = (mainModel?.model as Record<string, unknown>)?.primary;
+    const fallbackModel = typeof mainModelPrimary === 'string' ? mainModelPrimary : '';
+
+    api.logger.info(`Dual Model Supervisor initializing (enabled=${cfg.enabled}, mode=${cfg.reviewMode}, model=${cfg.supervisorModel || `(inherit: ${fallbackModel})` || '(none)'})`);
 
     if (!_initialized) {
       _db = new Database(DEFAULT_DB_PATH);
@@ -207,6 +212,7 @@ const plugin: PluginDefinition = {
         supervisorConfig: cfg,
         providers: mergedProviders,
         logger: api.logger,
+        fallbackModel,
       });
 
       _quickChecker = new QuickChecker(cfg, api.logger);
@@ -231,6 +237,7 @@ const plugin: PluginDefinition = {
     } else {
       _reviewerClient!.updateProviders(mergedProviders);
       _reviewerClient!.updateSupervisorConfig(_activeConfig ?? cfg);
+      _reviewerClient!.updateFallbackModel(fallbackModel);
     }
 
     const reviewerClient = _reviewerClient!;
