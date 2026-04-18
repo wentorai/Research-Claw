@@ -301,7 +301,9 @@ const plugin: PluginDefinition = {
           courseCorrection: newCfg.courseCorrection,
           highRiskTools: newCfg.highRiskTools,
         };
-        fs.writeFileSync(configPath, JSON.stringify(ocConfig, null, 2) + '\n', 'utf8');
+        const tmpPath = configPath + '.tmp';
+        fs.writeFileSync(tmpPath, JSON.stringify(ocConfig, null, 2) + '\n', 'utf8');
+        fs.renameSync(tmpPath, configPath);
         api.logger.info('Supervisor config persisted to openclaw.json');
       } catch (err) {
         api.logger.warn(`Failed to persist supervisor config: ${err instanceof Error ? err.message : String(err)}`);

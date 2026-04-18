@@ -103,9 +103,9 @@
       "dual-model-supervisor": {
         "enabled": true,
         "config": {
-          "enabled": true,
+          "enabled": false,
           "supervisorModel": "",
-          "reviewMode": "full",
+          "reviewMode": "off",
           "appendReviewToChannelOutput": true,
           "memoryGuard": {
             "enabled": true,

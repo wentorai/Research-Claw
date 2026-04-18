@@ -25,17 +25,18 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins', 'openclaw-weixin'];
-const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins'];
-const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin'];
+const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins', 'openclaw-weixin', 'dual-model-supervisor'];
+const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins', 'dual-model-supervisor'];
+const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin', 'extensions/dual-model-supervisor'];
 const RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
 // Provenance install records for all RC plugins (eliminates "loaded without
 // install/load-path provenance" warnings from OC's plugin loader)
 const PLUGIN_INSTALL_RECORDS = {
-  'research-claw-core': { source: 'path', sourcePath: './extensions/research-claw-core' },
-  'openclaw-weixin':    { source: 'path', sourcePath: './extensions/openclaw-weixin' },
-  'research-plugins':   { source: 'npm',  spec: '@wentorai/research-plugins',
-                          installPath: '~/.openclaw/extensions/research-plugins' },
+  'research-claw-core':       { source: 'path', sourcePath: './extensions/research-claw-core' },
+  'openclaw-weixin':          { source: 'path', sourcePath: './extensions/openclaw-weixin' },
+  'dual-model-supervisor':    { source: 'path', sourcePath: './extensions/dual-model-supervisor' },
+  'research-plugins':         { source: 'npm',  spec: '@wentorai/research-plugins',
+                                installPath: '~/.openclaw/extensions/research-plugins' },
 };
 
 function normalizeRcDbPath(configPath, rawPath) {
@@ -270,6 +271,7 @@ function ensureConfig(filePath) {
     c.plugins.entries = {
       'research-claw-core': { enabled: true, config: { dbPath: RC_DB_PATH, autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' } },
       'openclaw-weixin': { enabled: true },
+      'dual-model-supervisor': { enabled: true },
     };
     changed = true;
   }
