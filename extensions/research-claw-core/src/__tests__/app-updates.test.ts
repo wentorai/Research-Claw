@@ -83,7 +83,7 @@ describe('checkUpdates', () => {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version: string };
 
     // Mock fetch to fail so we exercise the error path
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network unreachable'));
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network unreachable')) as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(result.current).toBe(pkg.version);
@@ -93,7 +93,7 @@ describe('checkUpdates', () => {
   });
 
   it('returns error message when GitHub API fails', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('DNS resolution failed'));
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('DNS resolution failed')) as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(result.error).toBe('DNS resolution failed');
@@ -110,7 +110,7 @@ describe('checkUpdates', () => {
         html_url: 'https://github.com/wentorai/Research-Claw/releases/tag/v99.99.99',
         published_at: '2026-04-17T00:00:00Z',
       }),
-    });
+    }) as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(result.upToDate).toBe(false);
@@ -129,7 +129,7 @@ describe('checkUpdates', () => {
         html_url: `https://github.com/wentorai/Research-Claw/releases/tag/v${pkg.version}`,
         published_at: '2026-04-17T00:00:00Z',
       }),
-    });
+    }) as typeof fetch;
 
     const result = await checkUpdates(repoRoot);
     expect(result.upToDate).toBe(true);
@@ -137,7 +137,7 @@ describe('checkUpdates', () => {
   });
 
   it('generates correct shell update hints', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('offline'));
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('offline')) as typeof fetch;
     const result = await checkUpdates(repoRoot);
     // On macOS/Linux (CI), hint should use single quotes + &&
     if (process.platform !== 'win32') {
@@ -148,9 +148,9 @@ describe('checkUpdates', () => {
 
   it('falls back to tags API when releases endpoint returns 404', async () => {
     let callCount = 0;
-    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL | Request) => {
       callCount++;
-      if (url.includes('/releases/latest')) {
+      if (String(url).includes('/releases/latest')) {
         return { ok: false, status: 404 };
       }
       // Tags endpoint
