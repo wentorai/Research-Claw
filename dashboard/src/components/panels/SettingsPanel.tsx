@@ -1290,10 +1290,10 @@ export default function SettingsPanel() {
         items={[
           {
             key: 'advanced',
-            label: t('setup.advanced'),
+            label: t('settings.advancedTextEndpoint'),
             children: (
               <>
-                <SettingRow label={t('settings.baseUrl')}>
+                <SettingRow label={t('settings.customApiUrl')}>
                   <Input
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
@@ -1580,7 +1580,11 @@ export default function SettingsPanel() {
 
       {supervisorEnabled && (
         <>
-          <SettingRow label={t('settings.supervisorModelSource')}>
+          {/* Supervisor Model Source — block layout to avoid label compression */}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8, color: tokens.text.primary }}>
+              {t('settings.supervisorModelSource')}
+            </div>
             <Radio.Group
               value={supervisorUseMainModel ? 'inherit' : 'independent'}
               onChange={(e) => {
@@ -1592,21 +1596,22 @@ export default function SettingsPanel() {
                   setSupervisorModel('');
                 }
               }}
-              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
             >
-              <Radio value="inherit">
-                {t('settings.supervisorInheritMain')}
-                {provider && textModel && (
-                  <span style={{ color: tokens.text.muted, marginLeft: 8 }}>
-                    ({providerLabel(provider, t)} / {textModel})
-                  </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Radio value="inherit">
+                  <span>{t('settings.supervisorInheritMain')}</span>
+                </Radio>
+                {supervisorUseMainModel && provider && textModel && (
+                  <div style={{ marginLeft: 24, fontSize: 12, color: tokens.text.muted }}>
+                    {providerLabel(provider, t)} / {textModel}
+                  </div>
                 )}
-              </Radio>
-              <Radio value="independent">
-                {t('settings.supervisorIndependent')}
-              </Radio>
+                <Radio value="independent">
+                  <span>{t('settings.supervisorIndependent')}</span>
+                </Radio>
+              </div>
             </Radio.Group>
-          </SettingRow>
+          </div>
 
           {!supervisorUseMainModel && (
             <>
@@ -1754,11 +1759,11 @@ export default function SettingsPanel() {
               items={[
                 {
                   key: 'supervisorAdvanced',
-                  label: t('setup.advanced'),
+                  label: t('settings.advancedSupervisor'),
                   children: (
                     <>
                       {/* Supervisor Base URL — always shown */}
-                      <SettingRow label={t('settings.baseUrl')}>
+                      <SettingRow label={t('settings.customApiUrl')}>
                         <Input
                           value={supervisorBaseUrl}
                           onChange={(e) => setSupervisorBaseUrl(e.target.value)}
