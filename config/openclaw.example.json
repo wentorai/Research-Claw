@@ -64,14 +64,6 @@
       "mode": "none"
     }
   },
-  "mcp": {
-    "servers": {
-      "markitdown": {
-        "command": "markitdown-mcp",
-        "args": []
-      }
-    }
-  },
   "skills": {
     "load": {
       "extraDirs": [
@@ -142,77 +134,6 @@
     }
   },
   "tools": {
-    "profile": "full",
-    "alsoAllow": [
-      "library_add_paper",
-      "library_search",
-      "library_update_paper",
-      "library_get_paper",
-      "library_export_bibtex",
-      "library_reading_stats",
-      "library_batch_add",
-      "library_manage_collection",
-      "library_tag_paper",
-      "library_add_note",
-      "library_import_bibtex",
-      "library_citation_graph",
-      "task_create",
-      "task_list",
-      "task_complete",
-      "task_update",
-      "task_link",
-      "task_note",
-      "send_notification",
-      "workspace_save",
-      "workspace_read",
-      "workspace_list",
-      "workspace_diff",
-      "workspace_history",
-      "workspace_restore",
-      "ppt_init",
-      "ppt_export",
-      "search_openalex",
-      "get_work",
-      "get_author_openalex",
-      "resolve_doi",
-      "search_crossref",
-      "search_arxiv",
-      "get_arxiv_paper",
-      "search_pubmed",
-      "get_article",
-      "find_oa_version",
-      "memory_search",
-      "memory_get"
-    ],
-    "web": {
-      "fetch": {
-        "ssrfPolicy": {
-          "hostnameAllowlist": [
-            "*.arxiv.org",
-            "*.aclanthology.org",
-            "*.nature.com",
-            "*.stanford.edu",
-            "*.openalex.org",
-            "*.crossref.org",
-            "*.pubmed.ncbi.nlm.nih.gov",
-            "crfm.stanford.edu"
-          ],
-          "allowRfc2544BenchmarkRange": true
-        }
-      },
-      "sessions": {
-        "visibility": "all"
-      }
-    },
-    "commands": {
-      "native": "auto",
-      "nativeSkills": "auto",
-      "restart": true,
-      "ownerDisplay": "raw"
-    },
-    "channels": {},
-    "cron": {
-      "enabled": true
-    }
+    "profile": "full"
   }
 }

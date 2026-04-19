@@ -145,13 +145,36 @@ function ensureConfig(filePath) {
     if (c.plugins.load.paths.length !== before) changed = true;
   }
 
-  // 4. Remove tools.alsoAllow entirely — redundant with profile "full".
-  //    OC's "full" profile skips the tool-policy step (empty policy → undefined),
-  //    meaning ALL tools (core + plugin) are allowed. alsoAllow entries were never
-  //    evaluated but triggered "unknown entries" warnings at config-parse time
-  //    because plugin tools aren't registered yet at that point.
+  // 4. Remove tools keys not in OC 2026.3.13 schema.
+  //    tools.alsoAllow is redundant with profile "full".
+  //    tools.web.fetch.ssrfPolicy, tools.web.sessions, tools.commands,
+  //    tools.channels, tools.cron were erroneously added to the example config
+  //    in v0.6.3 (commits 0367b43, fca3d3b) and cause "Config invalid" + exit 1.
   if (c.tools?.alsoAllow) {
     delete c.tools.alsoAllow;
+    changed = true;
+  }
+  if (c.tools?.web?.fetch?.ssrfPolicy) {
+    delete c.tools.web.fetch.ssrfPolicy;
+    if (Object.keys(c.tools.web.fetch).length === 0) delete c.tools.web.fetch;
+    changed = true;
+  }
+  if (c.tools?.web?.sessions) {
+    delete c.tools.web.sessions;
+    if (Object.keys(c.tools.web).length === 0) delete c.tools.web;
+    changed = true;
+  }
+  for (const k of ['commands', 'channels', 'cron']) {
+    if (c.tools?.[k]) {
+      delete c.tools[k];
+      changed = true;
+    }
+  }
+
+  // 4b. Remove top-level "mcp" — not in OC 2026.3.13 schema.
+  //     Was erroneously added to example config in fca3d3b (MarkItDown integration).
+  if (c.mcp) {
+    delete c.mcp;
     changed = true;
   }
 
