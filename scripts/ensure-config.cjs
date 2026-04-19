@@ -178,19 +178,19 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
-  // 5. gateway.auth.token must match the expected token (env var or default 'research-claw').
-  //    This aligns config to the runtime token so OC's config-first precedence doesn't
-  //    pick up a stale token from a previous openclaw setup or manual edit.
-  const expectedToken = process.env.OPENCLAW_GATEWAY_TOKEN || 'research-claw';
-  if (c.gateway?.auth) {
-    if (c.gateway.auth.token && c.gateway.auth.token !== expectedToken) {
-      c.gateway.auth.token = expectedToken;
-      changed = true;
-    }
-    if (c.gateway.auth.mode && c.gateway.auth.mode !== 'none' && c.gateway.auth.mode !== 'token') {
-      c.gateway.auth.mode = 'token';
-      changed = true;
-    }
+  // 5. gateway.auth — set defaults but never overwrite user-customized tokens.
+  //    Users deploying with Nginx + HTTPS set custom tokens in config and expect
+  //    them to persist across restarts. run.sh reads the config token into
+  //    OPENCLAW_GATEWAY_TOKEN env var so the two are always in sync.
+  if (!c.gateway) c.gateway = {};
+  if (!c.gateway.auth) c.gateway.auth = {};
+  if (!c.gateway.auth.token) {
+    c.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN || 'research-claw';
+    changed = true;
+  }
+  if (c.gateway.auth.mode && c.gateway.auth.mode !== 'none' && c.gateway.auth.mode !== 'token') {
+    c.gateway.auth.mode = 'token';
+    changed = true;
   }
 
   // 6. channels.discord: rename botToken → token (example config had wrong key;
@@ -250,8 +250,9 @@ function ensureConfig(filePath) {
     };
     changed = true;
   }
-  if (!c.gateway.auth || !c.gateway.auth.mode) {
-    c.gateway.auth = { mode: 'none' };
+  if (!c.gateway.auth) c.gateway.auth = {};
+  if (!c.gateway.auth.mode) {
+    c.gateway.auth.mode = 'none';
     changed = true;
   }
   if (!c.gateway.port) { c.gateway.port = 28789; changed = true; }

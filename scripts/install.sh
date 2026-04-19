@@ -1279,13 +1279,17 @@ if (cfg.plugins?.entries) {
 if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); console.log('[config] Rebased paths to ' + root); }
 "
 
-# Token auth — matches Dashboard's DEFAULT_TOKEN ('research-claw').
-# Using --auth token instead of --auth none: some environments with pre-existing
-# OpenClaw device pairing state reject connections with NOT_PAIRED even when
-# dangerouslyDisableDeviceAuth=true. Token auth bypasses device pairing entirely.
-# Respects user-set value for remote deployments with custom tokens.
+# Token auth — config file is the source of truth.
+# Default 'research-claw' matches Dashboard's DEFAULT_TOKEN for zero-config local use.
+# Custom token: set gateway.auth.token in config/openclaw.json.
+# Env override: OPENCLAW_GATEWAY_TOKEN=my-secret curl ... | bash
 if [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
-  export OPENCLAW_GATEWAY_TOKEN=research-claw
+  OPENCLAW_GATEWAY_TOKEN=$("$GW_NODE" -e "
+    try { const c = JSON.parse(require('fs').readFileSync('config/openclaw.json', 'utf8'));
+      if (c.gateway?.auth?.token) console.log(c.gateway.auth.token);
+    } catch {}
+  " 2>/dev/null)
+  export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-research-claw}"
 fi
 
 CRASH_COUNT=0

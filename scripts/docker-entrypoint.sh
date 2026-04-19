@@ -158,11 +158,12 @@ node -e "
     changed = true;
   }
 
-  // Force gateway auth token to match OPENCLAW_GATEWAY_TOKEN env var.
-  const expectedToken = process.env.OPENCLAW_GATEWAY_TOKEN || 'research-claw';
+  // Set default gateway auth token if none exists.
+  // Never overwrite — respects user-customized tokens for remote deployments.
+  // Docker users override via: docker run -e OPENCLAW_GATEWAY_TOKEN=my-secret ...
   if (!c.gateway.auth) c.gateway.auth = {};
-  if (c.gateway.auth.token !== expectedToken) {
-    c.gateway.auth.token = expectedToken;
+  if (!c.gateway.auth.token) {
+    c.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN || 'research-claw';
     changed = true;
   }
   if (c.gateway.auth.mode && c.gateway.auth.mode !== 'token') {
@@ -244,11 +245,15 @@ fi
 [ ! -f /app/workspace/MEMORY.md ] && [ -f "$BP/MEMORY.md.example" ] && cp "$BP/MEMORY.md.example" /app/workspace/MEMORY.md
 [ ! -f /app/workspace/USER.md ] && [ -f "$BP/ws-USER.md.example" ] && cp "$BP/ws-USER.md.example" /app/workspace/USER.md
 
-# Default gateway token matches dashboard's DEFAULT_TOKEN for seamless access.
+# Token: config file is source of truth; env var is a convenience override.
 # Override via env: docker run -e OPENCLAW_GATEWAY_TOKEN=your-secret ...
 if [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
-  OPENCLAW_GATEWAY_TOKEN="research-claw"
-  export OPENCLAW_GATEWAY_TOKEN
+  OPENCLAW_GATEWAY_TOKEN=$(node -e "
+    try { const c = JSON.parse(require('fs').readFileSync('/app/config/openclaw.json', 'utf8'));
+      if (c.gateway?.auth?.token) console.log(c.gateway.auth.token);
+    } catch {}
+  " 2>/dev/null)
+  export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-research-claw}"
 fi
 
 # --- Banner ---
