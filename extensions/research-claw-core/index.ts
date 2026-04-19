@@ -346,7 +346,7 @@ const plugin: PluginDefinition = {
       const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
       if (homeDir) {
         rpCandidates.push(
-          path.join(homeDir, '.openclaw', 'plugins', 'node_modules', '@wentorai', 'research-plugins'),
+          path.join(homeDir, '.openclaw', 'extensions', 'research-plugins'),
         );
       }
 

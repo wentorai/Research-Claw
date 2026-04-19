@@ -1,5 +1,8 @@
 # Research-Claw: pull latest from origin (ff-only), install deps, rebuild dashboard + extensions.
 # PowerShell version for Windows - invoked by Dashboard → About → "Apply update"
+#
+# Dual-remote fallback: if the default remote (often Gitee) has no new commits,
+# automatically tries GitHub. Mirrors install.sh's Gitee→GitHub pattern.
 $ErrorActionPreference = 'Stop'
 
 # Get script directory and project root
@@ -17,11 +20,29 @@ if (-not (Test-Path (Join-Path $ProjectRoot '.git'))) {
 Push-Location $ProjectRoot
 
 try {
-    Write-Host "[update-research-claw] Pulling latest changes..." -ForegroundColor Cyan
-    git pull --ff-only
+    $env:PATH = (Join-Path $ProjectRoot 'node_modules' '.bin') + [IO.Path]::PathSeparator + $env:PATH
+    $GithubRepo = "https://github.com/wentorai/Research-Claw.git"
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "git pull failed with exit code $LASTEXITCODE"
+    Write-Host "[update-research-claw] Pulling latest changes..." -ForegroundColor Cyan
+
+    $OldHead = & git rev-parse HEAD 2>$null
+    & { $ErrorActionPreference = 'Continue'; git pull --ff-only 2>$null }
+
+    $NewHead = & git rev-parse HEAD 2>$null
+    if ($OldHead -eq $NewHead) {
+        # Default remote had no new commits — try GitHub fallback
+        Write-Host "[update-research-claw] Default remote had no updates, trying GitHub..." -ForegroundColor Cyan
+        & {
+            $ErrorActionPreference = 'Continue'
+            $null = git remote set-url github $GithubRepo 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                $null = git remote add github $GithubRepo 2>$null
+            }
+            $null = git fetch github main 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $null = git merge --ff-only github/main 2>$null
+            }
+        }
     }
 
     Write-Host "[update-research-claw] Installing dependencies..." -ForegroundColor Cyan
