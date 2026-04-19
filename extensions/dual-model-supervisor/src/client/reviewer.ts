@@ -119,6 +119,16 @@ export class ReviewerClient {
     const cfg = this.supervisorConfig;
     let modelRef = cfg.supervisorModel;
 
+    // Skip adapter resolution when disabled and no explicit supervisorModel.
+    // The fallback model (main model) may use an unsupported reviewer API (e.g.
+    // openai-codex-responses). We don't need an adapter until the supervisor is
+    // enabled — _resolveAdapter() is re-called by updateSupervisorConfig() at
+    // enable time so hot-enable always gets a fresh resolution.
+    if (!cfg.enabled && !cfg.supervisorModel) {
+      this._adapter = null;
+      return;
+    }
+
     // Fallback to main model when supervisor model is not configured
     if (!modelRef && this.fallbackModel) {
       modelRef = this.fallbackModel;

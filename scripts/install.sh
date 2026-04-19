@@ -775,8 +775,14 @@ else
 fi
 DASHBOARD_URL="http://$DASHBOARD_IP:$PORT"
 
-# --- Initialize L2/L3 bootstrap runtime files from .example templates ---
+# --- Sync L1 bootstrap files to workspace root ---
+# OC's heartbeat system reads workspace/HEARTBEAT.md directly (not .ResearchClaw/).
 RC_DIR="workspace/.ResearchClaw"
+for f in AGENTS.md HEARTBEAT.md; do
+  [ -f "$RC_DIR/$f" ] && cp "$RC_DIR/$f" "workspace/$f"
+done
+
+# --- Initialize L2/L3 bootstrap runtime files from .example templates ---
 for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
   [ ! -f "$RC_DIR/$f" ] && [ -f "$RC_DIR/$f.example" ] && \
     cp "$RC_DIR/$f.example" "$RC_DIR/$f"

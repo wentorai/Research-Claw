@@ -151,10 +151,18 @@ echo "[run] Config: $OPENCLAW_CONFIG_PATH"
 # Also fixes channels.*.commands.native=false (529 cmd limit).
 "$GW_NODE" "$(dirname "$0")/sync-global-config.cjs" 2>/dev/null || true
 
-# --- Initialize L2/L3 bootstrap runtime files from .example templates ---
-# L1 (AGENTS, HEARTBEAT) are git-tracked and always up-to-date.
-# L3 (SOUL, IDENTITY, TOOLS, USER) and L2 (BOOTSTRAP) are gitignored — only copy if missing.
+# --- Sync L1 bootstrap files to workspace root ---
+# OC's heartbeat system reads workspace/HEARTBEAT.md directly (not .ResearchClaw/).
+# The pnpm patch covers loadWorkspaceBootstrapFiles but not resolveHeartbeatPreflight
+# in health-DSTtGBUV.js. Syncing on every startup keeps both locations fresh.
 RC_DIR="workspace/.ResearchClaw"
+for f in AGENTS.md HEARTBEAT.md; do
+  [ -f "$RC_DIR/$f" ] && cp "$RC_DIR/$f" "workspace/$f"
+done
+
+# --- Initialize L2/L3 bootstrap runtime files from .example templates ---
+# L1 (AGENTS, HEARTBEAT) are synced above.
+# L3 (SOUL, IDENTITY, TOOLS, USER) and L2 (BOOTSTRAP) are gitignored — only copy if missing.
 for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
   [ ! -f "$RC_DIR/$f" ] && [ -f "$RC_DIR/$f.example" ] && \
     cp "$RC_DIR/$f.example" "$RC_DIR/$f" && echo "[run] $f initialized from template"

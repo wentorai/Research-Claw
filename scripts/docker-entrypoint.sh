@@ -231,8 +231,10 @@ RC_DIR=/app/workspace/.ResearchClaw
 BP=/defaults/bootstrap-prompts
 mkdir -p "$RC_DIR"
 # L1 system prompts: always force-update from image (safe — no user data).
+# Also sync to workspace root — OC's heartbeat system reads workspace/HEARTBEAT.md
+# directly (not .ResearchClaw/), and the pnpm patch doesn't cover health-DSTtGBUV.js.
 for f in AGENTS.md HEARTBEAT.md; do
-  [ -f "$BP/$f" ] && cp "$BP/$f" "$RC_DIR/$f"
+  [ -f "$BP/$f" ] && cp "$BP/$f" "$RC_DIR/$f" && cp "$BP/$f" /app/workspace/$f
 done
 # L3 user-owned files: only initialize if missing (never overwrite user customizations).
 for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
