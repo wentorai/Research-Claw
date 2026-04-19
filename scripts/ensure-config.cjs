@@ -313,6 +313,15 @@ function ensureConfig(filePath) {
     }
   }
 
+  // 13b. dual-model-supervisor dbPath — expand ~/ to absolute
+  if (!isGlobal && c.plugins?.entries?.['dual-model-supervisor']?.config?.dbPath) {
+    const raw = c.plugins.entries['dual-model-supervisor'].config.dbPath;
+    if (typeof raw === 'string' && raw.startsWith('~/')) {
+      c.plugins.entries['dual-model-supervisor'].config.dbPath = path.join(os.homedir(), raw.slice(2));
+      changed = true;
+    }
+  }
+
   // 14. plugins.installs — provenance records so OC's loader treats each plugin
   //     as intentionally tracked (eliminates "loaded without install/load-path
   //     provenance" warnings). Idempotent: only adds missing records.

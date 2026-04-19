@@ -6,22 +6,22 @@ import Database from 'better-sqlite3';
 import type { AuditLogEntry, AuditLogType, PluginLogger } from './types.js';
 
 export class AuditLogService {
-  private db: Database.Database;
+  private db: Database.Database | null;
   private logger: PluginLogger;
 
   /**
-   * @param db   SQLite database instance (shared across plugin lifecycle)
+   * @param db   SQLite database instance (shared across plugin lifecycle). May be null if DB init failed — service degrades to log-only.
    * @param logger Plugin logger for error reporting
    */
-  constructor(db: Database.Database, logger: PluginLogger) {
+  constructor(db: Database.Database | null, logger: PluginLogger) {
     this.db = db;
     this.logger = logger;
-    this._runMigrations();
+    if (db) this._runMigrations();
   }
 
   /** Create the audit log table and indexes if they do not exist yet. */
   private _runMigrations(): void {
-    this.db.exec(`
+    this.db!.exec(`
       CREATE TABLE IF NOT EXISTS supervisor_audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sessionId TEXT NOT NULL DEFAULT '',
@@ -41,6 +41,7 @@ export class AuditLogService {
    * Record an audit log entry.
    */
   record(entry: Omit<AuditLogEntry, 'id'>): void {
+    if (!this.db) return;
     try {
       this.db.prepare(
         `INSERT INTO supervisor_audit_log (sessionId, type, action, details, metadata, timestamp)
@@ -90,6 +91,7 @@ export class AuditLogService {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const query = `SELECT * FROM supervisor_audit_log ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
 
+    if (!this.db) return [];
     return this.db.prepare(query).all(...values, limit, offset) as AuditLogEntry[];
   }
 
@@ -97,6 +99,7 @@ export class AuditLogService {
    * Get audit statistics, computed from database for accuracy after restart.
    */
   getStats(): { total: number; blocked: number; corrected: number; warnings: number } {
+    if (!this.db) return { total: 0, blocked: 0, corrected: 0, warnings: 0 };
     const totalResult = this.db.prepare('SELECT COUNT(*) as count FROM supervisor_audit_log').get() as { count: number };
     const blockedResult = this.db.prepare("SELECT COUNT(*) as count FROM supervisor_audit_log WHERE action = 'block'").get() as { count: number };
     const correctedResult = this.db.prepare("SELECT COUNT(*) as count FROM supervisor_audit_log WHERE action = 'correct'").get() as { count: number };
@@ -114,6 +117,7 @@ export class AuditLogService {
    * Purge old entries (older than maxAgeMs).
    */
   purge(maxAgeMs: number): number {
+    if (!this.db) return 0;
     const cutoff = Date.now() - maxAgeMs;
     const result = this.db.prepare(
       `DELETE FROM supervisor_audit_log WHERE timestamp < ?`,

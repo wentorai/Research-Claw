@@ -210,11 +210,16 @@ const plugin: PluginDefinition = {
     api.logger.info(`Dual Model Supervisor initializing (enabled=${cfg.enabled}, mode=${cfg.reviewMode}, model=${cfg.supervisorModel || `(inherit: ${fallbackModel})` || '(none)'})`);
 
     if (!_initialized) {
-      const dbPath = resolveSupervisorDbPath(api.pluginConfig as Record<string, unknown> | undefined);
-      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      _db = new Database(dbPath);
-      _db.pragma('journal_mode = WAL');
-      _db.pragma('synchronous = FULL');
+      try {
+        const dbPath = resolveSupervisorDbPath(api.pluginConfig as Record<string, unknown> | undefined);
+        fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+        _db = new Database(dbPath);
+        _db.pragma('journal_mode = WAL');
+        _db.pragma('synchronous = FULL');
+      } catch (dbErr) {
+        api.logger.warn(`Supervisor DB init failed (audit logging disabled): ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+        _db = null;
+      }
 
       _auditLog = new AuditLogService(_db, api.logger);
 
@@ -309,7 +314,9 @@ const plugin: PluginDefinition = {
         if (!ocConfig.plugins.entries['dual-model-supervisor']) {
           ocConfig.plugins.entries['dual-model-supervisor'] = {};
         }
+        const existing = ocConfig.plugins.entries['dual-model-supervisor'].config || {};
         ocConfig.plugins.entries['dual-model-supervisor'].config = {
+          ...existing,  // preserve dbPath and other infra keys
           enabled: newCfg.enabled,
           supervisorModel: newCfg.supervisorModel,
           reviewMode: newCfg.reviewMode,
