@@ -61,13 +61,11 @@ extensions/*/package-lock.json
 
 # Workspace runtime data
 # All prompt files live in workspace/.ResearchClaw/ (loaded via agent:bootstrap hook).
-# Root-level copies are OC defaults — not RC content — and must not be tracked.
-# Only workspace/AGENTS.md (pointer to .ResearchClaw/) is git-tracked at root.
+# Root-level copies (AGENTS.md, HEARTBEAT.md) are synced by run.sh for OC compatibility
+# but must not be tracked — .ResearchClaw/ versions are the source of truth.
 workspace/*
 !workspace/.gitignore
 !workspace/.ResearchClaw/
-!workspace/AGENTS.md
-!workspace/AGENTS.md.example
 !workspace/MEMORY.md.example
 !workspace/USER.md.example
 workspace/SOUL.md
