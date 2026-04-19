@@ -87,6 +87,14 @@ function getOrCreateSession(sessionId: string): SessionState {
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), '.research-claw', 'supervisor.db');
 
+/** Resolve supervisor DB path: pluginConfig.dbPath > DEFAULT_DB_PATH. */
+function resolveSupervisorDbPath(pluginConfig: Record<string, unknown> | undefined): string {
+  const raw = typeof pluginConfig?.dbPath === 'string' ? pluginConfig.dbPath : '';
+  if (!raw) return DEFAULT_DB_PATH;
+  if (raw.startsWith('~/')) return path.join(os.homedir(), raw.slice(2));
+  return path.isAbsolute(raw) ? raw : path.resolve(raw);
+}
+
 /**
  * Gate static supervisor rules: OpenClaw may call `before_prompt_build` several times per user turn;
  * each return value is concatenated, which previously duplicated this block 2–3×.
@@ -202,7 +210,9 @@ const plugin: PluginDefinition = {
     api.logger.info(`Dual Model Supervisor initializing (enabled=${cfg.enabled}, mode=${cfg.reviewMode}, model=${cfg.supervisorModel || `(inherit: ${fallbackModel})` || '(none)'})`);
 
     if (!_initialized) {
-      _db = new Database(DEFAULT_DB_PATH);
+      const dbPath = resolveSupervisorDbPath(api.pluginConfig as Record<string, unknown> | undefined);
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+      _db = new Database(dbPath);
       _db.pragma('journal_mode = WAL');
       _db.pragma('synchronous = FULL');
 

@@ -110,10 +110,12 @@ RUN echo '{}' > /tmp/oc-install.json && \
     plugins install @wentorai/research-plugins && \
     rm /tmp/oc-install.json
 
-# Save baked plugin version for entrypoint to sync on upgrade.
-# Must run AFTER plugins install and BEFORE /defaults/ copy block.
+# Bake research-plugins to /defaults/ so rc-state volume doesn't shadow them.
+# The volume mounts at /root/.openclaw and hides the image's baked install.
+# Entrypoint copies from /defaults/ to the volume (instant, no network needed).
 RUN mkdir -p /defaults && \
-    node -e "process.stdout.write(require('/root/.openclaw/extensions/research-plugins/package.json').version)" \
+    cp -a /root/.openclaw/extensions/research-plugins /defaults/research-plugins && \
+    node -e "process.stdout.write(require('/defaults/research-plugins/package.json').version)" \
     > /defaults/rp-version.txt 2>/dev/null || echo "unknown" > /defaults/rp-version.txt
 
 # 烘焙配置模板 + 系统提示词到 /defaults/，entrypoint 会同步到 volume

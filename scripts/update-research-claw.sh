@@ -30,4 +30,21 @@ fi
 
 pnpm install
 pnpm build
+
+# Update research-plugins (skills + agent tools)
+PLUGIN_DIR="$HOME/.openclaw/extensions/research-plugins"
+if [ -d "$PLUGIN_DIR" ]; then
+  RP_LOG="$(mktemp)"
+  echo "[update-research-claw] Updating research-plugins..."
+  TMP_CFG="$(mktemp)"; echo '{}' > "$TMP_CFG"
+  if OPENCLAW_CONFIG_PATH="$TMP_CFG" node ./node_modules/openclaw/dist/entry.js plugins install @wentorai/research-plugins >"$RP_LOG" 2>&1; then
+    NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
+    echo "[update-research-claw] research-plugins → v${NEW_VER}"
+  else
+    echo "[update-research-claw] research-plugins update failed (non-critical). Details:" >&2
+    tail -3 "$RP_LOG" >&2
+  fi
+  rm -f "$TMP_CFG" "$RP_LOG"
+fi
+
 echo "[update-research-claw] Done. Restart the gateway (Settings → Restart or scripts/run.sh)."

@@ -176,11 +176,20 @@ node -e "
   // which is NOT on the volume — database would be lost on container recreation.
   // Force the volume-backed path so data persists across upgrades.
   const DOCKER_DB_PATH = '/app/.research-claw/library.db';
+  const DOCKER_SUPERVISOR_DB_PATH = '/app/.research-claw/supervisor.db';
   const rcEntry = c.plugins?.entries?.['research-claw-core'];
   if (rcEntry) {
     if (!rcEntry.config) { rcEntry.config = {}; changed = true; }
     if (rcEntry.config.dbPath !== DOCKER_DB_PATH) {
       rcEntry.config.dbPath = DOCKER_DB_PATH;
+      changed = true;
+    }
+  }
+  const dmsEntry = c.plugins?.entries?.['dual-model-supervisor'];
+  if (dmsEntry) {
+    if (!dmsEntry.config) { dmsEntry.config = {}; changed = true; }
+    if (dmsEntry.config.dbPath !== DOCKER_SUPERVISOR_DB_PATH) {
+      dmsEntry.config.dbPath = DOCKER_SUPERVISOR_DB_PATH;
       changed = true;
     }
   }
@@ -215,15 +224,15 @@ node -e "
 # --- Sync research-plugins from image → volume if version differs ---
 # rc-state volume persists /root/.openclaw/ across container recreation.
 # On image upgrade, the baked-in plugin version may be newer than the volume's.
+# Copy from /defaults/research-plugins/ (baked in image, not shadowed by volume)
+# instead of npm install (avoids silent network failures in China/offline).
 IMAGE_RP_VER=$(cat /defaults/rp-version.txt 2>/dev/null || true)
 VOL_RP_VER=$(node -e "console.log(require('/root/.openclaw/extensions/research-plugins/package.json').version)" 2>/dev/null || true)
 if [ -n "$IMAGE_RP_VER" ] && [ "$IMAGE_RP_VER" != "$VOL_RP_VER" ]; then
   echo "[research-claw] Updating research-plugins: ${VOL_RP_VER:-none} → $IMAGE_RP_VER"
-  echo '{}' > /tmp/rp-update.json
-  OPENCLAW_CONFIG_PATH=/tmp/rp-update.json \
-    node /app/node_modules/openclaw/dist/entry.js \
-    plugins install @wentorai/research-plugins >/dev/null 2>&1 || true
-  rm -f /tmp/rp-update.json
+  mkdir -p /root/.openclaw/extensions
+  rm -rf /root/.openclaw/extensions/research-plugins
+  cp -a /defaults/research-plugins /root/.openclaw/extensions/research-plugins
 fi
 
 # --- Sync bootstrap prompt files from image → volume ---

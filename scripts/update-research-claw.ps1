@@ -69,6 +69,20 @@ try {
         throw "pnpm build failed with exit code $LASTEXITCODE"
     }
 
+    # Update research-plugins (skills + agent tools)
+    $PluginDir = Join-Path $env:USERPROFILE '.openclaw' 'extensions' 'research-plugins'
+    if (Test-Path $PluginDir) {
+        Write-Host "[update-research-claw] Updating research-plugins..." -ForegroundColor Cyan
+        $TmpCfg = [System.IO.Path]::GetTempFileName()
+        '{}' | Set-Content $TmpCfg
+        & {
+            $ErrorActionPreference = 'Continue'
+            $env:OPENCLAW_CONFIG_PATH = $TmpCfg
+            node (Join-Path $ProjectRoot 'node_modules' 'openclaw' 'dist' 'entry.js') plugins install '@wentorai/research-plugins' 2>$null
+            Remove-Item $TmpCfg -ErrorAction SilentlyContinue
+        }
+    }
+
     Write-Host "[update-research-claw] Done. Restart the gateway (Settings → Restart or scripts/run.sh)." -ForegroundColor Green
 } catch {
     Write-Error "Update failed: $_"
