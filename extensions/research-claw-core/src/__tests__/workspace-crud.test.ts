@@ -249,22 +249,22 @@ describe('WorkspaceService CRUD fixes', () => {
       const rcDir = path.join(tmpDir, '.ResearchClaw');
       fs.mkdirSync(rcDir, { recursive: true });
       fs.writeFileSync(path.join(rcDir, 'AGENTS.md'), 'new version');
-      fs.writeFileSync(path.join(rcDir, 'HEARTBEAT.md'), 'heartbeat v2');
+      fs.writeFileSync(path.join(rcDir, 'TOOLS.md'), 'tools v2');
       fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), 'old stale version');
-      fs.writeFileSync(path.join(tmpDir, 'HEARTBEAT.md'), 'old heartbeat');
+      fs.writeFileSync(path.join(tmpDir, 'TOOLS.md'), 'old tools');
 
       await svc.init(); // triggers migratePromptFiles()
 
       // Root originals should be renamed to .bak
       expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
-      expect(fs.existsSync(path.join(tmpDir, 'HEARTBEAT.md'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'TOOLS.md'))).toBe(false);
       expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md.bak'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'HEARTBEAT.md.bak'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'TOOLS.md.bak'))).toBe(true);
       // .bak content is the old stale version
       expect(fs.readFileSync(path.join(tmpDir, 'AGENTS.md.bak'), 'utf-8')).toBe('old stale version');
       // .ResearchClaw/ files untouched
       expect(fs.readFileSync(path.join(rcDir, 'AGENTS.md'), 'utf-8')).toBe('new version');
-      expect(fs.readFileSync(path.join(rcDir, 'HEARTBEAT.md'), 'utf-8')).toBe('heartbeat v2');
+      expect(fs.readFileSync(path.join(rcDir, 'TOOLS.md'), 'utf-8')).toBe('tools v2');
     });
 
     it('does not delete root files when .ResearchClaw/ copy is missing', async () => {
@@ -313,6 +313,25 @@ describe('WorkspaceService CRUD fixes', () => {
 
       expect(fs.existsSync(path.join(tmpDir, 'MEMORY.md'))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, 'custom-notes.md'))).toBe(true);
+    });
+
+    it('preserves HEARTBEAT.md at root even when .ResearchClaw/ copy exists', async () => {
+      // HEARTBEAT.md must stay at root because OC's heartbeat-runner reads from
+      // workspace root directly (resolveHeartbeatPreflight), not .ResearchClaw/.
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'HEARTBEAT.md'), 'heartbeat v2');
+      fs.writeFileSync(path.join(tmpDir, 'HEARTBEAT.md'), 'heartbeat root copy');
+
+      await svc.init();
+
+      // Root HEARTBEAT.md must NOT be renamed to .bak
+      expect(fs.existsSync(path.join(tmpDir, 'HEARTBEAT.md'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'HEARTBEAT.md.bak'))).toBe(false);
+      expect(fs.readFileSync(path.join(tmpDir, 'HEARTBEAT.md'), 'utf-8')).toBe('heartbeat root copy');
+      // .ResearchClaw/ copy untouched
+      expect(fs.readFileSync(path.join(rcDir, 'HEARTBEAT.md'), 'utf-8')).toBe('heartbeat v2');
     });
   });
 

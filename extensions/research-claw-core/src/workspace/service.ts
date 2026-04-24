@@ -249,11 +249,28 @@ const WORKSPACE_DIRS = [
 /**
  * Prompt files that live in .ResearchClaw/ (loaded via agent:bootstrap hook).
  * MEMORY.md + memory/ stay at workspace root (OC memory search scans root).
+ *
+ * HEARTBEAT.md is intentionally excluded: OC's heartbeat-runner reads it from
+ * workspace root (resolveHeartbeatPreflight hardcodes the root path), and the
+ * pnpm patch only covers loadWorkspaceBootstrapFiles, not the health module.
+ * run.sh syncs .ResearchClaw/HEARTBEAT.md → workspace/HEARTBEAT.md at startup;
+ * including it here would immediately rename the root copy to .bak → ENOENT.
  */
 const RELOCATABLE_PROMPT_FILES = [
   'AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md',
-  'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md',
+  'USER.md', 'BOOTSTRAP.md',
 ] as const;
+
+/**
+ * Superset of RELOCATABLE_PROMPT_FILES for read() fallback.
+ * Includes files that live in .ResearchClaw/ but are NOT relocated by migration
+ * (e.g. HEARTBEAT.md stays at root for OC compatibility, but .ResearchClaw/ is
+ * the authoritative copy and should be used when root is missing).
+ */
+const RC_SUBDIR_FILES = new Set<string>([
+  ...RELOCATABLE_PROMPT_FILES,
+  'HEARTBEAT.md',
+]);
 
 /**
  * Root-level entries hidden from rc.ws.tree (system files, like Windows hidden files).
@@ -773,15 +790,15 @@ export class WorkspaceService {
     let fullPath = this.resolvePath(filePath);
 
     // Check file exists and is a regular file.
-    // Fallback: relocatable prompt files may have been migrated to .ResearchClaw/
-    // by migratePromptFiles(). The agent:bootstrap hook redirects at startup, but
-    // runtime workspace_read tool calls bypass the hook and land here directly.
+    // Fallback: prompt files in .ResearchClaw/ may not exist at workspace root
+    // (either migrated by migratePromptFiles, or never synced). The agent:bootstrap
+    // hook redirects at startup, but runtime workspace_read tool calls land here.
     let fileStat: fs.Stats;
     try {
       fileStat = await fsp.stat(fullPath);
     } catch {
       const basename = path.basename(fullPath);
-      if ((RELOCATABLE_PROMPT_FILES as readonly string[]).includes(basename)) {
+      if (RC_SUBDIR_FILES.has(basename)) {
         const rcPath = path.join(this.root, '.ResearchClaw', basename);
         try {
           fileStat = await fsp.stat(rcPath);

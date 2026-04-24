@@ -155,6 +155,8 @@ echo "[run] Config: $OPENCLAW_CONFIG_PATH"
 # OC's heartbeat system reads workspace/HEARTBEAT.md directly (not .ResearchClaw/).
 # The pnpm patch covers loadWorkspaceBootstrapFiles but not resolveHeartbeatPreflight
 # in health-DSTtGBUV.js. Syncing on every startup keeps both locations fresh.
+# NOTE: HEARTBEAT.md is excluded from RELOCATABLE_PROMPT_FILES in service.ts
+# so that migratePromptFiles() does not rename this root copy to .bak.
 RC_DIR="workspace/.ResearchClaw"
 for f in AGENTS.md HEARTBEAT.md; do
   [ -f "$RC_DIR/$f" ] && cp "$RC_DIR/$f" "workspace/$f"
