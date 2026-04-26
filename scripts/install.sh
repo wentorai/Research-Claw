@@ -200,6 +200,120 @@ else
   fi
 fi
 
+# --- Shell-profile block management (idempotent) ---
+# Persisted exports are stored as marker-bounded blocks:
+#   # >>> research-claw:<id> >>>
+#   ...
+#   # <<< research-claw:<id> <<<
+# On every run we strip ALL matching marker blocks AND legacy un-marked blocks
+# from .zshrc/.bashrc/.bash_profile, then write one fresh block to the user's
+# primary profile with shell-appropriate syntax. Handles: fresh install,
+# clean re-install, legacy buggy block, duplicate legacy blocks, shell switch.
+RC_PROFILE_LIST=("$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile")
+
+rc_user_primary_profile() {
+  case "$(basename "${SHELL:-/bin/bash}")" in
+    zsh) printf '%s\n' "$HOME/.zshrc" ;;
+    *)   printf '%s\n' "$HOME/.bashrc" ;;
+  esac
+}
+
+rc_shell_for_profile() {
+  case "$(basename "$1")" in
+    .zshrc) printf 'zsh\n' ;;
+    *)      printf 'bash\n' ;;
+  esac
+}
+
+# rc_strip_block <profile> <block_id> [<legacy_first_line>] [<legacy_line_count>]
+# Removes every marker-bounded block with the given id, plus every legacy
+# block that begins with <legacy_first_line> (skips that line + the next
+# <legacy_line_count> - 1 lines). No-op if file missing or unwritable.
+rc_strip_block() {
+  local profile="$1" block_id="$2" legacy_first="${3:-}" legacy_n="${4:-0}"
+  [ -f "$profile" ] || return 0
+  [ -w "$profile" ] || return 0
+
+  local start="# >>> research-claw:${block_id} >>>"
+  local end="# <<< research-claw:${block_id} <<<"
+
+  if ! grep -qF "$start" "$profile" 2>/dev/null; then
+    if [ -z "$legacy_first" ] || ! grep -qFx "$legacy_first" "$profile" 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  local tmp="${profile}.rcclean.$$"
+  if awk -v sm="$start" -v em="$end" -v lg="$legacy_first" -v ln="$legacy_n" '
+    BEGIN { inblk = 0; lleft = 0 }
+    {
+      if (inblk) { if ($0 == em) { inblk = 0 } ; next }
+      if (lleft > 0) { lleft--; next }
+      if ($0 == sm) { inblk = 1; next }
+      if (lg != "" && ln > 0 && $0 == lg) { lleft = ln - 1; next }
+      print
+    }
+  ' "$profile" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$profile"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+# rc_append_block <profile> <block_id> <body>
+# Idempotent on line count: trims trailing blank lines first, omits leading
+# separator when file is empty. Reinstalls produce byte-identical output.
+rc_append_block() {
+  local profile="$1" block_id="$2" body="$3"
+  local start="# >>> research-claw:${block_id} >>>"
+  local end="# <<< research-claw:${block_id} <<<"
+
+  if [ ! -e "$profile" ]; then
+    : > "$profile" 2>/dev/null || return 1
+  fi
+  [ -w "$profile" ] || return 1
+
+  if [ -s "$profile" ]; then
+    local tmp="${profile}.rcnorm.$$"
+    if awk '
+      /^[[:space:]]*$/ { tb++; next }
+      { for (i = 0; i < tb; i++) print ""; tb = 0; print }
+    ' "$profile" > "$tmp" 2>/dev/null; then
+      mv "$tmp" "$profile"
+    else
+      rm -f "$tmp"
+    fi
+  fi
+
+  if [ -s "$profile" ]; then
+    printf '\n%s\n%s\n%s\n' "$start" "$body" "$end" >> "$profile" 2>/dev/null
+  else
+    printf '%s\n%s\n%s\n' "$start" "$body" "$end" >> "$profile" 2>/dev/null
+  fi
+}
+
+# rc_install_profile_block <block_id> <legacy_first> <legacy_n> <body_bash> [<body_zsh>]
+# Strips stale entries from every candidate profile, then writes one fresh
+# block to the user's primary profile (shell-specific body if provided).
+rc_install_profile_block() {
+  local block_id="$1" legacy_first="$2" legacy_n="$3"
+  local body_bash="$4" body_zsh="${5:-$4}"
+
+  local p
+  for p in "${RC_PROFILE_LIST[@]}"; do
+    rc_strip_block "$p" "$block_id" "$legacy_first" "$legacy_n"
+  done
+
+  local primary
+  primary="$(rc_user_primary_profile)"
+  local body
+  case "$(rc_shell_for_profile "$primary")" in
+    zsh) body="$body_zsh" ;;
+    *)   body="$body_bash" ;;
+  esac
+  rc_append_block "$primary" "$block_id" "$body"
+}
+
 # --- [4/8] Node.js 22+ ---
 # Supports nvm, fnm, and system Node. Prefers existing version manager.
 install_node_fnm() {
@@ -252,30 +366,15 @@ install_node_fnm() {
   eval "$(fnm env --shell bash 2>/dev/null || true)"
   fnm install "$NODE_MIN" --progress=never </dev/null && fnm use "$NODE_MIN" </dev/null && fnm default "$NODE_MIN" </dev/null
 
-  # Persist to shell profile (create if none exist)
-  local FNM_SNIPPET
-  FNM_SNIPPET="$(printf '\n# fnm (added by Research-Claw)\nexport PATH="$HOME/.local/share/fnm:$PATH"\neval "$(fnm env --use-on-cd --shell bash)"\n')"
-  local PROFILE_WRITTEN=false
-  for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-    if [ -f "$p" ] && ! grep -q 'fnm env' "$p" 2>/dev/null; then
-      if printf '%s' "$FNM_SNIPPET" >> "$p" 2>/dev/null; then
-        PROFILE_WRITTEN=true
-        break
-      fi
-    fi
-  done
-  if ! $PROFILE_WRITTEN; then
-    # No existing profile or all read-only — try creating for the user's shell
-    local SHELL_RC="$HOME/.bashrc"
-    case "$(basename "${SHELL:-/bin/bash}")" in
-      zsh) SHELL_RC="$HOME/.zshrc" ;;
-    esac
-    if ! printf '%s' "$FNM_SNIPPET" >> "$SHELL_RC" 2>/dev/null; then
-      warn "Could not write to $SHELL_RC (permission denied). fnm works for this session"
-      warn "but won't persist. Fix with: chmod u+w $SHELL_RC"
-    else
-      info "Created $SHELL_RC with fnm configuration"
-    fi
+  # Persist to shell profile — idempotent, shell-aware.
+  # zsh users get --shell zsh; using --shell bash here breaks zsh tab-completion.
+  local FNM_BODY_BASH='export PATH="$HOME/.local/share/fnm:$PATH"
+eval "$(fnm env --use-on-cd --shell bash)"'
+  local FNM_BODY_ZSH='export PATH="$HOME/.local/share/fnm:$PATH"
+eval "$(fnm env --use-on-cd --shell zsh)"'
+  if ! rc_install_profile_block "fnm" "# fnm (added by Research-Claw)" 3 "$FNM_BODY_BASH" "$FNM_BODY_ZSH"; then
+    warn "Could not persist fnm config to $(rc_user_primary_profile)."
+    warn "fnm works for this session but won't persist across new terminals."
   fi
 }
 
@@ -1070,92 +1169,28 @@ fi  # end: if ! $UPDATE_FAILED (skip build/install/plugins)
 
 # --- Persist OPENCLAW_CONFIG_PATH in shell profile ---
 # Ensures `openclaw config set/get` always targets the RC project config,
-# not the vanilla ~/.openclaw/openclaw.json.
+# not the vanilla ~/.openclaw/openclaw.json. Idempotent across reinstalls
+# (path change automatically replaces, no duplicates).
 RC_ENV_LINE="export OPENCLAW_CONFIG_PATH=\"$INSTALL_DIR/config/openclaw.json\""
-RC_ENV_MARKER="OPENCLAW_CONFIG_PATH"
-RC_PROFILE_WRITTEN=false
-
-for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-  if [ -f "$p" ]; then
-    if grep -q "$RC_ENV_MARKER" "$p" 2>/dev/null; then
-      # Already present — update in-place if path changed (idempotent upgrade)
-      EXISTING_LINE="$(grep "$RC_ENV_MARKER" "$p" 2>/dev/null | head -1)"
-      if [ "$EXISTING_LINE" != "$RC_ENV_LINE" ]; then
-        # Path changed (user reinstalled to different dir) — update
-        sed -i.bak "s|.*${RC_ENV_MARKER}.*|${RC_ENV_LINE}|" "$p" 2>/dev/null && rm -f "${p}.bak"
-        info "Updated OPENCLAW_CONFIG_PATH in $p"
-      fi
-      RC_PROFILE_WRITTEN=true
-      break
-    fi
-  fi
-done
-
-if ! $RC_PROFILE_WRITTEN; then
-  # Not found in any existing profile — append to the user's shell rc
-  RC_SHELL_RC="$HOME/.bashrc"
-  case "$(basename "${SHELL:-/bin/bash}")" in
-    zsh) RC_SHELL_RC="$HOME/.zshrc" ;;
-  esac
-  # Also check existing profiles one more time for files that exist but didn't match
-  for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-    if [ -f "$p" ]; then
-      RC_SHELL_RC="$p"
-      break
-    fi
-  done
-  if printf '\n# Research-Claw config path (added by install.sh)\n%s\n' "$RC_ENV_LINE" >> "$RC_SHELL_RC" 2>/dev/null; then
-    ok "OPENCLAW_CONFIG_PATH → $RC_SHELL_RC"
-    RC_PROFILE_WRITTEN=true
-  else
-    warn "Could not write to $RC_SHELL_RC. Add manually:"
-    warn "  $RC_ENV_LINE"
-  fi
+if rc_install_profile_block "openclaw-config-path" "# Research-Claw config path (added by install.sh)" 2 "$RC_ENV_LINE"; then
+  ok "OPENCLAW_CONFIG_PATH → $(rc_user_primary_profile)"
+else
+  warn "Could not persist OPENCLAW_CONFIG_PATH. Add manually:"
+  warn "  $RC_ENV_LINE"
 fi
 
 # --- Persist standalone pnpm in shell profile (if installed) ---
 # Without this, opening a new terminal and running `pnpm serve` would hit the
-# broken Corepack shim again. Same pattern as fnm profile persistence.
+# broken Corepack shim again.
 if [ -x "$RC_PNPM_PREFIX/bin/pnpm" ]; then
   RC_PNPM_LINE="export PATH=\"$RC_PNPM_PREFIX/bin:\$PATH\""
-  RC_PNPM_MARKER="$RC_PNPM_PREFIX/bin"
-  RC_PNPM_WRITTEN=false
-  for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-    if [ -f "$p" ] && grep -q "$RC_PNPM_MARKER" "$p" 2>/dev/null; then
-      RC_PNPM_WRITTEN=true
-      break
-    fi
-  done
-  if ! $RC_PNPM_WRITTEN; then
-    # Find the profile that OPENCLAW_CONFIG_PATH was written to, or default
-    RC_PNPM_RC="$HOME/.bashrc"
-    case "$(basename "${SHELL:-/bin/bash}")" in zsh) RC_PNPM_RC="$HOME/.zshrc" ;; esac
-    for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-      if [ -f "$p" ]; then RC_PNPM_RC="$p"; break; fi
-    done
-    printf '\n# Standalone pnpm (added by Research-Claw install.sh)\n%s\n' "$RC_PNPM_LINE" >> "$RC_PNPM_RC" 2>/dev/null || true
-  fi
+  rc_install_profile_block "pnpm" "# Standalone pnpm (added by Research-Claw install.sh)" 2 "$RC_PNPM_LINE" || true
 fi
 
 # --- Persist ~/.local/bin in shell profile (for openclaw CLI) ---
 LOCAL_BIN="$HOME/.local/bin"
 if [ -d "$LOCAL_BIN" ]; then
-  LOCAL_BIN_MARKER='.local/bin'
-  LOCAL_BIN_WRITTEN=false
-  for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-    if [ -f "$p" ] && grep -q "$LOCAL_BIN_MARKER" "$p" 2>/dev/null; then
-      LOCAL_BIN_WRITTEN=true
-      break
-    fi
-  done
-  if ! $LOCAL_BIN_WRITTEN; then
-    RC_LB_RC="$HOME/.bashrc"
-    case "$(basename "${SHELL:-/bin/bash}")" in zsh) RC_LB_RC="$HOME/.zshrc" ;; esac
-    for p in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-      if [ -f "$p" ]; then RC_LB_RC="$p"; break; fi
-    done
-    printf '\n# ~/.local/bin (added by Research-Claw install.sh)\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$RC_LB_RC" 2>/dev/null || true
-  fi
+  rc_install_profile_block "local-bin" "# ~/.local/bin (added by Research-Claw install.sh)" 2 'export PATH="$HOME/.local/bin:$PATH"' || true
 fi
 
 # Apply to current session so the gateway startup below uses it
