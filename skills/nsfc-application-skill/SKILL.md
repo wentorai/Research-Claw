@@ -92,11 +92,22 @@ NSFC 申请书"报告正文"标准为 5 节，详见 `references/section-templat
 
 ## 提示词目录
 
-- `prompts/lipoy-yiju.md` — 立项依据撰写
+- `prompts/lipoy-yiju.md` — 立项依据撰写（含漏斗 5 段式 + 5 杀手级问题 + F02/G02 worked example）
 - `prompts/research-content.md` — 研究内容撰写
-- `prompts/research-plan.md` — 研究方案与技术路线
+- `prompts/research-plan.md` — 研究方案与技术路线（含 6 要素路线图模板 + 3 段式可行性）
 - `prompts/innovation.md` — 特色与创新点
 - `prompts/basis.md` — 工作基础与条件
+- `prompts/abstract-writing.md` — 摘要 + 关键词撰写（5 句法 + 中英文 + 3 层关键词）
+
+## 参考资料目录
+
+- `references/project-types.md` — 8 类项目对比
+- `references/section-template.md` — 5 大模块写作模板（深度版）
+- `references/budget-guide.md` — 预算编制规范
+- `references/disciplines-codes.md` — 学部 / 申请代码
+- `references/reviewer-perspective.md` — 评审专家视角（深度版：函评 + 会评 + 学部偏好）
+- `references/common-mistakes.md` — 高频退稿原因（15 类内容性 + 5 类 PI 隐性失分）
+- `references/jicy-paradigm.md` — 杰青 / 优青范式专题
 
 ## 工作模式
 
