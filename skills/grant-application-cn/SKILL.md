@@ -60,11 +60,14 @@ license: Apache-2.0
 
 详细 prompt 见 `prompts/` 目录：
 - `prompts/proposal-outline.md` — 通用提纲生成（自动识别项目类型）
-- `prompts/significance.md` — 重要性 / 立项依据
+- `prompts/significance.md` — 重要性 / 立项依据 / Hook（含 30 秒 hook 模板 + reviewer 5 问）
 - `prompts/innovation.md` — 创新点
 - `prompts/approach.md` — 研究方案 / Approach
-- `prompts/pi-bio.md` — 个人简介 / Biosketch / Track record
+- `prompts/pi-bio.md` — 个人简介 / NIH Biosketch / NSF Bio / ERC CV+Track Record / 国家社科申请人
 - `prompts/timeline-budget.md` — 时间线 + 预算
+- `prompts/elevator-pitch.md` — 30 秒 5 句电梯演讲（适用 abstract / aims / personal statement / synopsis）
+
+跨基金通用原则与"高分短语库"见 `references/grantsmanship-essentials.md`。
 
 ## 国内 vs 国际的体例差异
 
