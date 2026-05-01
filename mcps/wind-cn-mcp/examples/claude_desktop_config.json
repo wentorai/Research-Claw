@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "wind-cn": {
+      "command": "/ABSOLUTE/PATH/TO/wind-cn-mcp/.venv/bin/wind-cn-mcp",
+      "args": [],
+      "env": {
+        "TUSHARE_TOKEN": "your-40-char-tushare-token"
+      }
+    }
+  }
+}

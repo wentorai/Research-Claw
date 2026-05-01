@@ -1,0 +1,10 @@
+nsfc-mcp
+Copyright 2026 Research-Claw Contributors
+
+Independently implemented. The concept of providing programmatic access to
+NSFC's public project query was inspired by:
+  - suqingdong/nsfc (https://github.com/suqingdong/nsfc, public)
+
+This implementation does not contain code copied from the above project.
+HTTP endpoints used are public NSFC web pages (kd.nsfc.cn, www.nsfc.gov.cn).
+Users must comply with NSFC's terms of use and robots.txt.
