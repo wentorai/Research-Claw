@@ -1,0 +1,48 @@
+# matplotlibrc — 中文期刊默认配置
+# 用法：把本文件复制到工作目录命名为 matplotlibrc，matplotlib 会自动读取
+# 或在脚本中：matplotlib.rc_file('templates/matplotlibrc')
+
+# ---- font ----
+font.family         : serif
+font.serif          : Times New Roman, SimSun, Songti SC, Source Han Serif SC, STSong, Noto Serif CJK SC
+font.size           : 9
+axes.unicode_minus  : False
+
+# ---- figure ----
+figure.figsize      : 3.3, 2.5
+figure.dpi          : 100
+savefig.dpi         : 300
+savefig.format      : pdf
+savefig.bbox        : tight
+savefig.pad_inches  : 0.05
+
+# ---- axes ----
+axes.linewidth      : 0.8
+axes.labelsize      : 9
+axes.titlesize      : 10
+axes.spines.top     : True
+axes.spines.right   : True
+axes.grid           : False
+
+# ---- ticks ----
+xtick.direction     : in
+ytick.direction     : in
+xtick.major.size    : 3.0
+ytick.major.size    : 3.0
+xtick.major.width   : 0.8
+ytick.major.width   : 0.8
+xtick.labelsize     : 8
+ytick.labelsize     : 8
+
+# ---- lines ----
+lines.linewidth     : 1.5
+lines.markersize    : 5
+
+# ---- legend ----
+legend.fontsize     : 8
+legend.frameon      : False
+legend.handlelength : 2.0
+
+# ---- pdf ----
+pdf.fonttype        : 42
+ps.fonttype         : 42
