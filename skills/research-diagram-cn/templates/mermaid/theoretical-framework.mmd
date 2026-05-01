@@ -1,0 +1,20 @@
+%% 理论框架图：含中介 (Mediator) 与调节 (Moderator)
+%% H1: X -> Y (主效应)
+%% H2: X -> M -> Y (中介)
+%% H3: W 调节 X -> Y
+%% H4: W 调节 X -> M -> Y (moderated mediation)
+flowchart LR
+    X[自变量 X<br/>例：数字化转型] -- "H1 (+)" --> Y[因变量 Y<br/>例：企业绩效]
+    X -- "H2a (+)" --> M((中介 M<br/>例：创新投入))
+    M -- "H2b (+)" --> Y
+    W{调节 W<br/>例：行业竞争} -. "H3" .-> X
+    W -. "H4" .-> M
+
+    classDef indep fill:#cfe8fc,stroke:#1565c0,stroke-width:2px;
+    classDef dep fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px;
+    classDef med fill:#fff8c4,stroke:#f57f17,stroke-width:2px;
+    classDef mod fill:#e1bee7,stroke:#6a1b9a,stroke-width:2px;
+    class X indep;
+    class Y dep;
+    class M med;
+    class W mod;

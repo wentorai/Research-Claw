@@ -1,0 +1,11 @@
+research-diagram-cn
+Copyright 2026 Research-Claw Contributors
+
+Independently developed. Content is based on publicly available specifications:
+  - Mermaid syntax (https://mermaid.js.org/, MIT-licensed concept)
+  - DAGitty conventions for causal DAGs (http://dagitty.net/, public method)
+  - PRISMA 2020 guidelines (http://www.prisma-statement.org/, public document)
+
+All Python code uses standard NetworkX + matplotlib APIs. TikZ template uses
+public LaTeX tikz-cd / tikzpicture syntax. No source code copied from third
+parties. Skill structure inspired by existing Research-Claw skills.
