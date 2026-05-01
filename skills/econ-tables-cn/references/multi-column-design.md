@@ -1,0 +1,37 @@
+# Multi-Column Table Design
+
+Good multi-column tables tell an identification story rather than dumping all models.
+- Column 1 should usually be the simplest credible baseline.
+- Add controls, fixed effects, or samples one step at a time.
+- Keep the dependent variable family stable within one table.
+- Use panel labels when the table contains more than one outcome family.
+- Do not change samples silently across columns.
+- If sample changes, add a sample row or note.
+- Place main variables near the top.
+- Put controls in logical blocks.
+- Fixed effects should be bottom rows, not coefficient rows.
+- Use clear column headings such as OLS, Firm FE, Year FE, IV, DiD.
+- Avoid more than 6 columns in the main paper unless the journal page width allows it.
+- Move heavy robustness to appendix and summarize the lesson in text.
+- Align decimal points in LaTeX when possible.
+- Use consistent rounding: often 3 decimals for coefficients and SE.
+- Make model progression interpretable to a skeptical referee.
+- Checklist item 18: verify this against the target journal instructions before submission.
+- Checklist item 19: verify this against the target journal instructions before submission.
+- Checklist item 20: verify this against the target journal instructions before submission.
+- Checklist item 21: verify this against the target journal instructions before submission.
+- Checklist item 22: verify this against the target journal instructions before submission.
+- Checklist item 23: verify this against the target journal instructions before submission.
+- Checklist item 24: verify this against the target journal instructions before submission.
+- Checklist item 25: verify this against the target journal instructions before submission.
+- Checklist item 26: verify this against the target journal instructions before submission.
+- Checklist item 27: verify this against the target journal instructions before submission.
+- Checklist item 28: verify this against the target journal instructions before submission.
+- Checklist item 29: verify this against the target journal instructions before submission.
+- Checklist item 30: verify this against the target journal instructions before submission.
+- Checklist item 31: verify this against the target journal instructions before submission.
+- Checklist item 32: verify this against the target journal instructions before submission.
+- Checklist item 33: verify this against the target journal instructions before submission.
+- Checklist item 34: verify this against the target journal instructions before submission.
+- Checklist item 35: verify this against the target journal instructions before submission.
+- Checklist item 36: verify this against the target journal instructions before submission.

@@ -1,0 +1,93 @@
+{
+  "policy-mechanism": {
+    "title": "政策传导机制示意图",
+    "category": "mechanism",
+    "template": "Schematic diagram showing policy transmission: {POLICY} -> {CHANNEL} -> {OUTCOME}. Style: clean infographic, blue-gray palette, white background, suitable for academic paper figure 1, 16:9 aspect ratio, with arrows and labeled boxes. Chinese labels: {labels}.",
+    "params": ["POLICY", "CHANNEL", "OUTCOME", "labels"],
+    "example": "POLICY=央行降准, CHANNEL=银行间流动性, OUTCOME=企业信贷成本下降, labels=降准 -> 流动性 -> 信贷成本"
+  },
+  "game-theory-payoff": {
+    "title": "博弈论 payoff matrix 可视化",
+    "category": "game",
+    "template": "Game-theoretic payoff matrix visualization with two players ({PLAYER_A} vs {PLAYER_B}), strategies {STRATEGIES}, drawn as a 2x2 grid. Highlight the Nash equilibrium cell ({EQUILIBRIUM}). Academic figure style, monochrome with one accent color, sans-serif typography, 1:1 aspect ratio.",
+    "params": ["PLAYER_A", "PLAYER_B", "STRATEGIES", "EQUILIBRIUM"],
+    "example": "PLAYER_A=Firm 1, PLAYER_B=Firm 2, STRATEGIES=High/Low price, EQUILIBRIUM=(Low, Low)"
+  },
+  "concept-illustration": {
+    "title": "经管核心概念示意图",
+    "category": "concept",
+    "template": "Conceptual illustration of {CONCEPT} in economics/management. Clean vector-art style, isometric perspective, soft pastel palette, suitable for textbook figure or graphical abstract. Annotation: {ANNOTATION}. Avoid photo-realism. 16:9.",
+    "params": ["CONCEPT", "ANNOTATION"],
+    "example": "CONCEPT=信息不对称 (information asymmetry), ANNOTATION=买方知情度 < 卖方知情度"
+  },
+  "graphical-abstract": {
+    "title": "Graphical Abstract",
+    "category": "graphical-abstract",
+    "template": "Graphical abstract for an academic paper titled '{TITLE}'. Show input data ({DATA}), method ({METHOD}), and key finding ({FINDING}) flowing left-to-right. Three labeled panels with arrows. Top journals visual standard (Nature/Science style), restrained palette, sans-serif Arial, 16:9, white background.",
+    "params": ["TITLE", "DATA", "METHOD", "FINDING"],
+    "example": "TITLE=平台经济中的网络外部性, DATA=平台交易面板, METHOD=DiD with synthetic control, FINDING=用户规模每翻倍商家收益+12%"
+  },
+  "poster-background": {
+    "title": "学术海报背景",
+    "category": "poster",
+    "template": "Academic poster background for an economics/management conference (e.g., AEA / AOM / SMS). Theme: {THEME}. Subtle geometric pattern, low contrast, large empty central area for text and figures, predominantly {COLOR_PALETTE} palette. 3:4 portrait orientation.",
+    "params": ["THEME", "COLOR_PALETTE"],
+    "example": "THEME=数字经济与共同富裕, COLOR_PALETTE=blue-and-gold"
+  },
+  "policy-brief-cover": {
+    "title": "政策简报封面",
+    "category": "policy-brief",
+    "template": "Policy brief cover image. Title overlay placeholder: '{BRIEF_TITLE}'. Issuing institution: {INSTITUTION}. Visual motif: {MOTIF}. Modern, clean, government-publication style. 8.5x11 portrait. Color scheme: {COLOR_SCHEME}.",
+    "params": ["BRIEF_TITLE", "INSTITUTION", "MOTIF", "COLOR_SCHEME"],
+    "example": "BRIEF_TITLE=碳市场扩围对工业部门的影响, INSTITUTION=清华大学产业研究院, MOTIF=工厂剪影 + 上升曲线, COLOR_SCHEME=深蓝 + 翠绿"
+  },
+  "supply-demand-curve": {
+    "title": "供需曲线图",
+    "category": "concept",
+    "template": "Stylized supply-and-demand chart with {GOOD} on a price-quantity plane. Show shifts caused by {SHIFT_CAUSE}, label new equilibrium ({NEW_EQUILIBRIUM}). Black axes, two color-coded curves, labeled E and E'. Academic textbook figure style, 4:3.",
+    "params": ["GOOD", "SHIFT_CAUSE", "NEW_EQUILIBRIUM"],
+    "example": "GOOD=新能源汽车, SHIFT_CAUSE=补贴退坡 (negative demand shock), NEW_EQUILIBRIUM=lower P, lower Q"
+  },
+  "isoquant-isocost": {
+    "title": "等产量线 + 等成本线",
+    "category": "concept",
+    "template": "Isoquant-isocost diagram for a firm minimizing cost of producing {OUTPUT_LEVEL}. Two factor inputs on axes ({INPUT_X}, {INPUT_Y}). Show several isoquants and one tangent isocost line; mark the optimal mix at {OPTIMUM}. Microeconomics textbook style, 1:1, sans-serif labels.",
+    "params": ["OUTPUT_LEVEL", "INPUT_X", "INPUT_Y", "OPTIMUM"],
+    "example": "OUTPUT_LEVEL=Q=100, INPUT_X=Capital, INPUT_Y=Labor, OPTIMUM=(K*=20, L*=30)"
+  },
+  "phillips-curve-style": {
+    "title": "菲利普斯曲线 (含预期偏移)",
+    "category": "concept",
+    "template": "Phillips curve diagram: x-axis unemployment rate, y-axis inflation rate. Show short-run downward-sloping curve and a vertical long-run NAIRU line at {NAIRU}. Indicate a shift caused by {SHIFT}. Macroeconomics textbook style, 4:3, two accent colors.",
+    "params": ["NAIRU", "SHIFT"],
+    "example": "NAIRU=u*=5%, SHIFT=供给冲击 (oil price spike)"
+  },
+  "term-structure-yield-curve": {
+    "title": "利率期限结构 (yield curve)",
+    "category": "concept",
+    "template": "Yield curve plot for {COUNTRY} {DATE_RANGE}. Maturity (3M-30Y) on x-axis, yield % on y-axis. Compare {COMPARISON}. Highlight inversion if any. Bloomberg-style, two-color, dark background optional. 16:9.",
+    "params": ["COUNTRY", "DATE_RANGE", "COMPARISON"],
+    "example": "COUNTRY=US Treasury, DATE_RANGE=2022 vs 2024, COMPARISON=2022 normal vs 2024 inverted"
+  },
+  "network-effects": {
+    "title": "网络效应 / 平台经济示意图",
+    "category": "concept",
+    "template": "Network-effects illustration: a growing graph with {N_NODES} nodes representing platform users, edges representing interactions. Show {SIDE_A} side and {SIDE_B} side connected through the platform. Annotate Metcalfe-style value growth. Vector infographic, blue accent, 16:9.",
+    "params": ["N_NODES", "SIDE_A", "SIDE_B"],
+    "example": "N_NODES=~50 visible nodes, SIDE_A=consumers, SIDE_B=merchants"
+  },
+  "risk-contagion": {
+    "title": "风险传染 / 系统性金融风险图",
+    "category": "concept",
+    "template": "Systemic-risk contagion diagram across financial institutions. Nodes = {INSTITUTIONS}, edges = exposure links, edge thickness ~ exposure size. Highlight epicenter at {EPICENTER}. Use a heat gradient (green->yellow->red) for stress level. Academic finance figure style, 16:9.",
+    "params": ["INSTITUTIONS", "EPICENTER"],
+    "example": "INSTITUTIONS=large banks, shadow banks, money market funds, EPICENTER=Bank A"
+  },
+  "moral-hazard": {
+    "title": "道德风险 / 委托代理示意图",
+    "category": "concept",
+    "template": "Principal-agent / moral-hazard schematic. Two actors ({PRINCIPAL} and {AGENT}) with hidden action {HIDDEN_ACTION}. Show information asymmetry with a dashed boundary. Highlight {INCENTIVE_FIX} as the contractual remedy. Clean infographic, 4:3.",
+    "params": ["PRINCIPAL", "AGENT", "HIDDEN_ACTION", "INCENTIVE_FIX"],
+    "example": "PRINCIPAL=投资人, AGENT=基金经理, HIDDEN_ACTION=风险偏好, INCENTIVE_FIX=业绩报酬 + 跟投"
+  }
+}
