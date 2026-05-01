@@ -1,0 +1,57 @@
+%% 实证分析流水线
+%% 数据 → 清洗 → 描述 → 主回归 → 稳健性 → 异质性 → 机制
+flowchart TD
+    subgraph Data ["数据层"]
+        D1[(CSMAR<br/>上市公司)]
+        D2[(Wind<br/>宏观/行业)]
+        D3[(CNRDS<br/>专利数据)]
+    end
+
+    subgraph Clean ["清洗层"]
+        C1[匹配公司代码<br/>stkcd ↔ 行业代码]
+        C2[Winsorize 1% / 99%]
+        C3[平衡面板构造]
+    end
+    D1 --> C1
+    D2 --> C1
+    D3 --> C1
+    C1 --> C2 --> C3
+
+    subgraph Desc ["描述统计"]
+        DS1[Table 1<br/>样本特征]
+        DS2[Table 2<br/>相关系数]
+    end
+    C3 --> DS1 --> DS2
+
+    subgraph Main ["主分析"]
+        M1[Table 3<br/>主回归 OLS / FE]
+    end
+    DS2 --> M1
+
+    subgraph Robust ["稳健性"]
+        R1[替换变量定义]
+        R2[更换样本期]
+        R3[加控制变量]
+        R4[安慰剂检验]
+    end
+    M1 --> R1 & R2 & R3 & R4
+
+    subgraph Hetero ["异质性"]
+        H1[按企业规模分组]
+        H2[按地区分组]
+        H3[按产权性质分组]
+    end
+    M1 --> H1 & H2 & H3
+
+    subgraph Mech ["机制"]
+        Mech1[中介分析]
+        Mech2[调节分析]
+    end
+    M1 --> Mech1 & Mech2
+
+    classDef data fill:#e3f2fd,stroke:#1565c0;
+    classDef clean fill:#fff3c4,stroke:#f9a825;
+    classDef result fill:#c8e6c9,stroke:#2e7d32;
+    class D1,D2,D3 data;
+    class C1,C2,C3 clean;
+    class M1 result;
