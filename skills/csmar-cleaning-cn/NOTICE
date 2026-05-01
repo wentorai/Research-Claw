@@ -1,0 +1,13 @@
+csmar-cleaning-cn
+Copyright 2026 Research-Claw Contributors
+
+Independently developed. Content is based on:
+  - Publicly available CSMAR Data Manual (公开可下载)
+  - Standard Chinese accounting/finance research conventions
+  - Public documentation of `winsor2` (Stata), `DescTools` (R), `scipy.stats.mstats` (Python)
+
+No source code was copied from any existing project. Skill structure inspired by
+existing Research-Claw skills (skills/academic-writing/).
+
+CSMAR data access requires a separate institutional license. This Skill does not
+include or distribute any CSMAR data.
