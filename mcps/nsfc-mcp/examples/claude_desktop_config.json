@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "nsfc": {
+      "command": "python",
+      "args": ["-m", "nsfc_mcp"],
+      "env": {
+        "NSFC_BASE_URL": "https://kd.nsfc.cn"
+      }
+    }
+  }
+}
