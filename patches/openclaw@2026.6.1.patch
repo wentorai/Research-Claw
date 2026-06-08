@@ -1,5 +1,5 @@
 diff --git a/dist/chat-display-projection-CMTVNdR4.js b/dist/chat-display-projection-CMTVNdR4.js
-index d19aba1a5e8a9fb58fa09789dc5c41884e44a0b5..c41419637a5016b77bb4126a640581e8cae41629 100644
+index d19aba1..c414196 100644
 --- a/dist/chat-display-projection-CMTVNdR4.js
 +++ b/dist/chat-display-projection-CMTVNdR4.js
 @@ -699,6 +699,7 @@ function shouldHideProjectedHistoryMessage(message) {
@@ -11,7 +11,7 @@ index d19aba1a5e8a9fb58fa09789dc5c41884e44a0b5..c41419637a5016b77bb4126a640581e8
  	if (roleContent.role === "user" && isEmptyTextOnlyContent(message.content ?? message.text) && !hasTranscriptMediaPaths(message)) return true;
  	if (roleContent.role === "assistant" && isEmptyTextOnlyContent(message.content ?? message.text)) return false;
 diff --git a/dist/entry.js b/dist/entry.js
-index 0af4223574e7720e379eb075cbbc6e2fff0ed809..31b287f6f9876f544cdd1f2ae62fd3708073e3a6 100755
+index 0af4223..31b287f 100755
 --- a/dist/entry.js
 +++ b/dist/entry.js
 @@ -170,7 +170,7 @@ function runOpenClawCompileCacheRespawnPlan(plan, runtime = {
@@ -88,8 +88,54 @@ index 0af4223574e7720e379eb075cbbc6e2fff0ed809..31b287f6f9876f544cdd1f2ae62fd370
  		process$1.exitCode = 1;
  	});
  	try {
+diff --git a/dist/errors-B5i-PbnI.js b/dist/errors-B5i-PbnI.js
+index a2e13c5..e454d3c 100644
+--- a/dist/errors-B5i-PbnI.js
++++ b/dist/errors-B5i-PbnI.js
+@@ -287,6 +287,7 @@ const AUTH_SCOPE_NAME_RE = /\b(?:api\.responses\.write|model\.request)\b/i;
+ const AUTH_INVALID_TOKEN_HINT_RE = /\bunauthorized\b|\b(?:invalid|incorrect|expired|stale)[_\s-]?api[_\s-]?key\b|\b(?:invalid|incorrect|expired|stale)\s+(?:token|jwt|credential|api[_\s-]?key)\b|\b(?:token|jwt|credential|api[_\s-]?key)\s+(?:is\s+)?(?:invalid|incorrect|expired|stale)\b/i;
+ const HTML_BODY_RE = /^\s*(?:<!doctype\s+html\b|<html\b)/i;
+ const HTML_CLOSE_RE = /<\/html>/i;
++const HTML_CHALLENGE_RE = /\bcloudflare\b|cdn-cgi\/challenge-platform|__cf_chl_|cf_chl|challenge-form|captcha|enable javascript and cookies to continue|attention required/i;
+ const PROXY_ERROR_RE = /\bproxyconnect\b|\bhttps?_proxy\b|\b407\b|\bproxy authentication required\b|\btunnel connection failed\b|\bconnect tunnel\b|\bsocks proxy\b|\bproxy error\b/i;
+ const DNS_ERROR_RE = /\benotfound\b|\beai_again\b|\bgetaddrinfo\b|\bno such host\b|\bdns\b/i;
+ const INTERRUPTED_NETWORK_ERROR_RE = /\beconnrefused\b|\beconnreset\b|\beconnaborted\b|\benetreset\b|\behostunreach\b|\behostdown\b|\benetunreach\b|\bepipe\b|\bsocket hang up\b|\bconnection refused\b|\bconnection reset\b|\bconnection aborted\b|\bnetwork is unreachable\b|\bhost is unreachable\b|\bfetch failed\b|\bconnection error\b|\bnetwork request failed\b/i;
+@@ -327,6 +328,15 @@ function isHtmlErrorResponse(raw, status) {
+ 	const rest = extractLeadingHttpStatus(candidate)?.rest ?? candidate;
+ 	return HTML_BODY_RE.test(rest) && HTML_CLOSE_RE.test(rest);
+ }
++function isHtmlChallengeResponse(raw, status) {
++	const trimmed = raw.trim();
++	if (!trimmed) return false;
++	const candidate = extractLeadingHttpStatus(trimmed) ? trimmed : stripErrorPrefix(trimmed);
++	const inferred = typeof status === "number" && Number.isFinite(status) ? status : extractLeadingHttpStatus(candidate)?.code;
++	if (typeof inferred !== "number" || inferred < 400) return false;
++	const rest = extractLeadingHttpStatus(candidate)?.rest ?? candidate;
++	return HTML_BODY_RE.test(rest) && HTML_CLOSE_RE.test(rest) && HTML_CHALLENGE_RE.test(rest);
++}
+ function isTransportHtmlErrorStatus(status) {
+ 	return status === 408 || status === 499 || typeof status === "number" && status >= 500 && status < 600;
+ }
+@@ -632,7 +642,7 @@ function classifyProviderRuntimeFailureKind(signal) {
+ 	if (message && classifyOAuthRefreshFailure(message)) return "auth_refresh";
+ 	if (message && isAuthScopeErrorMessage(message, status, normalizedSignal.provider)) return "auth_scope";
+ 	if (message && isProxyErrorMessage(message, status)) return "proxy";
+-	if (message && isHtmlErrorResponse(message, status)) return status === 401 || status === 403 ? "auth_html" : "upstream_html";
++	if (message && isHtmlErrorResponse(message, status)) return isHtmlChallengeResponse(message, status) ? "upstream_html" : status === 401 || status === 403 ? "auth_html" : "upstream_html";
+ 	const failoverClassification = classifyFailoverSignal({
+ 		...normalizedSignal,
+ 		status,
+@@ -686,7 +696,7 @@ function formatAssistantErrorText(msg, opts) {
+ 	if (providerRuntimeFailureKind === "auth_scope") return "Authentication is missing the required OpenAI ChatGPT scopes. Re-run OpenAI login and try again.";
+ 	if (providerRuntimeFailureKind === "auth_html") return "Authentication failed at the provider. Re-authenticate and verify your provider credentials and account access.";
+ 	if (providerRuntimeFailureKind === "auth_invalid_token") return "Authentication failed (provider returned HTTP 401). Your provider token may have expired — try the request again in a moment. If the failure persists, re-authenticate this provider.";
+-	if (providerRuntimeFailureKind === "upstream_html") return "The provider returned an HTML error page instead of an API response. This usually means a CDN or gateway (e.g. Cloudflare) blocked the request. Retry in a moment or check provider status.";
++	if (providerRuntimeFailureKind === "upstream_html") return "The provider returned an HTML challenge/error page instead of an API response. This usually means a CDN or gateway (for example Cloudflare) blocked the request. Check your network/proxy route to the provider, complete any browser verification if needed, then retry.";
+ 	if (providerRuntimeFailureKind === "proxy") return "LLM request failed: proxy or tunnel configuration blocked the provider request.";
+ 	if (isContextOverflowError(raw)) return "Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session, or use a larger-context model.";
+ 	if (isReasoningConstraintErrorMessage(raw)) return "Reasoning is required for this model endpoint. Use /think minimal (or any non-off level) and try again.";
 diff --git a/dist/service-yYn6i75I.js b/dist/service-yYn6i75I.js
-index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c66b20b40 100644
+index fab20d4..bb31a2b 100644
 --- a/dist/service-yYn6i75I.js
 +++ b/dist/service-yYn6i75I.js
 @@ -132,7 +132,11 @@ const SKILL_WORKSHOP_LOCK_OPTIONS = {
@@ -106,7 +152,7 @@ index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c
  	const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 10);
  	return `${normalized.slice(0, 60)}-${date}-${suffix}`;
 diff --git a/dist/workspace-CgsM_arl.js b/dist/workspace-CgsM_arl.js
-index d03d8c1d80264fee95aeb9dd62bc0efefa1b3773..3331b2dcd97d1a5be95386b7816dbdd8307742b4 100644
+index d03d8c1..3331b2d 100644
 --- a/dist/workspace-CgsM_arl.js
 +++ b/dist/workspace-CgsM_arl.js
 @@ -20,7 +20,11 @@ import path from "node:path";
@@ -123,7 +169,7 @@ index d03d8c1d80264fee95aeb9dd62bc0efefa1b3773..3331b2dcd97d1a5be95386b7816dbdd8
  function isSkillRuntimeVisible(entry) {
  	return entry.exposure?.includeInRuntimeRegistry ?? true;
 diff --git a/dist/workspace-DVU_odQG.js b/dist/workspace-DVU_odQG.js
-index 348ea2271570f7be08616a385bcb1c2697701cac..46a2b9a883e5ca505820e35b703fb605fdf8f586 100644
+index 348ea22..46a2b9a 100644
 --- a/dist/workspace-DVU_odQG.js
 +++ b/dist/workspace-DVU_odQG.js
 @@ -689,40 +689,44 @@ async function ensureAgentWorkspace(params) {
@@ -179,157 +225,3 @@ index 348ea2271570f7be08616a385bcb1c2697701cac..46a2b9a883e5ca505820e35b703fb605
  		}
  	];
  	const result = [];
-diff --git a/dist/openclaw-tools-ChLzmhJi.js b/dist/openclaw-tools-ChLzmhJi.js
-index 2e82d22db7afd7d4f3af373cc447d02c5e25fe4d..6c33d2b563597d82bc8b33f946a5bdb648e5b5a8 100644
---- a/dist/openclaw-tools-ChLzmhJi.js	2026-06-04 10:44:27
-+++ b/dist/openclaw-tools-ChLzmhJi.js	2026-06-08 11:16:08
-@@ -50,7 +50,7 @@
- import { t as SsrFBlockedError } from "./ssrf-DQLCs47S.js";
- import { t as getGlobalHookRunner } from "./hook-runner-global-CBGmN_LW.js";
- import { o as resolveContextEngine } from "./registry-CMq-i5MO.js";
--import { t as clearAgentRunContext, u as registerAgentRunContext } from "./agent-events-f1e3xUso.js";
-+import { i as emitAgentEvent, t as clearAgentRunContext, u as registerAgentRunContext } from "./agent-events-f1e3xUso.js";
- import { a as imageMimeFromFormat, n as detectMime } from "./mime-n-YFWBtW.js";
- import { n as assertSandboxPath } from "./sandbox-paths-D0IzFPUM.js";
- import "./local-file-access-CBe_wA_B.js";
-@@ -3276,6 +3276,69 @@
- 		clearAgentRunContext(params.handle.runId);
- 	}
- }
-+function classifyMediaGenerationFailureForUser(params) {
-+	const errorText = formatErrorMessage(params.error);
-+	const lower = errorText.toLowerCase();
-+	const isImage = params.toolName === "image_generate" || params.toolName === "Image generation";
-+	if (!isImage) return {
-+		code: "MEDIA_GENERATION_FAILED",
-+		reason: errorText,
-+		suggestion: "Check the selected media provider, model, API key, and network route, then retry."
-+	};
-+	if (/no api key found|missing api key|api key/i.test(errorText)) return {
-+		code: "IMAGE_GENERATION_AUTH_MISSING",
-+		reason: errorText,
-+		suggestion: "Open Settings and configure the image provider API key. Pasting a key into chat does not configure runtime authentication."
-+	};
-+	if (/no image-generation provider registered|provider registered/i.test(errorText)) return {
-+		code: "IMAGE_GENERATION_PROVIDER_NOT_FOUND",
-+		reason: errorText,
-+		suggestion: "Check imageModel.primary uses provider/model format and that the provider exists in models.providers."
-+	};
-+	if (/blocked.*private|private\/internal\/special-use|ssrf|blocked url fetch/i.test(errorText)) return {
-+		code: "IMAGE_GENERATION_SSRF_BLOCKED",
-+		reason: errorText,
-+		suggestion: "Check DNS/proxy settings so the provider API domain resolves to a public IP, or adjust the OpenClaw URL-fetch/SSRF policy for this trusted provider."
-+	};
-+	if (/timeout|timed out|abort/i.test(lower)) return {
-+		code: "IMAGE_GENERATION_TIMEOUT",
-+		reason: errorText,
-+		suggestion: "Check network connectivity/proxy settings or increase the image-generation timeout before retrying."
-+	};
-+	if (/model|not found|not available|unsupported/i.test(lower)) return {
-+		code: "IMAGE_GENERATION_MODEL_UNAVAILABLE",
-+		reason: errorText,
-+		suggestion: "Choose a model listed by image_generate(action=\"list\") or update imageModel.primary to a provider-supported model id."
-+	};
-+	return {
-+		code: "IMAGE_GENERATION_FAILED",
-+		reason: errorText,
-+		suggestion: "Open Settings to verify the image provider, API key, model id, and network route, then retry."
-+	};
-+}
-+function emitMediaGenerationFailureEvent(params) {
-+	const runId = params.handle?.runId;
-+	if (!runId) return;
-+	const classified = classifyMediaGenerationFailureForUser({
-+		toolName: params.toolName,
-+		error: params.error
-+	});
-+	try {
-+		emitAgentEvent({
-+			runId,
-+			stream: "error",
-+			sessionKey: params.handle?.requesterSessionKey,
-+			data: {
-+				phase: "error",
-+				capability: params.toolName === "Image generation" || params.toolName === "image_generate" ? "image_generation" : "media_generation",
-+				toolName: params.toolName,
-+				...classified
-+			}
-+		});
-+	} catch (error) {
-+		log$5.debug?.("Media generation failure event emit failed", { error });
-+	}
-+}
- function buildMediaGenerationReplyInstruction(params) {
- 	if (params.status === "ok") return [
- 		`The ${params.completionLabel} is ready for the original chat.`,
-@@ -3342,7 +3405,12 @@
- 			});
- 		} catch (error) {
- 			params.lifecycle.failTaskRun({
-+				handle: params.handle,
-+				error
-+			});
-+			emitMediaGenerationFailureEvent({
- 				handle: params.handle,
-+				toolName: params.toolName,
- 				error
- 			});
- 			await params.lifecycle.wakeTaskCompletion({
-@@ -4741,7 +4809,12 @@
- 				};
- 			} catch (error) {
- 				failImageGenerationTaskRun({
-+					handle: taskHandle,
-+					error
-+				});
-+				emitMediaGenerationFailureEvent({
- 					handle: taskHandle,
-+					toolName: "image_generate",
- 					error
- 				});
- 				throw error;
-
-diff --git a/dist/errors-B5i-PbnI.js b/dist/errors-B5i-PbnI.js
-index 1111111..2222222 100644
---- a/dist/errors-B5i-PbnI.js
-+++ b/dist/errors-B5i-PbnI.js
-@@ -287,6 +287,7 @@
- const AUTH_INVALID_TOKEN_HINT_RE = /\bunauthorized\b|\b(?:invalid|incorrect|expired|stale)[_\s-]?api[_\s-]?key\b|\b(?:invalid|incorrect|expired|stale)\s+(?:token|jwt|credential|api[_\s-]?key)\b|\b(?:token|jwt|credential|api[_\s-]?key)\s+(?:is\s+)?(?:invalid|incorrect|expired|stale)\b/i;
- const HTML_BODY_RE = /^\s*(?:<!doctype\s+html\b|<html\b)/i;
- const HTML_CLOSE_RE = /<\/html>/i;
-+const HTML_CHALLENGE_RE = /\bcloudflare\b|cdn-cgi\/challenge-platform|__cf_chl_|cf_chl|challenge-form|captcha|enable javascript and cookies to continue|attention required/i;
- const PROXY_ERROR_RE = /\bproxyconnect\b|\bhttps?_proxy\b|\b407\b|\bproxy authentication required\b|\btunnel connection failed\b|\bconnect tunnel\b|\bsocks proxy\b|\bproxy error\b/i;
- const DNS_ERROR_RE = /\benotfound\b|\beai_again\b|\bgetaddrinfo\b|\bno such host\b|\bdns\b/i;
- const INTERRUPTED_NETWORK_ERROR_RE = /\beconnrefused\b|\beconnreset\b|\beconnaborted\b|\benetreset\b|\behostunreach\b|\behostdown\b|\benetunreach\b|\bepipe\b|\bsocket hang up\b|\bconnection refused\b|\bconnection reset\b|\bconnection aborted\b|\bnetwork is unreachable\b|\bhost is unreachable\b|\bfetch failed\b|\bconnection error\b|\bnetwork request failed\b/i;
-@@ -327,6 +328,15 @@
- 	const rest = extractLeadingHttpStatus(candidate)?.rest ?? candidate;
- 	return HTML_BODY_RE.test(rest) && HTML_CLOSE_RE.test(rest);
- }
-+function isHtmlChallengeResponse(raw, status) {
-+	const trimmed = raw.trim();
-+	if (!trimmed) return false;
-+	const candidate = extractLeadingHttpStatus(trimmed) ? trimmed : stripErrorPrefix(trimmed);
-+	const inferred = typeof status === "number" && Number.isFinite(status) ? status : extractLeadingHttpStatus(candidate)?.code;
-+	if (typeof inferred !== "number" || inferred < 400) return false;
-+	const rest = extractLeadingHttpStatus(candidate)?.rest ?? candidate;
-+	return HTML_BODY_RE.test(rest) && HTML_CLOSE_RE.test(rest) && HTML_CHALLENGE_RE.test(rest);
-+}
- function isTransportHtmlErrorStatus(status) {
- 	return status === 408 || status === 499 || typeof status === "number" && status >= 500 && status < 600;
- }
-@@ -632,6 +642,6 @@
- 	if (message && isAuthScopeErrorMessage(message, status, normalizedSignal.provider)) return "auth_scope";
- 	if (message && isProxyErrorMessage(message, status)) return "proxy";
--	if (message && isHtmlErrorResponse(message, status)) return status === 401 || status === 403 ? "auth_html" : "upstream_html";
-+	if (message && isHtmlErrorResponse(message, status)) return isHtmlChallengeResponse(message, status) ? "upstream_html" : status === 401 || status === 403 ? "auth_html" : "upstream_html";
- 	const failoverClassification = classifyFailoverSignal({
- 		...normalizedSignal,
- 		status,
-@@ -686,6 +696,6 @@
- 	if (providerRuntimeFailureKind === "auth_html") return "Authentication failed at the provider. Re-authenticate and verify your provider credentials and account access.";
- 	if (providerRuntimeFailureKind === "auth_invalid_token") return "Authentication failed (provider returned HTTP 401). Your provider token may have expired — try the request again in a moment. If the failure persists, re-authenticate this provider.";
--	if (providerRuntimeFailureKind === "upstream_html") return "The provider returned an HTML error page instead of an API response. This usually means a CDN or gateway (e.g. Cloudflare) blocked the request. Retry in a moment or check provider status.";
-+	if (providerRuntimeFailureKind === "upstream_html") return "The provider returned an HTML challenge/error page instead of an API response. This usually means a CDN or gateway (for example Cloudflare) blocked the request. Check your network/proxy route to the provider, complete any browser verification if needed, then retry.";
- 	if (providerRuntimeFailureKind === "proxy") return "LLM request failed: proxy or tunnel configuration blocked the provider request.";
- 	if (isContextOverflowError(raw)) return "Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session, or use a larger-context model.";
- 	if (isReasoningConstraintErrorMessage(raw)) return "Reasoning is required for this model endpoint. Use /think minimal (or any non-off level) and try again.";
