@@ -112,8 +112,8 @@ export const useSupervisorStore = create<SupervisorState>()((set, get) => ({
     if (!client?.isConnected) return;
     set({ configLoading: true, error: null });
     try {
-      const result = await client.request<{ ok: boolean; config: SupervisorConfig }>('rc.supervisor.config', {});
-      set({ config: result.config, configLoading: false });
+      const result = await client.request<{ ok: boolean; config?: SupervisorConfig }>('rc.supervisor.config', {});
+      set({ config: result?.config ?? null, configLoading: false });
     } catch {
       set({ configLoading: false, config: null });
     }

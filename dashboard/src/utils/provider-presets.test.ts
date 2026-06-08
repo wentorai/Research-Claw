@@ -124,3 +124,41 @@ describe('detectPresetFromProvider', () => {
     expect(detectPresetFromProvider('')).toBe('custom');
   });
 });
+
+describe('DeepSeek provider preset', () => {
+  const deepseek = PROVIDER_PRESETS.find((p) => p.id === 'deepseek')!;
+
+  it('exists with official endpoint and OpenAI-compatible protocol', () => {
+    expect(deepseek).toBeDefined();
+    expect(deepseek.baseUrl).toBe('https://api.deepseek.com');
+    expect(deepseek.api).toBe('openai-completions');
+  });
+
+  it('contains deepseek-v4-flash and deepseek-v4-pro models', () => {
+    const ids = deepseek.models.map((m) => m.id);
+    expect(ids).toContain('deepseek-v4-flash');
+    expect(ids).toContain('deepseek-v4-pro');
+  });
+
+  it('uses documented context and output limits', () => {
+    const flash = deepseek.models.find((m) => m.id === 'deepseek-v4-flash')!;
+    const pro = deepseek.models.find((m) => m.id === 'deepseek-v4-pro')!;
+
+    expect(flash.contextWindow).toBe(1_000_000);
+    expect(pro.contextWindow).toBe(1_000_000);
+    expect(flash.maxTokens).toBe(384_000);
+    expect(pro.maxTokens).toBe(384_000);
+  });
+
+  it('defaults DeepSeek v4 models to non-thinking mode', () => {
+    const flash = deepseek.models.find((m) => m.id === 'deepseek-v4-flash')!;
+    const pro = deepseek.models.find((m) => m.id === 'deepseek-v4-pro')!;
+    expect(flash.reasoning).toBe(false);
+    expect(pro.reasoning).toBe(false);
+  });
+
+  it('can be resolved by provider key', () => {
+    expect(detectPresetFromProvider('deepseek')).toBe('deepseek');
+    expect(getPreset('deepseek').id).toBe('deepseek');
+  });
+});

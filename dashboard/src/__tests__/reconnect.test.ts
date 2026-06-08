@@ -4,9 +4,12 @@ import { ReconnectScheduler } from '../gateway/reconnect';
 describe('ReconnectScheduler', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // schedule() applies jitter in [0.85, 1.15]; fix at 1.0 for deterministic delays.
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 

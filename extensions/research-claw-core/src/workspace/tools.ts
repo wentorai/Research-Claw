@@ -218,7 +218,7 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
     name: 'workspace_save',
     description:
       'Save or create a text file in the research workspace. Automatically commits to Git. ' +
-      'Convention: agent-generated files → outputs/, user uploads → uploads/. ' +
+      'Convention: agent-generated files → outputs/, user-provided files → sources/. ' +
       'Use paths relative to workspace root (e.g. "outputs/drafts/review.md").',
     parameters: {
       type: 'object',
@@ -786,7 +786,7 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
       'Append content to an existing file in the research workspace. ' +
       'If the file does not exist, creates it. This avoids the need to read, ' +
       'concatenate, and rewrite — reducing token usage and preventing accidental overwrites. ' +
-      'Convention: agent-generated files go under outputs/, user-uploaded under uploads/.',
+      'Convention: agent-generated files go under outputs/, user-provided under sources/.',
     parameters: {
       type: 'object',
       required: ['path', 'content'],

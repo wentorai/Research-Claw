@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Button, Tooltip, message } from 'antd';
+import { Button, Tooltip, message, Modal } from 'antd';
 import { SendOutlined, PaperClipOutlined, ReloadOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
@@ -9,6 +9,10 @@ import type { ChatAttachment } from '../../gateway/types';
 import SlashCommandMenu, { useSlashCommandMenu } from './SlashCommandMenu';
 import InputHistoryPopup from './InputHistoryPopup';
 import { useInputHistory } from '../../hooks/useInputHistory';
+import { abortChatShortcutLabel } from '../../utils/keyboard-shortcut';
+import { useUiStore } from '../../stores/ui';
+import { useSessionsStore } from '../../stores/sessions';
+import { resizeComposerInput } from '../../utils/composer-input';
 
 const DRAFT_STORAGE_PREFIX = 'rc-chat-draft:';
 
@@ -29,10 +33,17 @@ export default function MessageInput() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const send = useChatStore((s) => s.send);
   const abort = useChatStore((s) => s.abort);
+  const inputRestore = useChatStore((s) => s.inputRestore);
+  const inputRestoreSeq = useChatStore((s) => s.inputRestoreSeq);
+  const clearInputRestore = useChatStore((s) => s.clearInputRestore);
   const sending = useChatStore((s) => s.sending);
+  const runId = useChatStore((s) => s.runId);
   const streaming = useChatStore((s) => s.streaming);
+  const canStopGeneration = Boolean(runId) || sending || streaming;
   const loadHistory = useChatStore((s) => s.loadHistory);
   const connState = useGatewayStore((s) => s.state);
+  const chatInputPrefill = useUiStore((s) => s.chatInputPrefill);
+  const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
 
   const inputHistory = useInputHistory();
   const [historyPopupOpen, setHistoryPopupOpen] = useState(false);
@@ -68,12 +79,50 @@ export default function MessageInput() {
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
         if (saved) {
-          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+          resizeComposerInput(textareaRef.current);
         }
       }
     } catch { /* ignore */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- inputHistory ref is stable
   }, [sessionKey]);
+
+  // Restore draft to input after user aborts generation
+  useEffect(() => {
+    if (!inputRestore) return;
+    setText(inputRestore.text);
+    setAttachments(inputRestore.attachments);
+    clearInputRestore();
+    try {
+      if (inputRestore.text) {
+        localStorage.setItem(DRAFT_STORAGE_PREFIX + sessionKey, inputRestore.text);
+      } else {
+        localStorage.removeItem(DRAFT_STORAGE_PREFIX + sessionKey);
+      }
+    } catch { /* ignore */ }
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = 'auto';
+      resizeComposerInput(el);
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
+    });
+  }, [inputRestore, inputRestoreSeq, clearInputRestore, sessionKey]);
+
+  // Skill Workshop / other panels can push a one-shot message into the composer
+  useEffect(() => {
+    if (!chatInputPrefill) return;
+    setText(chatInputPrefill);
+    setChatInputPrefill(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.style.height = 'auto';
+      resizeComposerInput(el);
+      el.selectionStart = el.selectionEnd = el.value.length;
+    });
+  }, [chatInputPrefill, setChatInputPrefill]);
 
   const handleRefresh = useCallback(async () => {
     const beforeCount = useChatStore.getState().messages.length;
@@ -100,7 +149,7 @@ export default function MessageInput() {
       textareaRef.current.focus();
       // Auto-resize after setting text
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+      resizeComposerInput(textareaRef.current);
     }
   });
 
@@ -186,22 +235,54 @@ export default function MessageInput() {
   const handleSend = useCallback(() => {
     const msg = text.trim();
     if ((!msg && attachments.length === 0) || !isConnected || sending) return;
-    // Push to input history before clearing
-    if (msg) {
-      inputHistory.push(msg);
-      inputHistory.reset();
-      draftRef.current = null;
+
+    const doSend = () => {
+      if (msg) {
+        inputHistory.push(msg);
+        inputHistory.reset();
+        draftRef.current = null;
+      }
+      setHistoryPopupOpen(false);
+      setText('');
+      setAttachments([]);
+      try { localStorage.removeItem(DRAFT_STORAGE_PREFIX + sessionKey); } catch { /* ignore */ }
+      send(msg, attachments.length > 0 ? attachments : undefined);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    };
+
+    const {
+      activeSessionStale,
+      staleSendAcknowledgedKey,
+      acknowledgeStaleSessionSend,
+    } = useSessionsStore.getState();
+
+    if (
+      activeSessionStale
+      && staleSendAcknowledgedKey !== sessionKey
+    ) {
+      Modal.confirm({
+        title: t('chat.staleSessionConfirmTitle'),
+        content: t('chat.staleSessionConfirmBody'),
+        okText: t('chat.staleSessionConfirmOk'),
+        cancelText: t('chat.staleSessionConfirmCancel'),
+        onOk: () => {
+          acknowledgeStaleSessionSend(sessionKey);
+          doSend();
+        },
+      });
+      return;
     }
-    setHistoryPopupOpen(false);
-    setText('');
-    setAttachments([]);
-    // Clear persisted draft on send
-    try { localStorage.removeItem(DRAFT_STORAGE_PREFIX + sessionKey); } catch { /* ignore */ }
-    send(msg, attachments.length > 0 ? attachments : undefined);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
-  }, [text, attachments, isConnected, sending, send, sessionKey, inputHistory]);
+
+    doSend();
+  }, [text, attachments, isConnected, sending, send, sessionKey, inputHistory, t]);
+
+  const abortShortcut = abortChatShortcutLabel();
+  const abortTooltip = t('chat.abortWithShortcut', {
+    shortcut: abortShortcut,
+    defaultValue: 'Stop ({{shortcut}})',
+  });
 
   const handleCompositionStart = () => {
     composingRef.current = true;
@@ -216,6 +297,7 @@ export default function MessageInput() {
     // composingRef is the primary guard — survives remote desktop tools
     // (ToDesk, etc.) that may not set isComposing correctly.
     if (composingRef.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
+
     // Let slash command menu handle navigation keys first
     if (slashMenu.handleKeyDown(e)) return;
 
@@ -237,7 +319,7 @@ export default function MessageInput() {
           requestAnimationFrame(() => {
             if (el) {
               el.style.height = 'auto';
-              el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+              resizeComposerInput(el);
               el.selectionStart = el.selectionEnd = el.value.length;
             }
           });
@@ -262,7 +344,7 @@ export default function MessageInput() {
         requestAnimationFrame(() => {
           if (el) {
             el.style.height = 'auto';
-            el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+            resizeComposerInput(el);
             el.selectionStart = el.selectionEnd = el.value.length;
           }
         });
@@ -281,23 +363,19 @@ export default function MessageInput() {
     // Auto-resize
     const el = e.target;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    resizeComposerInput(el);
   };
 
   return (
     <div
+      className={`chat-composer${isDragging ? ' is-dragging' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={{
-        padding: '12px 24px 16px',
-        borderTop: '1px solid var(--border)',
-        background: 'var(--surface)',
-      }}
     >
-      {/* Attachment preview strip */}
+      <div className="chat-composer-panel">
       {attachments.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
+        <div className="chat-composer-attachments">
           {attachments.map((att) => (
             <div key={att.id} style={{ position: 'relative', width: 64, height: 64 }}>
               <img
@@ -307,7 +385,7 @@ export default function MessageInput() {
                   width: 64,
                   height: 64,
                   objectFit: 'cover',
-                  borderRadius: 6,
+                  borderRadius: 4,
                   border: '1px solid var(--border)',
                 }}
               />
@@ -340,21 +418,7 @@ export default function MessageInput() {
         </div>
       )}
 
-      {/* Input row — position:relative for the slash command menu overlay */}
-      <div
-        style={{
-          position: 'relative',
-          display: 'flex',
-          alignItems: 'flex-end',
-          gap: 8,
-          background: 'var(--surface-hover)',
-          border: `1px solid ${isDragging ? 'var(--accent-secondary)' : 'var(--border)'}`,
-          borderRadius: 8,
-          padding: '6px 12px',
-          transition: 'border-color 0.15s ease',
-        }}
-      >
-        {/* Slash command autocomplete menu — floats above input */}
+      <div className="chat-composer-bar">
         <SlashCommandMenu
           commands={slashMenu.commands}
           activeIndex={slashMenu.activeIndex}
@@ -362,19 +426,23 @@ export default function MessageInput() {
           onHover={slashMenu.setActiveIndex}
           visible={slashMenu.visible}
         />
-        {/* Refresh button — reloads chat history without losing draft.
-          * Matches OC chat view's onRefresh (app-render.ts:1386-1388). */}
-        <Tooltip title={t('chat.refresh')}>
-          <Button
-            type="text"
-            icon={<ReloadOutlined />}
-            onClick={handleRefresh}
-            disabled={!isConnected}
-            style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
-          />
-        </Tooltip>
 
-        {/* Hidden file input */}
+        <span className="chat-composer-prompt" aria-hidden="true">›</span>
+
+        <textarea
+          ref={textareaRef}
+          className="chat-composer-input"
+          value={text}
+          onChange={handleInput}
+          onKeyDown={handleKeyDown}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          onPaste={handlePaste}
+          placeholder={t('chat.placeholder')}
+          disabled={!isConnected || sending}
+          rows={1}
+        />
+
         <input
           ref={fileInputRef}
           type="file"
@@ -387,106 +455,92 @@ export default function MessageInput() {
           }}
         />
 
-        {/* Attach button */}
-        <Tooltip title={t('chat.attachImage')}>
-          <Button
-            type="text"
-            icon={<PaperClipOutlined />}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!isConnected || sending}
-            style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
-          />
-        </Tooltip>
-
-        {/* Input history popup + trigger button */}
-        <InputHistoryPopup
-          items={inputHistory.items()}
-          visible={historyPopupOpen}
-          onSelect={(historyText) => {
-            setText(historyText);
-            setHistoryPopupOpen(false);
-            textareaRef.current?.focus();
-            requestAnimationFrame(() => {
-              const el = textareaRef.current;
-              if (el) {
-                el.style.height = 'auto';
-                el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-                el.selectionStart = el.selectionEnd = el.value.length;
-              }
-            });
-          }}
-          onDismiss={() => setHistoryPopupOpen(false)}
-        />
-        <Tooltip title={t('chat.inputHistory', { defaultValue: 'Input history' })}>
-          <Button
-            type="text"
-            icon={<HistoryOutlined />}
-            onClick={() => setHistoryPopupOpen((v) => !v)}
-            style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
-          />
-        </Tooltip>
-
-        <textarea
-          ref={textareaRef}
-          className="chat-textarea"
-          value={text}
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          onPaste={handlePaste}
-          placeholder={t('chat.placeholder')}
-          disabled={!isConnected || sending}
-          rows={1}
-          style={{
-            flex: 1,
-            border: 'none',
-            outline: 'none',
-            background: 'transparent',
-            color: 'var(--text-primary)',
-            fontSize: 14,
-            lineHeight: '32px',
-            resize: 'none',
-            fontFamily: 'inherit',
-            height: 32,
-            minHeight: 32,
-            maxHeight: 160,
-            padding: 0,
-            margin: 0,
-          }}
-        />
-
-        {streaming ? (
-          <Tooltip title={t('chat.abort')}>
+        <div className="chat-composer-toolbar">
+          <Tooltip title={t('chat.refresh')}>
             <Button
               type="text"
-              icon={
-                <svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" strokeWidth="2" />
-                  <rect x="8" y="8" width="8" height="8" rx="1" />
-                </svg>
-              }
-              onClick={abort}
-              style={{
-                color: 'var(--accent-primary)',
-                flexShrink: 0,
-              }}
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={handleRefresh}
+              disabled={!isConnected}
             />
           </Tooltip>
-        ) : (
-          <Tooltip title={t('chat.send')}>
+          <Tooltip title={t('chat.attachImage')}>
             <Button
               type="text"
-              icon={<SendOutlined />}
-              onClick={handleSend}
-              disabled={!canSend}
-              style={{
-                color: canSend ? 'var(--accent-primary)' : 'var(--text-tertiary)',
-                flexShrink: 0,
-              }}
+              size="small"
+              icon={<PaperClipOutlined />}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!isConnected || sending}
             />
           </Tooltip>
-        )}
+          <div className="chat-composer-history">
+            <InputHistoryPopup
+              items={inputHistory.items()}
+              visible={historyPopupOpen}
+              align="right"
+              onSelect={(historyText) => {
+                setText(historyText);
+                setHistoryPopupOpen(false);
+                textareaRef.current?.focus();
+                requestAnimationFrame(() => {
+                  const el = textareaRef.current;
+                  if (el) {
+                    el.style.height = 'auto';
+                    resizeComposerInput(el);
+                    el.selectionStart = el.selectionEnd = el.value.length;
+                  }
+                });
+              }}
+              onDismiss={() => setHistoryPopupOpen(false)}
+            />
+            <Tooltip title={t('chat.inputHistory', { defaultValue: 'Input history' })}>
+              <Button
+                type="text"
+                size="small"
+                className="chat-composer-history-btn"
+                icon={<HistoryOutlined />}
+                onClick={() => setHistoryPopupOpen((v) => !v)}
+                disabled={!isConnected}
+                aria-expanded={historyPopupOpen}
+              />
+            </Tooltip>
+          </div>
+          {canStopGeneration ? (
+            <Tooltip title={abortTooltip}>
+              <Button
+                type="text"
+                size="small"
+                icon={
+                  <svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" strokeWidth="2" />
+                    <rect x="8" y="8" width="8" height="8" rx="1" />
+                  </svg>
+                }
+                onClick={abort}
+                style={{ color: 'var(--accent-primary)' }}
+              />
+            </Tooltip>
+          ) : (
+            <Tooltip title={t('chat.send')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<SendOutlined />}
+                onClick={handleSend}
+                disabled={!canSend}
+                style={{
+                  color: canSend ? 'var(--accent-primary)' : undefined,
+                }}
+              />
+            </Tooltip>
+          )}
+        </div>
+      </div>
+
+      <div className="chat-composer-hint">
+        {t('chat.composerHint', { defaultValue: 'Enter send · Shift+Enter newline' })}
+      </div>
       </div>
     </div>
   );

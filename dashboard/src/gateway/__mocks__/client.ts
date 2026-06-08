@@ -76,7 +76,7 @@ export class GatewayClient {
 
         const hello: HelloOk = {
           type: 'hello-ok',
-          protocol: 3,
+          protocol: 4,
           server: { version: '0.0.0-mock', connId: 'mock-conn-id' },
           features: { methods: ['health', 'chat.send', 'chat.abort', 'chat.history', 'sessions.reset'], events: [] },
         };

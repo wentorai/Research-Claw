@@ -210,8 +210,8 @@ describe('Gateway protocol parity with OpenClaw', () => {
       expect(connectFrame).toBeDefined();
       expect(connectFrame.params.minProtocol).toBe(MIN_PROTOCOL);
       expect(connectFrame.params.maxProtocol).toBe(MAX_PROTOCOL);
-      expect(connectFrame.params.minProtocol).toBe(3);
-      expect(connectFrame.params.maxProtocol).toBe(3);
+      expect(connectFrame.params.minProtocol).toBe(4);
+      expect(connectFrame.params.maxProtocol).toBe(4);
 
       client.disconnect();
     });
@@ -901,13 +901,10 @@ describe('Gateway protocol parity with OpenClaw', () => {
   // ─── Protocol version constants ───────────────────────────────────
 
   describe('Protocol version constants — openclaw/src/gateway/protocol/schema/protocol-schemas.ts:301', () => {
-    it('MIN_PROTOCOL and MAX_PROTOCOL are both 3', () => {
-      // OpenClaw reference: protocol-schemas.ts:301
-      //   export const PROTOCOL_VERSION = 3 as const;
-      // OpenClaw browser client: ui/src/ui/gateway.ts:308-309
-      //   minProtocol: 3, maxProtocol: 3,
-      expect(MIN_PROTOCOL).toBe(3);
-      expect(MAX_PROTOCOL).toBe(3);
+    it('MIN_PROTOCOL and MAX_PROTOCOL are both 4 (OC 2026.6.1+)', () => {
+      // OpenClaw reference: protocol-schemas.ts — PROTOCOL_VERSION = 4
+      expect(MIN_PROTOCOL).toBe(4);
+      expect(MAX_PROTOCOL).toBe(4);
     });
   });
 

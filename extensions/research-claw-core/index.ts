@@ -6,13 +6,15 @@
  *
  * Registration totals:
  *   - 40 agent tools (17 literature + 10 task + 7 workspace + 5 monitor + 1 skill_search)
- *   - 82 WS RPC methods + 1 HTTP route = 83 interface methods
- *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* = 82 WS; POST /rc/upload = 1 HTTP)
+ *   - 92 WS RPC methods + 2 HTTP routes = 94 interface methods
+ *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* = 92 WS; POST /rc/upload + GET /rc/download = 2 HTTP)
  *   - 10 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×3, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
+ *   - 1 session monitoring service (automatic memory extraction)
  */
 
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as os from 'node:os';
@@ -39,6 +41,25 @@ import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
+import {
+  oauthInitiate,
+  oauthComplete,
+  oauthStatus,
+  apiKeyStatus,
+  apiKeyStatuses,
+  setApiKeyProfile,
+  clearApiKeyProfile,
+} from './src/oauth/service.js';
+import { MemoryService, SessionMonitoringService, registerMemoryRpcMethods, registerSessionRpcMethods, type MemoryType } from './src/memory/index.js';
+import { ClaudeMemSyncService } from './src/memory/claude-mem-sync.js';
+import { hydrateDashboardSystemPromptFromConfigPath } from './src/dashboard/config.js';
+import { formatDashboardSystemPromptBlock } from './src/dashboard/prompt-append.js';
+import { TASK_FLOW_AGENT_GUIDANCE } from './src/tasks/task-flow-prompt.js';
+import { registerDashboardRpc } from './src/dashboard/rpc.js';
+import { PaperReviewService } from './src/paper-review/service.js';
+import { registerPaperReviewRpc } from './src/paper-review/rpc.js';
+import { resolveWorkspaceRoot } from './src/workspace/resolve-root.js';
+import { registerProviderRpc } from './src/provider/rpc.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -58,6 +79,9 @@ interface PluginConfig {
   };
 }
 
+/** Experimental memory module — enable with RC_ENABLE_MEMORY=1 (off in Docker by default). */
+const MEMORY_MODULE_ENABLED = process.env.RC_ENABLE_MEMORY === '1';
+
 // ── Minimal plugin API types (locally defined, contract-compatible) ────
 
 interface PluginLogger {
@@ -72,6 +96,20 @@ interface PluginApi {
   name: string;
   pluginConfig?: Record<string, unknown>;
   logger: PluginLogger;
+  runtime: {
+    config: {
+      current: () => Record<string, unknown>;
+      mutateConfigFile: (params: {
+        afterWrite: { mode: 'auto' };
+        mutate: (draft: Record<string, unknown>) => void;
+      }) => Promise<{
+        path: string;
+        persistedHash: string | null;
+        afterWrite?: unknown;
+        followUp?: unknown;
+      }>;
+    };
+  };
   resolvePath: (input: string) => string;
   registerTool: (tool: unknown) => void;
   registerGatewayMethod: (method: string, handler: unknown) => void;
@@ -99,6 +137,9 @@ interface PluginDefinition {
   name: string;
   description: string;
   version: string;
+  contracts?: {
+    tools?: string[];
+  };
   register?: (api: PluginApi) => void | Promise<void>;
 }
 
@@ -119,6 +160,10 @@ let _wsService: InstanceType<typeof WorkspaceService> | null = null;
 let _wsConfig: WorkspaceConfig | null = null;
 let _wsInitPromise: Promise<void> | null = null;
 let _pptService: InstanceType<typeof PptService> | null = null;
+let _sessionService: InstanceType<typeof SessionMonitoringService> | null = null;
+let _memoryService: InstanceType<typeof MemoryService> | null = null;
+let _claudeMemSyncService: ClaudeMemSyncService | null = null;
+let _reviewService: PaperReviewService | null = null;
 
 // ── Tool call probe state ─────────────────────────────────────────────
 // Caches Ollama tool-calling probe results per model string (30-min TTL).
@@ -126,6 +171,7 @@ let _pptService: InstanceType<typeof PptService> | null = null;
 const PROBE_TTL_MS = 30 * 60 * 1000;
 let _toolCallProbeCache = new Map<string, { supported: boolean; model: string; provider: string; testedAt: number }>();
 let _lastProbeResult: { supported: boolean; model: string } | null = null;
+const _memoryRecordedMessageCounts = new Map<string, number>();
 
 // ── Error resilience: context injection + degradation hints ──────────
 // Track tool failures within a session. When the same tool fails
@@ -141,6 +187,600 @@ interface ToolErrorEntry {
 
 const _toolErrorLog: ToolErrorEntry[] = [];
 const ERROR_LOG_MAX = 50; // cap memory usage
+
+type AutoMemoryCandidate = {
+  type: MemoryType;
+  name: string;
+  description: string;
+  content: string;
+  dedupe_key: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  confidence: number;
+};
+
+type MemorySummaryLogger = Pick<PluginLogger, 'info' | 'warn' | 'error'>;
+
+type LlmMemoryJob = {
+  memoryService: InstanceType<typeof MemoryService>;
+  configPath: string;
+  logger: MemorySummaryLogger;
+  userTexts: string[];
+  assistantTexts: string[];
+  metadata: Record<string, unknown>;
+};
+
+type HookLogSource = 'all' | 'claude-mem' | 'research-claw-core';
+type HookLogItem = { ts: string; source: 'claude-mem' | 'research-claw-core'; line: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function extractMessageText(message: unknown): string {
+  if (!isRecord(message)) return '';
+  const content = message.content;
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (!isRecord(part)) return '';
+        const text = part.text ?? part.content;
+        return typeof text === 'string' ? text : '';
+      })
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+  }
+  return '';
+}
+
+function summarizeForMemory(text: string, maxLength = 700): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength - 1)}...`;
+}
+
+function compactUnknown(value: unknown, maxLength = 1200): unknown {
+  if (typeof value === 'string') return summarizeForMemory(value, maxLength);
+  try {
+    const text = JSON.stringify(value);
+    return summarizeForMemory(text, maxLength);
+  } catch {
+    return String(value);
+  }
+}
+
+function stripPrivateAndSecrets(text: string): string {
+  return text
+    .replace(/<private>[\s\S]*?<\/private>/gi, '[private omitted]')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{12,}/g, 'Bearer [REDACTED]')
+    .replace(/\bsk-[A-Za-z0-9._~+/=-]{12,}/g, 'sk-[REDACTED]')
+    .replace(/\b(api[_-]?key|token|secret|password)\s*[:=]\s*["']?[^"'\s,;]+/gi, '$1=[REDACTED]')
+    .trim();
+}
+
+function normalizeKey(text: string, maxLength = 140): string {
+  return text
+    .toLowerCase()
+    .replace(/<private>[\s\S]*?<\/private>/gi, '')
+    .replace(/\bsk-[A-Za-z0-9._~+/=-]{12,}/g, 'sk-redacted')
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s:/._-]/gu, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function inferMemoryType(text: string): MemoryType {
+  const lower = text.toLowerCase();
+  if (/(偏好|习惯|以后都|以后请|我希望|我喜欢|我不喜欢|prefer|preference|always|never)/i.test(text)) {
+    return 'user';
+  }
+  if (/(不对|错误|失败|不满意|应该|不要再|修复|bug|报错|failed|wrong|fix)/i.test(text)) {
+    return 'feedback';
+  }
+  if (/(https?:\/\/|doi:|arxiv|zotero|endnote|bibtex|文献|论文|reference|citation)/i.test(text)) {
+    return 'reference';
+  }
+  return lower.includes('project') || /(项目|课题|研究|实验|数据|任务|进度|开题|基金)/.test(text)
+    ? 'project'
+    : 'project';
+}
+
+function memoryTitleFor(type: MemoryType, text: string): string {
+  const prefix: Record<MemoryType, string> = {
+    user: '用户偏好',
+    feedback: '用户反馈',
+    project: '项目进展',
+    reference: '资料引用',
+    agent: '智能体记录',
+  };
+  return `${prefix[type]}：${summarizeForMemory(text, 44)}`;
+}
+
+function looksLowValueMemory(text: string): boolean {
+  const compact = text.replace(/\s+/g, '').trim();
+  if (compact.length < 8) return true;
+  return /^(继续|好的|可以|确认|谢谢|ok|yes|no|嗯|好)$/i.test(compact);
+}
+
+function pushMemoryCandidate(
+  memories: AutoMemoryCandidate[],
+  candidate: {
+    type: MemoryType;
+    text: string;
+    description: string;
+    dedupeSeed?: string;
+    tags?: string[];
+    metadata?: Record<string, unknown>;
+    confidence: number;
+  },
+) {
+  const text = stripPrivateAndSecrets(candidate.text);
+  if (looksLowValueMemory(text)) return;
+  memories.push({
+    type: candidate.type,
+    name: memoryTitleFor(candidate.type, text),
+    description: candidate.description,
+    content: summarizeForMemory(text, candidate.type === 'reference' ? 1000 : 900),
+    dedupe_key: `${candidate.type}:${normalizeKey(candidate.dedupeSeed ?? text)}`,
+    tags: ['auto-captured', 'compressed', ...(candidate.tags ?? [])],
+    metadata: {
+      ...(candidate.metadata ?? {}),
+      confidence: candidate.confidence,
+    },
+    confidence: candidate.confidence,
+  });
+}
+
+function buildAutoMemories(params: {
+  userTexts: string[];
+  assistantTexts: string[];
+  sessionKey?: string;
+  sessionId?: string;
+  agentId?: string;
+  channelId?: string;
+  durationMs?: number;
+}): AutoMemoryCandidate[] {
+  const lastUserRaw = params.userTexts.at(-1) ?? '';
+  const lastAssistantRaw = params.assistantTexts.at(-1) ?? '';
+  const lastUser = stripPrivateAndSecrets(lastUserRaw);
+  const lastAssistant = stripPrivateAndSecrets(lastAssistantRaw);
+  const combined = [lastUser, lastAssistant].filter(Boolean).join('\n\n');
+  if (!combined.trim() || combined === '[private omitted]') return [];
+
+  const baseMetadata = {
+    source: 'agent_end_hook',
+    session_key: params.sessionKey,
+    session_id: params.sessionId,
+    agent_id: params.agentId,
+    channel_id: params.channelId,
+    duration_ms: params.durationMs,
+    captured_at: new Date().toISOString(),
+    compression: 'structured-heuristic-v2',
+  };
+
+  const memories: AutoMemoryCandidate[] = [];
+
+  const allUserText = stripPrivateAndSecrets(params.userTexts.join('\n'));
+  const allAssistantText = stripPrivateAndSecrets(params.assistantTexts.join('\n'));
+
+  for (const raw of params.userTexts) {
+    const text = stripPrivateAndSecrets(raw);
+    if (/(偏好|习惯|以后都|以后请|我希望|我喜欢|我不喜欢|默认|每次|prefer|preference|always|never)/i.test(text)) {
+      pushMemoryCandidate(memories, {
+        type: 'user',
+        text,
+        description: '用户明确表达的长期偏好或使用习惯。',
+        tags: ['user-preference'],
+        metadata: { ...baseMetadata, extractor_rule: 'explicit_user_preference' },
+        confidence: 0.88,
+      });
+    }
+
+    if (/(不对|错了|错误|失败|不满意|不要再|以后不要|应该|修复|bug|报错|failed|wrong|fix)/i.test(text)) {
+      pushMemoryCandidate(memories, {
+        type: 'feedback',
+        text,
+        description: '用户对系统行为、工具选择或回答质量的反馈。',
+        tags: ['feedback'],
+        metadata: { ...baseMetadata, extractor_rule: 'explicit_feedback' },
+        confidence: 0.84,
+      });
+    }
+  }
+
+  const projectSeed = [
+    lastUser ? `用户目标：${summarizeForMemory(lastUser, 420)}` : '',
+    lastAssistant ? `处理结果：${summarizeForMemory(lastAssistant, 620)}` : '',
+  ].filter(Boolean).join('\n\n');
+  const projectConfidence =
+    /(项目|课题|研究|实验|数据|任务|进度|论文|文献|开题|基金|zotero|rc|research-claw)/i.test(projectSeed)
+      ? 0.76
+      : 0.58;
+  if (projectConfidence >= 0.65) {
+    pushMemoryCandidate(memories, {
+      type: 'project',
+      text: projectSeed,
+      description: '本轮会话中形成的项目状态、任务进展或技术结论。',
+      dedupeSeed: lastUser || projectSeed,
+      tags: ['project-context'],
+      metadata: { ...baseMetadata, extractor_rule: 'project_turn_summary' },
+      confidence: projectConfidence,
+    });
+  }
+
+  const urls = Array.from(combined.matchAll(/https?:\/\/[^\s)]+/g)).map((m) => m[0]).slice(0, 3);
+  for (const url of urls) {
+    pushMemoryCandidate(memories, {
+      type: 'reference',
+      text: url,
+      description: '会话中提到的外部资源链接。',
+      dedupeSeed: `url:${url}`,
+      tags: ['reference'],
+      metadata: { ...baseMetadata, url, extractor_rule: 'url_reference' },
+      confidence: 0.92,
+    });
+  }
+
+  const seen = new Set<string>();
+  return memories
+    .filter((memory) => memory.confidence >= 0.65)
+    .filter((memory) => {
+      if (seen.has(memory.dedupe_key)) return false;
+      seen.add(memory.dedupe_key);
+      return true;
+    })
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 5);
+}
+
+function extractJsonArray(text: string): unknown[] {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const candidate = fenced || trimmed;
+  try {
+    const parsed = JSON.parse(candidate);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    const start = candidate.indexOf('[');
+    const end = candidate.lastIndexOf(']');
+    if (start >= 0 && end > start) {
+      try {
+        const parsed = JSON.parse(candidate.slice(start, end + 1));
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+}
+
+function coerceLlmMemories(raw: unknown[], baseMetadata: Record<string, unknown>): AutoMemoryCandidate[] {
+  const validTypes = new Set<MemoryType>(['user', 'feedback', 'project', 'reference']);
+  const memories: AutoMemoryCandidate[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const type = typeof item.type === 'string' && validTypes.has(item.type as MemoryType)
+      ? item.type as MemoryType
+      : 'project';
+    const content = stripPrivateAndSecrets(typeof item.content === 'string' ? item.content : '');
+    if (looksLowValueMemory(content)) continue;
+    const confidence = typeof item.confidence === 'number' && Number.isFinite(item.confidence)
+      ? Math.max(0, Math.min(1, item.confidence))
+      : 0.7;
+    if (confidence < 0.65) continue;
+
+    const nameText = typeof item.name === 'string' && item.name.trim()
+      ? stripPrivateAndSecrets(item.name)
+      : memoryTitleFor(type, content);
+    const tags = Array.isArray(item.tags)
+      ? item.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).slice(0, 8)
+      : [];
+    const dedupeSeed = typeof item.dedupe_key === 'string' && item.dedupe_key.trim()
+      ? item.dedupe_key
+      : `${type}:${nameText}:${content}`;
+
+    memories.push({
+      type,
+      name: summarizeForMemory(nameText, 80),
+      description: typeof item.description === 'string' && item.description.trim()
+        ? stripPrivateAndSecrets(item.description)
+        : '由 LLM 从会话中语义压缩生成。',
+      content: summarizeForMemory(content, type === 'reference' ? 1000 : 1200),
+      dedupe_key: `${type}:llm:${normalizeKey(dedupeSeed, 180)}`,
+      tags: ['auto-captured', 'llm-summary', ...tags],
+      metadata: {
+        ...baseMetadata,
+        confidence,
+        compression: 'llm-summary-v1',
+        extractor_rule: 'llm_semantic_summary',
+      },
+      confidence,
+    });
+  }
+  return memories.slice(0, 5);
+}
+
+function loadCurrentModelConfig(configPath: string): {
+  provider: string;
+  model: string;
+  api: string;
+  baseUrl: string;
+  apiKey: string;
+} | null {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    const defaults = (cfg.agents as Record<string, unknown> | undefined)?.defaults as Record<string, unknown> | undefined;
+    const modelRefObj = defaults?.model as { primary?: string } | undefined;
+    const primary = typeof modelRefObj?.primary === 'string' ? modelRefObj.primary : '';
+    const slash = primary.indexOf('/');
+    if (slash <= 0) return null;
+    const provider = primary.slice(0, slash);
+    const model = primary.slice(slash + 1);
+    const providers = (cfg.models as Record<string, unknown> | undefined)?.providers as Record<string, Record<string, unknown>> | undefined;
+    const entry = providers?.[provider];
+    if (!entry) return null;
+    const modelEntry = Array.isArray(entry.models)
+      ? entry.models.find((item) => {
+          if (!isRecord(item)) return false;
+          return item.id === model || item.name === model || item.model === model;
+        }) as Record<string, unknown> | undefined
+      : undefined;
+    return {
+      provider,
+      model,
+      api: typeof modelEntry?.api === 'string'
+        ? modelEntry.api
+        : typeof entry.api === 'string'
+          ? entry.api
+          : 'openai-completions',
+      baseUrl: (typeof modelEntry?.baseUrl === 'string' ? modelEntry.baseUrl : typeof entry.baseUrl === 'string' ? entry.baseUrl : '').replace(/\/+$/, ''),
+      apiKey: typeof modelEntry?.apiKey === 'string'
+        ? modelEntry.apiKey
+        : typeof entry.apiKey === 'string'
+          ? entry.apiKey
+          : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildMemorySummaryPrompt(userTexts: string[], assistantTexts: string[]): string {
+  const user = stripPrivateAndSecrets(userTexts.join('\n\n')).slice(-5000);
+  const assistant = stripPrivateAndSecrets(assistantTexts.join('\n\n')).slice(-7000);
+  return [
+    '你是 Research-Claw 的长期记忆提取器。请从下面这轮会话中提取对未来科研协作有长期价值的记忆。',
+    '只输出 JSON 数组，不要 markdown，不要解释。',
+    '每条格式：{"type":"user|feedback|project|reference","name":"短标题","description":"一句说明","content":"可长期复用的具体事实/偏好/结论","confidence":0.0-1.0,"tags":["..."],"dedupe_key":"稳定去重键"}',
+    '只保留明确、有用、可复用的信息。忽略寒暄、短确认、临时状态和敏感内容。最多 5 条。',
+    '',
+    '<user_messages>',
+    user,
+    '</user_messages>',
+    '',
+    '<assistant_messages>',
+    assistant,
+    '</assistant_messages>',
+  ].join('\n');
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function completeMemorySummaryWithConfiguredModel(configPath: string, prompt: string): Promise<string> {
+  const modelCfg = loadCurrentModelConfig(configPath);
+  if (!modelCfg?.baseUrl) throw new Error('No configured model found for memory summary');
+
+  if (modelCfg.api === 'anthropic-messages') {
+    const baseUrl = modelCfg.baseUrl.replace(/\/v1\/?$/, '');
+    const res = await fetchWithTimeout(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        ...(modelCfg.apiKey ? { 'x-api-key': modelCfg.apiKey } : {}),
+      },
+      body: JSON.stringify({
+        model: modelCfg.model,
+        max_tokens: 1200,
+        temperature: 0,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    }, 30_000);
+    if (!res.ok) throw new Error(`memory summary model failed: HTTP ${res.status}`);
+    const json = await res.json() as { content?: Array<{ text?: string; type?: string }> };
+    return (json.content ?? []).map((part) => part.text ?? '').join('\n').trim();
+  }
+
+  if (modelCfg.api === 'openai-completions') {
+    const endpoint = modelCfg.baseUrl.endsWith('/chat/completions')
+      ? modelCfg.baseUrl
+      : `${modelCfg.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    const res = await fetchWithTimeout(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(modelCfg.apiKey ? { authorization: `Bearer ${modelCfg.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: modelCfg.model,
+        temperature: 0,
+        max_tokens: 1200,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    }, 30_000);
+    if (!res.ok) throw new Error(`memory summary model failed: HTTP ${res.status}`);
+    const json = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return json.choices?.[0]?.message?.content?.trim() ?? '';
+  }
+
+  throw new Error(`Unsupported memory summary API: ${modelCfg.api}`);
+}
+
+async function runLlmMemorySummaryJob(job: LlmMemoryJob): Promise<void> {
+  const prompt = buildMemorySummaryPrompt(job.userTexts, job.assistantTexts);
+  const output = await completeMemorySummaryWithConfiguredModel(job.configPath, prompt);
+  const raw = extractJsonArray(output);
+  const memories = coerceLlmMemories(raw, job.metadata);
+  if (memories.length === 0) {
+    job.logger.info('[MemorySummary] LLM summary returned no durable memories');
+    return;
+  }
+  for (const memory of memories) {
+    job.memoryService.upsertMemory({
+      type: memory.type,
+      name: memory.name,
+      description: memory.description,
+      content: memory.content,
+      metadata: memory.metadata,
+      dedupe_key: memory.dedupe_key,
+      tags: memory.tags,
+    });
+  }
+  job.logger.info(`[MemorySummary] LLM summary stored ${memories.length} memory item(s)`);
+}
+
+class MemorySummaryQueue {
+  private jobs: LlmMemoryJob[] = [];
+  private running = false;
+
+  enqueue(job: LlmMemoryJob): void {
+    this.jobs.push(job);
+    if (this.jobs.length > 20) this.jobs.splice(0, this.jobs.length - 20);
+    void this.drain();
+  }
+
+  private async drain(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    try {
+      while (this.jobs.length > 0) {
+        const job = this.jobs.shift();
+        if (!job) continue;
+        try {
+          await runLlmMemorySummaryJob(job);
+        } catch (err) {
+          job.logger.warn(`[MemorySummary] LLM summary failed; heuristic memory kept: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    } finally {
+      this.running = false;
+    }
+  }
+}
+
+const _memorySummaryQueue = new MemorySummaryQueue();
+
+function collectHookLogItems(source: HookLogSource, limit: number): HookLogItem[] {
+  const safeLimit = Number.isFinite(limit) ? Math.max(10, Math.min(1000, Math.floor(limit))) : 120;
+  const logPaths = [
+    path.join(os.homedir(), '.openclaw', 'logs', 'gateway.log'),
+    path.join(os.homedir(), '.openclaw', 'logs', 'gateway.err.log'),
+  ];
+  const lines: string[] = [];
+  for (const p of logPaths) {
+    if (!fs.existsSync(p)) continue;
+    try {
+      const content = fs.readFileSync(p, 'utf8');
+      const parts = content.split('\n').filter(Boolean);
+      lines.push(...parts.slice(-2200));
+    } catch {
+      // Best-effort: skip unreadable log path.
+    }
+  }
+
+  const wantsClaude = source === 'all' || source === 'claude-mem';
+  const wantsRcCore = source === 'all' || source === 'research-claw-core';
+  const matches: HookLogItem[] = [];
+  for (const line of lines) {
+    if (wantsClaude && line.includes('[claude-mem]')) {
+      const ts = line.slice(0, 29).trim();
+      matches.push({ ts, source: 'claude-mem', line });
+    } else if (
+      wantsRcCore &&
+      (
+        line.includes('[SessionMonitoring]') ||
+        line.includes('[MemorySummary]') ||
+        line.includes('Research-Claw Core initializing') ||
+        line.includes('Research-Claw Core registered')
+      )
+    ) {
+      const ts = line.slice(0, 29).trim();
+      matches.push({ ts, source: 'research-claw-core', line });
+    }
+  }
+  return matches.slice(-safeLimit);
+}
+
+function interpretHookLogForMemory(line: string, source: 'claude-mem' | 'research-claw-core'): {
+  title: string;
+  description: string;
+  severity: 'info' | 'warn' | 'error';
+} {
+  const msg = line.replace(/^\d{4}-\d{2}-\d{2}T[^\s]+\s*/, '').replace(/\[[^\]]+\]\s*/g, '').trim();
+  const lower = msg.toLowerCase();
+  if (lower.includes('failed') || lower.includes('error:')) {
+    return { title: '插件执行失败', description: msg || '插件执行出现错误。', severity: 'error' };
+  }
+  if (lower.includes('timeout') || lower.includes('closed before connect')) {
+    return { title: '连接异常事件', description: msg || '连接链路出现异常或超时。', severity: 'warn' };
+  }
+  if (lower.includes('persist') || lower.includes('sync') || lower.includes('injected') || lower.includes('inject')) {
+    return { title: '记忆链路事件', description: msg || '记忆链路发生一次持久化或注入。', severity: 'info' };
+  }
+  return {
+    title: source === 'claude-mem' ? 'Claude-mem 观察事件' : 'Research-Claw Core 事件',
+    description: msg || line,
+    severity: 'info',
+  };
+}
+
+function syncHookLogsIntoMemories(params: {
+  memoryService: InstanceType<typeof MemoryService>;
+  source: HookLogSource;
+  limit: number;
+  logger: MemorySummaryLogger;
+}): { synced: number; source: HookLogSource; scanned: number } {
+  const items = collectHookLogItems(params.source, params.limit);
+  let synced = 0;
+  for (const item of items) {
+    const interpreted = interpretHookLogForMemory(item.line, item.source);
+    const digest = createHash('sha256').update(`${item.source}|${item.ts}|${item.line}`).digest('hex').slice(0, 24);
+    const name = `[${item.source}] ${interpreted.title}`.slice(0, 120);
+    const memoryType: MemoryType = interpreted.severity === 'error' ? 'feedback' : 'project';
+    params.memoryService.upsertMemory({
+      type: memoryType,
+      name,
+      description: interpreted.description.slice(0, 200),
+      content: item.line,
+      dedupe_key: `${memoryType}:hook-log:${digest}`,
+      tags: ['auto-captured', 'hook-log', 'agent-log', item.source, interpreted.severity],
+      metadata: {
+        source: 'hook_log_bridge',
+        hook_source: item.source,
+        hook_ts: item.ts || null,
+        severity: interpreted.severity,
+        extractor_rule: 'hook_log_bridge_v1',
+        captured_at: new Date().toISOString(),
+      },
+      is_private: false,
+    });
+    synced++;
+  }
+  params.logger.info(`[HookLogBridge] Synced ${synced}/${items.length} hook logs into memory view`);
+  return { synced, source: params.source, scanned: items.length };
+}
 
 // Degradation hints: when tool X fails, suggest tool Y
 // ── Tool call dedup state (module-level for cross-hook visibility) ────
@@ -197,7 +837,10 @@ const plugin: PluginDefinition = {
   id: 'research-claw-core',
   name: 'Research-Claw Core',
   description: 'Literature library, task management, and workspace tracking for academic research',
-  version: '0.6.3',
+  version: '0.7.0',
+  contracts: {
+    tools: ['task_flow_stage'],
+  },
 
   register(api) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
@@ -229,7 +872,7 @@ const plugin: PluginDefinition = {
       _monitorService.seedDefaults();
 
       _wsConfig = {
-        root: api.resolvePath(cfg.workspace?.root ?? 'workspace'),
+        root: resolveWorkspaceRoot(api, cfg.workspace?.root),
         autoTrackGit: cfg.autoTrackGit ?? true,
         commitDebounceMs: cfg.workspace?.commitDebounceMs ?? 5000,
         maxGitFileSize: cfg.workspace?.maxGitFileSize ?? 10_485_760,
@@ -238,11 +881,29 @@ const plugin: PluginDefinition = {
         gitAuthorEmail: cfg.workspace?.gitAuthorEmail ?? 'research-claw@wentor.ai',
       };
       _wsService = new WorkspaceService(_wsConfig);
+      _reviewService = new PaperReviewService(_dbManager.db, _wsService);
       _pptService = new PptService({
         pptRoot: resolvePptRoot(api, cfg),
         workspaceRoot: _wsConfig.root,
         repoRoot: api.resolvePath('.'),
       });
+
+      if (MEMORY_MODULE_ENABLED) {
+        // Initialize session monitoring service. Wire workspace root + config
+        // path so the LLM extractor knows where to write MEMORY.md and how to
+        // resolve the active model from openclaw.json.
+        _memoryService = new MemoryService(_dbManager.db);
+        _claudeMemSyncService = new ClaudeMemSyncService(_dbManager.db, {
+          workerUrl: 'http://127.0.0.1:37777',
+        });
+        const sessionConfigPath =
+          process.env.OPENCLAW_CONFIG_PATH ||
+          path.join(findGitRoot(api.resolvePath('.')), 'config', 'openclaw.json');
+        _sessionService = new SessionMonitoringService(_dbManager.db, {
+          workspaceRoot: _wsConfig.root,
+          configPath: sessionConfigPath,
+        });
+      }
 
       // Fire-and-forget: scaffold directories + git tracker in background.
       // MUST NOT await — OC plugin loader does not support async register().
@@ -276,6 +937,7 @@ const plugin: PluginDefinition = {
     const heartbeatService = _heartbeatService!;
     const monitorService = _monitorService!;
     const wsService = _wsService!;
+    const reviewService = _reviewService!;
     const pptService = _pptService!;
     const wsConfig = _wsConfig!;
 
@@ -306,6 +968,9 @@ const plugin: PluginDefinition = {
         _monitorService = null;
         _wsService = null;
         _pptService = null;
+        _memoryService = null;
+        _sessionService = null;
+        _claudeMemSyncService = null;
         _wsConfig = null;
         _wsInitPromise = null;
         _toolCallProbeCache = new Map();
@@ -489,7 +1154,138 @@ const plugin: PluginDefinition = {
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
     registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
     registerMonitorRpc(registerMethod, monitorService);   // 12 methods
+    registerPaperReviewRpc(registerMethod, reviewService); // 6 methods
     registerPptRpc(registerMethod, pptService);           // 3 methods
+    registerProviderRpc(registerMethod, {
+      config: api.runtime.config,
+      logger: api.logger,
+      setApiKey: (provider, apiKey) => setApiKeyProfile(provider, apiKey),
+      clearApiKey: (provider) => clearApiKeyProfile(provider),
+    });
+
+    if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
+    const memoryService = _memoryService;
+    const sessionService = _sessionService;
+    registerMemoryRpcMethods(registerMethod, memoryService); // 17 methods
+    registerSessionRpcMethods(registerMethod, sessionService); // 10 methods
+
+    // ── Memory diagnostics RPC ────────────────────────────────────────
+    // Surfaces hook registration, search backend status, and the most-recent
+    // automatic extraction stats. Used by tests and the dashboard to verify
+    // that the auto-memory pipeline is wired end-to-end.
+    registerMethod('rc.memory.diagnostics', async () => {
+      const provider = memoryService.getSearchProvider();
+      const extraction = sessionService.getExtractionDiagnostics();
+      const model = sessionService.getActiveModelInfo();
+      const sessionConfigPath =
+        process.env.OPENCLAW_CONFIG_PATH ||
+        path.join(findGitRoot(api.resolvePath('.')), 'config', 'openclaw.json');
+      const memoryMdPath = path.join(wsConfig.root, 'MEMORY.md');
+      const memoryMdExists = fs.existsSync(memoryMdPath);
+      let memoryMdHasManagedSection = false;
+      let memoryMdSize = 0;
+      if (memoryMdExists) {
+        try {
+          const stat = fs.statSync(memoryMdPath);
+          memoryMdSize = stat.size;
+          const content = fs.readFileSync(memoryMdPath, 'utf8');
+          memoryMdHasManagedSection =
+            content.includes('<!-- rc:memory-auto-start -->') &&
+            content.includes('<!-- rc:memory-auto-end -->');
+        } catch {
+          /* ignore */
+        }
+      }
+
+      return {
+        success: true,
+        hooks: {
+          session_start: true,
+          session_end: true,
+          agent_end: true,
+          after_tool_call: true,
+        },
+        search: {
+          provider: provider.provider,
+          fts_available: provider.fts_available,
+          embedding_available: provider.embedding_available,
+          notes: provider.notes,
+        },
+        extraction,
+        active_model: model,
+        memory_md: {
+          path: memoryMdPath,
+          exists: memoryMdExists,
+          managed_section_present: memoryMdHasManagedSection,
+          last_synced_at: extraction.memory_md_last_synced_at,
+          bytes: memoryMdSize,
+        },
+        config_path: sessionConfigPath,
+      };
+    });
+
+    registerMethod('rc.memory.extractNow', async (params) => {
+      const sessionId = typeof params?.session_id === 'string' ? params.session_id : null;
+      const result = await sessionService.triggerExtractionNow(sessionId);
+      return { success: true, ...result };
+    });
+
+    registerMethod('rc.memory.syncMarkdown', async () => {
+      const result = sessionService.syncMemoryMarkdown();
+      return { success: true, result };
+    });
+
+    registerMethod('rc.memory.hookLogs', async (params) => {
+      const source = (typeof params?.source === 'string' ? params.source : 'all') as HookLogSource;
+      const limit = typeof params?.limit === 'number' && Number.isFinite(params.limit)
+        ? Math.max(10, Math.min(500, Math.floor(params.limit)))
+        : 120;
+      const matches = collectHookLogItems(source, limit);
+
+      return {
+        success: true,
+        source,
+        count: matches.length,
+        items: matches,
+      };
+    });
+
+    registerMethod('rc.memory.syncHookLogs', async (params) => {
+      const source = (typeof params?.source === 'string' ? params.source : 'all') as HookLogSource;
+      const limit = typeof params?.limit === 'number' && Number.isFinite(params.limit)
+        ? Math.max(10, Math.min(500, Math.floor(params.limit)))
+        : 220;
+      const result = syncHookLogsIntoMemories({
+        memoryService,
+        source,
+        limit,
+        logger: api.logger,
+      });
+      return { success: true, ...result };
+    });
+
+    // ── Claude-mem sync RPC ─────────────────────────────────────────────
+    registerMethod('rc.memory.syncClaudeMem', async (params) => {
+      if (!_claudeMemSyncService) throw new Error('Claude-mem sync service not initialized');
+      const limit = typeof params?.limit === 'number' ? params.limit : 100;
+      const result = await _claudeMemSyncService.syncAll(limit);
+      return {
+        success: true,
+        ...result,
+        agent_memory_count: _claudeMemSyncService.getAgentMemoryCount(),
+      };
+    });
+
+    registerMethod('rc.memory.getClaudeMemStatus', async () => {
+      if (!_claudeMemSyncService) throw new Error('Claude-mem sync service not initialized');
+      const status = await _claudeMemSyncService.getSyncStatus();
+      return {
+        success: true,
+        ...status,
+        rc_agent_memories: _claudeMemSyncService.getAgentMemoryCount(),
+      };
+    });
+    } // MEMORY_MODULE_ENABLED
 
     // Heartbeat RPC (2 methods)
     registerMethod('rc.heartbeat.status', () => {
@@ -504,37 +1300,31 @@ const plugin: PluginDefinition = {
 
     // OAuth RPC (3 methods) — Dashboard-initiated OAuth for subscription providers
     registerMethod('rc.oauth.initiate', (params: Record<string, unknown>) => {
-      const { oauthInitiate } = require('./src/oauth/service');
       const provider = params.provider as string;
       if (!provider) throw new Error('provider is required');
       return oauthInitiate(provider);
     });
     registerMethod('rc.oauth.complete', async (params: Record<string, unknown>) => {
-      const { oauthComplete } = require('./src/oauth/service');
       const stateId = params.state_id as string;
       const callbackUrl = params.callback_url as string;
       if (!stateId || !callbackUrl) throw new Error('state_id and callback_url are required');
       return oauthComplete(stateId, callbackUrl);
     });
     registerMethod('rc.oauth.status', (params: Record<string, unknown>) => {
-      const { oauthStatus } = require('./src/oauth/service');
       const provider = params.provider as string;
       if (!provider) throw new Error('provider is required');
       return oauthStatus(provider);
     });
     registerMethod('rc.auth.status', (params: Record<string, unknown>) => {
-      const { apiKeyStatus } = require('./src/oauth/service');
       const provider = params.provider as string;
       if (!provider) throw new Error('provider is required');
       return apiKeyStatus(provider);
     });
     registerMethod('rc.auth.statuses', (params: Record<string, unknown>) => {
-      const { apiKeyStatuses } = require('./src/oauth/service');
       const providers = (params.providers as string[] | undefined) ?? [];
       return apiKeyStatuses(providers);
     });
     registerMethod('rc.auth.setApiKey', (params: Record<string, unknown>) => {
-      const { setApiKeyProfile } = require('./src/oauth/service');
       const provider = params.provider as string;
       const apiKey = params.apiKey as string;
       const profileId = params.profileId as string | undefined;
@@ -542,7 +1332,6 @@ const plugin: PluginDefinition = {
       return setApiKeyProfile(provider, apiKey, profileId);
     });
     registerMethod('rc.auth.clearApiKey', (params: Record<string, unknown>) => {
-      const { clearApiKeyProfile } = require('./src/oauth/service');
       const provider = params.provider as string;
       const profileId = params.profileId as string | undefined;
       if (!provider) throw new Error('provider is required');
@@ -686,6 +1475,9 @@ const plugin: PluginDefinition = {
       return { running: isUpdateRunning() };
     });
 
+    registerDashboardRpc(registerMethod);
+    hydrateDashboardSystemPromptFromConfigPath(api.resolvePath('config/openclaw.json'));
+
     // ── 6. Register HTTP route: POST /rc/upload ──────────────────────
     api.registerHttpRoute({
       path: '/rc/upload',
@@ -708,7 +1500,7 @@ const plugin: PluginDefinition = {
           }
 
           // Sanitize destination: resolve and verify it stays within workspace root
-          const destDir = destination || 'uploads';
+          const destDir = destination || 'sources';
           const resolvedDest = path.resolve(wsConfig.root, destDir);
           if (!resolvedDest.startsWith(path.resolve(wsConfig.root) + path.sep) && resolvedDest !== path.resolve(wsConfig.root)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -955,7 +1747,14 @@ const plugin: PluginDefinition = {
           }
         }
 
-        return { prependContext: lines.join('\n') };
+        const userSystemPrompt = formatDashboardSystemPromptBlock();
+        if (userSystemPrompt) {
+          lines.push(userSystemPrompt);
+        }
+
+        lines.push(TASK_FLOW_AGENT_GUIDANCE);
+
+        return lines.length > 0 ? { prependContext: lines.join('\n') } : {};
       } catch {
         return {};
       }
@@ -972,9 +1771,21 @@ const plugin: PluginDefinition = {
       // Reset error log — each session starts fresh, but errors from the
       // current session will persist through compaction/context resets.
       _toolErrorLog.length = 0;
+      if (MEMORY_MODULE_ENABLED) {
+        _memoryRecordedMessageCounts.clear();
+      }
 
       if (dbManager?.isOpen()) {
         runMigrations(dbManager.db);
+      }
+
+      if (MEMORY_MODULE_ENABLED && _sessionService) {
+        try {
+          _sessionService.startSession();
+          api.logger.info('[SessionMonitoring] Started tracking new session');
+        } catch (err) {
+          api.logger.warn(`[SessionMonitoring] Failed to start session: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     });
 
@@ -1006,6 +1817,18 @@ const plugin: PluginDefinition = {
         }
       } catch (err) {
         api.logger.warn(`Error closing reading sessions: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      if (MEMORY_MODULE_ENABLED && _sessionService) {
+        try {
+          const session = _sessionService.endSession();
+          if (session) {
+            api.logger.info(`[SessionMonitoring] Ended session ${session.id} with ${session.events_count} events`);
+          }
+          _memoryRecordedMessageCounts.clear();
+        } catch (err) {
+          api.logger.warn(`[SessionMonitoring] Failed to end session: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     });
 
@@ -1191,10 +2014,120 @@ const plugin: PluginDefinition = {
       return {};
     });
 
-    // Hook 5: Record agent run summary
-    api.on('agent_end', () => {
-      // Lightweight: future versions can log session summary to activity_log
+    // Hook 5: Capture every agent run into the memory substrate.
+    //
+    // This is the first, deterministic layer inspired by claude-mem:
+    //   1. store raw session events in rc_session_events;
+    //   2. create a compact project memory in rc_memories per successful run.
+    //
+    // A later layer can replace the compact summary with LLM-based extraction,
+    // but this hook ensures the memory panel has real session-derived data now.
+    if (MEMORY_MODULE_ENABLED) {
+    api.on('agent_end', (event: unknown, ctx: unknown) => {
+      try {
+        if (!dbManager?.isOpen() || !_memoryService || !_sessionService) return;
+        const memoryService = _memoryService;
+        const sessionService = _sessionService;
+        if (!sessionService.getCurrentSession()) {
+          sessionService.startSession({ source: 'agent_end_hook' });
+        }
+
+        const evt = event as { messages?: unknown[]; success?: boolean; durationMs?: number; error?: string } | undefined;
+        const hookCtx = ctx as { sessionKey?: string; sessionId?: string; agentId?: string; channelId?: string } | undefined;
+        const messages = Array.isArray(evt?.messages) ? evt.messages : [];
+        const memoryKey = hookCtx?.sessionKey ?? hookCtx?.sessionId ?? 'default';
+        const previousCount = _memoryRecordedMessageCounts.get(memoryKey) ?? 0;
+        const newMessages = messages.slice(previousCount);
+        _memoryRecordedMessageCounts.set(memoryKey, messages.length);
+
+        const userTexts: string[] = [];
+        const assistantTexts: string[] = [];
+
+        for (const message of newMessages) {
+          if (!isRecord(message)) continue;
+          const role = typeof message.role === 'string' ? message.role : '';
+          const text = extractMessageText(message);
+          if (!text) continue;
+
+          if (role === 'user') {
+            userTexts.push(text);
+            sessionService.recordUserPrompt(text);
+          } else if (role === 'assistant') {
+            assistantTexts.push(text);
+            const toolCalls = Array.isArray(message.tool_calls)
+              ? message.tool_calls.map((tc) => {
+                  if (!isRecord(tc)) return { name: 'unknown', input: {} };
+                  return {
+                    name: typeof tc.name === 'string' ? tc.name : String(tc.function ?? 'tool'),
+                    input: isRecord(tc.input) ? tc.input : {},
+                  };
+                })
+              : undefined;
+            sessionService.recordAssistantResponse(text, toolCalls);
+          }
+        }
+
+        if (evt?.success !== false && (userTexts.length > 0 || assistantTexts.length > 0)) {
+          for (const memory of buildAutoMemories({
+            userTexts,
+            assistantTexts,
+            sessionKey: hookCtx?.sessionKey,
+            sessionId: hookCtx?.sessionId,
+            agentId: hookCtx?.agentId,
+            channelId: hookCtx?.channelId,
+            durationMs: evt?.durationMs,
+          })) {
+            memoryService.upsertMemory({
+              type: memory.type,
+              name: memory.name,
+              description: memory.description,
+              content: memory.content,
+              metadata: memory.metadata,
+              dedupe_key: memory.dedupe_key,
+              tags: memory.tags,
+            });
+          }
+
+          // Bridge both hook log streams (research-claw-core + claude-mem)
+          // into rc_memories so the main memory view can show unified entries.
+          // Dedupe keys make this idempotent across repeated agent_end calls.
+          syncHookLogsIntoMemories({
+            memoryService,
+            source: 'all',
+            limit: 80,
+            logger: api.logger,
+          });
+        }
+      } catch (err) {
+        api.logger.warn(`[SessionMonitoring] Failed to capture agent run: ${err instanceof Error ? err.message : String(err)}`);
+      }
     });
+
+    api.on('after_tool_call', (event: unknown) => {
+      try {
+        if (!dbManager?.isOpen() || !_sessionService) return;
+        const sessionService = _sessionService;
+        if (!sessionService.getCurrentSession()) {
+          sessionService.startSession({ source: 'after_tool_call_hook' });
+        }
+        const evt = event as {
+          toolName?: string;
+          params?: Record<string, unknown>;
+          result?: unknown;
+          durationMs?: number;
+        } | undefined;
+        if (!evt?.toolName) return;
+        sessionService.recordToolUse(
+          evt.toolName,
+          evt.params ?? {},
+          compactUnknown(evt.result),
+          evt.durationMs,
+        );
+      } catch (err) {
+        api.logger.warn(`[SessionMonitoring] Failed to capture tool call: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+    } // MEMORY_MODULE_ENABLED
 
     // Hook 6: Sync native cron schedule changes back to rc_cron_state.
     //
@@ -1462,7 +2395,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (40 tools, 79 WS RPC + 1 HTTP = 80 interfaces, 10 hooks)');
+    api.logger.info('Research-Claw Core registered (40 tools, 89 WS RPC + 2 HTTP = 91 interfaces, 10 hooks, 1 session monitoring service)');
     _registrationDone = true;
     }
   },

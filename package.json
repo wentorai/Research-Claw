@@ -1,6 +1,6 @@
 {
   "name": "research-claw",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "description": "Research-Claw (科研龙虾) — AI-powered local academic research assistant, built as an OpenClaw satellite",
   "private": true,
   "type": "module",
@@ -23,7 +23,7 @@
     "sync-upstream": "bash scripts/sync-upstream.sh"
   },
   "dependencies": {
-    "openclaw": "2026.3.13"
+    "openclaw": "2026.6.1"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
@@ -32,7 +32,7 @@
   },
   "pnpm": {
     "patchedDependencies": {
-      "openclaw@2026.3.13": "patches/openclaw@2026.3.13.patch"
+      "openclaw@2026.6.1": "patches/openclaw@2026.6.1.patch"
     },
     "overrides": {
       "sass-embedded": "npm:sass@^1.77.0"

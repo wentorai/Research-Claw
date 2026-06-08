@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../stores/gateway';
 import { useConfigStore } from '../stores/config';
 import { useSessionsStore } from '../stores/sessions';
+import { useChatStore } from '../stores/chat';
 
 export default function ConfigRestartListener() {
   const { message } = App.useApp();
@@ -20,6 +21,8 @@ export default function ConfigRestartListener() {
   const connState = useGatewayStore((s) => s.state);
   const client = useGatewayStore((s) => s.client);
   const gatewayConfig = useConfigStore((s) => s.gatewayConfig);
+  const pendingConfigRestart = useConfigStore((s) => s.pendingConfigRestart);
+  const configOperationPhase = useConfigStore((s) => s.configOperation?.phase);
   const prevStateRef = useRef(connState);
   const awaitingFreshConfigRef = useRef(false);
   const reconnectBaselineConfigRef = useRef<typeof gatewayConfig>(null);
@@ -28,14 +31,31 @@ export default function ConfigRestartListener() {
     const prev = prevStateRef.current;
     prevStateRef.current = connState;
 
-    if (connState === 'connected' && prev !== 'connected') {
-      const { pendingConfigRestart } = useConfigStore.getState();
-      if (pendingConfigRestart) {
-        awaitingFreshConfigRef.current = true;
-        reconnectBaselineConfigRef.current = useConfigStore.getState().gatewayConfig;
-      }
+    const configStore = useConfigStore.getState();
+    if (pendingConfigRestart && (connState === 'disconnected' || connState === 'reconnecting')) {
+      configStore.setConfigOperationPhase('reconnecting');
     }
-  }, [connState]);
+    const readyToVerify = configOperationPhase !== 'persisting' && configOperationPhase !== 'validating';
+    if (pendingConfigRestart && readyToVerify && connState === 'connected' && (!awaitingFreshConfigRef.current || prev !== 'connected')) {
+      awaitingFreshConfigRef.current = true;
+      reconnectBaselineConfigRef.current = configStore.gatewayConfig;
+      configStore.setConfigOperationPhase('verifying_runtime');
+      void configStore.loadGatewayConfig();
+    }
+  }, [configOperationPhase, connState, pendingConfigRestart]);
+
+  useEffect(() => {
+    if (!pendingConfigRestart) return;
+    const timer = setTimeout(() => {
+      const configStore = useConfigStore.getState();
+      if (!configStore.pendingConfigRestart) return;
+      configStore.setPendingConfigRestart(false);
+      configStore.setConfigOperationPhase('failed', 'Gateway configuration verification timed out');
+      awaitingFreshConfigRef.current = false;
+      reconnectBaselineConfigRef.current = null;
+    }, 45_000);
+    return () => clearTimeout(timer);
+  }, [pendingConfigRestart]);
 
   useEffect(() => {
     const { pendingConfigRestart, setPendingConfigRestart } = useConfigStore.getState();
@@ -49,6 +69,7 @@ export default function ConfigRestartListener() {
     awaitingFreshConfigRef.current = false;
     reconnectBaselineConfigRef.current = null;
     setPendingConfigRestart(false);
+    useConfigStore.getState().setConfigOperationPhase('syncing_session');
     message.success(t('settings.reconnected'));
 
     // After config.apply + gateway restart, active sessions may keep their
@@ -56,21 +77,24 @@ export default function ConfigRestartListener() {
     // then sync the active session to the new defaults so runtime model matches
     // what the dashboard shows.
     const modelPrimary = gatewayConfig.agents?.defaults?.model?.primary;
-    const imageModelPrimary = gatewayConfig.agents?.defaults?.imageModel?.primary;
     const activeSessionKey = useSessionsStore.getState().activeSessionKey;
 
     if (client?.isConnected && activeSessionKey && typeof modelPrimary === 'string' && modelPrimary) {
       void (async () => {
         try {
           await client.request('sessions.patch', { key: activeSessionKey, model: modelPrimary });
-          // Best-effort: some OC versions may not accept imageModel on sessions.patch.
-          if (typeof imageModelPrimary === 'string' && imageModelPrimary) {
-            await client.request('sessions.patch', { key: activeSessionKey, imageModel: imageModelPrimary });
-          }
-        } catch {
-          // Non-fatal: even if patch fails, users can still change session model via /model.
+          void useChatStore.getState().loadSessionUsage();
+          useConfigStore.getState().setConfigOperationPhase('completed');
+        } catch (error) {
+          useConfigStore.getState().setConfigOperationPhase(
+            'failed',
+            error instanceof Error ? error.message : String(error),
+          );
         }
       })();
+    } else {
+      void useChatStore.getState().loadSessionUsage();
+      useConfigStore.getState().setConfigOperationPhase('completed');
     }
   }, [client, connState, gatewayConfig, message, t]);
 

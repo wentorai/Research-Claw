@@ -38,6 +38,7 @@ const DIRECT_CN_PROVIDER_IDS: ProviderId[] = [
   'zai',
   'zai-coding',
   'moonshot-cn',
+  'deepseek',
   'kimi-coding',
   'minimax-cn',
   'volcengine',
@@ -58,6 +59,7 @@ const SEARCH_ALIASES: Partial<Record<ProviderId, string[]>> = {
   'zai-coding-global': ['智谱', 'glm', 'coding'],
   moonshot: ['kimi', '月之暗面'],
   'moonshot-cn': ['kimi', '月之暗面'],
+  deepseek: ['深度求索', 'ds', 'v4', 'reasoner', 'chat'],
   'kimi-coding': ['kimi', '月之暗面', 'coding'],
   volcengine: ['豆包', '火山', 'ark', 'volces'],
   'volcengine-plan': ['豆包', '火山', 'ark', 'coding'],
@@ -117,12 +119,16 @@ export function providerLabel(id: string, t: (key: string) => string): string {
   return preset.id === 'custom' ? t('setup.providerCustom') : preset.label;
 }
 
+export type SavedCustomProfileOption = { id: string; label: string };
+
 export default function ProviderPickerModal({
   open,
   value,
   title,
   excludeProviderIds,
   includeProviderIds,
+  savedCustomProfiles,
+  onAddCustomProfile,
   onSelect,
   onClose,
 }: {
@@ -131,6 +137,10 @@ export default function ProviderPickerModal({
   title: string;
   excludeProviderIds?: string[];
   includeProviderIds?: string[];
+  /** Saved custom-* / custom providers shown in the Custom section. */
+  savedCustomProfiles?: SavedCustomProfileOption[];
+  /** Same as settings “Add profile” — new empty custom slot. */
+  onAddCustomProfile?: () => void;
   onSelect: (providerId: string) => void;
   onClose: () => void;
 }) {
@@ -161,6 +171,60 @@ export default function ProviderPickerModal({
 
   const presetIds = useMemo(() => new Set(presets.map((p) => p.id)), [presets]);
   const sections = useMemo(() => buildSections(t), [t]);
+
+  const savedCustomIds = useMemo(
+    () => new Set((savedCustomProfiles ?? []).map((p) => p.id)),
+    [savedCustomProfiles],
+  );
+
+  const renderSavedCustomCards = () => {
+    const items = savedCustomProfiles ?? [];
+    if (items.length === 0) return null;
+    return (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
+        {items.map((p) => {
+          const selected = p.id === value;
+          return (
+            <Card
+              key={p.id}
+              size="small"
+              hoverable
+              onClick={() => onSelect(p.id)}
+              style={{
+                cursor: 'pointer',
+                border: selected ? '1px solid var(--accent-primary)' : '1px solid var(--border)',
+                background: selected ? 'rgba(96,165,250,0.08)' : 'var(--surface-hover)',
+              }}
+              styles={{ body: { padding: 12 } }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <Text strong style={{ display: 'block', fontSize: 13 }} ellipsis={{ tooltip: p.label }}>
+                    {p.label}
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 11 }} ellipsis={{ tooltip: p.id }}>
+                    {p.id}
+                  </Text>
+                </div>
+                {selected && (
+                  <div style={{ color: 'var(--accent-primary)', fontSize: 12, flexShrink: 0 }}>
+                    {t('providerPicker.selected')}
+                  </div>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderCards = (ids: ProviderId[]) => (
     <div
@@ -255,6 +319,34 @@ export default function ProviderPickerModal({
                       );
                     })}
                   </Space>
+                ) : section.id === 'custom' ? (
+                  <>
+                    {renderSavedCustomCards()}
+                    {renderCards(visible.filter((id) => !savedCustomIds.has(id)))}
+                    {onAddCustomProfile ? (
+                      <Card
+                        size="small"
+                        hoverable
+                        onClick={onAddCustomProfile}
+                        style={{
+                          cursor: 'pointer',
+                          marginTop: 10,
+                          border: '1px dashed var(--border)',
+                          background: 'var(--surface-hover)',
+                        }}
+                        styles={{ body: { padding: 12 } }}
+                      >
+                        <Text strong style={{ fontSize: 13 }}>
+                          {t('providerPicker.addCustomProfile', { defaultValue: 'Add custom API profile' })}
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                          {t('providerPicker.addCustomProfileHint', {
+                            defaultValue: 'Same as Custom — enter URL, key, and model in settings',
+                          })}
+                        </Text>
+                      </Card>
+                    ) : null}
+                  </>
                 ) : (
                   renderCards(visible)
                 )}

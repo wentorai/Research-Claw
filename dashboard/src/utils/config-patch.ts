@@ -11,6 +11,11 @@
  * so that ProviderCapabilities and imageModel fallback logic work correctly.
  */
 
+import {
+  getActiveModelPrimary,
+  isApiProfileProviderKey,
+  listApiProfilesFromConfig,
+} from './api-profiles';
 import { getPreset } from './provider-presets';
 
 /** Sentinel value OpenClaw uses to redact secrets in resolved config */
@@ -62,6 +67,10 @@ export interface ConfigPatchInput {
    * These providers will be added only when absent in `currentConfig.models.providers`.
    */
   restoreProviders?: Record<string, { modelId: string; apiKey: string }>;
+  /** Display name for API profile providers (stored on models[0].name). */
+  profileLabel?: string;
+  /** Remove these custom profile provider keys on save. */
+  deleteApiProfileIds?: string[];
 
   // ── Dual-model supervisor ──
   supervisorEnabled?: boolean;
@@ -106,6 +115,12 @@ function cleanUrl(url: string): string {
   return url.replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
 }
 
+function normalizeApiType(api: string | undefined): string {
+  return api === 'openai-codex-responses'
+    ? 'openai-chatgpt-responses'
+    : api || 'openai-completions';
+}
+
 function isMiniMaxOAuthToken(apiKey?: string): boolean {
   return typeof apiKey === 'string' && apiKey.startsWith('sk-cp-');
 }
@@ -147,13 +162,26 @@ export function isLocalProvider(providerKey: string): boolean {
  * Unknown models (not in preset) default to ['text', 'image'] so that custom
  * models don't silently drop images.
  */
-function resolveModelDef(provider: string, modelId: string): Record<string, unknown> {
+function resolveModelDef(
+  provider: string,
+  modelId: string,
+  options?: { profileLabel?: string },
+): Record<string, unknown> {
   const preset = getPreset(provider);
   const known = preset.models.find((m) => m.id === modelId);
+  const profileLabel = options?.profileLabel?.trim();
+  const displayName =
+    profileLabel && isApiProfileProviderKey(provider) ? profileLabel : modelId;
+  // DeepSeek v4 thinking mode requires reasoning_content replay across turns.
+  // Our current gateway message pipeline doesn't persist/replay that field yet,
+  // so force non-thinking mode to avoid 400 errors in multi-turn chats.
+  const forceReasoningOff =
+    provider === 'deepseek' &&
+    /^deepseek-v4-(flash|pro)$/i.test(modelId);
   return {
     id: modelId,
-    name: modelId,
-    reasoning: known?.reasoning ?? false,
+    name: displayName,
+    reasoning: forceReasoningOff ? false : (known?.reasoning ?? false),
     input: known?.input ?? ['text', 'image'],
     contextWindow: known?.contextWindow ?? 32_000,
     maxTokens: known?.maxTokens ?? 16_384,
@@ -204,10 +232,13 @@ export function mergeProjectConfigsPreservingProviders(
 
   const latestProviders = cloneExistingProviders(latestConfig);
   const previousProviders = cloneExistingProviders(previousConfig);
-  const mergedProviders = {
-    ...previousProviders,
-    ...latestProviders,
-  };
+  const mergedProviders = { ...latestProviders };
+  for (const [key, val] of Object.entries(previousProviders)) {
+    if (key in mergedProviders) continue;
+    // Never resurrect invalid custom profile stubs from an older in-memory snapshot.
+    if (isApiProfileProviderKey(key) && !String(val.baseUrl ?? '').trim()) continue;
+    mergedProviders[key] = val;
+  }
 
   if (Object.keys(mergedProviders).length > 0) {
     const models = ((merged.models as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
@@ -291,7 +322,7 @@ export function extractProviderFieldsForEditor(
 
   return {
     baseUrl: displayBaseUrl,
-    api: (entry.api as string) ?? preset.api ?? 'openai-completions',
+    api: normalizeApiType((entry.api as string) ?? preset.api),
     apiKey: deRedact(apiKeyRaw),
     apiKeyConfigured: typeof apiKeyRaw === 'string' && apiKeyRaw.length > 0,
     textModel,
@@ -421,6 +452,144 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
 };
 
 /**
+ * RC-only keys written to disk (ensure-config.cjs) that OpenClaw's config.apply
+ * Zod schema rejects. Strip only for gateway apply; startup ensure-config re-adds them.
+ */
+export function sanitizeConfigForGatewayApply(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const out = structuredClone(config);
+  const plugins = out.plugins as Record<string, unknown> | undefined;
+  if (plugins && 'installs' in plugins) {
+    const { installs: _installs, ...restPlugins } = plugins;
+    void _installs;
+    out.plugins = restPlugins;
+  }
+  return out;
+}
+
+export function serializeConfigForGatewayApply(config: Record<string, unknown>): string {
+  return JSON.stringify(sanitizeConfigForGatewayApply(config));
+}
+
+function mergeRcDefaultsIntoBase(base: Record<string, unknown>): Record<string, unknown> {
+  const rcDefaults = structuredClone(RC_CONFIG_DEFAULTS);
+  for (const [key, val] of Object.entries(rcDefaults)) {
+    if (!(key in base)) {
+      base[key] = val;
+    }
+  }
+  return base;
+}
+
+function resolveFallbackPrimaryAfterProfileDelete(
+  providers: Record<string, Record<string, unknown>>,
+): string {
+  for (const [id, entry] of Object.entries(providers)) {
+    if (isApiProfileProviderKey(id)) continue;
+    const url = String(entry.baseUrl ?? '').trim();
+    const models = entry.models as Array<{ id?: string }> | undefined;
+    const modelId = models?.[0]?.id?.trim();
+    if (url && modelId) return `${id}/${modelId}`;
+  }
+  return 'minimax/MiniMax-M2.7';
+}
+
+function stripInvalidApiProfileProviders(
+  providers: Record<string, Record<string, unknown>>,
+): void {
+  for (const id of Object.keys(providers)) {
+    if (!isApiProfileProviderKey(id)) continue;
+    if (!String(providers[id]?.baseUrl ?? '').trim()) {
+      delete providers[id];
+    }
+  }
+}
+
+function resolvePrimaryForApply(
+  primary: string,
+  providers: Record<string, Record<string, unknown>>,
+): string {
+  const providerKey = primary.includes('/') ? primary.split('/')[0] : '';
+  if (!providerKey) return resolveFallbackPrimaryAfterProfileDelete(providers);
+
+  const entry = providers[providerKey];
+  const hasBaseUrl = Boolean(entry && String(entry.baseUrl ?? '').trim());
+  if (hasBaseUrl) {
+    if (!isApiProfileProviderKey(providerKey)) return primary;
+    const modelId = primary.slice(providerKey.length + 1);
+    if (modelId) return primary;
+    const models = entry.models as Array<{ id?: string }> | undefined;
+    return models?.[0]?.id
+      ? `${providerKey}/${models[0].id}`
+      : resolveFallbackPrimaryAfterProfileDelete(providers);
+  }
+
+  const profiles = listApiProfilesFromConfig({
+    models: { providers },
+  } as Record<string, unknown>);
+  if (profiles.length > 0) {
+    return `${profiles[0].id}/${profiles[0].modelId}`;
+  }
+  return resolveFallbackPrimaryAfterProfileDelete(providers);
+}
+
+/** Drop empty custom-* providers and repoint agents.defaults.model when needed. */
+function finalizeModelsProvidersAndAgentDefaults(config: Record<string, unknown>): void {
+  const providers = cloneExistingProviders(config);
+  stripInvalidApiProfileProviders(providers);
+
+  const agents = config.agents as Record<string, unknown> | undefined;
+  const defaults = (agents?.defaults as Record<string, unknown> | undefined) ?? {};
+  const modelBlock = (defaults.model as Record<string, unknown> | undefined) ?? {};
+  const imageBlock = (defaults.imageModel as Record<string, unknown> | undefined) ?? {};
+
+  const primary = resolvePrimaryForApply(String(modelBlock.primary ?? ''), providers);
+  let imagePrimary = resolvePrimaryForApply(String(imageBlock.primary ?? ''), providers);
+  if (!String(imageBlock.primary ?? '').trim()) {
+    imagePrimary = primary;
+  }
+
+  config.models = {
+    ...((config.models as Record<string, unknown> | undefined) ?? {}),
+    providers: providers as Record<string, unknown>,
+  };
+  config.agents = {
+    ...agents,
+    defaults: {
+      ...defaults,
+      model: { ...modelBlock, primary },
+      imageModel: { ...imageBlock, primary: imagePrimary },
+    },
+  };
+}
+
+/**
+ * Remove saved custom API profiles without rewriting the active provider from
+ * (possibly stale) form state. Fixes primary when the active profile is deleted.
+ */
+export function buildDeleteApiProfilesConfig(
+  currentConfig: Record<string, unknown> | null,
+  deleteIds: string[],
+): Record<string, unknown> {
+  const rcDefaults = structuredClone(RC_CONFIG_DEFAULTS);
+  const base = currentConfig ? structuredClone(currentConfig) : structuredClone(rcDefaults);
+  mergeRcDefaultsIntoBase(base);
+
+  const deleteSet = new Set(deleteIds.filter((id) => isApiProfileProviderKey(id)));
+  const providers = cloneExistingProviders(base);
+
+  for (const removeId of deleteSet) {
+    delete providers[removeId];
+  }
+
+  const result: Record<string, unknown> = { ...base };
+  result.models = { providers: providers as Record<string, unknown> };
+  finalizeModelsProvidersAndAgentDefaults(result);
+  return result;
+}
+
+/**
  * Build the complete project-level config by merging user edits into
  * the current project config.
  *
@@ -452,14 +621,18 @@ export function buildSaveConfig(
 
   const providerKey = input.provider;
   const baseUrl = cleanUrl(input.baseUrl);
-  const apiType = input.api || 'openai-completions';
+  const apiType = normalizeApiType(input.api);
 
   const hasVision = !!input.visionEnabled && !!input.visionModel;
   const visionProviderKey = input.visionProvider || providerKey;
   const useSeparateProvider = hasVision && visionProviderKey !== providerKey;
 
   // --- Text provider entry ---
-  const textModels = [resolveModelDef(providerKey, input.textModel)];
+  const textModels = [
+    resolveModelDef(providerKey, input.textModel, {
+      profileLabel: input.profileLabel,
+    }),
+  ];
 
   // Same provider, different vision model → add to same provider entry
   if (hasVision && !useSeparateProvider && input.visionModel !== input.textModel) {
@@ -468,13 +641,22 @@ export function buildSaveConfig(
 
   const providers = cloneExistingProviders(base);
 
+  for (const removeId of input.deleteApiProfileIds ?? []) {
+    if (isApiProfileProviderKey(removeId)) {
+      delete providers[removeId];
+    }
+  }
+
   // Restore additional cached providers if they are missing from the snapshot.
   // This avoids losing non-active provider secrets when gateway/config.get
   // omits them after provider switches.
+  const deleteProfileSet = new Set(input.deleteApiProfileIds ?? []);
+
   if (input.restoreProviders) {
     const restoreEntries = input.restoreProviders;
     for (const [restoreKey, restoreVal] of Object.entries(restoreEntries)) {
       if (!restoreKey) continue;
+      if (deleteProfileSet.has(restoreKey)) continue;
       if (providers[restoreKey]) continue; // keep existing
       const preset = getPreset(restoreKey);
       const modelId = restoreVal?.modelId?.trim() || preset.models?.[0]?.id;
@@ -572,7 +754,11 @@ export function buildSaveConfig(
     };
   }
 
-  providers[providerKey] = textProvider as Record<string, unknown>;
+  if (isApiProfileProviderKey(providerKey) && !baseUrl) {
+    delete providers[providerKey];
+  } else {
+    providers[providerKey] = textProvider as Record<string, unknown>;
+  }
 
   // --- Vision provider entry (only when using a different provider) ---
   if (useSeparateProvider) {
@@ -633,6 +819,7 @@ export function buildSaveConfig(
   const result: Record<string, unknown> = { ...base };
   result.agents = { ...existingAgents, defaults };
   result.models = { providers: providers as Record<string, unknown> };
+  finalizeModelsProvidersAndAgentDefaults(result);
 
   // --- Web search ---
   // OC reads API keys from provider-specific sub-objects, NOT the top-level apiKey:
@@ -860,7 +1047,7 @@ export function extractConfigFields(
   return {
     provider: textProviderKey,
     baseUrl: displayBaseUrl,
-    api: (textProviderDef?.api as string) ?? 'openai-completions',
+    api: normalizeApiType(textProviderDef?.api as string),
     apiKey: deRedact(apiKeyRaw),
     apiKeyConfigured: typeof apiKeyRaw === 'string' && apiKeyRaw.length > 0,
     textModel: textModelId,
@@ -872,7 +1059,9 @@ export function extractConfigFields(
       : '',
     visionApiKey: visionProviderDef ? deRedact(visionApiKeyRaw) : '',
     visionApiKeyConfigured: typeof visionApiKeyRaw === 'string' && visionApiKeyRaw.length > 0,
-    visionApi: (visionProviderDef?.api as string) ?? (textProviderDef?.api as string) ?? 'openai-completions',
+    visionApi: normalizeApiType(
+      (visionProviderDef?.api as string) ?? (textProviderDef?.api as string),
+    ),
     proxyUrl,
     webSearchEnabled,
     webSearchProvider: (searchConfig?.provider as string) ?? '',

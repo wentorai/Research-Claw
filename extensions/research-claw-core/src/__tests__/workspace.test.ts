@@ -97,17 +97,13 @@ describe('WorkspaceService', () => {
   // ── init ────────────────────────────────────────────────────────────
 
   describe('init', () => {
-    it('creates workspace root and scaffold directories', async () => {
+    it('creates workspace root and minimal scaffold directories', async () => {
       svc = new WorkspaceService(makeConfig(tmpDir));
       await svc.init();
 
-      expect(fs.existsSync(path.join(tmpDir, 'sources', 'papers'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'sources', 'data'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'sources', 'references'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'outputs', 'drafts'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'outputs', 'figures'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'outputs', 'exports'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'outputs', 'reports'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, '.ResearchClaw'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'sources'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'outputs'))).toBe(true);
     });
 
     it('creates default .gitignore', async () => {
@@ -130,6 +126,22 @@ describe('WorkspaceService', () => {
 
       const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
       expect(content).toBe('custom content\n');
+    });
+
+    it('migrates legacy uploads/ into sources/', async () => {
+      fs.mkdirSync(path.join(tmpDir, 'uploads'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'uploads', 'paper.pdf'), 'pdf');
+      fs.writeFileSync(path.join(tmpDir, 'uploads', 'notes.md'), '# notes');
+      fs.writeFileSync(path.join(tmpDir, '.gitignore'), '/uploads/*\n');
+
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      expect(fs.existsSync(path.join(tmpDir, 'uploads'))).toBe(false);
+      expect(fs.readFileSync(path.join(tmpDir, 'sources', 'paper.pdf'), 'utf-8')).toBe('pdf');
+      expect(fs.readFileSync(path.join(tmpDir, 'sources', 'notes.md'), 'utf-8')).toBe('# notes');
+      const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+      expect(gitignore).not.toContain('/uploads/');
     });
   });
 
@@ -204,6 +216,7 @@ describe('WorkspaceService', () => {
       svc = new WorkspaceService(makeConfig(tmpDir));
       await svc.init();
 
+      fs.mkdirSync(path.join(tmpDir, 'sources', 'papers'), { recursive: true });
       fs.writeFileSync(path.join(tmpDir, 'sources', 'papers', 'test.pdf'), 'data');
 
       const result = await svc.tree('sources/papers');

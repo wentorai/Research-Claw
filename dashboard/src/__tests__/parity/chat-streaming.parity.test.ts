@@ -271,14 +271,16 @@ describe('Chat streaming parity with OpenClaw native UI', () => {
     it('loads token usage from sessions.usage RPC', async () => {
       // OpenClaw gateway tracks token usage in session transcripts but does NOT
       // include usage in chat stream events. We fetch aggregate totals via the
-      // sessions.usage RPC (without key param to avoid key format mismatch).
+      // sessions.usage RPC scoped to the active gateway session key.
       mockGatewayClient.request.mockResolvedValueOnce({
         totals: { input: 1200, output: 350 },
       });
 
       await useChatStore.getState().loadSessionUsage();
 
-      expect(mockGatewayClient.request).toHaveBeenCalledWith('sessions.usage', {});
+      expect(mockGatewayClient.request).toHaveBeenCalledWith('sessions.usage', {
+        key: 'agent:main:main',
+      });
       expect(useChatStore.getState().tokensIn).toBe(1200);
       expect(useChatStore.getState().tokensOut).toBe(350);
     });

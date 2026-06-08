@@ -67,8 +67,17 @@
   "skills": {
     "load": {
       "extraDirs": [
-        "./skills"
+        "./skills",
+        "./workspace/skills"
       ]
+    },
+    "workshop": {
+      "autonomous": {
+        "enabled": false
+      },
+      "approvalPolicy": "pending",
+      "maxPending": 50,
+      "maxSkillBytes": 40000
     }
   },
   "plugins": {

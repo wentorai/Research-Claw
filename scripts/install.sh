@@ -831,7 +831,7 @@ node -e "
 
 if [ -f config/openclaw.json ]; then
   node scripts/migrate-rc-data-dir.cjs 2>/dev/null || true
-  # Clean stale references + ensure OC 2026.3.13+ required fields.
+  # Clean stale references + ensure OC 2026.6.1+ required fields.
   # Shared logic in ensure-config.cjs — also called by run.sh and docker-entrypoint.sh.
   GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
   node scripts/ensure-config.cjs config/openclaw.json ${GLOBAL_CFG:+"$GLOBAL_CFG"} 2>/dev/null || true

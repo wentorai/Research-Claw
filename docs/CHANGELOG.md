@@ -17,6 +17,19 @@ Tracks: `Dashboard` (S1), `Modules` (S2), `Plugins` (S3), `Prompt` (S4), `Infra`
 
 ## Log
 
+### 2026-06-08 — v0.7.0 Release
+
+> OpenClaw base upgraded `2026.3.13` → `2026.6.1` (patch migrated). Tests: 1338 dashboard pass; `pnpm build` green.
+
+- [2026-06-08] [Infra] [Release] chore: bump to v0.7.0. Version aligned across root `package.json`, `README.md`/`README.en.md` badges, `extensions/research-claw-core` (package.json + openclaw.plugin.json + index.ts), `extensions/wentor-connect`, and `scripts/docker-entrypoint.sh` `IMAGE_VERSION` (was stranded at 0.6.3).
+- [2026-06-08] [Dashboard] [Release] feat: Memory panel + memory subsystem (`MemoryPanel`, `stores/memory`, core `src/memory/`).
+- [2026-06-08] [Dashboard] [Release] feat: Paper Review workflow (`PaperReviewPanel`, `paper-review-*` utils, core `src/paper-review/`).
+- [2026-06-08] [Dashboard] [Release] feat: Skill Workshop (OC 2026.6.1) — `SkillWorkshopTab`, skill-workshop store/types.
+- [2026-06-08] [Dashboard] [Release] feat: Staged Writing + Task Flow timelines (`StagedWritingTimeline`, `TaskFlowTimeline`).
+- [2026-06-08] [Dashboard] [Release] feat: custom API profiles + settings dock picker (`api-profiles`, `custom-api-profiles`, `settings/`, `ConfigPanelDockPicker`).
+- [2026-06-08] [Infra] [Release] fix: supervisor robustness (DB graceful degradation, dbPath persistence, Docker RP volume shadowing); respect user-customized gateway auth tokens (#59); update-script GitHub fallback + SkillSearch catalog path; example-config OC-incompatible key auto-cleanup.
+- [2026-06-08] [Infra] [Release] chore: cleanup — removed scratch harnesses (`test-rpc.ts`, `test-memory-rpc.cjs`, `extensions/research-claw-core/test-memory-api.ts`); ignore `config/` runtime data (browser/media/npm/plugin-skills, `*.last-good`); fixed `init-memory-demo.sh` DB path to `~/.research-claw/library.db`; reference-map OC base updated to 2026.6.1.
+
 ### 2026-04-10 — OAuth Auto-Save UX
 
 - [2026-04-10] [Dashboard] [Claude] fix(UX): OAuth auto-save — closing the OAuth success dialog now automatically saves settings and triggers gateway restart, instead of requiring a separate manual "保存" click. Extracted `performSave` from `handleSave` (SettingsPanel) and `performStart` from `handleStart` (SetupWizard) as reusable async callbacks. OAuthModal blocks close during save, shows error with manual fallback on failure.

@@ -51,10 +51,10 @@ vi.mock('../../stores/gateway', () => ({
 // The unified image pipeline (chat.ts:268-337) checks primaryModelSupportsVision()
 // and hasImageModelConfigured() before sending attachments. Without this mock,
 // send() returns early with an error and never calls chat.send.
-vi.mock('../../stores/config', () => ({
-  primaryModelSupportsVision: vi.fn(() => true),
-  hasImageModelConfigured: vi.fn(() => true),
-}));
+vi.mock('../../stores/config', async () => {
+  const { parityConfigStoreMock } = await import('./parity-config-mock');
+  return parityConfigStoreMock();
+});
 
 /**
  * Find the chat.send RPC call from mock history.

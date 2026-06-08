@@ -391,7 +391,7 @@ describe('Provider preset metadata — openclaw/src/agents/provider-capabilities
     // openclaw accepts these api values in provider config
     const validApis = [
       'openai-completions',
-      'openai-codex-responses',
+      'openai-chatgpt-responses',
       'anthropic-messages',
       'google-generative-ai',
       'bedrock-converse-stream',
@@ -791,7 +791,7 @@ describe('ProviderPreset api union — pi-ai KnownApi parity', () => {
     type ApiType = (typeof PROVIDER_PRESETS)[number]['api'];
     const validApis: ApiType[] = [
       'openai-completions',
-      'openai-codex-responses',
+      'openai-chatgpt-responses',
       'openai-responses',
       'anthropic-messages',
       'google-generative-ai',

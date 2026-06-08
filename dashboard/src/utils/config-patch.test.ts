@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildDeleteApiProfilesConfig,
   buildSaveConfig,
   extractConfigFields,
   mergeProjectConfigsPreservingProviders,
   isConfigValid,
   hasModelConfigured,
   REDACTED_SENTINEL,
+  sanitizeConfigForGatewayApply,
+  serializeConfigForGatewayApply,
   type ConfigPatchInput,
 } from './config-patch';
 
@@ -399,6 +402,34 @@ describe('buildSaveConfig', () => {
     expect(providers.minimax).toBeDefined();
   });
 
+  it('does not resurrect empty custom profile stubs from previous snapshot', () => {
+    const previous = {
+      agents: { defaults: { model: { primary: 'custom/m0' } } },
+      models: {
+        providers: {
+          custom: { baseUrl: '', api: 'openai-completions', models: [{ id: 'm0' }] },
+        },
+      },
+    };
+    const latest = {
+      agents: { defaults: { model: { primary: 'minimax/MiniMax-M2.7' } } },
+      models: {
+        providers: {
+          minimax: {
+            baseUrl: 'https://api.minimax.io/anthropic',
+            models: [{ id: 'MiniMax-M2.7' }],
+          },
+        },
+      },
+    };
+    const merged = mergeProjectConfigsPreservingProviders(
+      latest as Record<string, unknown>,
+      previous as Record<string, unknown>,
+    );
+    const providers = (merged?.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers.custom).toBeUndefined();
+  });
+
   it('explicit deleteTextApiKey clears the text provider apiKey', () => {
     const existing = {
       models: {
@@ -586,6 +617,20 @@ describe('buildSaveConfig', () => {
     expect(models[0].reasoning).toBe(false);
   });
 
+  it('forces DeepSeek v4 models to non-thinking mode', () => {
+    const config = buildSaveConfig(null, {
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-test',
+      textModel: 'deepseek-v4-flash',
+    });
+
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    const models = providers.deepseek.models as Array<{ id: string; reasoning: boolean }>;
+    expect(models[0].id).toBe('deepseek-v4-flash');
+    expect(models[0].reasoning).toBe(false);
+  });
+
   // --- PR #18: MiniMax M2.7 model support ---
 
   it('builds config with MiniMax M2.7 model (international)', () => {
@@ -718,7 +763,7 @@ describe('buildSaveConfig', () => {
         providers: {
           'openai-codex': {
             baseUrl: 'https://chatgpt.com/backend-api',
-            api: 'openai-codex-responses',
+            api: 'openai-chatgpt-responses',
             models: [{ id: 'gpt-5.4', input: ['text', 'image'] }],
           },
         },
@@ -733,7 +778,7 @@ describe('buildSaveConfig', () => {
     const config = buildSaveConfig(existing as unknown as Record<string, unknown>, {
       provider: 'openai-codex',
       baseUrl: 'https://chatgpt.com/backend-api',
-      api: 'openai-codex-responses',
+      api: 'openai-chatgpt-responses',
       textModel: 'gpt-5.4',
       restoreProviders: {
         zai: { modelId: 'glm-5', apiKey: 'sk-zai-keep' },
@@ -744,6 +789,18 @@ describe('buildSaveConfig', () => {
     expect(providers['openai-codex']).toBeDefined();
     expect(providers.zai).toBeDefined();
     expect(providers.zai.apiKey).toBe('sk-zai-keep');
+  });
+
+  it('migrates the legacy OpenAI Codex API protocol name before saving', () => {
+    const config = buildSaveConfig(null, {
+      provider: 'openai-codex',
+      baseUrl: 'https://chatgpt.com/backend-api',
+      api: 'openai-codex-responses',
+      textModel: 'gpt-5.4',
+    } as ConfigPatchInput);
+
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers['openai-codex'].api).toBe('openai-chatgpt-responses');
   });
 });
 
@@ -1091,5 +1148,116 @@ describe('hasModelConfigured', () => {
     expect(hasModelConfigured({
       agents: { defaults: { model: { primary: 'openrouter/google/gemini-3.1-pro-preview' } } },
     })).toBe(true);
+  });
+});
+
+describe('sanitizeConfigForGatewayApply', () => {
+  it('removes plugins.installs before config.apply', () => {
+    const config = {
+      plugins: {
+        enabled: true,
+        installs: { 'research-claw-core': { source: 'path' } },
+        entries: { 'research-claw-core': { enabled: true } },
+      },
+    };
+    const sanitized = sanitizeConfigForGatewayApply(config);
+    const plugins = sanitized.plugins as Record<string, unknown>;
+    expect(plugins.installs).toBeUndefined();
+    expect(plugins.entries).toBeDefined();
+    const raw = JSON.parse(serializeConfigForGatewayApply(config)) as Record<string, unknown>;
+    expect((raw.plugins as Record<string, unknown>).installs).toBeUndefined();
+  });
+});
+
+describe('buildDeleteApiProfilesConfig', () => {
+  it('removes profile and keeps primary when deleting inactive profile', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'custom-relay-b/m1' } } },
+      models: {
+        providers: {
+          'custom-relay-a': { baseUrl: 'https://a.example/v1', models: [{ id: 'm0' }] },
+          'custom-relay-b': { baseUrl: 'https://b.example/v1', models: [{ id: 'm1' }] },
+        },
+      },
+    };
+    const result = buildDeleteApiProfilesConfig(config, ['custom-relay-a']);
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers['custom-relay-a']).toBeUndefined();
+    expect(providers['custom-relay-b']).toBeDefined();
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('custom-relay-b/m1');
+  });
+
+  it('repoints primary when deleting active profile', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'custom-relay-a/m0' } } },
+      models: {
+        providers: {
+          'custom-relay-a': { baseUrl: 'https://a.example/v1', models: [{ id: 'm0' }] },
+          'custom-relay-b': { baseUrl: 'https://b.example/v1', models: [{ id: 'm1' }] },
+        },
+      },
+    };
+    const result = buildDeleteApiProfilesConfig(config, ['custom-relay-a']);
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('custom-relay-b/m1');
+  });
+
+  it('prunes empty custom stub and falls back to builtin primary', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'custom/m0' } } },
+      models: {
+        providers: {
+          custom: { baseUrl: '', models: [{ id: 'm0' }] },
+          minimax: { baseUrl: 'https://api.minimax.io/v1', models: [{ id: 'MiniMax-M2.7' }] },
+        },
+      },
+    };
+    const result = buildDeleteApiProfilesConfig(config, ['custom']);
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers.custom).toBeUndefined();
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('minimax/MiniMax-M2.7');
+  });
+
+  it('repoints primary when deleting inactive profile leaves stale custom primary', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'custom/m0' } } },
+      models: {
+        providers: {
+          custom: { baseUrl: '', models: [{ id: 'm0' }] },
+          'custom-relay-b': { baseUrl: 'https://b.example/v1', models: [{ id: 'm1' }] },
+          minimax: { baseUrl: 'https://api.minimax.io/v1', models: [{ id: 'MiniMax-M2.7' }] },
+        },
+      },
+    };
+    const result = buildDeleteApiProfilesConfig(config, ['custom-relay-b']);
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers['custom-relay-b']).toBeUndefined();
+    expect(providers.custom).toBeUndefined();
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('minimax/MiniMax-M2.7');
+  });
+
+  it('does not restore providers marked for deletion during save', () => {
+    const base = {
+      agents: { defaults: { model: { primary: 'custom-relay-b/m1' } } },
+      models: {
+        providers: {
+          'custom-relay-b': { baseUrl: 'https://b.example/v1', models: [{ id: 'm1' }] },
+        },
+      },
+    };
+    const result = buildSaveConfig(base, {
+      provider: 'custom-relay-b',
+      baseUrl: 'https://b.example/v1',
+      textModel: 'm1',
+      deleteApiProfileIds: ['custom-relay-a'],
+      restoreProviders: {
+        'custom-relay-a': { modelId: 'm0', apiKey: REDACTED_SENTINEL },
+      },
+    });
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers['custom-relay-a']).toBeUndefined();
   });
 });

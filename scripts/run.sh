@@ -77,7 +77,7 @@ if [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
   export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-research-claw}"
 fi
 
-# --- Ensure config has all OC 2026.3.13+ required fields ---
+# --- Ensure config has all OC 2026.6.1+ required fields ---
 # MUST run BEFORE path resolution so that newly added relative paths
 # (e.g. ./extensions/openclaw-weixin) get converted to absolute below.
 GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
@@ -146,9 +146,23 @@ fi
 echo "[run] Using Node: $GW_NODE ($("$GW_NODE" -v))"
 echo "[run] Config: $OPENCLAW_CONFIG_PATH"
 
+# Stop macOS LaunchAgent gateway (installed by `openclaw doctor`) — it binds 28789 and
+# respawns on --force, causing "port still not bindable" when using pnpm serve.
+LAUNCH_AGENT="$HOME/Library/LaunchAgents/ai.openclaw.gateway.plist"
+if [ -f "$LAUNCH_AGENT" ]; then
+  launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT" 2>/dev/null \
+    || launchctl unload "$LAUNCH_AGENT" 2>/dev/null || true
+  echo "[run] Stopped LaunchAgent ai.openclaw.gateway (use pnpm serve OR LaunchAgent, not both)"
+fi
+if command -v lsof >/dev/null 2>&1 && lsof -ti :28789 >/dev/null 2>&1; then
+  echo "[run] Freeing port 28789..."
+  lsof -ti :28789 | xargs kill -9 2>/dev/null || true
+  sleep 1
+fi
+
 # Sync RC settings → ~/.openclaw/openclaw.json so `openclaw gateway --force` also works.
 # Direction: RC project config → global config (preserves user-only keys in global).
-# Also fixes channels.*.commands.native=false (529 cmd limit).
+# Strips invalid channels.*.commands for OC 2026.6.1+.
 "$GW_NODE" "$(dirname "$0")/sync-global-config.cjs" 2>/dev/null || true
 
 # --- Sync L1 bootstrap files to workspace root ---
@@ -181,6 +195,12 @@ done
 # Without this, agent diagnostics (`openclaw doctor`, `openclaw plugins list`) fail
 # with "command not found" because node_modules/.bin is not in PATH.
 export PATH="$(pwd)/node_modules/.bin:$PATH"
+
+# Rebuild RC extensions so gateway loads latest RPC (rc.ws.exists, review failed status, etc.).
+if command -v pnpm >/dev/null 2>&1; then
+  echo "[run] Building extensions..."
+  pnpm build:extensions >/dev/null 2>&1 || pnpm build:extensions
+fi
 
 STOP=false
 trap 'STOP=true' INT TERM

@@ -1,6 +1,7 @@
 import React, { useEffect, useCallback, Suspense, useState } from 'react';
 import { App as AntdApp, ConfigProvider, Spin, Result, Button, Input, Space, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
+import { buildAppShellGrid, buildOverlayPanelLayout } from './utils/config-panel-layout';
 import { getAntdThemeConfig } from './styles/theme';
 import { useConfigStore } from './stores/config';
 import { useGatewayStore } from './stores/gateway';
@@ -15,9 +16,11 @@ import RightPanel from './components/RightPanel';
 import StatusBar from './components/StatusBar';
 import SetupWizard from './components/setup/SetupWizard';
 import CronEventListener from './components/CronEventListener';
+import PaperReviewRunListener from './components/PaperReviewRunListener';
 import ConfigRestartListener from './components/ConfigRestartListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
+import { useStagedWritingStore } from './stores/staged-writing';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -73,7 +76,7 @@ function usePanelMode(): PanelMode {
   return mode;
 }
 
-const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'tasks', 'monitor', 'supervisor', 'extensions', 'settings'];
+const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'review', 'tasks', 'monitor', 'supervisor', 'extensions', 'settings'];
 
 export default function App() {
   const { t } = useTranslation();
@@ -91,6 +94,8 @@ export default function App() {
   const leftNavCollapsed = useUiStore((s) => s.leftNavCollapsed);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
   const rightPanelWidth = useUiStore((s) => s.rightPanelWidth);
+  const configPanelHeight = useUiStore((s) => s.configPanelHeight);
+  const configPanelPlacement = useUiStore((s) => s.configPanelPlacement);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
   const setLeftNavCollapsed = useUiStore((s) => s.setLeftNavCollapsed);
@@ -155,9 +160,30 @@ export default function App() {
     });
 
     const handleAgentPayload = (payload: unknown) => {
-      const status = payload as { state?: string };
-      if (status.state) {
-        setAgentStatus(status.state as 'idle' | 'thinking' | 'tool_running' | 'streaming' | 'error');
+      const status = payload as {
+        state?: string;
+        stream?: string;
+        data?: { phase?: string };
+      };
+
+      if (status.stream === 'compaction' && status.data?.phase) {
+        useChatStore.getState().handleCompactionAgentEvent(status);
+        if (status.data.phase === 'start') {
+          setAgentStatus('compacting');
+        } else if (status.data.phase === 'end' && useChatStore.getState().streaming) {
+          setAgentStatus('thinking');
+        }
+      } else if (
+        status.stream === 'lifecycle'
+        && status.data?.phase === 'error'
+      ) {
+        useChatStore.getState().handleAgentFailureEvent(status);
+        setAgentStatus('error');
+      } else if (status.stream === 'error') {
+        useChatStore.getState().handleAgentFailureEvent(status);
+        setAgentStatus('error');
+      } else if (status.state) {
+        setAgentStatus(status.state as 'idle' | 'thinking' | 'compacting' | 'tool_running' | 'streaming' | 'error');
       }
       // Feed tool stream store for P1-2 (inline tool display) and P1-3 (bg activity)
       const chatRunId = useChatStore.getState().runId;
@@ -190,6 +216,7 @@ export default function App() {
       setAgentStatus('idle');
       // Initial notification check
       useUiStore.getState().checkNotifications();
+      void useStagedWritingStore.getState().restoreJob();
     } else if (connState === 'disconnected' || connState === 'reconnecting') {
       setAgentStatus('disconnected');
     }
@@ -414,22 +441,37 @@ export default function App() {
   const showInlinePanel = isInline && rightPanelOpen;
   const showOverlayPanel = !isInline && rightPanelOpen;
 
+  const shellGrid = buildAppShellGrid({
+    leftNavWidth,
+    placement: configPanelPlacement,
+    panelOpen: showInlinePanel,
+    panelWidth: rightPanelWidth,
+    panelHeight: configPanelHeight,
+  });
+
+  const overlayLayout = showOverlayPanel
+    ? buildOverlayPanelLayout({
+        placement: configPanelPlacement,
+        panelMode: panelMode === 'modal' ? 'modal' : 'overlay',
+        leftNavWidth,
+        panelWidth: rightPanelWidth,
+        panelHeight: configPanelHeight,
+      })
+    : null;
+
   return (
     <ConfigProvider theme={antdTheme}>
       <AntdApp>
       <CronEventListener />
+      <PaperReviewRunListener />
       <ConfigRestartListener />
       <div
         style={{
           height: '100vh',
           display: 'grid',
-          gridTemplateRows: '48px 1fr 28px',
-          gridTemplateColumns: `${leftNavWidth}px 1fr ${showInlinePanel ? `${rightPanelWidth}px` : '0px'}`,
-          gridTemplateAreas: `
-            "topbar topbar topbar"
-            "leftnav chat rightpanel"
-            "statusbar statusbar statusbar"
-          `,
+          gridTemplateRows: shellGrid.gridTemplateRows,
+          gridTemplateColumns: shellGrid.gridTemplateColumns,
+          gridTemplateAreas: shellGrid.gridTemplateAreas,
           background: 'var(--bg)',
           overflow: 'hidden',
         }}
@@ -454,24 +496,33 @@ export default function App() {
         <main
           role="main"
           aria-label={t('a11y.mainContent')}
-          style={{ gridArea: 'chat', overflow: 'hidden' }}
+          style={{
+            gridArea: shellGrid.chatGridArea,
+            overflow: 'hidden',
+            minHeight: 0,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
         >
           <ErrorBoundary>
             <Suspense fallback={<Spin style={{ margin: 'auto', display: 'block', paddingTop: '40vh' }} />}>
-              <ChatView />
+              <div className="chat-view-host">
+                <ChatView />
+              </div>
             </Suspense>
           </ErrorBoundary>
         </main>
 
-        {/* Inline right panel (>= 1440px) */}
         <aside
           role="complementary"
           aria-label={t('a11y.sidePanel')}
           style={{
-            gridArea: 'rightpanel',
-            borderLeft: showInlinePanel ? '1px solid var(--border)' : 'none',
+            gridArea: shellGrid.configGridArea,
             overflow: 'hidden',
-            transition: 'width 0.2s ease',
+            minHeight: 0,
+            minWidth: 0,
+            ...shellGrid.configBorderStyle,
           }}
         >
           {showInlinePanel && (
@@ -488,10 +539,8 @@ export default function App() {
         </footer>
       </div>
 
-      {/* Overlay/Modal right panel (< 1440px) */}
-      {showOverlayPanel && (
+      {showOverlayPanel && overlayLayout && (
         <>
-          {/* Backdrop */}
           <div
             aria-hidden="true"
             onClick={() => setRightPanelOpen(false)}
@@ -502,21 +551,12 @@ export default function App() {
               zIndex: 900,
             }}
           />
-          {/* Panel drawer */}
           <div
             role="complementary"
             aria-label={t('a11y.sidePanel')}
             style={{
-              position: 'fixed',
-              top: 0,
-              right: 0,
-              bottom: 0,
-              width: panelMode === 'modal' ? '100%' : `${Math.min(rightPanelWidth, 480)}px`,
-              background: 'var(--surface)',
-              borderLeft: panelMode === 'modal' ? 'none' : '1px solid var(--border)',
-              zIndex: 1000,
-              overflow: 'hidden',
-              animation: 'slideInRight 0.2s ease-out',
+              ...overlayLayout.style,
+              animation: `${overlayLayout.animationName} 0.2s ease-out`,
             }}
           >
             <ErrorBoundary>
@@ -526,9 +566,25 @@ export default function App() {
             </ErrorBoundary>
           </div>
           <style>{`
-            @keyframes slideInRight {
+            @keyframes rcPanelSlideInRight {
               from { transform: translateX(100%); }
               to { transform: translateX(0); }
+            }
+            @keyframes rcPanelSlideInLeft {
+              from { transform: translateX(-100%); }
+              to { transform: translateX(0); }
+            }
+            @keyframes rcPanelSlideInTop {
+              from { transform: translateY(-100%); }
+              to { transform: translateY(0); }
+            }
+            @keyframes rcPanelSlideInBottom {
+              from { transform: translateY(100%); }
+              to { transform: translateY(0); }
+            }
+            @keyframes rcPanelFadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
             }
           `}</style>
         </>

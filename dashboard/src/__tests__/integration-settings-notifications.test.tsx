@@ -6,7 +6,7 @@
  * Issue 8: Notification system (Channel A polling, Channel B card extraction, dedup, read persistence)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import React from 'react';
 import { RC_VERSION } from '../version';
 
@@ -62,6 +62,7 @@ import { useUiStore } from '../stores/ui';
 import { useGatewayStore } from '../stores/gateway';
 import { useConfigStore } from '../stores/config';
 import { useChatStore } from '../stores/chat';
+import { useSupervisorStore } from '../stores/supervisor';
 
 function stubCheckUpdatesResponse() {
   return {
@@ -78,11 +79,56 @@ function stubCheckUpdatesResponse() {
 
 // --- Helpers ---
 
+function stubSupervisorConfig() {
+  return {
+    enabled: false,
+    supervisorModel: '',
+    reviewMode: 'off' as const,
+    appendReviewToChannelOutput: true,
+    memoryGuard: { enabled: false, keyCategories: [] as string[] },
+    courseCorrection: {
+      enabled: true,
+      deviationThreshold: 0.5,
+      forceRegenerate: false,
+      maxRegenerateAttempts: 3,
+    },
+    highRiskTools: [] as string[],
+  };
+}
+
+function defaultMockRequest(method: string): Promise<unknown> {
+  if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
+  if (method === 'rc.supervisor.config') {
+    return Promise.resolve({ ok: true, config: stubSupervisorConfig() });
+  }
+  if (method === 'rc.supervisor.status') {
+    return Promise.resolve({
+      enabled: false,
+      reviewMode: 'off',
+      supervisorModel: '',
+      appendReviewToChannelOutput: true,
+      memoryGuardEnabled: false,
+      courseCorrectionEnabled: true,
+      deviationThreshold: 0.5,
+      forceRegenerate: false,
+      maxRegenerateAttempts: 3,
+      highRiskTools: [],
+      stats: { total: 0, blocked: 0, corrected: 0, warnings: 0 },
+      activeSessions: 0,
+      sessionsInfo: [],
+    });
+  }
+  if (method.startsWith('rc.auth.')) return Promise.resolve({});
+  return Promise.resolve({});
+}
+
 /** Create a mock gateway client with a controllable request method. */
 function createMockClient(requestFn?: (...args: unknown[]) => Promise<unknown>) {
+  const request = requestFn
+    ?? vi.fn().mockImplementation((method: string) => defaultMockRequest(method));
   return {
     isConnected: true,
-    request: requestFn ?? vi.fn().mockResolvedValue({}),
+    request,
     connect: vi.fn(),
     disconnect: vi.fn(),
   } as unknown as ReturnType<typeof useGatewayStore.getState>['client'];
@@ -107,6 +153,28 @@ function minimalGatewayConfig() {
       },
     },
   };
+}
+
+function clickConfigSaveButton(): void {
+  const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
+  const configButton = saveButtons.find((button) => button.parentElement?.textContent?.includes('settings.restartHint'))
+    ?? saveButtons[0];
+  fireEvent.click(configButton);
+}
+
+/** Mocks for Settings save flow (performSave uses provider validate + upsert). */
+function extendSettingsSaveMocks(mockRequest: ReturnType<typeof vi.fn>) {
+  return mockRequest.mockImplementation((method: string) => {
+    if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
+    if (method === 'rc.auth.statuses') return Promise.resolve({ custom: { configured: false } });
+    if (method === 'config.get') {
+      return Promise.resolve({ config: minimalGatewayConfig(), hash: 'abc123' });
+    }
+    if (method === 'rc.provider.validate') return Promise.resolve({ ok: true });
+    if (method === 'rc.provider.upsert') return Promise.resolve({ ok: true });
+    if (method === 'config.apply') return Promise.resolve({});
+    return defaultMockRequest(method);
+  });
 }
 
 // --- Reset all store state between tests ---
@@ -153,9 +221,23 @@ beforeEach(() => {
     tokensIn: 0,
     tokensOut: 0,
   });
+
+  useSupervisorStore.getState().stopPolling();
+  useSupervisorStore.setState({
+    status: null,
+    config: null,
+    auditLog: [],
+    auditLogTotal: 0,
+    statusLoading: false,
+    configLoading: false,
+    error: null,
+    pollingTimer: null,
+  });
 });
 
 afterEach(() => {
+  useSupervisorStore.getState().stopPolling();
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -165,10 +247,7 @@ afterEach(() => {
 
 describe('Issue 6: Settings save confirmation dialog', () => {
   it('shows Modal.confirm when save button is clicked', async () => {
-    const mockRequest = vi.fn().mockImplementation((method: string) => {
-      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
-      return Promise.resolve({ config: minimalGatewayConfig(), hash: 'abc123' });
-    });
+    const mockRequest = extendSettingsSaveMocks(vi.fn());
 
     useGatewayStore.setState({
       client: createMockClient(mockRequest),
@@ -183,11 +262,10 @@ describe('Issue 6: Settings save confirmation dialog', () => {
 
     render(<SettingsPanel />);
 
-    // The form should be rendered with pre-filled values from config
-    // Find and click the save button (the first one - config save, not prompt save)
-    const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
-    expect(saveButtons.length).toBeGreaterThanOrEqual(1);
-    fireEvent.click(saveButtons[0]);
+    await waitFor(() => {
+      expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
+    });
+    clickConfigSaveButton();
 
     // Modal.confirm should have been called
     expect(mockModalConfirm).toHaveBeenCalledTimes(1);
@@ -205,10 +283,7 @@ describe('Issue 6: Settings save confirmation dialog', () => {
   });
 
   it('does NOT call config.apply before user confirms the dialog', async () => {
-    const mockRequest = vi.fn().mockImplementation((method: string) => {
-      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
-      return Promise.resolve({ config: minimalGatewayConfig(), hash: 'abc123' });
-    });
+    const mockRequest = extendSettingsSaveMocks(vi.fn());
 
     useGatewayStore.setState({
       client: createMockClient(mockRequest),
@@ -223,31 +298,20 @@ describe('Issue 6: Settings save confirmation dialog', () => {
 
     render(<SettingsPanel />);
 
-    // Click save
-    const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
-    fireEvent.click(saveButtons[0]);
+    await waitFor(() => {
+      expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
+    });
+    clickConfigSaveButton();
 
-    // config.apply should NOT have been called — only Modal.confirm was invoked
-    const configApplyCalls = mockRequest.mock.calls.filter(
-      (call: unknown[]) => call[0] === 'config.apply',
+    // Provider upsert should NOT run before confirm — only Modal.confirm was invoked
+    const upsertCalls = mockRequest.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'rc.provider.upsert',
     );
-    expect(configApplyCalls).toHaveLength(0);
+    expect(upsertCalls).toHaveLength(0);
   });
 
-  it('calls config.apply after user confirms the dialog', async () => {
-    const mockRequest = vi.fn().mockImplementation((method: string) => {
-      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
-      if (method === 'config.get') {
-        return Promise.resolve({
-          config: minimalGatewayConfig(),
-          hash: 'abc123',
-        });
-      }
-      if (method === 'config.apply') {
-        return Promise.resolve({});
-      }
-      return Promise.resolve({});
-    });
+  it('calls rc.provider.upsert after user confirms the dialog', async () => {
+    const mockRequest = extendSettingsSaveMocks(vi.fn());
 
     useGatewayStore.setState({
       client: createMockClient(mockRequest),
@@ -262,33 +326,36 @@ describe('Issue 6: Settings save confirmation dialog', () => {
 
     render(<SettingsPanel />);
 
-    // Click save to trigger Modal.confirm
-    const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
-    fireEvent.click(saveButtons[0]);
+    await waitFor(() => {
+      expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
+    });
+    clickConfigSaveButton();
 
     expect(mockModalConfirm).toHaveBeenCalledTimes(1);
 
-    // Simulate user confirming the dialog by calling onOk
     const confirmCall = mockModalConfirm.mock.calls[0][0] as {
       onOk: () => Promise<void>;
     };
-    await confirmCall.onOk();
+    await act(async () => {
+      await confirmCall.onOk();
+    });
 
-    // Now config.get and config.apply should both have been called
     const configGetCalls = mockRequest.mock.calls.filter(
       (call: unknown[]) => call[0] === 'config.get',
     );
-    const configApplyCalls = mockRequest.mock.calls.filter(
-      (call: unknown[]) => call[0] === 'config.apply',
+    const validateCalls = mockRequest.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'rc.provider.validate',
+    );
+    const upsertCalls = mockRequest.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'rc.provider.upsert',
     );
     expect(configGetCalls.length).toBeGreaterThanOrEqual(1);
-    expect(configApplyCalls).toHaveLength(1);
+    expect(validateCalls).toHaveLength(1);
+    expect(upsertCalls).toHaveLength(1);
 
-    // Verify config.apply was called with raw and baseHash
-    const applyParams = configApplyCalls[0][1] as { raw: string; baseHash: string };
-    expect(applyParams.raw).toBeDefined();
-    expect(typeof applyParams.raw).toBe('string');
-    expect(applyParams.baseHash).toBe('abc123');
+    const upsertParams = upsertCalls[0][1] as { desiredConfig: Record<string, unknown>; operationId: string };
+    expect(upsertParams.desiredConfig).toBeDefined();
+    expect(upsertParams.operationId).toBeTruthy();
   });
 });
 
@@ -301,7 +368,7 @@ describe('Issue 7: Version and GitHub link', () => {
   beforeEach(() => {
     const mockRequest = vi.fn().mockImplementation((method: string) => {
       if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
-      return Promise.resolve({});
+      return defaultMockRequest(method);
     });
     useGatewayStore.setState({
       client: createMockClient(mockRequest),
@@ -375,10 +442,10 @@ describe('Issue 7b: Auto-update check throttling', () => {
   it('throttles repeated auto update checks within the same session window', async () => {
     const updatePayload = {
       current: '0.6.2',
-      latest: '0.6.3',
-      latestTag: 'v0.6.3',
+      latest: '0.7.0',
+      latestTag: 'v0.7.0',
       upToDate: false,
-      releaseUrl: 'https://github.com/wentorai/Research-Claw/releases/tag/v0.6.3',
+      releaseUrl: 'https://github.com/wentorai/Research-Claw/releases/tag/v0.7.0',
       publishedAt: null,
       repoRoot: '/tmp/research-claw',
       shellUpdateHint: "cd '/tmp/research-claw' && git pull --ff-only && pnpm install && pnpm build",
@@ -401,10 +468,10 @@ describe('Issue 7b: Auto-update check throttling', () => {
   it('allows preloaded manual check results to bypass throttling without a second RPC', async () => {
     const updatePayload = {
       current: '0.6.2',
-      latest: '0.6.3',
-      latestTag: 'v0.6.3',
+      latest: '0.7.0',
+      latestTag: 'v0.7.0',
       upToDate: false,
-      releaseUrl: 'https://github.com/wentorai/Research-Claw/releases/tag/v0.6.3',
+      releaseUrl: 'https://github.com/wentorai/Research-Claw/releases/tag/v0.7.0',
       publishedAt: null,
       repoRoot: '/tmp/research-claw',
       shellUpdateHint: "cd '/tmp/research-claw' && git pull --ff-only && pnpm install && pnpm build",

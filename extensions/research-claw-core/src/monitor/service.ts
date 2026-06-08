@@ -408,6 +408,11 @@ export class MonitorService {
     const id = randomUUID();
     const filters = input.filters ?? {};
     const prompt = input.agent_prompt?.trim() || defaultAgentPrompt(input.source_type, filters);
+    // Creating a monitor only persists its RC definition. The dashboard
+    // registers the backing gateway cron job when the user enables it.
+    // Defaulting to enabled here creates a false "running" state with no
+    // gateway_job_id, so new monitors must start disabled.
+    const enabled = input.enabled ?? false;
 
     this.db.prepare(`
       INSERT INTO rc_monitors (id, name, source_type, target, filters, schedule, enabled, notify, agent_prompt, created_at, updated_at)
@@ -419,7 +424,7 @@ export class MonitorService {
       input.target ?? '',
       JSON.stringify(filters),
       schedule,
-      (input.enabled ?? true) ? 1 : 0,
+      enabled ? 1 : 0,
       (input.notify ?? true) ? 1 : 0,
       prompt,
     );

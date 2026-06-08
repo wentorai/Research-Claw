@@ -4,6 +4,9 @@ import React from 'react';
 import LibraryPanel from './LibraryPanel';
 import { useLibraryStore } from '../../stores/library';
 import { useConfigStore } from '../../stores/config';
+import { useChatStore } from '../../stores/chat';
+
+const sendMock = vi.fn();
 
 // Mock i18next
 vi.mock('react-i18next', () => ({
@@ -15,6 +18,16 @@ vi.mock('react-i18next', () => ({
     i18n: { changeLanguage: vi.fn() },
   }),
   initReactI18next: { type: '3rdParty', init: vi.fn() },
+}));
+
+vi.mock('../../stores/chat', () => ({
+  useChatStore: (selector: (s: { send: typeof sendMock }) => unknown) =>
+    selector({ send: sendMock }),
+}));
+
+vi.mock('../../stores/ui', () => ({
+  useUiStore: (selector: (s: { setRightPanelOpen: () => void }) => unknown) =>
+    selector({ setRightPanelOpen: vi.fn() }),
 }));
 
 // Mock react-window v2
@@ -30,6 +43,7 @@ vi.mock('react-window', () => ({
 
 describe('LibraryPanel', () => {
   beforeEach(() => {
+    sendMock.mockReset();
     // Reset store state
     useLibraryStore.setState({
       papers: [],

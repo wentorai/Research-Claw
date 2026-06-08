@@ -16,6 +16,7 @@ import {
 import { CloudDownloadOutlined, CopyOutlined, KeyOutlined, PoweroffOutlined, QuestionCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import OAuthModal from '../OAuthModal';
 import ProviderPickerModal, { providerLabel } from '../providers/ProviderPickerModal';
+import ApiProfilesSection from '../settings/ApiProfilesSection';
 import { useTranslation } from 'react-i18next';
 import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
@@ -24,11 +25,21 @@ import { useUiStore } from '../../stores/ui';
 import { getThemeTokens } from '../../styles/theme';
 import { buildThemedModalStyles, confirmApplyAppUpdate } from '../../utils/app-update-ui';
 import {
+  buildDeleteApiProfilesConfig,
   buildSaveConfig,
   extractConfigFields,
   extractProviderFieldsForEditor,
   mergeProjectConfigsPreservingProviders,
+  serializeConfigForGatewayApply,
 } from '../../utils/config-patch';
+import {
+  allocateNextProfileProviderId,
+  collectApiProfileRestoreEntries,
+  isApiProfileProviderKey,
+  listApiProfilesFromConfig,
+  profileIdToDisplayName,
+  type ApiProfile,
+} from '../../utils/api-profiles';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
 import { isOAuthProvider } from '../../utils/oauth-providers';
 import { RC_VERSION } from '../../version';
@@ -203,8 +214,11 @@ function AboutSection() {
             raw?: string | null;
             hash?: string;
           }>('config.get', {});
-          const raw = snapshot.raw ?? JSON.stringify(snapshot.parsed ?? snapshot.config ?? {});
-          await client.request('config.apply', { raw, baseHash: snapshot.hash });
+          const snapshotConfig = (snapshot.parsed ?? snapshot.config ?? {}) as Record<string, unknown>;
+          await client.request('config.apply', {
+            raw: serializeConfigForGatewayApply(snapshotConfig),
+            baseHash: snapshot.hash,
+          });
           message.success(t('settings.restartSuccess'));
           configSeenAtStartRef.current = useConfigStore.getState().gatewayConfig;
           setRestarting(true);
@@ -399,6 +413,8 @@ export default function SettingsPanel() {
 
   const showSystemFiles = useUiStore((s) => s.showSystemFiles);
   const setShowSystemFiles = useUiStore((s) => s.setShowSystemFiles);
+  const notificationSoundEnabled = useUiStore((s) => s.notificationSoundEnabled);
+  const setNotificationSoundEnabled = useUiStore((s) => s.setNotificationSoundEnabled);
 
   // --- Text endpoint ---
   const [provider, setProvider] = useState('custom');
@@ -462,7 +478,7 @@ export default function SettingsPanel() {
       setSupervisorEnabled(supervisorConfig.enabled);
     }
     if (supervisorConfig) {
-      const model = supervisorConfig.supervisorModel;
+      const model = supervisorConfig.supervisorModel ?? '';
       setSupervisorModel(model);
 
       // Determine inherit-main-model radio state
@@ -515,11 +531,14 @@ export default function SettingsPanel() {
         }
       }
 
-      setReviewMode(supervisorConfig.reviewMode === 'off' ? 'correct' : supervisorConfig.reviewMode);
+      setReviewMode(supervisorConfig.reviewMode === 'off' ? 'correct' : (supervisorConfig.reviewMode ?? 'correct'));
       setAppendReviewToChannelOutput(supervisorConfig.appendReviewToChannelOutput ?? true);
-      setDeviationThreshold(supervisorConfig.courseCorrection.deviationThreshold);
-      setForceRegenerate(supervisorConfig.courseCorrection.forceRegenerate);
-      setMaxRegenerateAttempts(supervisorConfig.courseCorrection.maxRegenerateAttempts);
+      const cc = supervisorConfig.courseCorrection;
+      if (cc) {
+        setDeviationThreshold(cc.deviationThreshold ?? 0.5);
+        setForceRegenerate(cc.forceRegenerate ?? false);
+        setMaxRegenerateAttempts(cc.maxRegenerateAttempts ?? 3);
+      }
     }
   }, [supervisorConfig, gatewayConfig]);
 
@@ -543,6 +562,7 @@ export default function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const pendingRestart = useConfigStore((s) => s.pendingConfigRestart);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [supervisorAdvancedOpen, setSupervisorAdvancedOpen] = useState(false);
 
   // Controls whether the next gatewayConfig change should sync into form fields.
@@ -564,6 +584,9 @@ export default function SettingsPanel() {
   // providers even when the gateway's `config.get` response drops them.
   const textModelCacheRef = useRef<Record<string, string>>({});
   const visionModelCacheRef = useRef<Record<string, string>>({});
+  const profileLabelRef = useRef<Record<string, string>>({});
+  const [profileLabel, setProfileLabel] = useState('');
+  const pendingDeleteProfileIdsRef = useRef<string[]>([]);
 
   const isOAuthProviderSelected = isOAuthProvider(provider);
   const visionSeparateProvider = visionProvider !== provider;
@@ -765,11 +788,10 @@ export default function SettingsPanel() {
     // If the gateway doesn't expose this provider in config.get anymore,
     // but the user previously typed a key (cached), restore "configured" state
     // without requiring re-entry.
-    if (!id.startsWith('custom') && !deleteTextApiKeyRef.current) {
+    if (!isOAuthProvider(id) && !deleteTextApiKeyRef.current) {
       const cached = apiKeyCacheRef.current[id];
       if (cached && cached.trim()) {
         setApiKeyConfigured(true);
-        // Keep apiKey value empty to avoid showing the raw key in the input.
         setApiKey('');
       }
     }
@@ -777,7 +799,56 @@ export default function SettingsPanel() {
       setApiKey('');
       setApiKeyConfigured(false);
     }
-  }, [authConfiguredByProvider, gatewayConfig]);
+
+    if (isApiProfileProviderKey(id)) {
+      const profiles = listApiProfilesFromConfig(providerConfig);
+      const label =
+        profileLabelRef.current[id] ||
+        profiles.find((p) => p.id === id)?.label ||
+        profileIdToDisplayName(id) ||
+        id;
+      profileLabelRef.current[id] = label;
+      setProfileLabel(label);
+    } else {
+      setProfileLabel('');
+    }
+  }, [gatewayConfig]);
+
+  const apiProfiles = useMemo(() => {
+    const cfg = projectConfigCacheRef.current ?? (gatewayConfig as unknown as Record<string, unknown> | null);
+    return listApiProfilesFromConfig(cfg);
+  }, [gatewayConfig]);
+
+  const loadApiProfileIntoForm = useCallback((profile: ApiProfile) => {
+    handleProviderChange(profile.id);
+    profileLabelRef.current[profile.id] = profile.label;
+    setProfileLabel(profile.label);
+  }, [handleProviderChange]);
+
+  const savedCustomProfileOptions = useMemo(
+    () => apiProfiles.map((p) => ({ id: p.id, label: p.label })),
+    [apiProfiles],
+  );
+
+  const beginNewCustomProfile = useCallback(() => {
+    const cfg = projectConfigCacheRef.current ?? (gatewayConfig as unknown as Record<string, unknown> | null);
+    const existingIds = new Set(listApiProfilesFromConfig(cfg).map((p) => p.id));
+    for (const id of Object.keys(profileLabelRef.current)) {
+      if (isApiProfileProviderKey(id)) existingIds.add(id);
+    }
+    if (isApiProfileProviderKey(provider)) existingIds.add(provider);
+    const providerId = allocateNextProfileProviderId(existingIds);
+    const defaultLabel =
+      providerId === 'custom'
+        ? t('setup.providerCustom', { defaultValue: 'Custom / Other' })
+        : profileIdToDisplayName(providerId) || providerId;
+    profileLabelRef.current[providerId] = defaultLabel;
+    setProfileLabel(defaultLabel);
+    setAdvancedOpen(true);
+    handleProviderChange(providerId);
+  }, [gatewayConfig, handleProviderChange, provider, t]);
+
+  const handleAddApiProfile = beginNewCustomProfile;
 
   const handleVisionProviderChange = useCallback((id: string) => {
     setVisionProvider(id);
@@ -880,7 +951,18 @@ export default function SettingsPanel() {
     setApiKey(fields.apiKey);
     setApiKeyConfigured(fields.apiKeyConfigured);
     setTextModel(fields.textModel);
-    setProvider(detectPresetFromProvider(fields.provider, fields.baseUrl));
+    setProvider(fields.provider);
+    if (isApiProfileProviderKey(fields.provider)) {
+      const label =
+        profileLabelRef.current[fields.provider] ||
+        apiProfiles.find((p) => p.id === fields.provider)?.label ||
+        profileIdToDisplayName(fields.provider) ||
+        fields.provider;
+      profileLabelRef.current[fields.provider] = label;
+      setProfileLabel(label);
+    } else {
+      setProfileLabel('');
+    }
 
     if (fields.visionEnabled) {
       setVisionEnabled(true);
@@ -913,6 +995,11 @@ export default function SettingsPanel() {
     setHeartbeatEnabled(fields.heartbeatEnabled);
     setHeartbeatInterval(fields.heartbeatInterval);
 
+    const cfgForProfiles = projectConfigCacheRef.current ?? (gatewayConfig as unknown as Record<string, unknown> | null);
+    for (const p of listApiProfilesFromConfig(cfgForProfiles)) {
+      profileLabelRef.current[p.id] = p.label;
+    }
+
   }, [gatewayConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefresh = useCallback(() => {
@@ -927,6 +1014,8 @@ export default function SettingsPanel() {
     if (!client?.isConnected) throw new Error(t('oauth.notConnected'));
     if (!baseUrl.trim() || !textModel.trim()) throw new Error(t('settings.validationMissing'));
 
+    const configStore = useConfigStore.getState();
+    const operationId = configStore.beginConfigOperation('validating');
     setSaving(true);
     try {
       const configSnapshot = await client.request<{
@@ -958,58 +1047,52 @@ export default function SettingsPanel() {
         ? undefined
         : (visionSeparateProvider ? (visionApiKey.trim() || cachedVisionKey || undefined) : undefined);
 
-      if (supportsAuthProfiles(provider)) {
-        if (deleteTextApiKeyRef.current) {
-          try {
-            await client.request('rc.auth.clearApiKey', { provider });
-          } catch { /* best effort — key also removed via config.apply */ }
-          setAuthConfiguredByProvider((prev) => ({ ...prev, [provider]: false }));
-        } else if (apiKeyToSend) {
-          try {
-            await client.request('rc.auth.setApiKey', { provider, apiKey: apiKeyToSend });
-          } catch { /* best effort — key also persisted via models.providers.*.apiKey */ }
-          setAuthConfiguredByProvider((prev) => ({ ...prev, [provider]: true }));
-        }
-      }
-      if (visionEnabled && visionSeparateProvider && supportsAuthProfiles(visionProvider)) {
-        if (deleteVisionApiKeyRef.current) {
-          try {
-            await client.request('rc.auth.clearApiKey', { provider: visionProvider });
-          } catch { /* best effort */ }
-          setAuthConfiguredByProvider((prev) => ({ ...prev, [visionProvider]: false }));
-        } else if (visionApiKeyToSend) {
-          try {
-            await client.request('rc.auth.setApiKey', { provider: visionProvider, apiKey: visionApiKeyToSend });
-          } catch { /* best effort */ }
-          setAuthConfiguredByProvider((prev) => ({ ...prev, [visionProvider]: true }));
-        }
-      }
-
       // Supervisor provider API key (via auth profile)
       const supervisorApiKeyToSend = deleteSupervisorApiKeyRef.current
         ? undefined
         : supervisorApiKey.trim() || supervisorApiKeyCacheRef.current[supervisorProvider]?.trim() || undefined;
-      if (supervisorEnabled && supervisorProvider && supervisorProvider !== provider && supervisorProvider !== visionProvider && supportsAuthProfiles(supervisorProvider)) {
-        if (deleteSupervisorApiKeyRef.current) {
-          try {
-            await client.request('rc.auth.clearApiKey', { provider: supervisorProvider });
-          } catch { /* best effort */ }
-          setAuthConfiguredByProvider((prev) => ({ ...prev, [supervisorProvider]: false }));
-        } else if (supervisorApiKeyToSend) {
-          try {
-            await client.request('rc.auth.setApiKey', { provider: supervisorProvider, apiKey: supervisorApiKeyToSend });
-          } catch { /* best effort */ }
-          setAuthConfiguredByProvider((prev) => ({ ...prev, [supervisorProvider]: true }));
-        }
+      const authActions: Array<{ provider: string; apiKey?: string; clear?: boolean }> = [];
+      if (supportsAuthProfiles(provider) && (deleteTextApiKeyRef.current || apiKeyToSend)) {
+        authActions.push(deleteTextApiKeyRef.current
+          ? { provider, clear: true }
+          : { provider, apiKey: apiKeyToSend });
+      }
+      if (visionEnabled && visionSeparateProvider && supportsAuthProfiles(visionProvider) && (deleteVisionApiKeyRef.current || visionApiKeyToSend)) {
+        authActions.push(deleteVisionApiKeyRef.current
+          ? { provider: visionProvider, clear: true }
+          : { provider: visionProvider, apiKey: visionApiKeyToSend });
+      }
+      if (
+        supervisorEnabled
+        && supervisorProvider
+        && supervisorProvider !== provider
+        && supervisorProvider !== visionProvider
+        && supportsAuthProfiles(supervisorProvider)
+        && (deleteSupervisorApiKeyRef.current || supervisorApiKeyToSend)
+      ) {
+        authActions.push(deleteSupervisorApiKeyRef.current
+          ? { provider: supervisorProvider, clear: true }
+          : { provider: supervisorProvider, apiKey: supervisorApiKeyToSend });
       }
 
-      // Restore other cached providers so `config.apply` doesn't accidentally
+      // Restore other cached providers so the focused provider mutation does not
       // drop non-active providers when `config.get` omits them.
-      const restoreProviders: Record<string, { modelId: string; apiKey: string }> = {};
+      const restoreProviders: Record<string, { modelId: string; apiKey: string }> = {
+        ...collectApiProfileRestoreEntries(
+          mergedProjectConfig,
+          provider,
+          {
+            apiKeys: apiKeyCacheRef.current,
+            models: textModelCacheRef.current,
+          },
+          pendingDeleteProfileIdsRef.current,
+        ),
+      };
       for (const [pId, k] of Object.entries(apiKeyCacheRef.current)) {
         const key = k?.trim() ?? '';
         if (!key) continue;
         if (pId === provider) continue;
+        if (isApiProfileProviderKey(pId)) continue;
         const modelId = textModelCacheRef.current[pId] || getPreset(pId).models?.[0]?.id;
         if (!modelId) continue;
         restoreProviders[pId] = { modelId, apiKey: key };
@@ -1063,6 +1146,12 @@ export default function SettingsPanel() {
           heartbeatEnabled,
           heartbeatInterval,
           restoreProviders: Object.keys(restoreProviders).length ? restoreProviders : undefined,
+          profileLabel: isApiProfileProviderKey(provider)
+            ? (profileLabel.trim() || profileLabelRef.current[provider])
+            : undefined,
+          deleteApiProfileIds: pendingDeleteProfileIdsRef.current.length
+            ? [...pendingDeleteProfileIdsRef.current]
+            : undefined,
           // Dual-model supervisor config
           supervisorEnabled,
           supervisorModel: supervisorEnabled
@@ -1076,12 +1165,24 @@ export default function SettingsPanel() {
         },
       );
 
-      await client.request('config.apply', {
-        raw: JSON.stringify(fullConfig),
-        baseHash: configSnapshot.hash,
+      const validation = await client.request<{ ok: boolean; issues?: string[] }>('rc.provider.validate', {
+        desiredConfig: fullConfig,
+        probe: true,
       });
+      if (validation.ok === false) {
+        throw new Error(validation.issues?.join('; ') || t('settings.validationMissing'));
+      }
 
+      configStore.setConfigOperationPhase('persisting');
+      configStore.setPendingConfigRestart(true);
+      await client.request('rc.provider.upsert', {
+        operationId,
+        desiredConfig: fullConfig,
+        authActions,
+      });
+      configStore.setConfigOperationPhase('restart_scheduled');
       projectConfigCacheRef.current = fullConfig;
+      pendingDeleteProfileIdsRef.current = [];
 
       deleteTextApiKeyRef.current = false;
       deleteVisionApiKeyRef.current = false;
@@ -1092,11 +1193,124 @@ export default function SettingsPanel() {
       void refreshAuthStatuses([provider, visionProvider, supervisorEnabled ? supervisorProvider : undefined].filter(Boolean) as string[]);
 
       syncNeeded.current = true;
-      useConfigStore.getState().setPendingConfigRestart(true);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      configStore.setConfigOperationPhase('failed', messageText);
+      if (client.isConnected && !/connection closed|not connected/i.test(messageText)) {
+        configStore.setPendingConfigRestart(false);
+      }
+      throw error;
     } finally {
       setSaving(false);
     }
   }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
+
+  const applyConfigFieldsToForm = useCallback((configForEditor: Record<string, unknown>) => {
+    const fields = extractConfigFields(configForEditor);
+    setBaseUrl(fields.baseUrl);
+    setApi(fields.api);
+    setApiKey(fields.apiKey);
+    setApiKeyConfigured(fields.apiKeyConfigured);
+    setTextModel(fields.textModel);
+    setProvider(fields.provider);
+    if (fields.visionEnabled) {
+      setVisionEnabled(true);
+      setVisionModel(fields.visionModel);
+      setVisionProvider(detectPresetFromProvider(fields.visionProvider, fields.visionBaseUrl));
+      setVisionBaseUrl(fields.visionBaseUrl || fields.baseUrl);
+      setVisionApi(fields.visionApi);
+      setVisionApiKey(fields.visionApiKey);
+      setVisionApiKeyConfigured(fields.visionApiKeyConfigured);
+    } else {
+      setVisionEnabled(false);
+      setVisionModel('');
+      setVisionBaseUrl('');
+      setVisionApiKey('');
+      setVisionApiKeyConfigured(false);
+    }
+    for (const p of listApiProfilesFromConfig(configForEditor)) {
+      profileLabelRef.current[p.id] = p.label;
+    }
+  }, []);
+
+  const performDeleteApiProfiles = useCallback(
+    async (deleteIds: string[]) => {
+      const client = useGatewayStore.getState().client;
+      if (!client?.isConnected) throw new Error(t('oauth.notConnected'));
+      if (deleteIds.length === 0) return;
+
+      setSaving(true);
+      try {
+        const configSnapshot = await client.request<{
+          parsed?: Record<string, unknown>;
+          config?: Record<string, unknown>;
+          hash?: string;
+        }>('config.get', {});
+        const latestProjectConfig = (configSnapshot.parsed ?? configSnapshot.config ?? null) as Record<
+          string,
+          unknown
+        > | null;
+        const mergedProjectConfig = mergeProjectConfigsPreservingProviders(
+          latestProjectConfig,
+          projectConfigCacheRef.current,
+        );
+        const fullConfig = buildDeleteApiProfilesConfig(mergedProjectConfig, deleteIds);
+
+        for (const id of deleteIds) {
+          delete apiKeyCacheRef.current[id];
+          delete textModelCacheRef.current[id];
+          delete profileLabelRef.current[id];
+        }
+        pendingDeleteProfileIdsRef.current = pendingDeleteProfileIdsRef.current.filter(
+          (id) => !deleteIds.includes(id),
+        );
+
+        const configStore = useConfigStore.getState();
+        const operationId = configStore.beginConfigOperation('persisting');
+        configStore.setPendingConfigRestart(true);
+        await client.request('rc.provider.delete', { desiredConfig: fullConfig, operationId });
+        configStore.setConfigOperationPhase('restart_scheduled');
+
+        projectConfigCacheRef.current = fullConfig;
+        applyConfigFieldsToForm(fullConfig);
+        void refreshAuthStatuses();
+        void loadGatewayConfig();
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : String(error);
+        const configStore = useConfigStore.getState();
+        configStore.setConfigOperationPhase('failed', messageText);
+        if (client.isConnected && !/connection closed|not connected/i.test(messageText)) {
+          configStore.setPendingConfigRestart(false);
+        }
+        throw error;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [applyConfigFieldsToForm, loadGatewayConfig, refreshAuthStatuses, t],
+  );
+
+  const handleActivateApiProfile = useCallback(
+    async (profile: ApiProfile) => {
+      loadApiProfileIntoForm(profile);
+      await performSave();
+    },
+    [loadApiProfileIntoForm, performSave],
+  );
+
+  const handleDeleteApiProfile = useCallback(
+    async (profile: ApiProfile) => {
+      try {
+        await performDeleteApiProfiles([profile.id]);
+        message.success(
+          t('settings.apiProfilesDeleted', { defaultValue: 'API profile removed' }),
+        );
+      } catch {
+        message.error(t('settings.saveFailed'));
+      }
+    },
+    [message, performDeleteApiProfiles, t],
+  );
 
   const handleSave = useCallback(() => {
     const client = useGatewayStore.getState().client;
@@ -1124,10 +1338,6 @@ export default function SettingsPanel() {
       },
     });
   }, [performSave, baseUrl, textModel, t, modal, message]);
-
-  const handleSavePrompt = useCallback(() => {
-    message.success(t('settings.saved'));
-  }, [t, message]);
 
   if (state !== 'connected') {
     return (
@@ -1166,6 +1376,16 @@ export default function SettingsPanel() {
 
       <Divider style={{ margin: '4px 0 8px' }} />
 
+      <ApiProfilesSection
+        profiles={apiProfiles}
+        activeProviderId={provider}
+        loading={saving}
+        onSelectProfile={loadApiProfileIntoForm}
+        onActivateProfile={handleActivateApiProfile}
+        onAddProfile={handleAddApiProfile}
+        onDeleteProfile={handleDeleteApiProfile}
+      />
+
       {/* ── Provider + Model section ── */}
       <SettingRow label={t('settings.provider')}>
         <>
@@ -1175,7 +1395,9 @@ export default function SettingsPanel() {
             onClick={() => setProviderPickerOpen(true)}
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {providerLabel(provider, t)}
+              {isApiProfileProviderKey(provider)
+                ? (apiProfiles.find((p) => p.id === provider)?.label ?? providerLabel(provider, t))
+                : providerLabel(provider, t)}
               {currentProviderHasSavedKey ? ` · ${t('settings.providerConfigured')}` : ''}
             </span>
             <span style={{ opacity: 0.65, marginLeft: 8, flexShrink: 0 }}>
@@ -1186,8 +1408,23 @@ export default function SettingsPanel() {
             open={providerPickerOpen}
             value={provider}
             title={t('settings.provider')}
+            savedCustomProfiles={savedCustomProfileOptions}
+            onAddCustomProfile={() => {
+              setProviderPickerOpen(false);
+              beginNewCustomProfile();
+            }}
             onSelect={(id) => {
               setProviderPickerOpen(false);
+              if (isApiProfileProviderKey(id)) {
+                const p = apiProfiles.find((x) => x.id === id);
+                if (p) {
+                  loadApiProfileIntoForm(p);
+                  return;
+                }
+                profileLabelRef.current[id] =
+                  profileLabelRef.current[id] || profileIdToDisplayName(id) || id;
+                setProfileLabel(profileLabelRef.current[id]);
+              }
               handleProviderChange(id);
             }}
             onClose={() => setProviderPickerOpen(false)}
@@ -1283,6 +1520,22 @@ export default function SettingsPanel() {
         />
       </SettingRow>
 
+      {isApiProfileProviderKey(provider) && (
+        <SettingRow label={t('settings.apiProfileName', { defaultValue: 'Profile name' })}>
+          <Input
+            value={profileLabel}
+            onChange={(e) => {
+              const v = e.target.value;
+              setProfileLabel(v);
+              profileLabelRef.current[provider] = v;
+            }}
+            size="small"
+            style={{ width: 220 }}
+            placeholder={t('settings.apiProfilesAddHint', { defaultValue: 'e.g. Relay A, Company gateway' })}
+          />
+        </SettingRow>
+      )}
+
       <Collapse
         activeKey={advancedOpen ? ['advanced'] : []}
         onChange={(keys) => setAdvancedOpen((keys as string[]).includes('advanced'))}
@@ -1303,7 +1556,7 @@ export default function SettingsPanel() {
                   />
                 </SettingRow>
 
-                {provider === 'custom' && (
+                {isApiProfileProviderKey(provider) && (
                   <SettingRow label={t('settings.apiProtocol')}>
                     <Select
                       value={api}
@@ -1963,25 +2216,33 @@ export default function SettingsPanel() {
         </Button>
       </div>
 
-      <Divider style={{ margin: '8px 0' }} />
-
-      {/* ── System prompt append (local-only) ── */}
-      <SettingRow label={t('settings.systemPromptAppend')}>
-        <Input.TextArea
-          value={systemPromptAppend}
-          onChange={(e) => setSystemPromptAppend(e.target.value)}
-          placeholder={t('settings.systemPromptAppend')}
-          rows={3}
-          size="small"
-          style={{ width: 220 }}
-        />
-      </SettingRow>
-
-      <div style={{ textAlign: 'right', paddingTop: 8 }}>
-        <Button type="primary" size="small" onClick={handleSavePrompt}>
-          {t('settings.save')}
-        </Button>
-      </div>
+      <Collapse
+        activeKey={systemPromptOpen ? ['systemPrompt'] : []}
+        onChange={(keys) => setSystemPromptOpen((keys as string[]).includes('systemPrompt'))}
+        size="small"
+        style={{ marginTop: 8 }}
+        items={[
+          {
+            key: 'systemPrompt',
+            label: t('settings.systemPromptAppend'),
+            children: (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {t('settings.systemPromptAppendHint')}
+                </Text>
+                <Input.TextArea
+                  value={systemPromptAppend}
+                  onChange={(e) => setSystemPromptAppend(e.target.value)}
+                  placeholder={t('settings.systemPromptAppendPlaceholder')}
+                  rows={4}
+                  size="small"
+                  style={{ width: '100%', maxWidth: 420 }}
+                />
+              </div>
+            ),
+          },
+        ]}
+      />
 
       {/* ── Display section ── */}
       <Divider style={{ margin: '12px 0 8px' }} />
@@ -1990,6 +2251,18 @@ export default function SettingsPanel() {
         <Segmented
           value={showSystemFiles ? 'on' : 'off'}
           onChange={(v) => setShowSystemFiles(v === 'on')}
+          options={[
+            { label: 'OFF', value: 'off' },
+            { label: 'ON', value: 'on' },
+          ]}
+          size="small"
+        />
+      </SettingRow>
+
+      <SettingRow label={t('settings.notificationSound')} description={t('settings.notificationSoundHint')}>
+        <Segmented
+          value={notificationSoundEnabled ? 'on' : 'off'}
+          onChange={(v) => setNotificationSoundEnabled(v === 'on')}
           options={[
             { label: 'OFF', value: 'off' },
             { label: 'ON', value: 'on' },

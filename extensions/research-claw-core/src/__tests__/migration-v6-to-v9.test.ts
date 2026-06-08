@@ -276,7 +276,7 @@ describe('Migration v6 → v9: existing user upgrade', () => {
     it('migrates from v6 to v9 without data loss', () => {
       runMigrations(db);
 
-      expect(getCurrentVersion(db)).toBe(10);
+      expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
       expect((db.prepare('SELECT COUNT(*) AS c FROM rc_papers').get() as { c: number }).c).toBe(5);
       expect((db.prepare('SELECT COUNT(*) AS c FROM rc_tags').get() as { c: number }).c).toBe(3);
       expect((db.prepare('SELECT COUNT(*) AS c FROM rc_tasks').get() as { c: number }).c).toBe(3);
@@ -429,11 +429,11 @@ describe('Migration idempotency', () => {
 
   it('running runMigrations() twice is safe', () => {
     runMigrations(db);
-    expect(getCurrentVersion(db)).toBe(10);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
 
     // Second run should be a no-op
     runMigrations(db);
-    expect(getCurrentVersion(db)).toBe(10);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
     expect((db.prepare('SELECT COUNT(*) AS c FROM rc_papers').get() as { c: number }).c).toBe(5);
   });
 
@@ -441,7 +441,7 @@ describe('Migration idempotency', () => {
     runMigrations(db);
     runMigrations(db);
     runMigrations(db);
-    expect(getCurrentVersion(db)).toBe(10);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
     expect((db.prepare('SELECT COUNT(*) AS c FROM rc_papers').get() as { c: number }).c).toBe(5);
   });
 
@@ -452,7 +452,7 @@ describe('Migration idempotency', () => {
     // Leave the rest missing — v9 should add only the missing ones
 
     runMigrations(db);
-    expect(getCurrentVersion(db)).toBe(10);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
 
     const cols = getColumns(db, 'rc_papers');
     expect(cols).toContain('keywords');
@@ -527,7 +527,7 @@ describe('Corner cases', () => {
     // No papers seeded — empty table
     runMigrations(db);
 
-    expect(getCurrentVersion(db)).toBe(10);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
     expect(getColumns(db, 'rc_papers').length).toBe(30);
     // FTS rebuild on empty table should not error
     const ftsCount = (db.prepare('SELECT COUNT(*) AS c FROM rc_papers_fts').get() as { c: number }).c;
@@ -597,7 +597,7 @@ describe('Corner cases', () => {
     // v4 adds related_file_path, v5 adds schedule, v6 adds scan cache — all should apply
     runMigrations(db);
 
-    expect(getCurrentVersion(db)).toBe(10);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
     expect(getColumns(db, 'rc_tasks')).toContain('related_file_path');
     expect(getColumns(db, 'rc_cron_state')).toContain('schedule');
     expect(getColumns(db, 'rc_papers')).toContain('keywords');

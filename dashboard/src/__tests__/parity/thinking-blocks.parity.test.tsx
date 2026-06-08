@@ -18,7 +18,7 @@
  * not hand-crafted mock data.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import MessageBubble from '../../components/chat/MessageBubble';
 import { useChatStore } from '../../stores/chat';
@@ -60,6 +60,12 @@ vi.mock('react-i18next', () => ({
   }),
   initReactI18next: { type: '3rdParty', init: vi.fn() },
 }));
+
+/** Thinking blocks render collapsed by default; expand before asserting content. */
+function expandThinkingSection(): void {
+  const toggle = document.querySelector('.chat-thinking-toggle') as HTMLButtonElement | null;
+  if (toggle) fireEvent.click(toggle);
+}
 
 describe('Thinking block parity with OpenClaw native UI', () => {
   describe('extractText STRIPS thinking — message-extract.ts:10-11, format.ts:58-60', () => {
@@ -163,6 +169,7 @@ describe('Thinking block parity with OpenClaw native UI', () => {
      */
     it('renders thinking content in a distinct section for Anthropic thinking blocks', () => {
       render(<MessageBubble message={MSG_THINKING_BLOCK_AND_TEXT} />);
+      expandThinkingSection();
 
       // There should be a thinking section with the thinking content
       const thinkingSection = document.querySelector('[data-testid="thinking-section"]');
@@ -174,6 +181,7 @@ describe('Thinking block parity with OpenClaw native UI', () => {
 
     it('renders thinking content in a distinct section for <think> tag format', () => {
       render(<MessageBubble message={MSG_THINK_TAGS_IN_TEXT} />);
+      expandThinkingSection();
 
       const thinkingSection = document.querySelector('[data-testid="thinking-section"]');
       expect(thinkingSection).not.toBeNull();
@@ -188,6 +196,7 @@ describe('Thinking block parity with OpenClaw native UI', () => {
        *   if (parts.length > 0) return parts.join("\n");
        */
       render(<MessageBubble message={MSG_MULTIPLE_THINKING_BLOCKS} />);
+      expandThinkingSection();
 
       const thinkingSection = document.querySelector('[data-testid="thinking-section"]');
       expect(thinkingSection).not.toBeNull();
@@ -198,6 +207,7 @@ describe('Thinking block parity with OpenClaw native UI', () => {
 
     it('shows thinking section for text field with think tags', () => {
       render(<MessageBubble message={MSG_THINK_TAGS_IN_TEXT_FIELD} />);
+      expandThinkingSection();
 
       const thinkingSection = document.querySelector('[data-testid="thinking-section"]');
       expect(thinkingSection).not.toBeNull();

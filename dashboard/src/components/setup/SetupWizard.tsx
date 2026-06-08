@@ -15,7 +15,11 @@ import { isOAuthProvider } from '../../utils/oauth-providers';
 import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../../stores/gateway';
 import { useConfigStore } from '../../stores/config';
-import { buildSaveConfig, extractConfigFields, isLocalProvider } from '../../utils/config-patch';
+import {
+  buildSaveConfig,
+  extractConfigFields,
+  isLocalProvider,
+} from '../../utils/config-patch';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset, type ProviderPreset } from '../../utils/provider-presets';
 import ProviderPickerModal, { providerLabel } from '../providers/ProviderPickerModal';
 
@@ -214,7 +218,16 @@ export default function SetupWizard() {
   useEffect(() => {
     if (!restarting || connState !== 'connected') return;
     const timer = setTimeout(() => {
-      useConfigStore.getState().loadGatewayConfig();
+      void useConfigStore.getState().loadGatewayConfig().then(() => {
+        const configStore = useConfigStore.getState();
+        if (configStore.gatewayConfig?.agents?.defaults?.model?.primary) {
+          configStore.setPendingConfigRestart(false);
+          configStore.setConfigOperationPhase('completed');
+          configStore.setBootState('ready');
+          setRestarting(false);
+          setSaving(false);
+        }
+      });
     }, 2000);
     return () => clearTimeout(timer);
   }, [restarting, connState]);
@@ -233,6 +246,8 @@ export default function SetupWizard() {
   const performStart = useCallback(async () => {
     if (!client?.isConnected) throw new Error(t('oauth.notConnected'));
 
+    const configStore = useConfigStore.getState();
+    const operationId = configStore.beginConfigOperation('validating');
     setSaving(true);
     try {
       const configSnapshot = await client.request<{
@@ -261,13 +276,29 @@ export default function SetupWizard() {
         },
       );
 
-      await client.request('config.apply', {
-        raw: JSON.stringify(fullConfig),
-        baseHash: configSnapshot.hash,
+      const validation = await client.request<{ ok: boolean; issues?: string[] }>('rc.provider.validate', {
+        desiredConfig: fullConfig,
+        probe: true,
       });
+      if (validation.ok === false) {
+        throw new Error(validation.issues?.join('; ') || t('setup.configureFailed'));
+      }
 
+      configStore.setConfigOperationPhase('persisting');
+      configStore.setPendingConfigRestart(true);
+      await client.request('rc.provider.upsert', {
+        operationId,
+        desiredConfig: fullConfig,
+        authActions: apiKey.trim() ? [{ provider, apiKey: apiKey.trim() }] : [],
+      });
+      configStore.setConfigOperationPhase('restart_scheduled');
       setRestarting(true);
     } catch (err) {
+      const messageText = err instanceof Error ? err.message : String(err);
+      configStore.setConfigOperationPhase('failed', messageText);
+      if (client.isConnected && !/connection closed|not connected/i.test(messageText)) {
+        configStore.setPendingConfigRestart(false);
+      }
       setSaving(false);
       throw err;
     }

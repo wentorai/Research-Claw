@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ensure-config.cjs — Shared config cleanup/migration for RC v0.5.6+ (OC 2026.3.13)
+ * ensure-config.cjs — Shared config cleanup/migration for RC v0.5.6+ (OC 2026.6.1)
  *
  * Called by: run.sh, install.sh, docker-entrypoint.sh
  * Purpose:  Ensure the RC project config contains all fields required by the
@@ -18,6 +18,7 @@
  *  10. agents.defaults.sandbox.mode = "off" (RC has no Docker sandbox)
  *  14. plugins.installs — provenance records for loaded plugins
  *  15. dangerouslyDisableDeviceAuth — remove (unnecessary on loopback)
+ *  16. OC 2026.6.1 — legacy model APIs, bundledDiscovery, telegram streaming, DMS hooks
  */
 'use strict';
 
@@ -260,6 +261,25 @@ function ensureConfig(filePath) {
   if (!c.gateway.bind) { c.gateway.bind = 'loopback'; changed = true; }
   if (!c.ui) { c.ui = { assistant: { name: 'Research-Claw' } }; changed = true; }
   if (!c.skills) { c.skills = { load: { extraDirs: ['./skills'] } }; changed = true; }
+  // Skill Workshop (OC 2026.6.1): applied skills live under workspace/skills — load alongside repo ./skills
+  if (!c.skills.load) { c.skills.load = { extraDirs: ['./skills'] }; changed = true; }
+  if (!Array.isArray(c.skills.load.extraDirs)) {
+    c.skills.load.extraDirs = ['./skills'];
+    changed = true;
+  }
+  if (!c.skills.load.extraDirs.includes('./workspace/skills')) {
+    c.skills.load.extraDirs.push('./workspace/skills');
+    changed = true;
+  }
+  if (!c.skills.workshop) {
+    c.skills.workshop = {
+      autonomous: { enabled: false },
+      approvalPolicy: 'pending',
+      maxPending: 50,
+      maxSkillBytes: 40000,
+    };
+    changed = true;
+  }
   if (!c.cron) { c.cron = { enabled: true }; changed = true; }
 
   // 10. Sandbox — force off. RC is a local desktop app; native installs don't have Docker,
@@ -360,11 +380,99 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
-  // 13. Session reset — override OC default "daily 4AM" with idle-based reset.
-  // Scientific workflows span days; daily reset silently archives the transcript,
-  // causing issue #31 ("会话记录被覆盖"). 4320 min = 72 hours idle before reset.
-  if (!c.session || !c.session.reset || c.session.reset.mode === 'daily') {
-    c.session = { reset: { mode: 'idle', idleMinutes: 4320 } };
+  // 16. OC 2026.6.1 config migrations (project config only)
+  if (!isGlobal) {
+    const LEGACY_CODEX_API = 'openai-codex-responses';
+    const CHATGPT_API = 'openai-chatgpt-responses';
+    const providers = c.models?.providers;
+    if (providers && typeof providers === 'object') {
+      if (providers['openai-codex'] && !providers.openai) {
+        providers.openai = providers['openai-codex'];
+        delete providers['openai-codex'];
+        changed = true;
+      } else if (providers['openai-codex']) {
+        delete providers['openai-codex'];
+        changed = true;
+      }
+      for (const prov of Object.values(providers)) {
+        if (!prov || typeof prov !== 'object') continue;
+        if (prov.api === LEGACY_CODEX_API) {
+          prov.api = CHATGPT_API;
+          changed = true;
+        }
+        if (Array.isArray(prov.models)) {
+          for (const m of prov.models) {
+            if (m && typeof m === 'object' && m.api === LEGACY_CODEX_API) {
+              m.api = CHATGPT_API;
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+
+    const tg = c.channels?.telegram;
+    if (tg && typeof tg.streaming === 'string') {
+      const mode = tg.streaming;
+      tg.streaming = { mode };
+      changed = true;
+    }
+
+    if (Array.isArray(c.plugins?.allow) && c.plugins.allow.length > 0 && !c.plugins.bundledDiscovery) {
+      c.plugins.bundledDiscovery = 'compat';
+      changed = true;
+    }
+
+    const dmsEntry = c.plugins?.entries?.['dual-model-supervisor'];
+    if (dmsEntry && dmsEntry.hooks?.allowConversationAccess !== true) {
+      if (!dmsEntry.hooks) dmsEntry.hooks = {};
+      dmsEntry.hooks.allowConversationAccess = true;
+      changed = true;
+    }
+
+    // OC 2026.6.1: channel.commands is not in schema (feishu/qqbot/etc.)
+    if (c.channels && typeof c.channels === 'object') {
+      for (const ch of Object.values(c.channels)) {
+        if (ch && typeof ch === 'object' && ch.commands) {
+          delete ch.commands;
+          changed = true;
+        }
+      }
+    }
+
+    // Memory slot pointing at missing plugin breaks config validation
+    if (c.plugins?.slots?.memory === 'claude-mem') {
+      delete c.plugins.slots.memory;
+      if (Object.keys(c.plugins.slots).length === 0) delete c.plugins.slots;
+      changed = true;
+    }
+    if (Array.isArray(c.plugins?.allow) && c.plugins.allow.includes('claude-mem')) {
+      c.plugins.allow = c.plugins.allow.filter(id => id !== 'claude-mem');
+      changed = true;
+    }
+    if (c.plugins?.entries?.['claude-mem']) {
+      delete c.plugins.entries['claude-mem'];
+      changed = true;
+    }
+  }
+
+  // 13. Session reset — minimize automatic transcript rollover on idle/daily expiry.
+  // OC default "daily 4AM" and prior RC 72h idle caused issue #31: reopening an old
+  // session shows history, but the first chat.send archives the transcript and wipes
+  // UI + model context. OC schema requires idleMinutes > 0, so use 365 days (~never).
+  const RC_SESSION_IDLE_MINUTES = 525600;
+  if (!c.session) c.session = {};
+  const reset = c.session.reset;
+  const idleMinutes = typeof reset?.idleMinutes === 'number' ? reset.idleMinutes : null;
+  const needsResetPolicy =
+    !reset
+    || reset.mode === 'daily'
+    || reset.mode !== 'idle'
+    || idleMinutes == null
+    || idleMinutes <= 0
+    || idleMinutes < RC_SESSION_IDLE_MINUTES;
+  if (needsResetPolicy) {
+    c.session.reset = { mode: 'idle', idleMinutes: RC_SESSION_IDLE_MINUTES };
     changed = true;
   }
 

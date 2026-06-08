@@ -40,7 +40,7 @@ export const CONNECT_CHALLENGE_EMPTY_NONCE: EventFrame = {
 
 export const HELLO_OK_PAYLOAD: HelloOk = {
   type: 'hello-ok',
-  protocol: 3,
+  protocol: 4,
   server: {
     version: '2026.3.14',
     connId: 'conn-uuid-abcdef',
@@ -90,7 +90,7 @@ export const HELLO_OK_RESPONSE: ResponseFrame = {
 // Minimal hello-ok (no auth, no snapshot details)
 export const HELLO_OK_MINIMAL: HelloOk = {
   type: 'hello-ok',
-  protocol: 3,
+  protocol: 4,
   server: { version: '2026.3.14', connId: 'conn-minimal' },
   features: { methods: ['connect'], events: ['tick'] },
   policy: { tickIntervalMs: 30_000 },

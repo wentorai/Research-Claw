@@ -1,16 +1,6 @@
 import { create } from 'zustand';
 
-/**
- * Tracks live tool execution events from the gateway's `agent` event stream.
- *
- * Agent events come in two flavors:
- * 1. Status events: { state: "thinking" | "tool_running" | "streaming" | "idle" | "error" }
- *    — Broadcast to all clients, used by the status dot and background activity bar.
- * 2. Detailed events: { stream: "tool" | "lifecycle", data: { phase, name, toolCallId, ... } }
- *    — Only sent to clients with caps: ["tool-events"] for tool stream,
- *      or broadcast for lifecycle/assistant/error streams.
- */
-
+import { useTaskFlowStore } from './task-flow';
 import { normalizeSessionKey } from '../utils/session-key';
 
 export interface PendingTool {
@@ -208,6 +198,17 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
       const { phase, toolCallId } = evt.data;
       const name = evt.data.name ?? evt.data.toolName;
 
+      useTaskFlowStore.getState().handleToolEvent(
+        {
+          runId: evt.runId,
+          sessionKey: evt.sessionKey,
+          stream: evt.stream,
+          data: evt.data as Record<string, unknown>,
+        },
+        activeSessionKey,
+        chatRunId,
+      );
+
       if (!isBackground) {
         // Foreground: update pendingTools for inline chat display.
         // On every mutation, also evict stale tools (startedAt > STALE_TOOL_MS ago)
@@ -321,6 +322,23 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
             },
           });
         }
+      }
+    }
+
+    if (evt.stream === 'compaction' && eventSessionKey) {
+      const phase = evt.data.phase;
+      if (phase === 'start' || phase === 'end') {
+        pushActivityLog(set, get, {
+          sessionKey: eventSessionKey,
+          runId: evt.runId ?? null,
+          toolCallId: null,
+          scope: isBackground ? 'background' : 'foreground',
+          status: phase === 'start' ? 'compaction_start' : 'compaction_end',
+          text: phase === 'start'
+            ? 'Compacting conversation history'
+            : 'Compaction finished',
+          detail: evt.data,
+        });
       }
     }
 

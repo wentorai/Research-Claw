@@ -114,7 +114,7 @@ describe('GatewayClient (mock mode)', () => {
     expect(onHello).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'hello-ok',
-        protocol: 3,
+        protocol: 4,
         server: { version: '0.0.0-mock', connId: 'mock-conn-id' },
       }),
     );

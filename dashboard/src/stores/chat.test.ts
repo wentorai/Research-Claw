@@ -5,6 +5,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useChatStore } from './chat';
+import { useStagedWritingStore } from './staged-writing';
+import { buildInitialStageStates, STAGED_WRITING_STAGES } from '../utils/staged-writing-stages';
 
 // Mock the gateway store
 const mockGatewayClient = {
@@ -30,12 +32,26 @@ describe('Chat store', () => {
       messages: [],
       sending: false,
       streaming: false,
+      compacting: false,
       streamText: null,
       runId: null,
       sessionKey: 'main',
       lastError: null,
       tokensIn: 0,
       tokensOut: 0,
+      _lastSentDraft: null,
+      inputRestore: null,
+      inputRestoreSeq: 0,
+      _abortedUserSuppressCounts: {},
+      _pendingUserMsgs: [],
+      _localOnlyMsgs: [],
+    });
+    sessionStorage.removeItem('rc-pending-user-msgs');
+    sessionStorage.removeItem('rc-local-chat-msgs');
+    localStorage.removeItem('rc-local-chat-msgs-v2');
+    useStagedWritingStore.setState({
+      job: null,
+      restored: false,
     });
   });
 
@@ -80,7 +96,10 @@ describe('Chat store', () => {
     });
 
     it('sets lastError on RPC failure', async () => {
-      mockGatewayClient.request.mockRejectedValueOnce(new Error('Network error'));
+      mockGatewayClient.request.mockImplementation(async (method: string) => {
+        if (method === 'chat.send') throw new Error('Network error');
+        return {};
+      });
 
       await useChatStore.getState().send('test');
 
@@ -95,6 +114,39 @@ describe('Chat store', () => {
       await useChatStore.getState().send('new message');
 
       expect(useChatStore.getState().lastError).toBeNull();
+    });
+
+    it('does not re-enter staged writing after a completed job in the same session', async () => {
+      const stages = buildInitialStageStates('outputs/drafts/session28').map((stage) => ({
+        ...stage,
+        status: 'done' as const,
+      }));
+      useStagedWritingStore.setState({
+        job: {
+          id: 'job-session-28',
+          sessionKey: 'main',
+          slug: 'session28',
+          topic: '根据这些分析，完成一篇完整的小论文',
+          contextText: '',
+          sourcePaths: ['sources/'],
+          venue: '',
+          locale: 'zh-CN',
+          outputDir: 'outputs/drafts/session28',
+          startedAtMs: Date.now(),
+          status: 'completed',
+          currentStageIndex: STAGED_WRITING_STAGES.length,
+          stages,
+          lastError: null,
+        },
+      });
+      mockGatewayClient.request.mockResolvedValueOnce({});
+
+      await useChatStore.getState().send('根据新的修改意见，完成一篇完整的小论文');
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith('chat.send', expect.objectContaining({
+        message: '根据新的修改意见，完成一篇完整的小论文',
+      }));
+      expect(useStagedWritingStore.getState().job?.id).toBe('job-session-28');
     });
   });
 
@@ -238,6 +290,29 @@ describe('Chat store', () => {
 
         expect(useChatStore.getState().messages).toHaveLength(0);
       });
+
+      it('preserves compacting and suppresses runEndedNoOutput for final without message during compaction', () => {
+        const userMsg = { role: 'user' as const, text: 'hi', timestamp: Date.now() };
+        useChatStore.setState({
+          runId: 'run-1',
+          streaming: true,
+          streamText: null,
+          compacting: true,
+          messages: [userMsg],
+          lastError: null,
+        });
+
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-1',
+          sessionKey: 'main',
+          state: 'final',
+        });
+
+        const state = useChatStore.getState();
+        expect(state.compacting).toBe(true);
+        expect(state.streaming).toBe(false);
+        expect(state.lastError).toBeNull();
+      });
     });
 
     describe('aborted', () => {
@@ -256,6 +331,30 @@ describe('Chat store', () => {
         expect(state.runId).toBeNull();
         expect(state.messages).toHaveLength(1);
         expect(state.messages[0].text).toBe('Partial answer');
+      });
+
+      it('restores input and removes optimistic user message on abort', () => {
+        const userMsg = { role: 'user' as const, text: 'Edit me', timestamp: Date.now() };
+        useChatStore.setState({
+          runId: 'run-1',
+          streaming: true,
+          streamText: null,
+          messages: [userMsg],
+          _lastSentDraft: { text: 'Edit me', attachments: [], runId: 'run-1' },
+          _pendingUserMsgs: [userMsg],
+        });
+
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-1',
+          sessionKey: 'main',
+          state: 'aborted',
+        });
+
+        const state = useChatStore.getState();
+        expect(state.messages).toHaveLength(0);
+        expect(state.inputRestore).toEqual({ text: 'Edit me', attachments: [] });
+        expect(state._lastSentDraft).toBeNull();
+        expect(state._abortedUserSuppressCounts).toEqual({ 'Edit me': 1 });
       });
 
       it('clears state without saving when no streamText', () => {
@@ -298,12 +397,32 @@ describe('Chat store', () => {
           state: 'error',
         });
 
-        expect(useChatStore.getState().lastError).toBe('Unknown streaming error');
+        expect(useChatStore.getState().lastError).toMatch(/run ended without|没有生成回复|no reply/i);
       });
     });
   });
 
   describe('abort', () => {
+    it('restores input immediately when stop is clicked', () => {
+      const userMsg = { role: 'user' as const, text: 'Stop me', timestamp: Date.now() };
+      useChatStore.setState({
+        runId: 'run-1',
+        sessionKey: 'main',
+        streaming: true,
+        messages: [userMsg],
+        _lastSentDraft: { text: 'Stop me', attachments: [], runId: 'run-1' },
+      });
+      mockGatewayClient.request.mockResolvedValueOnce({});
+
+      useChatStore.getState().abort();
+
+      const state = useChatStore.getState();
+      expect(state.inputRestore).toEqual({ text: 'Stop me', attachments: [] });
+      expect(state.streaming).toBe(false);
+      expect(state.messages).toHaveLength(0);
+      expect(mockGatewayClient.request).toHaveBeenCalledWith('chat.abort', { runId: 'run-1', sessionKey: 'main' });
+    });
+
     it('sends chat.abort RPC with runId and sessionKey', () => {
       useChatStore.setState({ runId: 'run-1', sessionKey: 'main' });
       mockGatewayClient.request.mockResolvedValueOnce({});
@@ -334,10 +453,11 @@ describe('Chat store', () => {
       useChatStore.getState().abort();
 
       expect(mockGatewayClient.request).not.toHaveBeenCalled();
-
-      // After 3s timeout, streaming state should be force-cleared
-      vi.advanceTimersByTime(3000);
+      // Stops streaming immediately; partial text kept until timeout
       expect(useChatStore.getState().streaming).toBe(false);
+
+      // After 3s timeout, runId cleared and partial saved as assistant message
+      vi.advanceTimersByTime(3000);
       expect(useChatStore.getState().runId).toBeNull();
       expect(useChatStore.getState().messages).toHaveLength(1);
       expect(useChatStore.getState().messages[0].text).toBe('partial');
@@ -350,6 +470,7 @@ describe('Chat store', () => {
       mockGatewayClient.request.mockResolvedValueOnce({});
 
       useChatStore.getState().abort();
+      expect(useChatStore.getState().streaming).toBe(false);
 
       // Simulate server sending 'aborted' event before timeout
       useChatStore.getState().handleChatEvent({
@@ -398,6 +519,23 @@ describe('Chat store', () => {
       expect(state.streamText).toBeNull();
       expect(state.runId).toBeNull();
     });
+
+    it('restores dashboard-only messages for the selected session', () => {
+      useChatStore.setState({ sessionKey: 'project-25' });
+      useChatStore.getState().appendLocalMessage({
+        role: 'user',
+        text: '根据资料完成一篇完整小论文',
+        timestamp: 1000,
+      });
+
+      useChatStore.getState().setSessionKey('project-29');
+      expect(useChatStore.getState().messages).toEqual([]);
+
+      useChatStore.getState().setSessionKey('project-25');
+      expect(useChatStore.getState().messages.map((m) => m.text)).toEqual([
+        '根据资料完成一篇完整小论文',
+      ]);
+    });
   });
 
   describe('clearError', () => {
@@ -417,6 +555,130 @@ describe('Chat store', () => {
       useChatStore.getState().updateTokens(200, 100);
       expect(useChatStore.getState().tokensIn).toBe(300);
       expect(useChatStore.getState().tokensOut).toBe(150);
+    });
+  });
+
+  describe('handleCompactionAgentEvent', () => {
+    it('sets compacting on start for matching run', () => {
+      useChatStore.setState({ runId: 'run-1', sessionKey: 'main', streaming: true });
+      useChatStore.getState().handleCompactionAgentEvent({
+        runId: 'run-1',
+        sessionKey: 'agent:main:main',
+        stream: 'compaction',
+        data: { phase: 'start' },
+      });
+      expect(useChatStore.getState().compacting).toBe(true);
+    });
+
+    it('clears compacting on end', () => {
+      useChatStore.setState({ compacting: true, runId: 'run-1' });
+      useChatStore.getState().handleCompactionAgentEvent({
+        runId: 'run-1',
+        stream: 'compaction',
+        data: { phase: 'end' },
+      });
+      expect(useChatStore.getState().compacting).toBe(false);
+    });
+
+    it('ignores compaction for a different run', () => {
+      useChatStore.setState({ runId: 'run-a', compacting: false });
+      useChatStore.getState().handleCompactionAgentEvent({
+        runId: 'run-b',
+        stream: 'compaction',
+        data: { phase: 'start' },
+      });
+      expect(useChatStore.getState().compacting).toBe(false);
+    });
+
+    it('ignores compaction for a different session', () => {
+      useChatStore.setState({ sessionKey: 'main', runId: 'run-1' });
+      useChatStore.getState().handleCompactionAgentEvent({
+        runId: 'run-1',
+        sessionKey: 'agent:main:project-other',
+        stream: 'compaction',
+        data: { phase: 'start' },
+      });
+      expect(useChatStore.getState().compacting).toBe(false);
+    });
+  });
+
+  describe('handleAgentFailureEvent', () => {
+    it('surfaces lifecycle error for active run', () => {
+      useChatStore.setState({ runId: 'run-1', streaming: true, sessionKey: 'project-x' });
+      useChatStore.getState().handleAgentFailureEvent({
+        runId: 'run-1',
+        sessionKey: 'agent:main:project-x',
+        stream: 'lifecycle',
+        data: {
+          phase: 'error',
+          error: 'Context overflow: prompt too large for the model (precheck).',
+        },
+      });
+      expect(useChatStore.getState().streaming).toBe(false);
+      expect(useChatStore.getState().lastError).toContain('上下文溢出');
+    });
+
+    it('ignores lifecycle error for other sessions', () => {
+      useChatStore.setState({ runId: 'run-1', streaming: true, sessionKey: 'main' });
+      useChatStore.getState().handleAgentFailureEvent({
+        runId: 'run-1',
+        sessionKey: 'agent:main:project-other',
+        stream: 'lifecycle',
+        data: { phase: 'error', error: 'boom' },
+      });
+      expect(useChatStore.getState().streaming).toBe(true);
+      expect(useChatStore.getState().lastError).toBeNull();
+    });
+
+    it('surfaces lifecycle error when gateway runId differs from client runId', () => {
+      useChatStore.setState({ runId: 'client-run', streaming: true, sessionKey: 'project-x' });
+      useChatStore.getState().handleAgentFailureEvent({
+        runId: 'gateway-run',
+        sessionKey: 'agent:main:project-x',
+        stream: 'lifecycle',
+        data: { phase: 'error', error: 'LLM request timed out.' },
+      });
+      expect(useChatStore.getState().streaming).toBe(false);
+      expect(useChatStore.getState().lastError).toContain('timed out');
+    });
+
+    it('surfaces structured error details and repair suggestion', () => {
+      useChatStore.setState({ runId: 'run-1', streaming: true, sessionKey: 'project-x' });
+      useChatStore.getState().handleAgentFailureEvent({
+        runId: 'run-1',
+        sessionKey: 'agent:main:project-x',
+        stream: 'error',
+        data: {
+          reason: 'Image generation request was blocked.',
+          code: 'IMAGE_GENERATION_SSRF_BLOCKED',
+          provider: 'google',
+          model: 'gemini-3.1-pro-preview',
+          suggestion: '检查 DNS/代理，确保 Google API 域名解析到公网 IP。',
+        },
+      });
+
+      const lastError = useChatStore.getState().lastError ?? '';
+      expect(lastError).toContain('Image generation request was blocked.');
+      expect(lastError).toContain('google/gemini-3.1-pro-preview');
+      expect(lastError).toContain('IMAGE_GENERATION_SSRF_BLOCKED');
+      expect(lastError).toContain('检查 DNS/代理');
+    });
+
+    it('surfaces structured operational errors after the main run has ended', () => {
+      useChatStore.setState({ runId: null, streaming: false, sending: false, sessionKey: 'project-x' });
+      useChatStore.getState().handleAgentFailureEvent({
+        runId: 'tool:image_generate:abc',
+        sessionKey: 'agent:main:project-x',
+        stream: 'error',
+        data: {
+          reason: 'No API key found for provider "google".',
+          code: 'IMAGE_GENERATION_AUTH_MISSING',
+          capability: 'image_generation',
+          suggestion: '打开设置并配置 google API Key。',
+        },
+      });
+
+      expect(useChatStore.getState().lastError).toContain('IMAGE_GENERATION_AUTH_MISSING');
     });
   });
 
@@ -452,6 +714,78 @@ describe('Chat store', () => {
       await useChatStore.getState().loadHistory();
 
       expect(useChatStore.getState().messages).toEqual([]);
+    });
+
+    it('filters aborted user messages reloaded from gateway transcript', async () => {
+      useChatStore.setState({
+        _abortedUserSuppressCounts: { '需压迫': 1 },
+      });
+      mockGatewayClient.request.mockResolvedValueOnce({
+        messages: [
+          { role: 'user', text: '需压迫', timestamp: 1000 },
+          { role: 'user', text: '需要', timestamp: 2000 },
+          { role: 'assistant', text: 'ok', timestamp: 3000 },
+        ],
+      });
+
+      await useChatStore.getState().loadHistory();
+
+      expect(useChatStore.getState().messages.map((m) => m.text)).toEqual(['需要', 'ok']);
+      expect(useChatStore.getState()._abortedUserSuppressCounts).toEqual({});
+    });
+
+    it('drops empty aborted turns from history reload', async () => {
+      mockGatewayClient.request.mockResolvedValueOnce({
+        messages: [
+          { role: 'user', text: '你能否清空着31篇论文', timestamp: 1000 },
+          {
+            role: 'assistant',
+            content: [],
+            stopReason: 'aborted',
+            errorMessage: 'This operation was aborted',
+            timestamp: 1500,
+          },
+          { role: 'user', text: '你能否清空这31篇论文', timestamp: 2000 },
+          { role: 'assistant', text: '请确认删除', timestamp: 3000 },
+        ],
+      });
+
+      await useChatStore.getState().loadHistory();
+
+      expect(useChatStore.getState().messages.map((m) => m.text)).toEqual([
+        '你能否清空这31篇论文',
+        '请确认删除',
+      ]);
+    });
+
+    it('preserves dashboard-only messages after history reload', async () => {
+      const localUser = {
+        role: 'user' as const,
+        text: '根据提纲完成一篇完整的小论文',
+        timestamp: 500,
+      };
+      const localAssistant = {
+        role: 'assistant' as const,
+        text: '**分步写作** · 已启动',
+        timestamp: 600,
+      };
+      useChatStore.setState({
+        _localOnlyMsgs: [localUser, localAssistant],
+      });
+
+      mockGatewayClient.request.mockResolvedValueOnce({
+        messages: [
+          { role: 'assistant', text: 'gateway reply', timestamp: 1000 },
+        ],
+      });
+
+      await useChatStore.getState().loadHistory();
+
+      expect(useChatStore.getState().messages.map((m) => m.text)).toEqual([
+        '根据提纲完成一篇完整的小论文',
+        '**分步写作** · 已启动',
+        'gateway reply',
+      ]);
     });
   });
 });

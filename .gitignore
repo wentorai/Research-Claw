@@ -12,6 +12,14 @@ dashboard/dist/
 config/openclaw.json
 config/*.bak
 config/*.bak.*
+config/openclaw.json.last-good
+
+# Browser/runtime data written under config/ at runtime — never commit.
+# These can contain cookies, login data and other private/credential material.
+config/browser/
+config/media/
+config/npm/
+config/plugin-skills/
 
 # Environment
 .env
@@ -96,5 +104,4 @@ workspace/*.txt
 workspace/helloworld.md
 workspace/test-scenarios.md
 workspace/*_report*.md
-workspace/uploads/*
 workspace/ml-project/

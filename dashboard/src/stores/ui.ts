@@ -3,9 +3,22 @@ import i18n from '../i18n';
 import type { CheckUpdatesPayload } from '../types/app-updates';
 import { useGatewayStore } from './gateway';
 
-export type PanelTab = 'library' | 'workspace' | 'tasks' | 'monitor' | 'supervisor' | 'extensions' | 'settings';
+import {
+  clampPanelHeight,
+  clampPanelWidth,
+  loadConfigPanelHeight,
+  loadConfigPanelPlacement,
+  CONFIG_PANEL_HEIGHT_DEFAULT,
+  CONFIG_PANEL_WIDTH_DEFAULT,
+  type ConfigPanelPlacement,
+} from '../utils/config-panel-layout';
+import { playNotificationSound } from '../utils/notification-sound';
 
-export type AgentStatus = 'idle' | 'thinking' | 'tool_running' | 'streaming' | 'error' | 'disconnected';
+export type { ConfigPanelPlacement };
+
+export type PanelTab = 'library' | 'workspace' | 'review' | 'tasks' | 'monitor' | 'supervisor' | 'extensions' | 'settings';
+
+export type AgentStatus = 'idle' | 'thinking' | 'compacting' | 'tool_running' | 'streaming' | 'error' | 'disconnected';
 
 const NOTIFICATION_TYPES = new Set<string>(['deadline', 'heartbeat', 'system', 'error', 'update']);
 
@@ -41,10 +54,11 @@ const PANEL_OPEN_STORAGE = 'rc-right-panel-open';
 const LEFT_NAV_COLLAPSED_STORAGE = 'rc-left-nav-collapsed';
 const SHOW_SYSTEM_FILES_STORAGE = 'rc-show-system-files';
 const CRON_FOLD_STORAGE = 'rc-cron-sessions-folded';
+const NOTIFICATION_SOUND_STORAGE = 'rc-notification-sound';
 const APP_UPDATE_LAST_CHECK_STORAGE = 'rc-app-update-last-check-at';
 const APP_UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
-const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'tasks', 'monitor', 'supervisor', 'extensions', 'settings']);
+const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'review', 'tasks', 'monitor', 'supervisor', 'extensions', 'settings']);
 
 function loadPanelTab(): PanelTab {
   try {
@@ -144,6 +158,8 @@ interface UiState {
   rightPanelTab: PanelTab;
   rightPanelOpen: boolean;
   rightPanelWidth: number;
+  configPanelHeight: number;
+  configPanelPlacement: ConfigPanelPlacement;
   leftNavCollapsed: boolean;
   notifications: Notification[];
   unreadCount: number;
@@ -160,16 +176,24 @@ interface UiState {
   /** Whether cron sessions are folded in the session list (Layer 3, #33). */
   cronSessionsFolded: boolean;
 
+  /** Play a sound when a new unread notification arrives. */
+  notificationSoundEnabled: boolean;
+
   /** Last check_updates result — shared between gateway auto-check and Settings → About. */
   appUpdateInfo: CheckUpdatesPayload | null;
 
   /** True while rc.app.apply_update is in progress — locks the update button across components. */
   appUpdateRunning: boolean;
 
+  /** One-shot prefill for chat input (e.g. Skill Workshop handoff). */
+  chatInputPrefill: string | null;
+
   setRightPanelTab: (tab: PanelTab) => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
   setRightPanelWidth: (width: number) => void;
+  setConfigPanelHeight: (height: number) => void;
+  setConfigPanelPlacement: (placement: ConfigPanelPlacement) => void;
   toggleLeftNav: () => void;
   setLeftNavCollapsed: (collapsed: boolean) => void;
   setAgentStatus: (status: AgentStatus) => void;
@@ -191,6 +215,8 @@ interface UiState {
   clearPendingPreview: () => void;
   setShowSystemFiles: (show: boolean) => void;
   setCronSessionsFolded: (folded: boolean) => void;
+  setNotificationSoundEnabled: (enabled: boolean) => void;
+  setChatInputPrefill: (text: string | null) => void;
 }
 
 const _initNotifications = loadNotifications();
@@ -198,7 +224,9 @@ const _initNotifications = loadNotifications();
 export const useUiStore = create<UiState>()((set, get) => ({
   rightPanelTab: loadPanelTab(),
   rightPanelOpen: loadBoolean(PANEL_OPEN_STORAGE, true),
-  rightPanelWidth: 360,
+  rightPanelWidth: CONFIG_PANEL_WIDTH_DEFAULT,
+  configPanelHeight: loadConfigPanelHeight(),
+  configPanelPlacement: loadConfigPanelPlacement(),
   leftNavCollapsed: loadBoolean(LEFT_NAV_COLLAPSED_STORAGE, false),
   notifications: _initNotifications,
   unreadCount: _initNotifications.filter((n) => !n.read).length,
@@ -207,8 +235,12 @@ export const useUiStore = create<UiState>()((set, get) => ({
   pendingPreviewPath: null,
   showSystemFiles: loadBoolean(SHOW_SYSTEM_FILES_STORAGE, false),
   cronSessionsFolded: loadBoolean(CRON_FOLD_STORAGE, true),
+  notificationSoundEnabled: loadBoolean(NOTIFICATION_SOUND_STORAGE, true),
   appUpdateInfo: null,
   appUpdateRunning: false,
+  chatInputPrefill: null,
+
+  setChatInputPrefill: (text) => set({ chatInputPrefill: text }),
 
   setRightPanelTab: (tab: PanelTab) => {
     try { localStorage.setItem(PANEL_TAB_STORAGE, tab); } catch { /* non-fatal */ }
@@ -228,7 +260,18 @@ export const useUiStore = create<UiState>()((set, get) => ({
   },
 
   setRightPanelWidth: (width: number) => {
-    set({ rightPanelWidth: Math.min(480, Math.max(320, width)) });
+    set({ rightPanelWidth: clampPanelWidth(width) });
+  },
+
+  setConfigPanelHeight: (height: number) => {
+    const clamped = clampPanelHeight(height);
+    try { localStorage.setItem('rc-config-panel-height', String(clamped)); } catch { /* non-fatal */ }
+    set({ configPanelHeight: clamped });
+  },
+
+  setConfigPanelPlacement: (placement: ConfigPanelPlacement) => {
+    try { localStorage.setItem('rc-config-panel-placement', placement); } catch { /* non-fatal */ }
+    set({ configPanelPlacement: placement });
   },
 
   toggleLeftNav: () => {
@@ -272,6 +315,10 @@ export const useUiStore = create<UiState>()((set, get) => ({
         unreadCount: alreadyRead ? s.unreadCount : s.unreadCount + 1,
       };
     });
+
+    if (!alreadyRead && get().notificationSoundEnabled) {
+      playNotificationSound(n.type);
+    }
   },
 
   markNotificationRead: (id: string) => {
@@ -329,6 +376,11 @@ export const useUiStore = create<UiState>()((set, get) => ({
   setCronSessionsFolded: (folded: boolean) => {
     try { localStorage.setItem(CRON_FOLD_STORAGE, String(folded)); } catch { /* non-fatal */ }
     set({ cronSessionsFolded: folded });
+  },
+
+  setNotificationSoundEnabled: (enabled: boolean) => {
+    try { localStorage.setItem(NOTIFICATION_SOUND_STORAGE, String(enabled)); } catch { /* non-fatal */ }
+    set({ notificationSoundEnabled: enabled });
   },
 
   checkNotifications: async () => {

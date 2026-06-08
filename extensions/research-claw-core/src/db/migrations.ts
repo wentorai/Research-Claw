@@ -183,6 +183,162 @@ const MIGRATIONS: readonly Migration[] = [
     name: 'add_monitor_memory',
     sql: `ALTER TABLE rc_monitors ADD COLUMN memory TEXT NOT NULL DEFAULT '{"v":1,"seen":[],"runs":[],"notes":""}';`,
   },
+  {
+    version: 11,
+    name: 'add_memory_tables',
+    sql: [
+      `CREATE TABLE IF NOT EXISTS rc_memories (
+  id              TEXT PRIMARY KEY,
+  type            TEXT NOT NULL CHECK(type IN ('user', 'feedback', 'project', 'reference')),
+  name            TEXT NOT NULL,
+  description     TEXT,
+  content         TEXT NOT NULL,
+  metadata        TEXT DEFAULT '{}',
+  related_paper_id TEXT REFERENCES rc_papers(id) ON DELETE SET NULL,
+  related_task_id  TEXT REFERENCES rc_tasks(id) ON DELETE SET NULL,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  accessed_at     TEXT,
+  access_count    INTEGER DEFAULT 0,
+  is_active       INTEGER DEFAULT 1,
+  is_private      INTEGER DEFAULT 0
+);`,
+      `CREATE TABLE IF NOT EXISTS rc_memory_tags (
+  id        TEXT PRIMARY KEY,
+  name      TEXT NOT NULL UNIQUE,
+  color     TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`,
+      `CREATE TABLE IF NOT EXISTS rc_memory_tag_links (
+  memory_id TEXT NOT NULL REFERENCES rc_memories(id) ON DELETE CASCADE,
+  tag_id    TEXT NOT NULL REFERENCES rc_memory_tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (memory_id, tag_id)
+);`,
+      `CREATE TABLE IF NOT EXISTS rc_memory_links (
+  id              TEXT PRIMARY KEY,
+  from_memory_id  TEXT NOT NULL REFERENCES rc_memories(id) ON DELETE CASCADE,
+  to_memory_id    TEXT NOT NULL REFERENCES rc_memories(id) ON DELETE CASCADE,
+  context         TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(from_memory_id, to_memory_id)
+);`,
+      `CREATE VIRTUAL TABLE IF NOT EXISTS rc_memories_fts USING fts5(
+  name,
+  description,
+  content,
+  content='rc_memories',
+  content_rowid='rowid'
+);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memories_type           ON rc_memories(type);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memories_active         ON rc_memories(is_active);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memories_private        ON rc_memories(is_private);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memories_paper          ON rc_memories(related_paper_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memories_task           ON rc_memories(related_task_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memories_accessed       ON rc_memories(accessed_at);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memories_access_count   ON rc_memories(access_count);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memory_tag_links_memory ON rc_memory_tag_links(memory_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memory_tag_links_tag    ON rc_memory_tag_links(tag_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memory_links_from       ON rc_memory_links(from_memory_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_memory_links_to         ON rc_memory_links(to_memory_id);`,
+      `CREATE TRIGGER IF NOT EXISTS rc_memories_fts_insert AFTER INSERT ON rc_memories BEGIN INSERT INTO rc_memories_fts(rowid, name, description, content) VALUES (new.rowid, new.name, new.description, new.content); END;`,
+      `CREATE TRIGGER IF NOT EXISTS rc_memories_fts_update AFTER UPDATE ON rc_memories BEGIN INSERT INTO rc_memories_fts(rc_memories_fts, rowid, name, description, content) VALUES ('delete', old.rowid, old.name, old.description, old.content); INSERT INTO rc_memories_fts(rowid, name, description, content) VALUES (new.rowid, new.name, new.description, new.content); END;`,
+      `CREATE TRIGGER IF NOT EXISTS rc_memories_fts_delete BEFORE DELETE ON rc_memories BEGIN INSERT INTO rc_memories_fts(rc_memories_fts, rowid, name, description, content) VALUES ('delete', old.rowid, old.name, old.description, old.content); END;`,
+    ].join('\n'),
+  },
+  {
+    version: 12,
+    name: 'add_session_monitoring',
+    sql: [
+      `CREATE TABLE IF NOT EXISTS rc_sessions (
+  id                  TEXT PRIMARY KEY,
+  started_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at            TEXT,
+  events_count        INTEGER NOT NULL DEFAULT 0,
+  memories_extracted  INTEGER NOT NULL DEFAULT 0,
+  metadata            TEXT DEFAULT '{}'
+);`,
+      `CREATE TABLE IF NOT EXISTS rc_session_events (
+  id          TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL REFERENCES rc_sessions(id) ON DELETE CASCADE,
+  event_type  TEXT NOT NULL CHECK(event_type IN ('session_start', 'user_prompt', 'tool_use', 'assistant_response', 'session_end')),
+  timestamp   TEXT NOT NULL DEFAULT (datetime('now')),
+  data        TEXT NOT NULL DEFAULT '{}'
+);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_sessions_started       ON rc_sessions(started_at);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_sessions_ended         ON rc_sessions(ended_at);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_session_events_session  ON rc_session_events(session_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_session_events_type     ON rc_session_events(event_type);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_session_events_timestamp ON rc_session_events(timestamp);`,
+    ].join('\n'),
+  },
+  {
+    version: 13,
+    name: 'add_paper_reviews',
+    sql: [
+      `CREATE TABLE IF NOT EXISTS rc_paper_reviews (
+  id              TEXT PRIMARY KEY,
+  file_path       TEXT NOT NULL,
+  paper_id        TEXT REFERENCES rc_papers(id) ON DELETE SET NULL,
+  title           TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'draft'
+                    CHECK(status IN ('draft', 'in_progress', 'completed')),
+  overall_score   INTEGER CHECK(overall_score IS NULL OR (overall_score BETWEEN 1 AND 10)),
+  summary         TEXT,
+  strengths       TEXT,
+  weaknesses      TEXT,
+  suggestions     TEXT,
+  report_markdown TEXT,
+  rubric          TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_file    ON rc_paper_reviews(file_path);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_updated ON rc_paper_reviews(updated_at);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_status  ON rc_paper_reviews(status);`,
+    ].join('\n'),
+  },
+  {
+    version: 14,
+    name: 'paper_reviews_failed_status',
+    sql: '',
+    fn: (db) => {
+      db.exec(`
+        CREATE TABLE rc_paper_reviews_v14 (
+          id              TEXT PRIMARY KEY,
+          file_path       TEXT NOT NULL,
+          paper_id        TEXT REFERENCES rc_papers(id) ON DELETE SET NULL,
+          title           TEXT NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'draft'
+                            CHECK(status IN ('draft', 'in_progress', 'completed', 'failed')),
+          overall_score   INTEGER CHECK(overall_score IS NULL OR (overall_score BETWEEN 1 AND 10)),
+          summary         TEXT,
+          strengths       TEXT,
+          weaknesses      TEXT,
+          suggestions     TEXT,
+          report_markdown TEXT,
+          rubric          TEXT,
+          failure_reason  TEXT,
+          created_at      TEXT NOT NULL,
+          updated_at      TEXT NOT NULL
+        );
+        INSERT INTO rc_paper_reviews_v14 (
+          id, file_path, paper_id, title, status, overall_score,
+          summary, strengths, weaknesses, suggestions, report_markdown, rubric,
+          failure_reason, created_at, updated_at
+        )
+        SELECT
+          id, file_path, paper_id, title, status, overall_score,
+          summary, strengths, weaknesses, suggestions, report_markdown, rubric,
+          NULL, created_at, updated_at
+        FROM rc_paper_reviews;
+        DROP TABLE rc_paper_reviews;
+        ALTER TABLE rc_paper_reviews_v14 RENAME TO rc_paper_reviews;
+        CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_file    ON rc_paper_reviews(file_path);
+        CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_updated ON rc_paper_reviews(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_status  ON rc_paper_reviews(status);
+      `);
+    },
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────

@@ -16,6 +16,8 @@ interface InputHistoryPopupProps {
   onSelect: (text: string) => void;
   /** Called to dismiss the popup (Escape, click outside). */
   onDismiss: () => void;
+  /** Horizontal alignment relative to the trigger (default left). */
+  align?: 'left' | 'right';
 }
 
 export default function InputHistoryPopup({
@@ -23,6 +25,7 @@ export default function InputHistoryPopup({
   visible,
   onSelect,
   onDismiss,
+  align = 'left',
 }: InputHistoryPopupProps) {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -71,7 +74,7 @@ export default function InputHistoryPopup({
       style={{
         position: 'absolute',
         bottom: '100%',
-        left: 0,
+        ...(align === 'right' ? { right: 0 } : { left: 0 }),
         width: 340,
         maxHeight: 300,
         marginBottom: 4,

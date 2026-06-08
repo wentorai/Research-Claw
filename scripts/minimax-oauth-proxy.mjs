@@ -58,7 +58,24 @@ function readJson(filePath) {
 
 function loadMiniMaxConfig(configPath) {
   const cfg = readJson(configPath);
-  const provider = cfg?.models?.providers?.minimax ?? cfg?.models?.providers?.['minimax-cn'] ?? null;
+  const providers = cfg?.models?.providers ?? {};
+  const primaryModel = cfg?.agents?.defaults?.model?.primary;
+  const activeProviderKey =
+    typeof primaryModel === 'string' && primaryModel.includes('/')
+      ? primaryModel.split('/')[0]
+      : '';
+
+  const activeProvider =
+    (activeProviderKey === 'minimax' || activeProviderKey === 'minimax-cn')
+      ? providers?.[activeProviderKey]
+      : null;
+  const provider =
+    activeProvider ??
+    (typeof providers?.['minimax-cn']?.apiKey === 'string' ? providers['minimax-cn'] : null) ??
+    (typeof providers?.minimax?.apiKey === 'string' ? providers.minimax : null) ??
+    providers?.['minimax-cn'] ??
+    providers?.minimax ??
+    null;
   const apiKey = typeof provider?.apiKey === 'string' ? provider.apiKey : '';
   const upstreamFromEnv =
     typeof cfg?.env?.vars?.RC_MINIMAX_UPSTREAM_BASEURL === 'string'

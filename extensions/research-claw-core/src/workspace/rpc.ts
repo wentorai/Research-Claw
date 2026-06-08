@@ -125,6 +125,19 @@ export function registerWorkspaceRpc(
   });
 
   // -----------------------------------------------------------------------
+  // 2b. rc.ws.exists — Check whether a workspace file exists
+  //     params: { path: string }
+  // -----------------------------------------------------------------------
+  registerMethod('rc.ws.exists', async (params: Record<string, unknown>) => {
+    try {
+      const filePath = requireString(params, 'path');
+      return service.exists(filePath);
+    } catch (err) {
+      mapError(err);
+    }
+  });
+
+  // -----------------------------------------------------------------------
   // 2. rc.ws.read — Read a single file for the dashboard preview pane
   //    params: { path: string }
   // -----------------------------------------------------------------------

@@ -298,6 +298,25 @@ function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   return filter(nodes);
 }
 
+// --- Tree presentation helpers (display-only, no backend contract changes) ---
+
+const ROOT_PRIORITY_ORDER = ['sources', 'outputs'] as const;
+
+function sortRootNodes(nodes: TreeNode[]): TreeNode[] {
+  const priority = new Map<string, number>(ROOT_PRIORITY_ORDER.map((name, idx) => [name, idx]));
+  return [...nodes].sort((a, b) => {
+    const aRank = priority.get(a.name);
+    const bRank = priority.get(b.name);
+    if (aRank !== undefined || bRank !== undefined) {
+      if (aRank === undefined) return 1;
+      if (bRank === undefined) return -1;
+      if (aRank !== bRank) return aRank - bRank;
+    }
+    // Keep existing fallback ordering stable/alphabetical for non-priority items.
+    return a.name.localeCompare(b.name);
+  });
+}
+
 // --- FileTree component ---
 
 interface CreatingItem {
@@ -327,7 +346,9 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
   const { t } = useTranslation();
   const { message } = App.useApp();
   const client = useGatewayStore((s) => s.client);
-  const [expanded, setExpanded] = useState(depth < 2);
+  const [expanded, setExpanded] = useState(
+    depth === 0 && ROOT_PRIORITY_ORDER.includes(node.name as (typeof ROOT_PRIORITY_ORDER)[number]),
+  );
   const [dragOver, setDragOver] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [dockerModal, setDockerModal] = useState<Omit<DockerFileModalProps, 'open' | 'onClose'> | null>(null);
@@ -956,6 +977,10 @@ export default function WorkspacePanel() {
   }, [searchQuery]);
 
   const filteredTree = useMemo(() => filterTree(tree, debouncedQuery), [tree, debouncedQuery]);
+  const displayTree = useMemo(
+    () => (debouncedQuery ? filteredTree : sortRootNodes(filteredTree)),
+    [filteredTree, debouncedQuery],
+  );
 
   // Priority lock: loadData (user-triggered) always runs; silentRefresh yields.
   const fetchingRef = useRef(false);   // true while any fetch is in-flight
@@ -1159,7 +1184,7 @@ export default function WorkspacePanel() {
     async (file: File): Promise<boolean> => {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('destination', 'uploads/');
+      formData.append('destination', 'sources/');
       const token = new URLSearchParams(window.location.search).get('token') || 'research-claw';
       const res = await fetch('/rc/upload', {
         method: 'POST',
@@ -1197,8 +1222,8 @@ export default function WorkspacePanel() {
           message.success(
             t('workspace.uploadSuccessWithPath', {
               count: successCount,
-              path: 'uploads/',
-              defaultValue: `${successCount} file(s) uploaded to uploads/`,
+              path: 'sources/',
+              defaultValue: `${successCount} file(s) uploaded to sources/`,
             }),
           );
         }
@@ -1415,8 +1440,8 @@ export default function WorkspacePanel() {
             )}
 
             {/* Tree nodes */}
-            {filteredTree.length > 0 ? (
-              filteredTree.map((node) => (
+            {displayTree.length > 0 ? (
+              displayTree.map((node) => (
                 <FileTreeNode key={node.path} node={node} depth={0} tokens={tokens} workspaceRoot={workspaceRoot} dragSrcPath={dragSrcPath} movingPath={movingPath} creatingItem={creatingItem} onOpenFile={setPreviewPath} onDeleted={loadData} onMoved={loadData} onDragSrcChange={setDragSrcPath} onMoveStart={setMovingPath} onMoveEnd={() => setMovingPath(null)} onCreateItem={setCreatingItem} onCreateDone={() => setCreatingItem(null)} />
               ))
             ) : debouncedQuery ? (

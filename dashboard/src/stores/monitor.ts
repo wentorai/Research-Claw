@@ -5,7 +5,8 @@
  * gateway cron job that triggers isolated agent turns on schedule.
  *
  * Key simplification vs the old cron.ts:
- *   - OC persists cron jobs to disk (jobs.json) — no reconciliation needed
+ *   - OC persists cron jobs to disk (jobs.json), but RC still verifies that
+ *     enabled monitors have a live gateway job after reconnect/manual edits.
  *   - No PRESET_DEFINITIONS hardcoded list — monitors are DB-driven
  *   - No _inflightPresets mutex — use simple loading flag instead
  */
@@ -45,8 +46,86 @@ interface MonitorState {
   runMonitor: (id: string) => Promise<void>;
 }
 
+type CronJobRow = { id?: unknown };
+
 // Tracks in-flight toggle/delete operations to prevent race conditions
 const _inflightOps = new Set<string>();
+
+// Tracks whether we've reconciled monitor cron bindings in this gateway session.
+let _reconciled = false;
+
+function extractCronJobIds(res: unknown): Set<string> | null {
+  const jobs = Array.isArray(res)
+    ? res
+    : res && typeof res === 'object'
+      ? Object.values(res as Record<string, unknown>).find(Array.isArray)
+      : null;
+
+  if (!Array.isArray(jobs)) return null;
+
+  const ids = new Set<string>();
+  for (const job of jobs) {
+    if (!job || typeof job !== 'object') continue;
+    const id = (job as CronJobRow).id;
+    if (typeof id === 'string' && id) ids.add(id);
+  }
+  return ids;
+}
+
+async function registerMonitorCronJob(monitor: Monitor): Promise<string | null> {
+  const client = useGatewayStore.getState().client;
+  if (!client?.isConnected) return null;
+
+  const cronResult = await client.request<{ id: string }>('cron.add', {
+    name: `[rc-monitor] ${monitor.name}`,
+    description: `Monitor: ${monitor.id}`,
+    schedule: { kind: 'cron' as const, expr: monitor.schedule },
+    sessionTarget: 'isolated',
+    payload: { kind: 'agentTurn', message: monitor.agent_prompt },
+  });
+
+  if (!cronResult?.id) return null;
+  await client.request('rc.monitor.setJobId', { id: monitor.id, job_id: cronResult.id });
+  return cronResult.id;
+}
+
+async function reconcileEnabledMonitors(monitors: Monitor[]): Promise<{ verified: boolean; repaired: boolean }> {
+  const client = useGatewayStore.getState().client;
+  if (!client?.isConnected) return { verified: false, repaired: false };
+
+  const enabled = monitors.filter((m) => m.enabled);
+  if (enabled.length === 0) return { verified: true, repaired: false };
+
+  let jobIds: Set<string> | null = null;
+  try {
+    jobIds = extractCronJobIds(await client.request<unknown>('cron.list', {}));
+  } catch (err) {
+    console.warn('[MonitorStore] cron.list failed during reconcile:', err);
+    return { verified: false, repaired: false };
+  }
+
+  // Unknown cron.list shape. Avoid creating duplicates if we cannot verify.
+  if (!jobIds) return { verified: false, repaired: false };
+
+  let repaired = false;
+  for (const monitor of enabled) {
+    const hasLiveJob = monitor.gateway_job_id ? jobIds.has(monitor.gateway_job_id) : false;
+    if (hasLiveJob) continue;
+    if (_inflightOps.has(monitor.id)) continue;
+
+    _inflightOps.add(monitor.id);
+    try {
+      const jobId = await registerMonitorCronJob(monitor);
+      repaired = repaired || Boolean(jobId);
+    } catch (err) {
+      console.warn(`[MonitorStore] reconcile failed for ${monitor.id}:`, err);
+    } finally {
+      _inflightOps.delete(monitor.id);
+    }
+  }
+
+  return { verified: true, repaired };
+}
 
 export const useMonitorStore = create<MonitorState>()((set, get) => ({
   monitors: [],
@@ -61,7 +140,18 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
     set({ loading: true });
     try {
       const result = await client.request<{ items: Monitor[]; total: number }>('rc.monitor.list', { limit: 100 });
-      set({ monitors: result.items, loaded: true });
+      let items = result.items;
+
+      if (!_reconciled) {
+        const outcome = await reconcileEnabledMonitors(result.items);
+        _reconciled = outcome.verified;
+        if (outcome.repaired) {
+          const refreshed = await client.request<{ items: Monitor[]; total: number }>('rc.monitor.list', { limit: 100 });
+          items = refreshed.items;
+        }
+      }
+
+      set({ monitors: items, loaded: true });
     } catch (err) {
       console.warn('[MonitorStore] loadMonitors failed:', err);
     } finally {
@@ -90,19 +180,8 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
           try { await client.request('cron.remove', { id: updated.gateway_job_id }); } catch { /* */ }
         }
 
-        // 2b. Create gateway cron job with monitor ID in name for dedup
-        const cronResult = await client.request<{ id: string }>('cron.add', {
-          name: `[rc-monitor] ${updated.name}`,
-          description: `Monitor: ${updated.id}`,
-          schedule: { kind: 'cron' as const, expr: updated.schedule },
-          sessionTarget: 'isolated',
-          payload: { kind: 'agentTurn', message: updated.agent_prompt },
-        });
-
-        // 3. Store gateway job ID in plugin DB
-        if (cronResult?.id) {
-          await client.request('rc.monitor.setJobId', { id, job_id: cronResult.id });
-        }
+        // 2b/3. Create gateway cron job and store gateway job ID in plugin DB
+        await registerMonitorCronJob(updated);
       } else {
         // 2b. Remove gateway cron job
         if (updated.gateway_job_id) {
@@ -168,18 +247,8 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
           await client.request('cron.remove', { id: updated.gateway_job_id });
         } catch { /* */ }
 
-        // Create new
-        const cronResult = await client.request<{ id: string }>('cron.add', {
-          name: `[rc-monitor] ${updated.name}`,
-          description: `Monitor: ${updated.id}`,
-          schedule: { kind: 'cron' as const, expr: updated.schedule },
-          sessionTarget: 'isolated',
-          payload: { kind: 'agentTurn', message: updated.agent_prompt },
-        });
-
-        if (cronResult?.id) {
-          await client.request('rc.monitor.setJobId', { id, job_id: cronResult.id });
-        }
+        // Create new and persist gateway job ID
+        await registerMonitorCronJob(updated);
       }
 
       await get().loadMonitors();
@@ -206,3 +275,7 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
     }
   },
 }));
+
+export function resetMonitorReconciled(): void {
+  _reconciled = false;
+}

@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useMonitorStore } from './monitor';
+import { resetMonitorReconciled, useMonitorStore } from './monitor';
 import { useGatewayStore } from './gateway';
 import {
   RC_MONITOR_LIST_RESPONSE,
@@ -30,6 +30,7 @@ function setConnected(connected: boolean) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetMonitorReconciled();
   useMonitorStore.setState({ monitors: [], loading: false, loaded: false });
   setConnected(true);
 });
@@ -71,6 +72,36 @@ describe('loadMonitors', () => {
 
     expect(useMonitorStore.getState().monitors).toHaveLength(0);
     expect(useMonitorStore.getState().loading).toBe(false);
+  });
+
+  it('repairs an enabled monitor whose gateway cron job is missing', async () => {
+    const missingJobMonitor = {
+      ...RC_MONITOR_LIST_RESPONSE.items[0],
+      gateway_job_id: 'stale-job-id',
+    };
+    const repairedMonitor = {
+      ...missingJobMonitor,
+      gateway_job_id: CRON_ADD_RESPONSE.id,
+    };
+
+    mockRequest
+      .mockResolvedValueOnce({ items: [missingJobMonitor], total: 1 })
+      .mockResolvedValueOnce({ jobs: [] })
+      .mockResolvedValueOnce(CRON_ADD_RESPONSE)
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ items: [repairedMonitor], total: 1 });
+
+    await useMonitorStore.getState().loadMonitors();
+
+    expect(mockRequest).toHaveBeenCalledWith('cron.list', {});
+    expect(mockRequest).toHaveBeenCalledWith('cron.add', expect.objectContaining({
+      name: '[rc-monitor] arXiv Daily Digest',
+    }));
+    expect(mockRequest).toHaveBeenCalledWith('rc.monitor.setJobId', {
+      id: 'arxiv-daily',
+      job_id: CRON_ADD_RESPONSE.id,
+    });
+    expect(useMonitorStore.getState().monitors[0].gateway_job_id).toBe(CRON_ADD_RESPONSE.id);
   });
 });
 

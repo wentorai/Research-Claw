@@ -231,19 +231,11 @@ const MAX_DIFF_OUTPUT = 100 * 1024; // 100 KB truncation for diff
 const MAX_TREE_DEPTH = 10;
 const DEFAULT_TREE_DEPTH = 3;
 
-/** Standard workspace directory scaffold. */
+/** Minimal workspace directory scaffold (other paths are created on demand). */
 const WORKSPACE_DIRS = [
   '.ResearchClaw',
-  'uploads',
-  'sources/papers',
-  'sources/data',
-  'sources/references',
-  'outputs/drafts',
-  'outputs/figures',
-  'outputs/exports',
-  'outputs/reports',
-  'outputs/notes',
-  'outputs/monitor',
+  'sources',
+  'outputs',
 ] as const;
 
 /**
@@ -478,9 +470,10 @@ export class WorkspaceService {
   /**
    * Initialize the workspace directory structure and optional git tracker.
    *
-   * Creates the standard scaffold directories (sources/papers, sources/data,
-   * sources/references, outputs/drafts, outputs/figures, outputs/exports,
-   * outputs/reports). Initializes the git tracker if autoTrackGit is enabled.
+   * Creates only the minimal top-level scaffold (sources/, outputs/,
+   * .ResearchClaw/). Feature-specific subdirectories are created lazily on
+   * first write (e.g. save/move/export/upload flows).
+   * Initializes the git tracker if autoTrackGit is enabled.
    * Creates a default .gitignore if one does not already exist.
    */
   async init(): Promise<void> {
@@ -495,6 +488,9 @@ export class WorkspaceService {
 
     // Migrate prompt files from workspace root → .ResearchClaw/ (idempotent)
     await this.migratePromptFiles();
+
+    // Migrate legacy uploads/ → sources/ (idempotent)
+    await this.migrateUploadsToSources();
 
     // Create default .gitignore if it does not exist
     const gitignorePath = path.join(this.root, '.gitignore');
@@ -572,6 +568,71 @@ export class WorkspaceService {
       } catch {
         // Neither exists
       }
+    }
+  }
+
+  /**
+   * Migrate legacy `uploads/` into `sources/` (idempotent).
+   * RC uses two user-visible top-level dirs: sources/ (user input) + outputs/ (agent).
+   */
+  private async migrateUploadsToSources(): Promise<void> {
+    const uploadsDir = path.join(this.root, 'uploads');
+    const sourcesDir = path.join(this.root, 'sources');
+
+    try {
+      const stat = await fsp.stat(uploadsDir);
+      if (!stat.isDirectory()) return;
+    } catch {
+      return;
+    }
+
+    await fsp.mkdir(sourcesDir, { recursive: true });
+
+    const entries = await fsp.readdir(uploadsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const src = path.join(uploadsDir, entry.name);
+      let dest = path.join(sourcesDir, entry.name);
+      try {
+        await fsp.access(dest);
+        const fallbackDir = path.join(sourcesDir, '_from-uploads');
+        await fsp.mkdir(fallbackDir, { recursive: true });
+        dest = path.join(fallbackDir, entry.name);
+        try {
+          await fsp.access(dest);
+          const ext = path.extname(entry.name);
+          const stem = path.basename(entry.name, ext);
+          dest = path.join(fallbackDir, `${stem}-${Date.now()}${ext}`);
+        } catch {
+          // dest available in fallback dir
+        }
+      } catch {
+        // dest does not exist — use sources/{name}
+      }
+      await fsp.rename(src, dest);
+    }
+
+    const remaining = await fsp.readdir(uploadsDir);
+    if (remaining.length === 0) {
+      await fsp.rmdir(uploadsDir);
+    }
+
+    await this.stripLegacyUploadsGitignore();
+  }
+
+  /** Remove stale `/uploads/*` lines from workspace .gitignore after migration. */
+  private async stripLegacyUploadsGitignore(): Promise<void> {
+    const gitignorePath = path.join(this.root, '.gitignore');
+    try {
+      const content = await fsp.readFile(gitignorePath, 'utf-8');
+      const cleaned = content
+        .split('\n')
+        .filter((line) => !/^\/uploads\/?\*?\/?$/.test(line.trim()))
+        .join('\n');
+      if (cleaned !== content) {
+        await fsp.writeFile(gitignorePath, cleaned, 'utf-8');
+      }
+    } catch {
+      // no .gitignore — nothing to clean
     }
   }
 
@@ -765,6 +826,20 @@ export class WorkspaceService {
     }
 
     return nodes;
+  }
+
+  // -----------------------------------------------------------------------
+  // exists — rc.ws.exists
+  // -----------------------------------------------------------------------
+
+  /** Lightweight existence check for polling (avoids noisy read errors in logs). */
+  async exists(filePath: string): Promise<{ exists: boolean }> {
+    try {
+      const stat = await fsp.stat(this.resolvePath(filePath));
+      return { exists: stat.isFile() };
+    } catch {
+      return { exists: false };
+    }
   }
 
   // -----------------------------------------------------------------------

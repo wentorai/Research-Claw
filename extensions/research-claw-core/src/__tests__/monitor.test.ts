@@ -153,7 +153,7 @@ describe('MonitorService', () => {
       expect(m.target).toBe('https://example.com');
       expect(m.filters).toEqual({ keywords: ['test'] });
       expect(m.schedule).toBe('0 8 * * *');
-      expect(m.enabled).toBe(true);
+      expect(m.enabled).toBe(false);
       expect(m.notify).toBe(true);
       expect(m.id).toBeTruthy();
       expect(m.check_count).toBe(0);
@@ -193,9 +193,9 @@ describe('MonitorService', () => {
       expect(m.schedule).toBe('0 8 * * *');
     });
 
-    it('defaults enabled=true and notify=true', () => {
+    it('defaults enabled=false and notify=true', () => {
       const m = svc.create({ name: 'Defaults', source_type: 'code' });
-      expect(m.enabled).toBe(true);
+      expect(m.enabled).toBe(false);
       expect(m.notify).toBe(true);
     });
 
@@ -1204,6 +1204,8 @@ describe('Monitor Agent Tools', () => {
       expect(result.content[0].text).toContain('Tool Test');
       expect(result.details).toBeDefined();
       expect(result.details.id).toBeTruthy();
+      expect(result.details.enabled).toBe(false);
+      expect(result.content[0].text).toContain('Status: disabled');
     });
 
     it('returns error format on empty name', async () => {

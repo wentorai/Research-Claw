@@ -18,6 +18,8 @@ export interface Session {
   displayName?: string;
   derivedTitle?: string;
   updatedAt?: number;
+  sessionStartedAt?: number;
+  lastInteractionAt?: number;
   sessionId?: string;
   kind?: string;
 }
@@ -35,6 +37,10 @@ interface SessionsState {
   sessions: Session[];
   activeSessionKey: string;
   loading: boolean;
+  /** True when active session will roll over on next chat.send (idle/daily expiry). */
+  activeSessionStale: boolean;
+  /** Session key for which the user confirmed continuing a stale session. */
+  staleSendAcknowledgedKey: string | null;
 
   loadSessions: () => Promise<void>;
   switchSession: (key: string) => void;
@@ -44,6 +50,8 @@ interface SessionsState {
   /** General-purpose session patch (aligned with OC sessions.patch — supports all fields). */
   patchSession: (key: string, fields: SessionPatchFields) => Promise<void>;
   isMainSession: (key: string) => boolean;
+  refreshActiveSessionStale: () => void;
+  acknowledgeStaleSessionSend: (key: string) => void;
 }
 
 function getPersistedKey(): string {
@@ -62,17 +70,33 @@ function persistKey(key: string) {
   }
 }
 
-import { isMainSessionKey } from '../utils/session-key';
+import { isMainSessionKey, normalizeSessionKey } from '../utils/session-key';
+import { isSessionRowStale } from '../utils/session-freshness';
+import { useConfigStore } from './config';
 
 /** Check if a key refers to the main session (handles both bare and canonical forms). */
 function isMain(key: string): boolean {
   return isMainSessionKey(key);
 }
 
+function findSessionRow(sessions: Session[], key: string): Session | undefined {
+  const bare = normalizeSessionKey(key);
+  return sessions.find((s) => normalizeSessionKey(s.key) === bare);
+}
+
+function computeActiveSessionStale(sessions: Session[], activeKey: string): boolean {
+  const row = findSessionRow(sessions, activeKey);
+  if (!row?.updatedAt) return false;
+  const policy = useConfigStore.getState().sessionResetPolicy;
+  return isSessionRowStale(row, policy);
+}
+
 export const useSessionsStore = create<SessionsState>()((set, get) => ({
   sessions: [],
   activeSessionKey: getPersistedKey(),
   loading: false,
+  activeSessionStale: false,
+  staleSendAcknowledgedKey: null,
 
   loadSessions: async () => {
     const client = useGatewayStore.getState().client;
@@ -88,17 +112,34 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
       const sessions = serverSessions.some((s) => isMain(s.key))
         ? serverSessions
         : [{ key: MAIN_SESSION_KEY }, ...serverSessions];
-      set({ sessions, loading: false });
+      set({
+        sessions,
+        loading: false,
+        activeSessionStale: computeActiveSessionStale(sessions, get().activeSessionKey),
+      });
     } catch {
       set({ loading: false });
     }
+  },
+
+  refreshActiveSessionStale: () => {
+    const { sessions, activeSessionKey } = get();
+    set({ activeSessionStale: computeActiveSessionStale(sessions, activeSessionKey) });
+  },
+
+  acknowledgeStaleSessionSend: (key: string) => {
+    set({ staleSendAcknowledgedKey: key, activeSessionStale: false });
   },
 
   switchSession: (key: string) => {
     const safeKey = key || MAIN_SESSION_KEY;
     const prev = get().activeSessionKey;
     if (safeKey === prev) return;
-    set({ activeSessionKey: safeKey });
+    set({
+      activeSessionKey: safeKey,
+      staleSendAcknowledgedKey: null,
+      activeSessionStale: computeActiveSessionStale(get().sessions, safeKey),
+    });
     persistKey(safeKey);
     // Switch chat store and reload history + usage for the new session
     useChatStore.getState().setSessionKey(safeKey);
@@ -127,6 +168,8 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     set((s) => ({
       sessions: [placeholder, ...s.sessions],
       activeSessionKey: key,
+      staleSendAcknowledgedKey: null,
+      activeSessionStale: false,
     }));
     persistKey(key);
     // Persist the label to the gateway so it survives refresh

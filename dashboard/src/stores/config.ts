@@ -1,4 +1,13 @@
 import { create } from 'zustand';
+import { syncSystemPromptAppendToGateway } from '../utils/sync-system-prompt-append';
+import {
+  readSystemPromptAppendFromConfig,
+  schedulePersistSystemPromptAppend,
+} from '../utils/system-prompt-config';
+import {
+  readSessionResetPolicy,
+  type SessionResetPolicy,
+} from '../utils/session-freshness';
 import i18n from '../i18n';
 import { useGatewayStore } from './gateway';
 import { isConfigValid, hasModelConfigured } from '../utils/config-patch';
@@ -42,6 +51,23 @@ export interface GatewayConfig {
 }
 
 export type BootState = 'pending' | 'ready' | 'needs_setup' | 'gateway_unreachable' | 'needs_token';
+export type ConfigOperationPhase =
+  | 'idle'
+  | 'validating'
+  | 'persisting'
+  | 'restart_scheduled'
+  | 'reconnecting'
+  | 'verifying_runtime'
+  | 'syncing_session'
+  | 'completed'
+  | 'failed';
+
+export interface ConfigOperation {
+  id: string;
+  phase: ConfigOperationPhase;
+  startedAt: number;
+  error?: string;
+}
 
 /** Maximum retries for config loading after reconnect (handles race with gateway startup) */
 const CONFIG_RETRY_MAX = 5;
@@ -51,6 +77,8 @@ interface ConfigState {
   theme: 'dark' | 'light';
   locale: 'en' | 'zh-CN';
   systemPromptAppend: string;
+  /** OpenClaw session.reset policy from gateway config */
+  sessionResetPolicy: SessionResetPolicy;
   bootState: BootState;
 
   /** Live config from gateway (via config.get RPC) */
@@ -63,6 +91,7 @@ interface ConfigState {
   /** True when config.apply succeeded and we're waiting for gateway restart + reconnect.
    *  Persisted to sessionStorage so it survives page refresh. */
   pendingConfigRestart: boolean;
+  configOperation: ConfigOperation | null;
 
   /** Tool call probe result — null until probed, then reflects model capability */
   toolCallProbe: {
@@ -80,6 +109,9 @@ interface ConfigState {
   evaluateConfig: () => void;
   setBootState: (s: BootState) => void;
   setPendingConfigRestart: (v: boolean) => void;
+  beginConfigOperation: (phase?: ConfigOperationPhase) => string;
+  setConfigOperationPhase: (phase: ConfigOperationPhase, error?: string) => void;
+  clearConfigOperation: () => void;
   probeToolCalling: () => Promise<void>;
 }
 
@@ -101,6 +133,7 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
     theme: persisted.theme,
     locale: persisted.locale,
     systemPromptAppend: persisted.systemPromptAppend,
+    sessionResetPolicy: readSessionResetPolicy(null),
     bootState: 'pending',
     gatewayConfig: null,
     gatewayConfigLoading: false,
@@ -110,6 +143,7 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
       try { return sessionStorage.getItem('rc:pending-config-restart') === '1'; }
       catch { return false; }
     })(),
+    configOperation: null,
 
     setPendingConfigRestart: (v: boolean) => {
       try {
@@ -118,6 +152,20 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
       } catch { /* non-fatal */ }
       set({ pendingConfigRestart: v });
     },
+
+    beginConfigOperation: (phase = 'validating') => {
+      const id = crypto.randomUUID();
+      set({ configOperation: { id, phase, startedAt: Date.now() } });
+      return id;
+    },
+
+    setConfigOperationPhase: (phase, error) => {
+      const current = get().configOperation;
+      if (!current) return;
+      set({ configOperation: { ...current, phase, ...(error ? { error } : {}) } });
+    },
+
+    clearConfigOperation: () => set({ configOperation: null }),
 
     setTheme: (t: 'dark' | 'light') => {
       document.documentElement.setAttribute('data-theme', t);
@@ -134,6 +182,8 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
     setSystemPromptAppend: (v: string) => {
       localStorage.setItem('rc-system-prompt-append', v);
       set({ systemPromptAppend: v });
+      void syncSystemPromptAppendToGateway(v);
+      schedulePersistSystemPromptAppend(v);
     },
 
     loadConfig: () => {
@@ -175,7 +225,22 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
           baseHash: snapshot.hash ?? null,
           projectConfig: (snapshot.config ?? null) as Record<string, unknown> | null,
         };
-        set({ gatewayConfig: gc, gatewayConfigLoading: false });
+        set({
+          gatewayConfig: gc,
+          gatewayConfigLoading: false,
+          sessionResetPolicy: readSessionResetPolicy(configObj),
+        });
+
+        const fromConfig = readSystemPromptAppendFromConfig(configObj);
+        const fromLocal = get().systemPromptAppend;
+        if (fromConfig !== fromLocal) {
+          localStorage.setItem('rc-system-prompt-append', fromConfig);
+          set({ systemPromptAppend: fromConfig });
+          void syncSystemPromptAppendToGateway(fromConfig);
+        } else if (fromLocal.trim() && !fromConfig.trim()) {
+          schedulePersistSystemPromptAppend(fromLocal);
+        }
+
         // Probe tool call support for the active model after config is loaded
         get().probeToolCalling();
         get().evaluateConfig();

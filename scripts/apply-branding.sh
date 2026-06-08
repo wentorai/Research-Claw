@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
-# Regenerate pnpm patch for Research-Claw (branding + .ResearchClaw bootstrap)
+# Regenerate pnpm patch for Research-Claw (branding + .ResearchClaw bootstrap + chat history)
 #
 # This script creates a pnpm patch that:
 #   1. Branding: process title, version output, error prefixes, daemon CLI
 #   2. Bootstrap: .ResearchClaw/ directory override for workspace bootstrap files
+#   3. Chat history: hide tool/toolResult rows so they do not consume the history window
 #
 # Usage:
 #   ./scripts/apply-branding.sh
 #
 # Prerequisites:
-#   - pnpm install must have been run first (without patch)
-#   - openclaw must be in node_modules/
+#   - openclaw@target version installed in node_modules/ (run pnpm install first)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-echo "=== Generating Research-Claw patch (branding + bootstrap) ==="
+echo "=== Generating Research-Claw patch (branding + bootstrap + chat history) ==="
 
-# 1. Check openclaw is installed
 if [ ! -d "node_modules/openclaw" ]; then
   echo "ERROR: node_modules/openclaw not found. Run 'pnpm install' first."
   exit 1
@@ -30,14 +29,26 @@ PATCH_FILE="${PATCH_DIR}/openclaw@${VERSION}.patch"
 echo "OpenClaw version: $VERSION"
 echo "Patch target: $PATCH_FILE"
 
-# 2. Check if patch already exists
 if [ -f "$PATCH_FILE" ]; then
-  echo "Patch file already exists: $PATCH_FILE"
-  echo "To regenerate, delete it first, then re-run this script."
-  exit 0
+  echo "Removing existing patch: $PATCH_FILE"
+  rm -f "$PATCH_FILE"
 fi
 
-# 3. Create pnpm patch edit directory
+# Drop stale patch keys from package.json before pnpm patch-commit
+node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+if (pkg.pnpm?.patchedDependencies) {
+  for (const k of Object.keys(pkg.pnpm.patchedDependencies)) {
+    if (k.startsWith('openclaw@')) delete pkg.pnpm.patchedDependencies[k];
+  }
+  if (Object.keys(pkg.pnpm.patchedDependencies).length === 0) {
+    pkg.pnpm.patchedDependencies = {};
+  }
+  fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+}
+"
+
 mkdir -p "$PATCH_DIR"
 EDIT_DIR="/tmp/oc-patch-$$"
 rm -rf "$EDIT_DIR"
@@ -66,17 +77,17 @@ if [ -f "$DAEMON_FILE" ]; then
 fi
 
 # ── 6. Bootstrap: .ResearchClaw directory override ─────────────────
-# Inject resolveBootstrapFilePath() into each agent-scope chunk and
-# redirect all 7 bootstrap file paths through it.
 echo "Applying .ResearchClaw bootstrap override ..."
 
 CHUNK_COUNT=0
-for CHUNK in "$EDIT_DIR"/dist/agent-scope-*.js; do
+for CHUNK in "$EDIT_DIR"/dist/workspace-*.js; do
   [ -f "$CHUNK" ] || continue
+  if ! grep -q "async function loadWorkspaceBootstrapFiles" "$CHUNK" 2>/dev/null; then
+    continue
+  fi
   CHUNK_COUNT=$((CHUNK_COUNT + 1))
   BASENAME=$(basename "$CHUNK")
 
-  # 6a. Insert resolveBootstrapFilePath function before loadWorkspaceBootstrapFiles
   sed -i '' '/^async function loadWorkspaceBootstrapFiles(dir) {/i\
 function resolveBootstrapFilePath(resolvedDir, name) {\
 	const rcPath = path.join(resolvedDir, ".ResearchClaw", name);\
@@ -84,46 +95,80 @@ function resolveBootstrapFilePath(resolvedDir, name) {\
 }\
 ' "$CHUNK"
 
-  # 6b. Replace all 7 filePath: path.join(...) with resolveBootstrapFilePath(...)
   for CONST in DEFAULT_AGENTS_FILENAME DEFAULT_SOUL_FILENAME DEFAULT_TOOLS_FILENAME \
                DEFAULT_IDENTITY_FILENAME DEFAULT_USER_FILENAME DEFAULT_HEARTBEAT_FILENAME \
-               DEFAULT_BOOTSTRAP_FILENAME; do
+               DEFAULT_BOOTSTRAP_FILENAME DEFAULT_MEMORY_FILENAME; do
     sed -i '' "s/filePath: path\.join(resolvedDir, ${CONST})/filePath: resolveBootstrapFilePath(resolvedDir, ${CONST})/g" "$CHUNK"
   done
 
-  # 6c. Verify
   COUNT=$(grep -c "resolveBootstrapFilePath" "$CHUNK")
-  echo "  $BASENAME: $COUNT occurrences (expect 8 = 1 def + 7 calls)"
-  if [ "$COUNT" -ne 8 ]; then
+  echo "  $BASENAME: $COUNT occurrences (expect 9 = 1 def + 8 calls)"
+  if [ "$COUNT" -lt 8 ]; then
     echo "  WARNING: unexpected count in $BASENAME! Manual review needed."
   fi
 done
 
 if [ "$CHUNK_COUNT" -eq 0 ]; then
-  echo "ERROR: No agent-scope-*.js chunks found! OC build structure may have changed."
+  echo "ERROR: No workspace-* chunks with loadWorkspaceBootstrapFiles found!"
   rm -rf "$EDIT_DIR"
   exit 1
 fi
-echo "  Patched $CHUNK_COUNT agent-scope chunks."
+echo "  Patched $CHUNK_COUNT workspace chunks."
 
-# ── 7. Commit patch ───────────────────────────────────────────────
+# ── 7. Chat history: hide tool/toolResult from dashboard window ───
+PROJECTION_FILE=$(find "$EDIT_DIR/dist" -name 'chat-display-projection-*.js' | head -1)
+if [ -n "$PROJECTION_FILE" ] && [ -f "$PROJECTION_FILE" ]; then
+  echo "Applying chat history toolResult filter to $(basename "$PROJECTION_FILE") ..."
+  if ! grep -q 'roleContent.role === "toolResult"' "$PROJECTION_FILE"; then
+    sed -i '' 's/if (!roleContent) return false;/if (!roleContent) return false;\
+	if (roleContent.role === "toolResult" || roleContent.role === "tool") return true;/' "$PROJECTION_FILE"
+  fi
+  if grep -q 'roleContent.role === "toolResult"' "$PROJECTION_FILE"; then
+    echo "  chat-display-projection: toolResult filter OK"
+  else
+    echo "  WARNING: toolResult filter not applied — manual review needed"
+  fi
+else
+  echo "  WARNING: chat-display-projection chunk not found; skipping history filter"
+fi
+
+# ── 8. Commit patch ───────────────────────────────────────────────
 echo ""
 echo "Committing patch..."
 pnpm patch-commit "$EDIT_DIR" --patches-dir "$PATCH_DIR"
 
-# ── 8. Verify ─────────────────────────────────────────────────────
+# ── 9. Register patch in package.json ─────────────────────────────
+node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+pkg.pnpm = pkg.pnpm || {};
+pkg.pnpm.patchedDependencies = pkg.pnpm.patchedDependencies || {};
+const key = 'openclaw@${VERSION}';
+pkg.pnpm.patchedDependencies[key] = 'patches/openclaw@${VERSION}.patch';
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+console.log('Updated package.json patchedDependencies:', key);
+"
+
+# ── 10. Verify ────────────────────────────────────────────────────
 echo ""
 echo "=== Verification ==="
 BRAND_COUNT=$(grep -c "research-claw" "node_modules/openclaw/dist/entry.js" 2>/dev/null || echo 0)
 echo "  Branding in entry.js: $BRAND_COUNT (expect >=6)"
 
-for f in node_modules/openclaw/dist/agent-scope-*.js; do
+for f in node_modules/openclaw/dist/workspace-*.js; do
   [ -f "$f" ] || continue
+  grep -q "loadWorkspaceBootstrapFiles" "$f" 2>/dev/null || continue
   BC=$(grep -c "resolveBootstrapFilePath" "$f" 2>/dev/null || echo 0)
-  echo "  Bootstrap in $(basename $f): $BC (expect 8)"
+  echo "  Bootstrap in $(basename "$f"): $BC"
 done
+
+if [ -f "node_modules/openclaw/dist/chat-display-projection-CMTVNdR4.js" ]; then
+  TC=$(grep -c 'roleContent.role === "toolResult"' node_modules/openclaw/dist/chat-display-projection-CMTVNdR4.js 2>/dev/null || echo 0)
+  echo "  Chat history filter: $TC (expect >=1)"
+fi
+
+node node_modules/openclaw/dist/entry.js --version 2>/dev/null | head -1 || true
 
 echo ""
 echo "=== Patch generated: $PATCH_FILE ==="
-echo "The patch will be auto-applied on 'pnpm install'."
-echo "Commit the patch file to version control."
+echo "Commit the patch file and package.json to version control."

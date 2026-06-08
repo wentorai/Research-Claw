@@ -1,7 +1,7 @@
 # 00 — Master Reference Map
 
 > Research-Claw Documentation Index
-> Status: Complete | OpenClaw base: `2026.3.8` (commit `62d5df28d`) | Protocol: v3
+> Status: Complete | OpenClaw base: `2026.6.1` | Protocol: v3
 
 ---
 
@@ -26,8 +26,10 @@
 | S3 | `docs/sop/03-plugin-integration-sop.md` | — | Plugin ecosystem integration SOP | 05 |
 | S4 | `docs/sop/04-prompt-behavior-sop.md` | — | Prompt/bootstrap development SOP | 04 |
 | CL | `docs/CHANGELOG.md` | — | Global operation log (all tracks, merged from sop/CHANGELOG + CHANGELOG-model-provider-config) | All |
+| FT | `docs/functional-test-spec.md` | — | Functional checklist & QA test cases (v0.7.0) | 00, README |
+| BF | `docs/bugFix/` | — | Bug/issue postmortems (01–04) | FT, modules |
 
-**Total:** ~17,534 lines across 12 design documents + 5 SOP documents.
+**Total:** ~17,534 lines across 12 design documents + 5 SOP documents + functional test spec.
 
 ---
 
@@ -257,6 +259,7 @@ Convention: fenced code blocks with card type as language tag. Standard code blo
 - **...write or modify a bootstrap file** → Read `04` (framework) + existing files in `workspace/`
 - **...build a new plugin** → Read `05` (dev guide) + `02` §6 (SDK contract)
 - **...set up the dev environment** → Read `06` (install/startup) + `README.md`
+- **...run functional QA / write test cases** → Read `docs/functional-test-spec.md`
 - **...add a new RPC method** → Read `02` §4 (protocol) + the relevant module doc (03a/03b/03c)
 - **...understand the config** → Read `02` §9 (build pipeline) + `config/openclaw.json`
 - **...add a cron preset** → Read `03b` §5 (cron integration) + `04` §5 (HEARTBEAT.md)
@@ -326,4 +329,4 @@ Research-Claw operates **entirely local** with a 4-layer defense model:
 
 ---
 
-*Updated: 2026-04-05 | OpenClaw: 2026.3.8 | Protocol: v3 | RPC: 57 WS + 1 HTTP = 58 methods | Tables: 14 + FTS5 | Tools: 28 | Cards: 6 | Hooks: 7 | Indexes: 23 | AGENTS.md: v4.1 | SOUL.md: v2.2*
+*Updated: 2026-06-08 | OpenClaw: 2026.6.1 | Protocol: v3 | RPC: 57 WS + 1 HTTP = 58 methods | Tables: 14 + FTS5 | Tools: 28 | Cards: 6 | Hooks: 7 | Indexes: 23 | AGENTS.md: v4.1 | SOUL.md: v2.2*

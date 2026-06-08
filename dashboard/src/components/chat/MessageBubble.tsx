@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Typography, Image } from 'antd';
+import { Image } from 'antd';
 import {
   CopyOutlined,
   CheckOutlined,
@@ -18,8 +18,6 @@ import { useGatewayStore } from '../../stores/gateway';
 import { sanitizeUserMessage } from '../../utils/sanitize-message';
 import { sanitizeAssistantMessage, sanitizeAssistantRawCopy } from '../../utils/sanitize-assistant-message';
 import CodeBlock from './CodeBlock';
-
-const { Text } = Typography;
 
 interface ImageBlock {
   url: string;
@@ -194,6 +192,40 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
 }
 
+const markdownCodeComponents = {
+  code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'> & { className?: string }) => {
+    const isInline = !className;
+    if (isInline) {
+      return (
+        <code
+          style={{
+            background: 'var(--surface-active)',
+            padding: '2px 4px',
+            borderRadius: 3,
+            fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
+            fontSize: '0.9em',
+          }}
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    }
+    return <CodeBlock className={className}>{children}</CodeBlock>;
+  },
+  pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ color: 'var(--accent-secondary)' }}
+    >
+      {children}
+    </a>
+  ),
+};
+
 interface ActivityLogContentBlock {
   type: 'activity_log';
   title?: string;
@@ -205,7 +237,6 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
   const isUser = message.role === 'user';
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [copied, setCopied] = useState<false | 'visible' | 'raw'>(false);
-  const [hovered, setHovered] = useState(false);
   // Stable ref so callbacks don't depend on the message object identity
   // (streaming messages create a new object every render).
   const messageRef = useRef(message);
@@ -317,60 +348,18 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
         return <ToolOutlined style={{ color: '#a3a3a3' }} />;
       };
       return (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            marginBottom: 16,
-            maxWidth: '85%',
-          }}
-        >
+        <div className="chat-turn chat-turn-system">
           {rows.map((row, idx) => (
-            <details
-              key={`${idx}-${getRowId(row)}`}
-              style={{
-                width: '100%',
-                padding: '9px 12px',
-                marginBottom: 8,
-                borderRadius: 8,
-                border: '1px solid rgba(0,0,0,0.08)',
-                background: 'rgba(0,0,0,0.03)',
-                color: 'var(--text-tertiary)',
-                fontSize: 12,
-                fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-              }}
-            >
-              <summary
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  cursor: 'pointer',
-                }}
-              >
-                <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{'▸'}</span>
-                <span style={{ fontSize: 12, minWidth: 14, display: 'inline-flex', justifyContent: 'center' }}>
+            <details key={`${idx}-${getRowId(row)}`} className="chat-activity-row">
+              <summary>
+                <span style={{ fontSize: 11, minWidth: 10 }}>{'▸'}</span>
+                <span style={{ minWidth: 14, display: 'inline-flex', justifyContent: 'center' }}>
                   {statusIcon(getRowStatus(row))}
                 </span>
                 <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{getRowText(row)}</span>
               </summary>
               {getRowDetail(row) && (
-                <pre
-                  style={{
-                    margin: '8px 0 0 22px',
-                    padding: 8,
-                    borderRadius: 6,
-                    background: 'var(--code-bg, rgba(0,0,0,0.06))',
-                    border: '1px solid rgba(0,0,0,0.1)',
-                    fontSize: 11,
-                    lineHeight: 1.4,
-                    color: 'var(--text-tertiary)',
-                    overflowX: 'auto',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
+                <pre className="chat-activity-detail">
 {safeStringifyDetail(getRowDetail(row))}
                 </pre>
               )}
@@ -381,119 +370,57 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
     }
 
     return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          marginBottom: 16,
-        }}
-      >
-        <Text
-          type="secondary"
-          style={{
-            fontSize: 11,
-            marginBottom: 4,
-            fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-          }}
-        >
-          {t('chat.system')}
-        </Text>
-        <div
-          style={{
-            padding: '10px 14px',
-            borderRadius: 12,
-            border: '1px dashed var(--border, rgba(255, 255, 255, 0.18))',
-            background: 'var(--surface, rgba(255, 255, 255, 0.04))',
-            maxWidth: '85%',
-            fontSize: 13,
-            lineHeight: 1.5,
-            overflow: 'hidden',
-            wordBreak: 'break-word',
-          }}
-          className="markdown-body"
-        >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              code: ({ className, children, ...props }) => {
-                const isInline = !className;
-                if (isInline) {
-                  return (
-                    <code
-                      style={{
-                        background: 'var(--surface-active)',
-                        padding: '2px 4px',
-                        borderRadius: 3,
-                        fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-                        fontSize: '0.9em',
-                      }}
-                      {...props}
-                    >
-                      {children}
-                    </code>
-                  );
-                }
-                return <CodeBlock className={className}>{children}</CodeBlock>;
-              },
-              pre: ({ children }) => <>{children}</>,
-            }}
-          >
-            {text}
-          </ReactMarkdown>
+      <article className="chat-turn chat-turn-system">
+        <div className="chat-turn-panel">
+          <header className="chat-turn-header">
+            <span className="chat-turn-label">{t('chat.system')}</span>
+          </header>
+          <div className="chat-turn-body markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
+              {text}
+            </ReactMarkdown>
+          </div>
         </div>
-      </div>
+      </article>
     );
   }
 
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: isUser ? 'flex-end' : 'flex-start',
-        marginBottom: 16,
-      }}
-    >
-      {/* Role label */}
-      <Text
-        type="secondary"
-        style={{
-          fontSize: 11,
-          marginBottom: 4,
-          fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-        }}
-      >
-        {isUser ? t('chat.you') : t('chat.assistant')}
-      </Text>
+  const turnClass = isUser ? 'chat-turn-user' : 'chat-turn-assistant';
 
-      {/* Message row: bubble + copy button side by side */}
-      <div
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        style={{
-          display: 'flex',
-          flexDirection: isUser ? 'row-reverse' : 'row',
-          alignItems: 'flex-start',
-          gap: 4,
-          maxWidth: '85%',
-        }}
-      >
-        {/* Message body */}
-        <div
-          style={{
-            padding: '10px 14px',
-            borderRadius: isUser ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-            background: isUser ? 'var(--surface-hover)' : 'var(--surface)',
-            border: `1px solid ${isUser ? 'var(--border-hover)' : 'var(--border)'}`,
-            position: 'relative',
-            overflow: 'hidden',
-            minWidth: 0,
-          }}
-        >
-        {/* Attached images */}
+  return (
+    <article className={`chat-turn ${turnClass}`}>
+      <div className="chat-turn-panel">
+        <header className="chat-turn-header">
+          <span className="chat-turn-label">{isUser ? t('chat.you') : t('chat.assistant')}</span>
+          {!isStreaming && text && (
+            <div className="chat-turn-actions">
+              <button
+                type="button"
+                onClick={handleCopy}
+                aria-label={t('code.copy')}
+                className={`chat-turn-action${copied === 'visible' ? ' is-copied' : ''}`}
+                title={copied === 'visible' ? t('code.copied') : t('code.copy')}
+              >
+                {copied === 'visible' ? <CheckOutlined /> : <CopyOutlined />}
+              </button>
+              {!isUser && (
+                <button
+                  type="button"
+                  onClick={handleCopyRaw}
+                  aria-label={t('chat.copyRaw')}
+                  className={`chat-turn-action${copied === 'raw' ? ' is-copied' : ''}`}
+                  title={copied === 'raw' ? t('code.copied') : t('chat.copyRaw')}
+                >
+                  {copied === 'raw' ? <CheckOutlined /> : <CodeOutlined />}
+                </button>
+              )}
+            </div>
+          )}
+        </header>
+
+        <div className="chat-turn-body">
         {images.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: text ? 8 : 0 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: text ? 12 : 0 }}>
             <Image.PreviewGroup>
               {images.map((img, idx) => (
                 <Image
@@ -501,11 +428,12 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
                   src={img.url}
                   alt={img.alt ?? 'Attached image'}
                   style={{
-                    maxWidth: 240,
-                    maxHeight: 240,
-                    borderRadius: 8,
+                    maxWidth: 280,
+                    maxHeight: 280,
+                    borderRadius: 4,
                     objectFit: 'contain',
                     cursor: 'pointer',
+                    border: '1px solid var(--border)',
                   }}
                   fallback="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgZmlsbD0iIzY2NiI+PHRleHQgeD0iMTYiIHk9IjM2IiBmb250LXNpemU9IjEyIj5JbWFnZTwvdGV4dD48L3N2Zz4="
                 />
@@ -514,117 +442,33 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
           </div>
         )}
 
-        {/*
-         * Thinking/reasoning section — rendered BEFORE the main text.
-         * Source: openclaw/ui/src/ui/chat/grouped-render.ts:273-278
-         *   html`<div class="chat-thinking">...</div>`
-         * Source: openclaw/ui/src/styles/chat/text.css:5-14
-         *   .chat-thinking { muted, dashed border, small font }
-         *
-         * OpenClaw renders thinking as always-visible with muted styling.
-         * We add a toggle for collapsed-by-default (improved UX for long thinking).
-         */}
         {thinkingContent && (
-          <div
-            data-testid="thinking-section"
-            style={{
-              marginBottom: 10,
-              padding: '8px 12px',
-              borderRadius: 10,
-              border: '1px dashed rgba(255, 255, 255, 0.18)',
-              background: 'rgba(255, 255, 255, 0.04)',
-              fontSize: 12,
-              lineHeight: 1.4,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                cursor: 'pointer',
-                userSelect: 'none',
-                color: 'var(--muted, #888)',
-                fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-                fontSize: 11,
-                marginBottom: thinkingExpanded ? 6 : 0,
-              }}
+          <div data-testid="thinking-section" className="chat-thinking">
+            <button
+              type="button"
+              className="chat-thinking-toggle"
+              aria-expanded={thinkingExpanded}
               onClick={() => setThinkingExpanded(!thinkingExpanded)}
             >
-              <span
-                style={{
-                  display: 'inline-block',
-                  transform: thinkingExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.15s ease',
-                  marginRight: 6,
-                  fontSize: 10,
-                }}
-              >
-                {'▶'}
-              </span>
+              <span className={`chat-thinking-chevron${thinkingExpanded ? ' is-open' : ''}`}>{'▶'}</span>
               {t('chat.thinkingLabel')}
-            </div>
-            <div
-              style={{
-                display: thinkingExpanded ? 'block' : 'none',
-                color: 'var(--muted, #888)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {thinkingContent}
-            </div>
+            </button>
+            {thinkingExpanded && (
+              <div className="chat-thinking-content">{thinkingContent}</div>
+            )}
           </div>
         )}
 
         {isUser ? (
-          text ? <Text style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 14, lineHeight: 1.6 }}>{text}</Text> : null
+          text ? <div>{text}</div> : null
         ) : (
-          <div
-            style={{ fontSize: 14, lineHeight: 1.6, overflow: 'hidden', wordBreak: 'break-word' }}
-            className="markdown-body"
-          >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code: ({ className, children, ...props }) => {
-                  const isInline = !className;
-                  if (isInline) {
-                    return (
-                      <code
-                        style={{
-                          background: 'var(--surface-active)',
-                          padding: '2px 4px',
-                          borderRadius: 3,
-                          fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-                          fontSize: '0.9em',
-                        }}
-                        {...props}
-                      >
-                        {children}
-                      </code>
-                    );
-                  }
-                  return <CodeBlock className={className}>{children}</CodeBlock>;
-                },
-                pre: ({ children }) => <>{children}</>,
-                a: ({ href, children }) => (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--accent-secondary)' }}
-                  >
-                    {children}
-                  </a>
-                ),
-              }}
-            >
+          <div className="markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
               {text}
             </ReactMarkdown>
           </div>
         )}
 
-        {/* Streaming cursor */}
         {isStreaming && (
           <span
             style={{
@@ -638,71 +482,8 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
             }}
           />
         )}
-        </div>
-
-        {/* Action buttons — outside bubble, appear on row hover */}
-        {!isStreaming && text && (
-          <div
-            style={{
-              visibility: hovered ? 'visible' : 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-              flexShrink: 0,
-              marginTop: 2,
-            }}
-          >
-            {/* Copy visible text */}
-            <button
-              onClick={handleCopy}
-              aria-label={t('code.copy')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 24,
-                height: 24,
-                padding: 0,
-                border: 'none',
-                borderRadius: 4,
-                background: 'transparent',
-                color: copied === 'visible' ? '#22C55E' : 'var(--text-tertiary)',
-                cursor: 'pointer',
-                fontSize: 13,
-                transition: 'color 0.15s',
-              }}
-              title={copied === 'visible' ? t('code.copied') : t('code.copy')}
-            >
-              {copied === 'visible' ? <CheckOutlined /> : <CopyOutlined />}
-            </button>
-            {/* Copy raw source (thinking + markdown) — assistant only */}
-            {!isUser && (
-              <button
-                onClick={handleCopyRaw}
-                aria-label={t('chat.copyRaw')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 24,
-                  height: 24,
-                  padding: 0,
-                  border: 'none',
-                  borderRadius: 4,
-                  background: 'transparent',
-                  color: copied === 'raw' ? '#22C55E' : 'var(--text-tertiary)',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  transition: 'color 0.15s',
-                }}
-                title={copied === 'raw' ? t('code.copied') : t('chat.copyRaw')}
-              >
-                {copied === 'raw' ? <CheckOutlined /> : <CodeOutlined />}
-              </button>
-            )}
-          </div>
-        )}
       </div>
-    </div>
+      </div>
+    </article>
   );
 }

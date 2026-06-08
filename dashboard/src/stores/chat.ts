@@ -4,19 +4,28 @@ import { useGatewayStore } from './gateway';
 import { useLibraryStore } from './library';
 import { useTasksStore } from './tasks';
 import { useToolStreamStore } from './tool-stream';
+import { useTaskFlowStore } from './task-flow';
 import { useSessionsStore } from './sessions';
 import { useCronStore } from './cron';
 import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
-import { primaryModelSupportsVision, hasImageModelConfigured } from './config';
+import { primaryModelSupportsVision, hasImageModelConfigured, useConfigStore } from './config';
+import { syncSystemPromptAppendToGateway } from '../utils/sync-system-prompt-append';
 import i18n from '../i18n';
 import { sanitizeUserMessage, CRON_REMINDER_RE } from '../utils/sanitize-message';
 import { sanitizeAssistantMessage } from '../utils/sanitize-assistant-message';
 import { parseSlashCommand, executeSlashCommand } from '../utils/slash-commands';
+import {
+  detectStagedWritingIntent,
+  extractStagedWritingSourcePaths,
+  isExplicitStagedWritingRestart,
+} from '../utils/staged-writing-detect';
+import { isStagedWritingJobForSession } from '../utils/staged-writing-run';
+import { useStagedWritingStore } from './staged-writing';
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 
-import { normalizeSessionKey } from '../utils/session-key';
+import { normalizeSessionKey, toGatewaySessionKey } from '../utils/session-key';
 
 /**
  * Debounce timer for gap-triggered history reloads.
@@ -58,6 +67,62 @@ const RECONNECT_STALE_MS = 15_000;
 /** Max age (ms) for a pending tool with no events before watchdog treats it as hung. */
 const WATCHDOG_TOOL_STALE_MS = 120_000;
 
+const CONTEXT_OVERFLOW_RE = /context overflow|prompt too large|too large for the model/i;
+
+type AgentFailureData = {
+  phase?: string;
+  error?: string;
+  reason?: string;
+  code?: string;
+  provider?: string;
+  model?: string;
+  suggestion?: string;
+  capability?: string;
+};
+
+function formatRunFailureForUser(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return i18n.t('chat.runEndedNoOutput');
+  if (CONTEXT_OVERFLOW_RE.test(trimmed)) return i18n.t('chat.contextOverflow');
+  if (trimmed.startsWith('⚠️') || trimmed.startsWith('Error:')) return trimmed;
+  return trimmed;
+}
+
+function formatStructuredRunFailureForUser(data: AgentFailureData): string {
+  const base = formatRunFailureForUser(String(data.reason ?? data.error ?? ''));
+  const details: string[] = [];
+  if (data.provider || data.model) {
+    details.push([data.provider, data.model].filter(Boolean).join('/'));
+  }
+  if (data.code) details.push(data.code);
+
+  const lines = [base];
+  if (details.length > 0) lines.push(`${i18n.t('chat.failureDetails')}${details.join(' · ')}`);
+  if (data.suggestion?.trim()) lines.push(`${i18n.t('chat.failureSuggestion')}${data.suggestion.trim()}`);
+  return lines.join('\n');
+}
+
+function detectRunEndedWithoutReply(messages: ChatMessage[]): boolean {
+  if (messages.length === 0) return false;
+  const last = messages[messages.length - 1];
+  return last.role === 'user';
+}
+
+function clearActiveRunState(): Pick<
+  ChatState,
+  'streaming' | 'compacting' | 'streamText' | 'runId' | '_streamStartedAt' | '_lastDeltaAt' | '_reconnectedAt'
+> {
+  return {
+    streaming: false,
+    compacting: false,
+    streamText: null,
+    runId: null,
+    _streamStartedAt: null,
+    _lastDeltaAt: null,
+    _reconnectedAt: null,
+  };
+}
+
 function stopStaleStreamWatchdog() {
   if (_staleStreamWatchdog) {
     clearInterval(_staleStreamWatchdog);
@@ -73,6 +138,8 @@ function startStaleStreamWatchdog(get: () => ChatState) {
       stopStaleStreamWatchdog();
       return;
     }
+    // Context compaction can run for several minutes with no chat deltas.
+    if (s.compacting) return;
     const lastActivity = s._lastDeltaAt ?? s._streamStartedAt;
     if (!lastActivity) return;
 
@@ -91,15 +158,25 @@ function startStaleStreamWatchdog(get: () => ChatState) {
       }
 
       stopStaleStreamWatchdog();
+      const staleRunId = s.runId;
       console.log(`[Chat] Stale streaming detected (${Math.round(gap / 1000)}s since last activity, reconnect=${!!s._reconnectedAt}) — recovering via loadHistory`);
-      useChatStore.setState({
-        streaming: false,
-        streamText: null,
-        runId: null,
-        _streamStartedAt: null, _lastDeltaAt: null,
-        _reconnectedAt: null,
+      useTaskFlowStore.getState().endRun(staleRunId, 'error');
+      useChatStore.setState(clearActiveRunState());
+      void useChatStore.getState().loadHistory().then(() => {
+        if (detectRunEndedWithoutReply(useChatStore.getState().messages)) {
+          useChatStore.setState({ lastError: i18n.t('chat.runEndedNoOutput') });
+        } else {
+          const message = i18n.t('chat.runStoppedAfterStaleStream');
+          useChatStore.setState({ lastError: message });
+          useUiStore.getState().addNotification({
+            type: 'error',
+            title: i18n.t('chat.runIssueNotificationTitle'),
+            body: message,
+            dedupKey: `chat-stale-stream:${s.sessionKey}:${staleRunId ?? 'unknown'}`,
+            targetSessionKey: s.sessionKey,
+          });
+        }
       });
-      useChatStore.getState().loadHistory();
     }
   }, STALE_WATCHDOG_CHECK_MS);
 }
@@ -110,6 +187,9 @@ function startStaleStreamWatchdog(get: () => ChatState) {
  * don't vanish when the gateway has queued them in-memory (collect mode).
  */
 const PENDING_MSGS_STORAGE_KEY = 'rc-pending-user-msgs';
+/** Dashboard-only messages (staged writing, etc.) — not in gateway transcript. */
+const LOCAL_MSGS_STORAGE_KEY = 'rc-local-chat-msgs-v2';
+const LEGACY_LOCAL_MSGS_STORAGE_KEY = 'rc-local-chat-msgs';
 const PENDING_EXPIRY_MS = 3 * 60 * 1000; // 3 min auto-expiry
 
 function savePendingMsgs(msgs: ChatMessage[]): void {
@@ -131,6 +211,69 @@ function loadPendingMsgs(): ChatMessage[] {
     const now = Date.now();
     return parsed.filter((m) => m.timestamp && (now - m.timestamp) < PENDING_EXPIRY_MS);
   } catch { return []; }
+}
+
+function saveLocalMsgs(sessionKey: string, msgs: ChatMessage[]): void {
+  try {
+    const raw = localStorage.getItem(LOCAL_MSGS_STORAGE_KEY);
+    const bySession = raw ? JSON.parse(raw) as Record<string, ChatMessage[]> : {};
+    const normalizedKey = normalizeSessionKey(sessionKey) || 'main';
+    if (msgs.length === 0) delete bySession[normalizedKey];
+    else bySession[normalizedKey] = msgs;
+    if (Object.keys(bySession).length === 0) localStorage.removeItem(LOCAL_MSGS_STORAGE_KEY);
+    else localStorage.setItem(LOCAL_MSGS_STORAGE_KEY, JSON.stringify(bySession));
+  } catch { /* non-fatal */ }
+}
+
+function loadLocalMsgs(sessionKey: string): ChatMessage[] {
+  try {
+    const normalizedKey = normalizeSessionKey(sessionKey) || 'main';
+    const raw = localStorage.getItem(LOCAL_MSGS_STORAGE_KEY);
+    let messages = raw
+      ? (JSON.parse(raw) as Record<string, ChatMessage[]>)[normalizedKey] ?? []
+      : [];
+
+    // One-time migration for dashboard versions that stored one global list per tab.
+    if (messages.length === 0) {
+      const legacyRaw = sessionStorage.getItem(LEGACY_LOCAL_MSGS_STORAGE_KEY);
+      if (legacyRaw) {
+        messages = JSON.parse(legacyRaw) as ChatMessage[];
+        sessionStorage.removeItem(LEGACY_LOCAL_MSGS_STORAGE_KEY);
+        saveLocalMsgs(normalizedKey, messages);
+      }
+    }
+
+    return messages.filter((message) => {
+      if (message.role !== 'assistant') return true;
+      const text = message.text?.trim() ?? '';
+      return !/^\*\*(?:分步写作|Staged writing)\*\*\s*·/i.test(text);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function localMessageExists(transcript: ChatMessage[], msg: ChatMessage): boolean {
+  const text = msg.text?.trim() ?? '';
+  const ts = msg.timestamp ?? 0;
+  return transcript.some((m) =>
+    m.role === msg.role
+    && (m.text?.trim() ?? '') === text
+    && Math.abs((m.timestamp ?? 0) - ts) < 5000,
+  );
+}
+
+function mergeLocalMessages(transcript: ChatMessage[], local: ChatMessage[]): ChatMessage[] {
+  if (local.length === 0) return transcript;
+  const merged = [...transcript];
+  for (const msg of local) {
+    if (localMessageExists(merged, msg)) continue;
+    const ts = msg.timestamp ?? 0;
+    const insertIdx = merged.findIndex((m) => (m.timestamp ?? 0) > ts);
+    if (insertIdx === -1) merged.push(msg);
+    else merged.splice(insertIdx, 0, msg);
+  }
+  return merged;
 }
 
 function isSilentReply(text: string | undefined): boolean {
@@ -243,10 +386,146 @@ function extractText(msg: ChatMessage): string {
   return raw;
 }
 
+function buildStagedWritingContext(messages: ChatMessage[]): string {
+  const lines = messages
+    .slice(-12)
+    .map((message) => {
+      const text = extractText(message).trim();
+      if (!text) return '';
+      const role = message.role === 'user' ? '用户' : message.role === 'assistant' ? '助手' : '系统';
+      return `${role}：${text}`;
+    })
+    .filter(Boolean);
+  return lines.join('\n\n').slice(-12_000);
+}
+
+/** Snapshot of the last user send — used to restore the input after abort. */
+export interface ChatInputRestore {
+  text: string;
+  attachments: ChatAttachment[];
+}
+
+interface LastSentDraft extends ChatInputRestore {
+  runId: string;
+}
+
+function cloneAttachments(attachments?: ChatAttachment[]): ChatAttachment[] {
+  return attachments?.map((a) => ({ ...a })) ?? [];
+}
+
+function removeLastUserMessageForDraft(messages: ChatMessage[], draftText: string): ChatMessage[] {
+  const trimmed = draftText.trim();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'user') continue;
+    const t = m.text ?? '';
+    if (t === draftText || t.trim() === trimmed) {
+      return [...messages.slice(0, i), ...messages.slice(i + 1)];
+    }
+  }
+  return messages;
+}
+
+/** Drop user turns the user aborted — gateway transcript still keeps them until compaction. */
+function filterAbortedUserMessagesFromTranscript(
+  messages: ChatMessage[],
+  suppressCounts: Record<string, number>,
+): { messages: ChatMessage[]; suppressCounts: Record<string, number> } {
+  const next = { ...suppressCounts };
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    if (m.role !== 'user') {
+      out.push(m);
+      continue;
+    }
+    const key = (m.text ?? '').trim();
+    if (key && (next[key] ?? 0) > 0) {
+      next[key] -= 1;
+      continue;
+    }
+    out.push(m);
+  }
+  return { messages: out, suppressCounts: next };
+}
+
+function isEmptyAbortedAssistantMessage(message: ChatMessage): boolean {
+  if (message.role !== 'assistant') return false;
+  const stopReason = message.stopReason;
+  const errorCode = (message as { errorCode?: string }).errorCode;
+  const errorMessage = (message as { errorMessage?: string }).errorMessage ?? '';
+  const aborted =
+    stopReason === 'aborted'
+    || errorCode === '20'
+    || /aborted/i.test(errorMessage);
+  return aborted && extractText(message).trim().length === 0;
+}
+
+function removeEmptyAbortedTurns(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const current = messages[i];
+    const next = messages[i + 1];
+    if (
+      current?.role === 'user'
+      && next
+      && isEmptyAbortedAssistantMessage(next)
+    ) {
+      // The dashboard removes optimistic user input when a run is aborted.
+      // If the gateway transcript later reloads the empty aborted turn, keep
+      // the UI consistent by dropping both the cancelled user and empty reply.
+      i += 1;
+      continue;
+    }
+    out.push(current);
+  }
+  return out;
+}
+
+function bumpAbortedUserSuppress(
+  counts: Record<string, number>,
+  draftText: string,
+): Record<string, number> {
+  const key = draftText.trim();
+  if (!key) return counts;
+  return { ...counts, [key]: (counts[key] ?? 0) + 1 };
+}
+
+function pruneAbortedUserSuppress(counts: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, n] of Object.entries(counts)) {
+    if (n > 0) out[key] = n;
+  }
+  return out;
+}
+
+/** Build store patch to restore input and drop the aborted run's optimistic user message. */
+function buildAbortInputRestorePatch(
+  state: Pick<ChatState, 'messages' | '_pendingUserMsgs' | '_lastSentDraft' | 'inputRestoreSeq' | '_abortedUserSuppressCounts'>,
+  activeRunId?: string | null,
+): Partial<ChatState> | null {
+  const draft = state._lastSentDraft;
+  if (!draft) return null;
+  if (activeRunId && draft.runId !== activeRunId) return null;
+
+  const trimmed = draft.text.trim();
+  return {
+    messages: removeLastUserMessageForDraft(state.messages, draft.text),
+    _pendingUserMsgs: state._pendingUserMsgs.filter(
+      (m) => m.text !== draft.text && m.text?.trim() !== trimmed,
+    ),
+    inputRestore: { text: draft.text, attachments: draft.attachments },
+    inputRestoreSeq: state.inputRestoreSeq + 1,
+    _lastSentDraft: null,
+    _abortedUserSuppressCounts: bumpAbortedUserSuppress(state._abortedUserSuppressCounts, draft.text),
+  };
+}
+
 interface ChatState {
   messages: ChatMessage[];
   sending: boolean;
   streaming: boolean;
+  /** True while gateway embedded_run is compacting context (agent stream: compaction). */
+  compacting: boolean;
   streamText: string | null;
   runId: string | null;
   sessionKey: string;
@@ -264,6 +543,8 @@ interface ChatState {
    * Auto-expires after 3 minutes to prevent stale messages from sticking.
    */
   _pendingUserMsgs: ChatMessage[];
+  /** Local-only chat lines (staged-writing progress, etc.) — survive loadHistory(). */
+  _localOnlyMsgs: ChatMessage[];
   /**
    * Timestamp when streaming started (RPC ACK received). Used to prevent
    * false-positive queue-drain detection from quick heartbeat/cron finals.
@@ -276,12 +557,27 @@ interface ChatState {
    *  When set, the stale-stream watchdog uses a shorter timeout (RECONNECT_STALE_MS)
    *  to speed up recovery. Cleared on first delta/final/aborted/error after reconnect. */
   _reconnectedAt: number | null;
+  /** Last user send for the active run — cleared on final or after abort restore. */
+  _lastSentDraft: LastSentDraft | null;
+  /** Per-text suppress counts — aborted sends stay out after loadHistory(). */
+  _abortedUserSuppressCounts: Record<string, number>;
+  /** Set on abort; MessageInput consumes and clears via clearInputRestore(). */
+  inputRestore: ChatInputRestore | null;
+  /** Bumped on each restore so MessageInput re-applies even if text is unchanged. */
+  inputRestoreSeq: number;
 
-  send: (text: string, attachments?: ChatAttachment[]) => Promise<void>;
+  send: (text: string, attachments?: ChatAttachment[], options?: { displayText?: string }) => Promise<void>;
+  /** Append a message that never goes to gateway — kept across loadHistory(). */
+  appendLocalMessage: (message: ChatMessage) => void;
   abort: () => void;
+  clearInputRestore: () => void;
   loadHistory: () => Promise<void>;
   loadSessionUsage: () => Promise<void>;
   handleChatEvent: (event: ChatStreamEvent) => void;
+  /** Agent event stream: lifecycle/error failures surfaced without chat.final body */
+  handleAgentFailureEvent: (payload: unknown) => void;
+  /** Agent event stream: { stream: "compaction", data: { phase: "start" | "end" } } */
+  handleCompactionAgentEvent: (payload: unknown) => void;
   /** Called by gateway onGap — debounced reload when idle, deferred when streaming. */
   onGapDetected: () => void;
   setSessionKey: (key: string) => void;
@@ -291,13 +587,15 @@ interface ChatState {
 
 // Restore pending messages from sessionStorage on module load (survives F5).
 const _restoredPendingMsgs = loadPendingMsgs();
+const _restoredLocalMsgs = loadLocalMsgs('main');
 
 export const useChatStore = create<ChatState>()((set, get) => ({
   // Initialize messages with restored pending so they're visible immediately
   // after F5, before WS reconnects and loadHistory() runs.
-  messages: _restoredPendingMsgs,
+  messages: mergeLocalMessages(_restoredPendingMsgs, _restoredLocalMsgs),
   sending: false,
   streaming: false,
+  compacting: false,
   streamText: null,
   runId: null,
   sessionKey: 'main',
@@ -306,7 +604,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   tokensOut: 0,
   _pendingGapReload: false,
   _pendingUserMsgs: _restoredPendingMsgs,
+  _localOnlyMsgs: _restoredLocalMsgs,
   _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
+  _lastSentDraft: null,
+  inputRestore: null,
+  inputRestoreSeq: 0,
+  _abortedUserSuppressCounts: {},
+
+  clearInputRestore: () => set({ inputRestore: null }),
 
   onGapDetected: () => {
     if (!get().streaming && !get().sending) {
@@ -326,7 +631,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
   },
 
-  send: async (text: string, attachments?: ChatAttachment[]) => {
+  send: async (text: string, attachments?: ChatAttachment[], options?: { displayText?: string }) => {
     const client = useGatewayStore.getState().client;
     if (!client || !client.isConnected) {
       set({ lastError: i18n.t('chat.notConnected') });
@@ -418,13 +723,110 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       return; // Don't send to agent
     }
 
+    const displayText = options?.displayText?.trim() || text;
+
+    // Built-in staged writing: full-paper requests run as Dashboard-orchestrated cron steps
+    // (file-based completion) instead of one long chat agent run.
+    if (!hasAttachments) {
+      const writingIntent = detectStagedWritingIntent(trimmed);
+      if (writingIntent) {
+        const staged = useStagedWritingStore.getState();
+        const currentSessionKey = get().sessionKey;
+        const sameSessionJob = isStagedWritingJobForSession(staged.job, currentSessionKey)
+          ? staged.job
+          : null;
+        const shouldBypassCompletedWritingJob =
+          writingIntent.mode === 'start'
+          && sameSessionJob?.status === 'completed'
+          && !isExplicitStagedWritingRestart(trimmed);
+
+        if (shouldBypassCompletedWritingJob) {
+          // A completed staged-writing job remains in the UI so users can open
+          // generated files. Do not let that completed workflow hijack later
+          // ordinary prompts unless the user explicitly asks to restart it.
+        } else {
+          const userMessage: ChatMessage = {
+            role: 'user',
+            text: displayText,
+            timestamp: Date.now(),
+          };
+          get().appendLocalMessage(userMessage);
+          set({ lastError: null });
+
+          if (staged.job && !isStagedWritingJobForSession(staged.job, currentSessionKey)) {
+            if (writingIntent.mode === 'scan' || writingIntent.mode === 'resume') {
+              set({ lastError: i18n.t('stagedWriting.chatWrongSession') });
+              return;
+            }
+            if (staged.job.status === 'running') {
+              set({ lastError: i18n.t('stagedWriting.chatRunningOtherSession') });
+              return;
+            }
+          }
+
+          if (writingIntent.mode === 'scan') {
+            if (!staged.job) {
+              set({ lastError: i18n.t('stagedWriting.chatNoJob') });
+              return;
+            }
+            await staged.syncStageFiles();
+            return;
+          }
+
+          if (writingIntent.mode === 'resume') {
+            if (!staged.job) {
+              set({ lastError: i18n.t('stagedWriting.chatNoJob') });
+              return;
+            }
+            if (staged.job.status === 'running') {
+              set({ lastError: i18n.t('stagedWriting.chatAlreadyRunning') });
+              return;
+            }
+            const ok = await staged.resumeJob();
+            if (!ok) {
+              const afterJob = useStagedWritingStore.getState().job;
+              set({ lastError: afterJob?.lastError ?? i18n.t('stagedWriting.chatNoJob') });
+            }
+            return;
+          }
+
+          if (staged.job?.status === 'running') {
+            set({ lastError: i18n.t('stagedWriting.chatAlreadyRunning') });
+            return;
+          }
+
+          const contextText = buildStagedWritingContext(get().messages);
+          const contextualSourcePaths = extractStagedWritingSourcePaths(contextText);
+          const ok = await staged.startJobFromChat({
+            sessionKey: currentSessionKey,
+            topic: writingIntent.topic,
+            slug: writingIntent.slug,
+            sourcePaths: [...new Set([...writingIntent.sourcePaths, ...contextualSourcePaths])],
+            venue: writingIntent.venue,
+            contextText,
+          });
+          if (!ok) {
+            const job = useStagedWritingStore.getState().job;
+            set({ lastError: job?.lastError ?? i18n.t('chat.sendFailed') });
+          }
+          return;
+        }
+      }
+    }
+
+    // Match OC pattern: generate runId locally and set BEFORE the RPC call.
+    // OC uses the idempotencyKey as chatRunId (chat.ts:194-195) so delta events
+    // can match immediately, with no timing gap between RPC send and response.
+    // Source: openclaw/ui/src/ui/controllers/chat.ts:192-196
+    const localRunId = crypto.randomUUID();
+
     // Build user message — include content blocks for display when attachments present
     const userMessage: ChatMessage = {
       role: 'user',
-      text,
+      text: displayText,
       content: attachments?.length
         ? [
-            ...(text ? [{ type: 'text' as const, text }] : []),
+            ...(displayText ? [{ type: 'text' as const, text: displayText }] : []),
             ...attachments.map((att) => ({
               type: 'image' as const,
               source: { type: 'base64', media_type: att.mimeType, data: att.dataUrl },
@@ -432,13 +834,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           ]
         : undefined,
       timestamp: Date.now(),
+      idempotencyKey: `${localRunId}:user`,
     };
-
-    // Match OC pattern: generate runId locally and set BEFORE the RPC call.
-    // OC uses the idempotencyKey as chatRunId (chat.ts:194-195) so delta events
-    // can match immediately, with no timing gap between RPC send and response.
-    // Source: openclaw/ui/src/ui/controllers/chat.ts:192-196
-    const localRunId = crypto.randomUUID();
 
     set((s) => ({
       messages: [...s.messages, userMessage],
@@ -447,7 +844,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       streamText: null,
       runId: localRunId,
       _pendingUserMsgs: [...s._pendingUserMsgs, userMessage],
+      _lastSentDraft: {
+        text: displayText,
+        attachments: cloneAttachments(attachments),
+        runId: localRunId,
+      },
+      inputRestore: null,
     }));
+    useTaskFlowStore.getState().startRun(localRunId, get().sessionKey, {
+      userTimestamp: userMessage.timestamp,
+      userText: displayText,
+      idempotencyKey: userMessage.idempotencyKey,
+    });
 
     try {
       // Convert attachments to RPC format
@@ -476,7 +884,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       //   - Vision primary: also send as attachments (inline to model)
       //   - Text-only primary: only send file paths (agent uses /image tool)
       //
-      // Workspace paths are embedded as [rc-image:uploads/xxx.png] markers
+      // Workspace paths are embedded as [rc-image:sources/xxx.png] markers
       // in the message text, which MessageBubble can detect and render
       // after history reload.
       // -----------------------------------------------------------------
@@ -488,10 +896,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // The gateway would silently drop attachments AND there's no /image tool
       // fallback. Block the send with a clear error instead of a cryptic 400.
       if (rpcAttachments?.length && !visionCapable && !hasImageModelConfigured()) {
-        set({
+        set((s) => ({
+          ...clearActiveRunState(),
+          ...(buildAbortInputRestorePatch(s, localRunId) ?? { _pendingUserMsgs: [] }),
           sending: false,
           lastError: i18n.t('chat.imageNotSupported'),
-        });
+        }));
+        useTaskFlowStore.getState().endRun(localRunId, 'error');
         return;
       }
 
@@ -500,7 +911,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         for (const att of rpcAttachments) {
           const ts = Date.now();
           const safeName = att.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-          const wsPath = `uploads/${ts}-${safeName}`;
+          const wsPath = `sources/${ts}-${safeName}`;
           try {
             await client.request('rc.ws.saveImage', {
               path: wsPath,
@@ -534,6 +945,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         }
       }
 
+      void syncSystemPromptAppendToGateway(useConfigStore.getState().systemPromptAppend);
+
       await client.request('chat.send', {
         message: finalMessage,
         sessionKey: get().sessionKey,
@@ -553,11 +966,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       set({
         sending: false,
         streaming: false,
+        compacting: false,
         streamText: null,
         runId: null,
         _streamStartedAt: null, _lastDeltaAt: null,
         lastError: err instanceof Error ? err.message : i18n.t('chat.sendFailed'),
       });
+      useTaskFlowStore.getState().endRun(localRunId, 'error');
     }
   },
 
@@ -565,6 +980,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     stopStaleStreamWatchdog();
     const client = useGatewayStore.getState().client;
     const { runId, sessionKey } = get();
+
+    // Restore input immediately on stop — do not wait for gateway 'aborted' event
+    // (it may be delayed, missing, or carry a mismatched runId).
+    const optimisticRestore = buildAbortInputRestorePatch(get(), runId ?? undefined);
 
     // Send abort RPC — with runId if available, session-level fallback if not.
     // Matches OC abortChatRun (chat.ts:250-253):
@@ -579,29 +998,53 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // If no runId, this is an orphan streaming state (e.g. after session switch
     // or reconnect). Clean up immediately — no server event will come.
     if (!runId) {
-      set({ streaming: false, streamText: null, runId: null, _pendingUserMsgs: [], _streamStartedAt: null, _lastDeltaAt: null });
+      set((s) => ({
+        streaming: false,
+        compacting: false,
+        streamText: null,
+        runId: null,
+        _pendingUserMsgs: [],
+        _streamStartedAt: null,
+        _lastDeltaAt: null,
+        ...(optimisticRestore ?? {}),
+      }));
       return;
     }
 
-    // Safety: if server doesn't send 'aborted' event within 3s, force-clear streaming state.
-    // Normal case: server responds → handleChatEvent clears state → runId is null → timeout is a no-op.
-    // OC also does NOT clear state optimistically — it waits for the server's 'aborted' event.
+    // Keep streamText until gateway 'aborted' (or timeout) so partial reply can be saved.
+    set((s) => ({
+      streaming: false,
+      compacting: false,
+      ...(optimisticRestore ?? {}),
+    }));
+
+    // Safety: if server doesn't send 'aborted' event within 3s, force-clear runId.
     const abortedRunId = runId;
+    useTaskFlowStore.getState().endRun(abortedRunId, 'clear');
     setTimeout(() => {
       if (get().runId === abortedRunId) {
         console.warn('[Chat] Abort timeout — force-clearing streaming state');
         const partialText = get().streamText;
         if (partialText) {
           set((s) => ({
-            messages: [...s.messages, { role: 'assistant' as const, text: partialText, timestamp: Date.now() }],
-            streaming: false,
+            messages: [
+              ...s.messages,
+              { role: 'assistant' as const, text: partialText, timestamp: Date.now() },
+            ],
             streamText: null,
             runId: null,
+            _streamStartedAt: null,
+            _lastDeltaAt: null,
             _pendingUserMsgs: [],
-            _streamStartedAt: null, _lastDeltaAt: null,
           }));
         } else {
-          set({ streaming: false, streamText: null, runId: null, _pendingUserMsgs: [], _streamStartedAt: null, _lastDeltaAt: null });
+          set({
+            streamText: null,
+            runId: null,
+            _streamStartedAt: null,
+            _lastDeltaAt: null,
+            _pendingUserMsgs: [],
+          });
         }
       }
     }, 3000);
@@ -625,7 +1068,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // Strip system-injected context and channel relay attribution from user messages.
       // Uses unified sanitizeUserMessage() which handles all known injection patterns:
       // [Research-Claw] blocks, System: lines, channel attributions (ou_xxx:, [System:], etc.)
-      const cleaned = visible
+      const cleaned = removeEmptyAbortedTurns(visible
         .map((m) => {
           if (m.role !== 'user') return m;
           const rawText = extractText(m);
@@ -635,7 +1078,17 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           // Only set text override; keep original content for image rendering
           return { ...m, text: stripped };
         })
-        .filter(Boolean) as ChatMessage[];
+        .filter(Boolean) as ChatMessage[]);
+
+      const filtered = filterAbortedUserMessagesFromTranscript(
+        cleaned,
+        get()._abortedUserSuppressCounts,
+      );
+      const cleanedAfterAbort = filtered.messages;
+      const prunedSuppress = pruneAbortedUserSuppress(filtered.suppressCounts);
+      if (prunedSuppress !== get()._abortedUserSuppressCounts) {
+        set({ _abortedUserSuppressCounts: prunedSuppress });
+      }
 
       // Fix: Preserve optimistic user messages when the gateway has queued them
       // (collect mode) but hasn't persisted them to the transcript yet.
@@ -653,7 +1106,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // A pending message is "resolved" if the transcript contains a user message
         // whose text includes the pending text (covers both direct match and
         // collect-mode combined format "[Queued messages...]\nQueued #1\n你好").
-        const transcriptUserTexts = cleaned
+        const transcriptUserTexts = cleanedAfterAbort
           .filter((m) => m.role === 'user')
           .map((m) => m.text ?? '');
         const stillPending = activePending.filter((p) => {
@@ -665,23 +1118,23 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         if (stillPending.length > 0) {
           // Insert pending messages at their chronological positions in the transcript.
           // This keeps the chat order correct (user msg above its response).
-          const merged = [...cleaned];
-          for (const p of stillPending) {
-            const pt = p.timestamp ?? 0;
-            const insertIdx = merged.findIndex((m) => (m.timestamp ?? 0) > pt);
-            if (insertIdx === -1) {
-              merged.push(p);
-            } else {
-              merged.splice(insertIdx, 0, p);
-            }
-          }
+          const merged = mergeLocalMessages(
+            mergeLocalMessages(cleanedAfterAbort, stillPending),
+            get()._localOnlyMsgs,
+          );
           set({ messages: merged, _pendingUserMsgs: stillPending });
         } else {
           // All pending messages now in transcript — clear
-          set({ messages: cleaned, _pendingUserMsgs: [] });
+          set({
+            messages: mergeLocalMessages(cleanedAfterAbort, get()._localOnlyMsgs),
+            _pendingUserMsgs: [],
+          });
         }
       } else {
-        set({ messages: cleaned, _pendingUserMsgs: [] });
+        set({
+          messages: mergeLocalMessages(cleanedAfterAbort, get()._localOnlyMsgs),
+          _pendingUserMsgs: [],
+        });
       }
     } catch {
       // History load failure is non-fatal
@@ -693,12 +1146,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     if (!client || !client.isConnected) return;
 
     try {
-      // Fetch aggregate token usage across all sessions (last 30 days default).
-      // We deliberately omit `key` to avoid session key format mismatch:
-      // the chat store uses 'main' but the gateway stores 'agent:main:main'.
+      const sessionKey = get().sessionKey;
       const result = await client.request<{
         totals: { input: number; output: number };
-      }>('sessions.usage', {});
+      }>('sessions.usage', {
+        key: toGatewaySessionKey(sessionKey),
+      });
+
+      if (get().sessionKey !== sessionKey) return;
 
       console.log('[Chat] sessions.usage totals:', result.totals);
       set({
@@ -708,6 +1163,76 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     } catch (err) {
       console.warn('[Chat] loadSessionUsage failed:', err);
     }
+  },
+
+  handleCompactionAgentEvent: (payload: unknown) => {
+    const evt = payload as {
+      runId?: string;
+      sessionKey?: string;
+      stream?: string;
+      data?: { phase?: string };
+    };
+    if (evt.stream !== 'compaction' || !evt.data?.phase) return;
+
+    if (
+      evt.sessionKey
+      && normalizeSessionKey(evt.sessionKey) !== normalizeSessionKey(get().sessionKey)
+    ) {
+      return;
+    }
+
+    const { runId } = get();
+    if (evt.runId && runId && evt.runId !== runId) return;
+
+    if (evt.data.phase === 'start') {
+      set({ compacting: true });
+      useTaskFlowStore.getState().handleCompaction(true);
+      return;
+    }
+    if (evt.data.phase === 'end') {
+      set({ compacting: false });
+      useTaskFlowStore.getState().handleCompaction(false);
+    }
+  },
+
+  handleAgentFailureEvent: (payload: unknown) => {
+    const evt = payload as {
+      runId?: string;
+      sessionKey?: string;
+      stream?: string;
+      data?: AgentFailureData;
+    };
+
+    if (evt.sessionKey && normalizeSessionKey(evt.sessionKey) !== normalizeSessionKey(get().sessionKey)) {
+      return;
+    }
+
+    const isStructuredOperationalError = Boolean(
+      evt.stream === 'error'
+      && (evt.data?.code || evt.data?.suggestion || evt.data?.capability),
+    );
+    const { runId, streaming, sending } = get();
+    if (!streaming && !sending && !runId && !isStructuredOperationalError) return;
+    // Gateway embedded runs may use an internal runId that differs from our
+    // chat.send idempotencyKey — still surface failures for the active session.
+    if (evt.runId && runId && evt.runId !== runId && !streaming && !sending) return;
+
+    let failureText: string | null = null;
+    if (evt.stream === 'lifecycle' && evt.data?.phase === 'error' && evt.data.error) {
+      failureText = formatStructuredRunFailureForUser(evt.data);
+    } else if (evt.stream === 'error' && evt.data?.reason) {
+      failureText = formatStructuredRunFailureForUser(evt.data);
+    }
+    if (!failureText) return;
+
+    stopStaleStreamWatchdog();
+    useTaskFlowStore.getState().endRun(runId, 'error');
+    set({
+      ...clearActiveRunState(),
+      sending: false,
+      lastError: failureText,
+    });
+    void get().loadHistory();
   },
 
   handleChatEvent: (event: ChatStreamEvent) => {
@@ -757,9 +1282,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // Match OpenClaw native UI: REPLACE stream text, taking the longer value.
         set((s) => {
           const current = s.streamText ?? '';
+          const nextText = !current || deltaText.length >= current.length ? deltaText : current;
+          if (nextText.trim()) {
+            useTaskFlowStore.getState().handleStreamText(event.runId ?? runId, true);
+          }
           return {
             streaming: true,
-            streamText: !current || deltaText.length >= current.length ? deltaText : current,
+            streamText: nextText,
             _lastDeltaAt: Date.now(),
             // Fix 3: clear reconnect flag on first successful delta
             _reconnectedAt: null,
@@ -773,8 +1302,22 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           // MiniMax and some providers send final without a message body.
           // Clear streaming state and reload history to show the result.
           if (event.runId === runId || (get().streaming && !runId)) {
-            set({ streaming: false, streamText: null, runId: null, _pendingGapReload: false, _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null });
-            get().loadHistory();
+            const wasCompacting = get().compacting;
+            set({
+              ...clearActiveRunState(),
+              // During context overflow auto-compaction / retry, providers may emit
+              // a "final without message" for the first attempt. Clearing `compacting`
+              // causes the UI to drop the status row and appear "silent".
+              compacting: wasCompacting,
+              _pendingGapReload: false,
+            });
+            void get().loadHistory().then(() => {
+              // Don't classify as "no output" while we are mid-compaction/retry.
+              if (!wasCompacting && detectRunEndedWithoutReply(get().messages)) {
+                set({ lastError: i18n.t('chat.runEndedNoOutput') });
+              }
+            });
+            useTaskFlowStore.getState().endRun(runId, wasCompacting ? 'clear' : 'done');
             setTimeout(() => {
               useLibraryStore.getState().loadPapers();
               useLibraryStore.getState().loadTags();
@@ -805,11 +1348,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           set((s) => ({
             messages: [...s.messages, finalMsg],
             streaming: false,
+            compacting: false,
             streamText: null,
             runId: null,
             _pendingUserMsgs: [],
             _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
+            _lastSentDraft: s._lastSentDraft?.runId === runId ? null : s._lastSentDraft,
           }));
+          useTaskFlowStore.getState().endRun(runId, 'done');
           // After a full conversation turn, refresh panel data
           // (the LLM may have used tools that modified library/tasks/workspace)
           console.log('[Chat] Run complete → refreshing panel stores');
@@ -860,9 +1406,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             ...(isQueueDrainResponse
               // Don't clear _pendingUserMessages here — more queue-drain responses
               // may follow. Let loadHistory() handle them via the 3-min expiry.
-              ? { streaming: false, streamText: null, runId: null, _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null }
+              ? { streaming: false, compacting: false, streamText: null, runId: null, _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null }
               : s.streaming && !s.runId
-                ? { streaming: false, streamText: null, _reconnectedAt: null }
+                ? { streaming: false, compacting: false, streamText: null, _reconnectedAt: null }
                 : {}),
           }));
 
@@ -895,6 +1441,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // Uses the same triple-AND pattern as the delta handler (line 575).
         if (event.runId && runId && event.runId !== runId) return;
 
+        // Match restore to client runId (idempotencyKey), not gateway event.runId.
         const partialText = get().streamText;
         if (partialText) {
           const abortedMsg: ChatMessage = {
@@ -902,22 +1449,41 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             text: partialText,
             timestamp: Date.now(),
           };
-          set((s) => ({
-            messages: [...s.messages, abortedMsg],
-            streaming: false,
-            streamText: null,
-            runId: null,
-            _pendingUserMsgs: [],
-            _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
-          }));
+          set((s) => {
+            const restore = buildAbortInputRestorePatch(s, runId);
+            return {
+              messages: [...(restore?.messages ?? s.messages), abortedMsg],
+              streaming: false,
+              compacting: false,
+              streamText: null,
+              runId: null,
+              _streamStartedAt: null,
+              _lastDeltaAt: null,
+              _reconnectedAt: null,
+              ...(restore ?? { _pendingUserMsgs: [] }),
+            };
+          });
         } else {
-          set({ streaming: false, streamText: null, runId: null, _pendingUserMsgs: [], _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null });
+          set((s) => {
+            const restore = buildAbortInputRestorePatch(s, runId);
+            return {
+              streaming: false,
+              compacting: false,
+              streamText: null,
+              runId: null,
+              _streamStartedAt: null,
+              _lastDeltaAt: null,
+              _reconnectedAt: null,
+              ...(restore ?? { _pendingUserMsgs: [] }),
+            };
+          });
         }
         // Deferred gap recovery
         if (get()._pendingGapReload) {
           set({ _pendingGapReload: false });
           get().loadHistory();
         }
+        useTaskFlowStore.getState().endRun(runId, 'clear');
         break;
       }
 
@@ -927,18 +1493,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         if (event.runId && runId && event.runId !== runId) return;
 
         set({
-          streaming: false,
-          streamText: null,
-          runId: null,
+          ...clearActiveRunState(),
           _pendingUserMsgs: [],
-          _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
-          lastError: event.errorMessage ?? 'Unknown streaming error',
+          lastError: event.errorMessage
+            ? formatRunFailureForUser(event.errorMessage)
+            : i18n.t('chat.runEndedNoOutput'),
         });
         // Deferred gap recovery
         if (get()._pendingGapReload) {
           set({ _pendingGapReload: false });
           get().loadHistory();
         }
+        useTaskFlowStore.getState().endRun(runId, 'error');
         break;
       }
     }
@@ -949,10 +1515,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // Matches OC resetChatStateForSessionSwitch: clears chatStream, chatStreamStartedAt,
     // chatRunId, chatMessage, resets tool stream + scroll.
     stopStaleStreamWatchdog();
+    useTaskFlowStore.getState().clear();
     set({
       sessionKey: key,
-      messages: [],
+      messages: loadLocalMsgs(key),
       streaming: false,
+      compacting: false,
       streamText: null,
       runId: null,
       sending: false,
@@ -961,7 +1529,25 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       tokensOut: 0,
       _pendingGapReload: false,
       _pendingUserMsgs: [],
+      _localOnlyMsgs: loadLocalMsgs(key),
       _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
+      _lastSentDraft: null,
+      inputRestore: null,
+      inputRestoreSeq: 0,
+      _abortedUserSuppressCounts: {},
+    });
+  },
+
+  appendLocalMessage: (message) => {
+    set((s) => {
+      if (localMessageExists(s.messages, message)) {
+        return s;
+      }
+      const nextLocal = [...s._localOnlyMsgs, message];
+      return {
+        messages: [...s.messages, message],
+        _localOnlyMsgs: nextLocal,
+      };
     });
   },
 
@@ -983,6 +1569,9 @@ useChatStore.subscribe(
   (state, prev) => {
     if (state._pendingUserMsgs !== prev._pendingUserMsgs) {
       savePendingMsgs(state._pendingUserMsgs);
+    }
+    if (state._localOnlyMsgs !== prev._localOnlyMsgs) {
+      saveLocalMsgs(state.sessionKey, state._localOnlyMsgs);
     }
   },
 );

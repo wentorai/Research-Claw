@@ -39,7 +39,7 @@ export interface ProviderPreset {
   api:
     | 'openai-completions'
     | 'openai-responses'
-    | 'openai-codex-responses'
+    | 'openai-chatgpt-responses'
     | 'anthropic-messages'
     | 'google-generative-ai'
     | 'bedrock-converse-stream'
@@ -90,7 +90,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'openai-codex',
     label: 'OpenAI Codex (ChatGPT OAuth)',
     baseUrl: 'https://chatgpt.com/backend-api',
-    api: 'openai-codex-responses',
+    api: 'openai-chatgpt-responses',
     models: [
       { id: 'gpt-5.4', name: 'Codex GPT-5.4 (OAuth)', reasoning: true, input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
     ],
@@ -185,6 +185,17 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'kimi-k2.5', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 8_192 },
     ],
     urlPattern: /moonshot\.ai/i,
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com',
+    api: 'openai-completions',
+    models: [
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', reasoning: false, input: ['text'], contextWindow: 1_000_000, maxTokens: 384_000 },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', reasoning: false, input: ['text'], contextWindow: 1_000_000, maxTokens: 384_000 },
+    ],
+    urlPattern: /api\.deepseek\.com/i,
   },
   {
     id: 'kimi-coding',
@@ -529,6 +540,7 @@ export function detectPresetFromProvider(providerKey: string, baseUrl?: string):
   if (!providerKey) return 'custom';
   const exact = PROVIDER_PRESETS.find((p) => p.id === providerKey);
   if (exact) return exact.id;
+  if (providerKey === 'custom' || providerKey.startsWith('custom-')) return providerKey;
   if (baseUrl) return detectPresetFromUrl(baseUrl);
   return 'custom';
 }

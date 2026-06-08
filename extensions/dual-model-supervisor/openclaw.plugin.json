@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "description": "Dual-model supervision: course correction, memory guarding, and safety filtering",
   "main": "index.ts",
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "properties": {

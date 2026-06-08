@@ -40,10 +40,16 @@ export class AuditLogService {
   /**
    * Record an audit log entry.
    */
+  private getDb(): Database.Database | null {
+    if (!this.db?.open) return null;
+    return this.db;
+  }
+
   record(entry: Omit<AuditLogEntry, 'id'>): void {
-    if (!this.db) return;
+    const db = this.getDb();
+    if (!db) return;
     try {
-      this.db.prepare(
+      db.prepare(
         `INSERT INTO supervisor_audit_log (sessionId, type, action, details, metadata, timestamp)
          VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(
@@ -69,6 +75,9 @@ export class AuditLogService {
     type?: AuditLogType;
     action?: string;
   }): AuditLogEntry[] {
+    const db = this.getDb();
+    if (!db) return [];
+
     const limit = Math.min(params.limit ?? 50, 200);
     const offset = params.offset ?? 0;
 
@@ -91,19 +100,19 @@ export class AuditLogService {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const query = `SELECT * FROM supervisor_audit_log ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
 
-    if (!this.db) return [];
-    return this.db.prepare(query).all(...values, limit, offset) as AuditLogEntry[];
+    return db.prepare(query).all(...values, limit, offset) as AuditLogEntry[];
   }
 
   /**
    * Get audit statistics, computed from database for accuracy after restart.
    */
   getStats(): { total: number; blocked: number; corrected: number; warnings: number } {
-    if (!this.db) return { total: 0, blocked: 0, corrected: 0, warnings: 0 };
-    const totalResult = this.db.prepare('SELECT COUNT(*) as count FROM supervisor_audit_log').get() as { count: number };
-    const blockedResult = this.db.prepare("SELECT COUNT(*) as count FROM supervisor_audit_log WHERE action = 'block'").get() as { count: number };
-    const correctedResult = this.db.prepare("SELECT COUNT(*) as count FROM supervisor_audit_log WHERE action = 'correct'").get() as { count: number };
-    const warningsResult = this.db.prepare("SELECT COUNT(*) as count FROM supervisor_audit_log WHERE action = 'warn'").get() as { count: number };
+    const db = this.getDb();
+    if (!db) return { total: 0, blocked: 0, corrected: 0, warnings: 0 };
+    const totalResult = db.prepare('SELECT COUNT(*) as count FROM supervisor_audit_log').get() as { count: number };
+    const blockedResult = db.prepare("SELECT COUNT(*) as count FROM supervisor_audit_log WHERE action = 'block'").get() as { count: number };
+    const correctedResult = db.prepare("SELECT COUNT(*) as count FROM supervisor_audit_log WHERE action = 'correct'").get() as { count: number };
+    const warningsResult = db.prepare("SELECT COUNT(*) as count FROM supervisor_audit_log WHERE action = 'warn'").get() as { count: number };
 
     return {
       total: totalResult.count,
@@ -117,9 +126,10 @@ export class AuditLogService {
    * Purge old entries (older than maxAgeMs).
    */
   purge(maxAgeMs: number): number {
-    if (!this.db) return 0;
+    const db = this.getDb();
+    if (!db) return 0;
     const cutoff = Date.now() - maxAgeMs;
-    const result = this.db.prepare(
+    const result = db.prepare(
       `DELETE FROM supervisor_audit_log WHERE timestamp < ?`,
     ).run(cutoff);
     return result.changes;

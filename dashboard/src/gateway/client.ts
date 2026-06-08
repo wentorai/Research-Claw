@@ -58,6 +58,7 @@ export interface GatewayClientOptions {
 }
 
 interface PendingRequest {
+  method: string;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -248,7 +249,7 @@ export class GatewayClient {
       // Reject all pending requests
       for (const [id, entry] of this.pending) {
         clearTimeout(entry.timer);
-        entry.reject(new Error('Connection closed'));
+        entry.reject(new Error(`Connection closed while waiting for ${entry.method}`));
         this.pending.delete(id);
       }
 
@@ -311,7 +312,7 @@ export class GatewayClient {
       console.warn(`[GatewayClient] request(${method}) rejected: state=${this.state}, ws=${!!this.ws}`);
       throw new Error('Not connected to gateway');
     }
-    console.log(`[GatewayClient] → ${method}`, params ?? '');
+    console.debug(`[GatewayClient] → ${method}`);
 
     const id = generateUUID();
     // Always include params field (aligned with OC — gateway always sends `params`).
@@ -325,6 +326,7 @@ export class GatewayClient {
       }, timeout);
 
       this.pending.set(id, {
+        method,
         resolve: resolve as (value: unknown) => void,
         reject,
         timer,
@@ -488,6 +490,7 @@ export class GatewayClient {
     }, REQUEST_TIMEOUT_MS);
 
     this.pending.set(id, {
+      method: 'connect',
       resolve: (payload) => {
         const hello = payload as HelloOk;
         this.setState('connected');
@@ -592,7 +595,7 @@ export class GatewayClient {
     this.pending.delete(frame.id);
 
     if (frame.ok) {
-      console.log(`[GatewayClient] ← ${frame.id.slice(0, 8)} OK`, typeof frame.payload === 'object' ? frame.payload : '');
+      console.debug(`[GatewayClient] ← ${entry.method} OK`);
       entry.resolve(frame.payload);
     } else {
       console.warn(`[GatewayClient] ← ${frame.id.slice(0, 8)} ERR`, frame.error);

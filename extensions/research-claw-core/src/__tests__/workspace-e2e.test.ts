@@ -423,13 +423,12 @@ describe.skipIf(!gitAvailable)('Workspace E2E (real filesystem + real git)', () 
   });
 
   // ══════════════════════════════════════════════════════════════════════
-  // 10. Workspace scaffold: directories exist after init
+  // 10. Workspace scaffold: minimal directories exist after init
   // ══════════════════════════════════════════════════════════════════════
 
-  it('init creates full directory scaffold with git', () => {
+  it('init creates minimal directory scaffold with git', () => {
     const expected = [
-      'sources/papers', 'sources/data', 'sources/references',
-      'outputs/drafts', 'outputs/figures', 'outputs/exports', 'outputs/reports',
+      'sources', 'outputs',
       '.ResearchClaw',
     ];
     for (const dir of expected) {

@@ -78,6 +78,9 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         useConfigStore.setState({ _configRetryCount: 0 });
         // Auto-fetch config on every (re)connection
         useConfigStore.getState().loadGatewayConfig();
+        void import('../utils/sync-system-prompt-append').then(({ syncSystemPromptAppendToGateway }) => {
+          void syncSystemPromptAppendToGateway(useConfigStore.getState().systemPromptAppend);
+        });
         // GitHub version check -> notification bell when a newer release exists
         // + sync server-side update-in-progress state (survives page refresh)
         void import('./ui').then(({ useUiStore }) => {
@@ -101,19 +104,18 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
             })
             .catch(() => { /* non-fatal */ });
         });
-        // TODO: Enable sessions.subscribe when OC baseline is upgraded past v2026.3.13.
-        // sessions.subscribe was added to OC main in commit 7b61ca1b06 (2026-03-18)
-        // but is not in the v2026.3.13 npm dist we currently pin. Calling it produces
-        // a console.warn "unknown method" in GatewayClient before .catch() can silence
-        // it. Until OC publishes a version with this method, session sync relies on
-        // post-chat-final reload (chat.ts:820) + onHello loadSessions (line 102 below).
-        // Re-enable:  client.request('sessions.subscribe', {}).catch(() => {});
+        // OC 2026.6.1+: live session list updates via sessions.subscribe
+        client.request('sessions.subscribe', {}).catch(() => {});
         // Reset cron reconciliation flag so enabled presets re-register
         // with the gateway after a restart. Uses dynamic import to avoid
         // circular dependency (same pattern as chat store above).
         void import('./cron').then(({ resetCronReconciled, useCronStore }) => {
           resetCronReconciled();
           useCronStore.getState().loadPresets();
+        });
+        void import('./monitor').then(({ resetMonitorReconciled, useMonitorStore }) => {
+          resetMonitorReconciled();
+          useMonitorStore.getState().loadMonitors();
         });
         // Reset tool stream on reconnect (aligned with OC: resetToolStream on hello).
         // Prevents stale tool events from a previous connection lingering in the UI.

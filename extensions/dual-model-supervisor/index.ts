@@ -277,10 +277,11 @@ const plugin: PluginDefinition = {
         }
       },
       stop() {
+        // Checkpoint only — do not close. Gateway plugin reload calls stop() then
+        // register() again in-process; closing here leaves a stale handle while
+        // _initialized stays true (rc.supervisor.status → "database is not open").
         if (_db?.open) {
           _db.pragma('wal_checkpoint(TRUNCATE)');
-          _db.close();
-          api.logger.info('Supervisor database closed');
         }
       },
     });

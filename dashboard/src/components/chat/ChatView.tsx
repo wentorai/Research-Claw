@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Typography, Spin } from 'antd';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Typography, Spin, Alert, Button, Space } from 'antd';
 import {
   MessageOutlined,
   ArrowDownOutlined,
@@ -13,13 +13,22 @@ import { useChatStore } from '../../stores/chat';
 import { useToolStreamStore } from '../../stores/tool-stream';
 import { useGatewayStore } from '../../stores/gateway';
 import { useConfigStore } from '../../stores/config';
+import { useSessionsStore } from '../../stores/sessions';
+import { useUiStore } from '../../stores/ui';
 import type { ChatMessage } from '../../gateway/types';
 import { normalizeSessionKey } from '../../utils/session-key';
 import { fmtActivityRow, safeStringifyDetail } from '../../utils/activity-log';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import ToolActivityStream from './ToolActivityStream';
+import TaskFlowTimeline from './TaskFlowTimeline';
+import StagedWritingTimeline from './StagedWritingTimeline';
 import AgentActivityBar from './AgentActivityBar';
+import { useTaskFlowStore } from '../../stores/task-flow';
+import { useStagedWritingStore } from '../../stores/staged-writing';
+import { isStagedWritingJobForSession } from '../../utils/staged-writing-run';
+import { isTaskFlowVisible } from '../../utils/task-flow';
+import { detectStagedWritingIntent } from '../../utils/staged-writing-detect';
 
 const { Text } = Typography;
 
@@ -49,6 +58,74 @@ function hasImageContent(msg: ChatMessage): boolean {
   return msg.content.some((c) => c.type === 'image' || c.type === 'image_url');
 }
 
+function findTimelineAnchorIndex(
+  messages: ChatMessage[],
+  params: {
+    startedAtMs?: number;
+    anchorUserTimestamp?: number;
+    anchorUserText?: string;
+    anchorIdempotencyKey?: string;
+    topic?: string;
+    isStagedWriting?: boolean;
+  },
+): number {
+  const anchorText = params.anchorUserText?.trim();
+  const topic = params.topic?.trim();
+
+  if (params.anchorIdempotencyKey) {
+    const idx = messages.findIndex((msg) =>
+      msg.role === 'user'
+      && msg.idempotencyKey === params.anchorIdempotencyKey,
+    );
+    if (idx >= 0) return idx;
+  }
+
+  if (params.anchorUserTimestamp) {
+    let nearestIdx = -1;
+    let nearestDelta = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg.role !== 'user') continue;
+      if (anchorText && extractVisibleText(msg).trim() !== anchorText) continue;
+      const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : null;
+      if (timestamp === null) continue;
+      const delta = Math.abs(timestamp - params.anchorUserTimestamp);
+      if (delta < nearestDelta && delta <= 5000) {
+        nearestIdx = i;
+        nearestDelta = delta;
+      }
+    }
+    if (nearestIdx >= 0) return nearestIdx;
+  }
+
+  if (anchorText) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'user' && extractVisibleText(msg).trim() === anchorText) return i;
+    }
+  }
+
+  if (params.startedAtMs) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== 'user') continue;
+      const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : null;
+      if (timestamp !== null && timestamp <= params.startedAtMs) return i;
+    }
+  }
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== 'user') continue;
+    const text = extractVisibleText(msg).trim();
+    if (!text) continue;
+    if (topic && text === topic) return i;
+    if (params.isStagedWriting && detectStagedWritingIntent(text)) return i;
+  }
+
+  return -1;
+}
+
 export default function ChatView() {
   const { t } = useTranslation();
   const sessionKey = useChatStore((s) => s.sessionKey);
@@ -63,16 +140,41 @@ export default function ChatView() {
     return extractVisibleText(m).trim().length > 0 || hasImageContent(m);
   });
   const streaming = useChatStore((s) => s.streaming);
+  const compacting = useChatStore((s) => s.compacting);
   const streamText = useChatStore((s) => s.streamText);
   const sending = useChatStore((s) => s.sending);
   const lastError = useChatStore((s) => s.lastError);
   const clearError = useChatStore((s) => s.clearError);
+  const loadHistory = useChatStore((s) => s.loadHistory);
+  const loadSessionUsage = useChatStore((s) => s.loadSessionUsage);
+  const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const pendingTools = useToolStreamStore((s) => s.pendingTools);
   const activityLog = useToolStreamStore((s) => s.activityLog);
   const clearActivityLog = useToolStreamStore((s) => s.clearActivityLog);
   const connState = useGatewayStore((s) => s.state);
   const toolCallProbe = useConfigStore((s) => s.toolCallProbe);
+  const sessionResetPolicy = useConfigStore((s) => s.sessionResetPolicy);
+  const activeSessionStale = useSessionsStore((s) => s.activeSessionStale);
+  const staleSendAcknowledgedKey = useSessionsStore((s) => s.staleSendAcknowledgedKey);
+  const refreshActiveSessionStale = useSessionsStore((s) => s.refreshActiveSessionStale);
+  const writingJob = useStagedWritingStore((s) => s.job);
+  const showWritingTimeline = isStagedWritingJobForSession(writingJob, sessionKey);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Sticky "last user input" context (only one copy to avoid sticky chaos).
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [stickyUserMessage, setStickyUserMessage] = useState<ChatMessage | null>(null);
+  const stickyUserIndexRef = useRef<number | null>(null);
+  const userElRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const stickyRafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    refreshActiveSessionStale();
+  }, [sessionResetPolicy, refreshActiveSessionStale]);
 
   // Smart scroll state — refs to avoid re-renders on every scroll event
   const userNearBottomRef = useRef(true);
@@ -81,7 +183,36 @@ export default function ChatView() {
   // Matches OC pattern: openclaw/ui/src/ui/app-scroll.ts:19-21
   const scrollFrameRef = useRef<number | null>(null);
   const prevActivityActiveRef = useRef(false);
-  const activityActive = sending || streaming || pendingTools.length > 0;
+  const activityActive = sending || streaming || compacting || pendingTools.length > 0;
+  const taskFlow = useTaskFlowStore((s) => s.flow);
+  const taskFlowVisible = isTaskFlowVisible(taskFlow);
+  const timelineAnchorIndex = useMemo(() => {
+    if (showWritingTimeline) {
+      return findTimelineAnchorIndex(messages, {
+        startedAtMs: writingJob?.startedAtMs,
+        topic: writingJob?.topic,
+        isStagedWriting: true,
+      });
+    }
+    if (taskFlowVisible) {
+      return findTimelineAnchorIndex(messages, {
+        startedAtMs: taskFlow?.startedAtMs,
+        anchorUserTimestamp: taskFlow?.anchorUserTimestamp,
+        anchorUserText: taskFlow?.anchorUserText,
+        anchorIdempotencyKey: taskFlow?.anchorIdempotencyKey,
+      });
+    }
+    return -1;
+  }, [
+    messages,
+    showWritingTimeline,
+    taskFlow?.startedAtMs,
+    taskFlowVisible,
+    writingJob?.startedAtMs,
+    writingJob?.topic,
+  ]);
+  /** Task progress already shows coarse steps + tool detail — hide redundant thinking UI. */
+  const showThinkingPanel = activityActive && !taskFlowVisible && !showWritingTimeline;
   const activityEntries = activityLog
     .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey))
     .slice(-30)
@@ -92,10 +223,49 @@ export default function ChatView() {
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    userNearBottomRef.current = distanceFromBottom < NEAR_BOTTOM_THRESHOLD;
-    if (userNearBottomRef.current) {
-      setNewMessagesBelow(false);
+    const nextNearBottom = distanceFromBottom < NEAR_BOTTOM_THRESHOLD;
+    const prevNearBottom = userNearBottomRef.current;
+    userNearBottomRef.current = nextNearBottom;
+    if (prevNearBottom !== nextNearBottom) setIsNearBottom(nextNearBottom);
+    if (nextNearBottom) setNewMessagesBelow(false);
+
+    // Update sticky context when user scrolls away from the bottom.
+    if (nextNearBottom) {
+      stickyUserIndexRef.current = null;
+      setStickyUserMessage(null);
+      return;
     }
+
+    if (stickyRafRef.current !== null) cancelAnimationFrame(stickyRafRef.current);
+    stickyRafRef.current = requestAnimationFrame(() => {
+      stickyRafRef.current = null;
+      const root = scrollRef.current;
+      if (!root) return;
+
+      const rootTop = root.getBoundingClientRect().top;
+      const tolerance = 1;
+
+      // Pin context only after the in-flow user bubble has scrolled fully above the viewport.
+      let bestIdx: number | null = null;
+      for (const [idxStr, node] of Object.entries(userElRefs.current)) {
+        if (!node) continue;
+        const idx = Number(idxStr);
+        const bottom = node.getBoundingClientRect().bottom;
+        if (bottom <= rootTop + tolerance) {
+          if (bestIdx === null || idx > bestIdx) bestIdx = idx;
+        }
+      }
+
+      if (bestIdx === null) {
+        stickyUserIndexRef.current = null;
+        setStickyUserMessage(null);
+        return;
+      }
+      if (stickyUserIndexRef.current === bestIdx) return;
+
+      stickyUserIndexRef.current = bestIdx;
+      setStickyUserMessage(messagesRef.current[bestIdx] ?? null);
+    });
   }, []);
 
   // Safari workaround: clicking blank areas in overflow:hidden containers
@@ -127,6 +297,9 @@ export default function ChatView() {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
     userNearBottomRef.current = true;
+    setIsNearBottom(true);
+    stickyUserIndexRef.current = null;
+    setStickyUserMessage(null);
     setNewMessagesBelow(false);
   }, []);
 
@@ -161,7 +334,11 @@ export default function ChatView() {
   // Reset scroll tracking when a new session starts (messages cleared)
   useEffect(() => {
     if (messages.length === 0) {
+      userElRefs.current = {};
       userNearBottomRef.current = true;
+      setIsNearBottom(true);
+      stickyUserIndexRef.current = null;
+      setStickyUserMessage(null);
       setNewMessagesBelow(false);
     }
   }, [messages.length]);
@@ -177,14 +354,7 @@ export default function ChatView() {
   }, [activityActive, clearActivityLog]);
 
   return (
-    <div
-      style={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--bg)',
-      }}
-    >
+    <div className="chat-view">
       {/* Background activity bar (P1-3) */}
       <AgentActivityBar />
 
@@ -210,6 +380,16 @@ export default function ChatView() {
         </div>
       )}
 
+      {compacting && (
+        <Alert
+          type="info"
+          showIcon
+          message={t('chat.compacting')}
+          description={t('chat.compactingBanner')}
+          style={{ borderRadius: 0, margin: 0 }}
+        />
+      )}
+
       {/* Tool call capability warning — model cannot generate structured tool calls */}
       {toolCallProbe?.status === 'done' && toolCallProbe.supported === false && (
         <div
@@ -232,22 +412,14 @@ export default function ChatView() {
       <div
         role="log"
         aria-live="polite"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: 'hidden',
-        }}
+        className="chat-view-messages"
       >
         <div
           ref={scrollRef}
+          className="chat-scroll"
           onScroll={handleScroll}
           onMouseDown={handleContainerMouseDown}
           onClick={handleContainerClick}
-          style={{
-            height: '100%',
-            overflow: 'auto',
-            padding: '16px 24px',
-          }}
         >
           {messages.length === 0 && !streaming && (
             <div
@@ -267,8 +439,30 @@ export default function ChatView() {
             </div>
           )}
 
+          {/* Only one sticky copy: the last user input shown as a context anchor. */}
+          {!isNearBottom && stickyUserMessage && (
+            <div className="chat-context-sticky">
+              <MessageBubble message={stickyUserMessage} />
+            </div>
+          )}
+
           {messages.map((msg, idx) => (
-            <MessageBubble key={idx} message={msg} />
+            <React.Fragment key={idx}>
+              {msg.role === 'user' ? (
+                <div
+                  ref={(el) => {
+                    userElRefs.current[idx] = el;
+                  }}
+                >
+                  <MessageBubble message={msg} />
+                </div>
+              ) : (
+                <MessageBubble message={msg} />
+              )}
+              {timelineAnchorIndex === idx && (
+                showWritingTimeline ? <StagedWritingTimeline /> : <TaskFlowTimeline />
+              )}
+            </React.Fragment>
           ))}
 
           {/* Streaming indicator */}
@@ -279,14 +473,31 @@ export default function ChatView() {
             />
           )}
 
-          {/* Tool stream + activity log are lifecycle-bound to thinking/running */}
-          {activityActive && (
+          {timelineAnchorIndex < 0 && (
+            showWritingTimeline ? (
+              <>
+                {writingJob?.topic && (
+                  <MessageBubble
+                    message={{
+                      role: 'user',
+                      text: writingJob.topic,
+                      timestamp: writingJob.startedAtMs,
+                    }}
+                  />
+                )}
+                <StagedWritingTimeline />
+              </>
+            ) : <TaskFlowTimeline />
+          )}
+
+          {/* Tool stream + activity log — hidden while task progress is shown */}
+          {showThinkingPanel && (
             <>
-              {(sending || (streaming && !streamText)) && (
-                <div style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {(sending || compacting || (streaming && !streamText)) && (
+                <div className="chat-status-row">
                   <Spin size="small" />
-                  <Text type="secondary" style={{ fontSize: 13 }}>
-                    {t('chat.thinking')}
+                  <Text type="secondary" style={{ fontSize: 15 }}>
+                    {compacting ? t('chat.compacting') : t('chat.thinking')}
                   </Text>
                 </div>
               )}
@@ -314,57 +525,22 @@ export default function ChatView() {
                     };
 
                     return (
-                      <div
-                        key={e.id}
-                        style={{
-                          marginBottom: 8,
-                          borderRadius: 8,
-                          border: '1px solid rgba(0,0,0,0.08)',
-                          background: 'rgba(0,0,0,0.03)',
-                        }}
-                      >
+                      <div key={e.id} className="chat-activity-row">
                         <button
                           type="button"
+                          className="chat-activity-summary"
                           onClick={() => setOpenActivityId((prev) => (prev === e.id ? null : e.id))}
-                          style={{
-                            width: '100%',
-                            border: 'none',
-                            background: 'transparent',
-                            padding: '10px 12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            color: 'var(--text-tertiary)',
-                            fontSize: 12,
-                            fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                          }}
                         >
-                          <span style={{ color: 'var(--text-tertiary)', fontSize: 11, minWidth: 10 }}>
+                          <span style={{ fontSize: 11, minWidth: 10 }}>
                             {expanded ? '▼' : '▶'}
                           </span>
-                          <span style={{ fontSize: 12, minWidth: 14, display: 'inline-flex', justifyContent: 'center' }}>
+                          <span style={{ minWidth: 14, display: 'inline-flex', justifyContent: 'center' }}>
                             {icon}
                           </span>
                           <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{rowText}</span>
                         </button>
                         {expanded && (
-                          <pre
-                            style={{
-                              margin: '0 12px 10px 34px',
-                              padding: 8,
-                              borderRadius: 6,
-                              background: 'var(--code-bg, rgba(0,0,0,0.06))',
-                              border: '1px solid rgba(0,0,0,0.1)',
-                              fontSize: 11,
-                              lineHeight: 1.4,
-                              color: 'var(--text-tertiary)',
-                              overflowX: 'auto',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                            }}
-                          >
+                          <pre className="chat-activity-detail">
 {safeStringifyDetail(detailObj)}
                           </pre>
                         )}
@@ -376,82 +552,88 @@ export default function ChatView() {
             </>
           )}
           {/* Sending / waiting-for-first-delta indicator (only when no activity panel). */}
-          {!activityActive && (sending || (streaming && !streamText)) && (
-            <div style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!taskFlowVisible && !activityActive && (sending || compacting || (streaming && !streamText)) && (
+            <div className="chat-status-row">
               <Spin size="small" />
               <Text type="secondary" style={{ fontSize: 13 }}>
-                {t('chat.thinking')}
+                {compacting ? t('chat.compacting') : t('chat.thinking')}
               </Text>
             </div>
           )}
         </div>
       </div>
 
-      {/* "New messages below" pill — shown when user scrolls up during streaming */}
-      {newMessagesBelow && (
-        <div style={{ position: 'relative', height: 0, overflow: 'visible' }}>
-          <button
-            onClick={scrollToBottom}
-            aria-label={t('chat.newMessages')}
-            style={{
-              position: 'absolute',
-              bottom: 8,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 16px',
-              background: 'var(--surface-hover, rgba(255,255,255,0.08))',
-              border: '1px solid var(--border, rgba(255,255,255,0.1))',
-              borderRadius: 9999,
-              color: 'var(--text-secondary, #a1a1aa)',
-              fontSize: 12,
-              cursor: 'pointer',
-              backdropFilter: 'blur(8px)',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-              transition: 'background 0.15s, color 0.15s',
-              zIndex: 10,
-            }}
-          >
-            <ArrowDownOutlined style={{ fontSize: 12 }} />
-            {t('chat.newMessages')}
-          </button>
-        </div>
-      )}
+      {/* Input + banners pinned below scroll area (never overlays messages). */}
+      <div className="chat-view-footer">
+        {newMessagesBelow && (
+          <div className="chat-new-messages-anchor">
+            <button
+              onClick={scrollToBottom}
+              aria-label={t('chat.newMessages')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 16px',
+                background: 'var(--surface-hover, rgba(255,255,255,0.08))',
+                border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                borderRadius: 9999,
+                color: 'var(--text-secondary, #a1a1aa)',
+                fontSize: 12,
+                cursor: 'pointer',
+                backdropFilter: 'blur(8px)',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                transition: 'background 0.15s, color 0.15s',
+              }}
+            >
+              <ArrowDownOutlined style={{ fontSize: 12 }} />
+              {t('chat.newMessages')}
+            </button>
+          </div>
+        )}
 
-      {/* Error banner */}
-      {lastError && (
-        <div
-          style={{
-            padding: '8px 24px',
-            background: 'rgba(239, 68, 68, 0.1)',
-            borderTop: '1px solid var(--error)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <Text style={{ color: 'var(--error)', fontSize: 13 }}>{lastError}</Text>
-          <button
-            onClick={clearError}
-            aria-label={t('chat.dismiss')}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--error)',
-              cursor: 'pointer',
-              fontSize: 16,
-              padding: '0 4px',
-            }}
-          >
-            &times;
-          </button>
-        </div>
-      )}
+        {activeSessionStale && staleSendAcknowledgedKey !== sessionKey && (
+          <div style={{ padding: '8px 24px 0' }}>
+            <Alert
+              type="warning"
+              showIcon
+              message={t('chat.staleSessionBannerTitle')}
+              description={t('chat.staleSessionBannerBody')}
+            />
+          </div>
+        )}
 
-      {/* Input area */}
-      <MessageInput />
+        {lastError && (
+          <div style={{ padding: '8px 24px' }}>
+            <Alert
+              type="error"
+              showIcon
+              closable
+              onClose={clearError}
+              message={t('chat.runIssueTitle')}
+              description={lastError}
+              action={
+                <Space size="small">
+                  <Button size="small" onClick={() => setRightPanelTab('settings')}>
+                    {t('chat.openSettings')}
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void loadHistory();
+                      void loadSessionUsage();
+                    }}
+                  >
+                    {t('chat.refreshHistory')}
+                  </Button>
+                </Space>
+              }
+            />
+          </div>
+        )}
+
+        <MessageInput />
+      </div>
     </div>
   );
 }

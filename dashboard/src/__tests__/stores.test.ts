@@ -68,6 +68,20 @@ describe('uiStore', () => {
     expect(useUiStore.getState().rightPanelWidth).toBe(400);
   });
 
+  it('setConfigPanelHeight clamps and persists', async () => {
+    const { useUiStore } = await import('../stores/ui');
+    useUiStore.getState().setConfigPanelHeight(100);
+    expect(useUiStore.getState().configPanelHeight).toBe(200);
+    expect(localStorage.getItem('rc-config-panel-height')).toBe('200');
+  });
+
+  it('setConfigPanelPlacement persists', async () => {
+    const { useUiStore } = await import('../stores/ui');
+    useUiStore.getState().setConfigPanelPlacement('bottom');
+    expect(useUiStore.getState().configPanelPlacement).toBe('bottom');
+    expect(localStorage.getItem('rc-config-panel-placement')).toBe('bottom');
+  });
+
   it('addNotification increments unreadCount', async () => {
     const { useUiStore } = await import('../stores/ui');
     useUiStore.setState({ notifications: [], unreadCount: 0 });

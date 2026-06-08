@@ -31,3 +31,10 @@ export function isMainSessionKey(key: string): boolean {
   const k = normalizeSessionKey(key).toLowerCase();
   return k === 'main';
 }
+
+/** Bare dashboard key → gateway session store key (agent:main:…). */
+export function toGatewaySessionKey(key: string): string {
+  if (!key) return 'agent:main:main';
+  if (CANONICAL_PREFIX_RE.test(key)) return key;
+  return `agent:main:${key}`;
+}

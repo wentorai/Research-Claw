@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import ConfigRestartListener from './ConfigRestartListener';
 import { useGatewayStore } from '../stores/gateway';
 import { useConfigStore } from '../stores/config';
 import { useSessionsStore } from '../stores/sessions';
+import { useChatStore } from '../stores/chat';
 
 const mockMessageSuccess = vi.fn();
 
@@ -76,6 +77,11 @@ describe('ConfigRestartListener', () => {
       activeSessionKey: 'project-1234',
       loading: false,
     });
+    useChatStore.setState({
+      sessionKey: 'project-1234',
+      tokensIn: 0,
+      tokensOut: 0,
+    });
   });
 
   afterEach(() => {
@@ -83,7 +89,12 @@ describe('ConfigRestartListener', () => {
   });
 
   it('waits for refreshed gatewayConfig before patching the active session model', async () => {
-    const mockRequest = vi.fn().mockResolvedValue({ ok: true });
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'sessions.usage') {
+        return Promise.resolve({ totals: { input: 12, output: 3 } });
+      }
+      return Promise.resolve({ ok: true });
+    });
     const client = {
       isConnected: true,
       request: mockRequest,
@@ -116,6 +127,11 @@ describe('ConfigRestartListener', () => {
     expect(mockRequest).toHaveBeenCalledWith('sessions.patch', {
       key: 'project-1234',
       model: 'zai-coding/glm-5',
+    });
+    await waitFor(() => {
+      expect(mockRequest).toHaveBeenCalledWith('sessions.usage', {
+        key: 'agent:main:project-1234',
+      });
     });
     expect(mockMessageSuccess).toHaveBeenCalledWith('settings.reconnected');
     expect(useConfigStore.getState().pendingConfigRestart).toBe(false);

@@ -31,8 +31,8 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
       'Create a new monitoring target. The source_type is a free-form category string ' +
       '(e.g. "academic", "code", "feed", "web", "social", "report", "reminder", or any custom string). ' +
       'Well-known categories get rich default agent prompts with the Read\u2192Execute\u2192Write protocol. ' +
-      'The monitor will run on the specified schedule and send notifications to the dashboard bell ' +
-      'when new content is found.',
+      'The monitor is created disabled. After the user enables it in the dashboard, it will run ' +
+      'on the specified schedule and send notifications to the dashboard bell when new content is found.',
     parameters: {
       type: 'object',
       properties: {
@@ -94,7 +94,7 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
           `ID: ${monitor.id}\n` +
           `Schedule: ${monitor.schedule}\n` +
           `Target: ${monitor.target || '(keyword-based)'}\n` +
-          `The dashboard will register the cron job when the user enables it.`,
+          `Status: disabled. Enable it in the dashboard to register the cron job.`,
           monitor,
         );
       } catch (err) {

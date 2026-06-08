@@ -17,6 +17,8 @@ import { render, screen } from '@testing-library/react';
 import React from 'react';
 import ChatView from '../../components/chat/ChatView';
 import { useChatStore } from '../../stores/chat';
+import { useStagedWritingStore } from '../../stores/staged-writing';
+import { buildInitialStageStates } from '../../utils/staged-writing-stages';
 import {
   USER_MSG,
   ASSISTANT_MSG,
@@ -70,11 +72,83 @@ beforeEach(() => {
     tokensIn: 0,
     tokensOut: 0,
   });
+  useStagedWritingStore.setState({ job: null, restored: false });
 });
 
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe('ChatView message filtering — parity with grouped-render.ts:225-288', () => {
+  it('keeps staged-writing progress anchored after the request that started it', () => {
+    useChatStore.setState({
+      messages: [
+        { role: 'user', text: '请根据资料生成一篇完整小论文', timestamp: 1000 },
+        { role: 'user', text: '你现在是什么基座模型', timestamp: 3000 },
+        { role: 'assistant', text: '当前基座模型是 deepseek。', timestamp: 4000 },
+      ],
+      sessionKey: 'main',
+    });
+    useStagedWritingStore.setState({
+      job: {
+        id: 'writing-1',
+        sessionKey: 'main',
+        slug: 'paper-writing1',
+        topic: '请根据资料生成一篇完整小论文',
+        contextText: '',
+        sourcePaths: [],
+        venue: '',
+        locale: 'zh-CN',
+        outputDir: 'outputs/drafts/paper-writing1',
+        startedAtMs: 1100,
+        status: 'running',
+        currentStageIndex: 0,
+        stages: buildInitialStageStates('outputs/drafts/paper-writing1'),
+        lastError: null,
+      },
+    });
+
+    render(<ChatView />);
+
+    const writingRequest = screen.getByText('请根据资料生成一篇完整小论文').closest('.chat-turn');
+    const timeline = screen.getByText('stagedWriting.builtInTitle').closest('.staged-writing-timeline');
+    const laterQuestion = screen.getByText('你现在是什么基座模型').closest('.chat-turn');
+
+    expect(writingRequest).not.toBeNull();
+    expect(timeline).not.toBeNull();
+    expect(laterQuestion).not.toBeNull();
+    expect(writingRequest!.compareDocumentPosition(timeline!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(timeline!.compareDocumentPosition(laterQuestion!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('reconstructs a missing staged-writing request from the persisted job topic', () => {
+    useChatStore.setState({ messages: [], sessionKey: 'main' });
+    useStagedWritingStore.setState({
+      job: {
+        id: 'writing-legacy',
+        sessionKey: 'main',
+        slug: 'paper-legacy',
+        topic: '根据资料完成一篇完整小论文',
+        contextText: '',
+        sourcePaths: [],
+        venue: '',
+        locale: 'zh-CN',
+        outputDir: 'outputs/drafts/paper-legacy',
+        startedAtMs: 1000,
+        status: 'completed',
+        currentStageIndex: 6,
+        stages: buildInitialStageStates('outputs/drafts/paper-legacy').map((stage) => ({
+          ...stage,
+          status: 'done' as const,
+        })),
+        lastError: null,
+      },
+    });
+
+    render(<ChatView />);
+
+    expect(screen.getByText('根据资料完成一篇完整小论文')).toBeInTheDocument();
+    expect(screen.getByText('stagedWriting.builtInTitle')).toBeInTheDocument();
+  });
+
   /**
    * OpenClaw behavior: all user messages are always rendered.
    * grouped-render.ts renders message groups where normalizeRoleForGrouping

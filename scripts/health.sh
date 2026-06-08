@@ -58,10 +58,15 @@ fi
 # Validate that the project config can load the RC plugin.
 if [ -f "$ENTRY_JS" ] && [ -f "$CONFIG_PATH" ]; then
   if PLUGINS_OUT="$(OPENCLAW_CONFIG_PATH="$CONFIG_PATH" node "$ENTRY_JS" plugins list 2>/dev/null)"; then
-    if printf '%s\n' "$PLUGINS_OUT" | grep -Fq "Research-Claw Core registered"; then
-      echo "[OK] research-claw-core registers successfully under project config"
+    if printf '%s\n' "$PLUGINS_OUT" | grep -Fq "research-claw-core/index.ts"; then
+      if printf '%s\n' "$PLUGINS_OUT" | grep "research-claw-core/index.ts" | grep -Fq "enabled"; then
+        echo "[OK] research-claw-core is enabled under project config"
+      else
+        echo "[FAIL] research-claw-core found but not enabled"
+        exit 1
+      fi
     else
-      echo "[FAIL] research-claw-core did not report successful registration"
+      echo "[FAIL] research-claw-core not discovered by plugins list"
       echo "       Run: OPENCLAW_CONFIG_PATH=\"$CONFIG_PATH\" node \"$ENTRY_JS\" plugins list"
       exit 1
     fi

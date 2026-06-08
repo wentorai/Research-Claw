@@ -49,10 +49,10 @@ vi.mock('../../stores/gateway', () => ({
 }));
 
 // Mock config store — vision capability for attachment tests
-vi.mock('../../stores/config', () => ({
-  primaryModelSupportsVision: vi.fn(() => true),
-  hasImageModelConfigured: vi.fn(() => true),
-}));
+vi.mock('../../stores/config', async () => {
+  const { parityConfigStoreMock } = await import('./parity-config-mock');
+  return parityConfigStoreMock();
+});
 
 describe('Empty message guard parity — openclaw/ui/src/ui/controllers/chat.ts:160-164', () => {
   beforeEach(() => {
@@ -131,11 +131,14 @@ describe('Empty message guard parity — openclaw/ui/src/ui/controllers/chat.ts:
 
   it('send("hello") proceeds normally — chat.ts:160,162', async () => {
     // OpenClaw: msg = "hello".trim() = "hello", which is truthy → guard passes → RPC call
+    // Dashboard also syncs systemPromptAppend before chat.send.
     await useChatStore.getState().send('hello');
 
-    expect(mockGatewayClient.request).toHaveBeenCalledTimes(1);
-    expect(mockGatewayClient.request).toHaveBeenCalledWith(
-      'chat.send',
+    const chatSendCall = mockGatewayClient.request.mock.calls.find(
+      (c: unknown[]) => c[0] === 'chat.send',
+    );
+    expect(chatSendCall).toBeDefined();
+    expect(chatSendCall![1]).toEqual(
       expect.objectContaining({
         message: 'hello',
         sessionKey: 'main',

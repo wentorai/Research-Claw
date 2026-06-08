@@ -189,7 +189,7 @@ async function main() {
   await c1.connect();
   await c1.auth(identity);
 
-  const wsPath = `uploads/${Date.now()}-test-image.png`;
+  const wsPath = `sources/${Date.now()}-test-image.png`;
   try {
     const result = await c1.rpc('rc.ws.saveImage', { path: wsPath, base64: imageBase64 });
     console.log(`  ✓ Saved: ${result.path} (${result.size} bytes)`);

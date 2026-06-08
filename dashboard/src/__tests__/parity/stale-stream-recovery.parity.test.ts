@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useChatStore, _testWatchdog } from '../../stores/chat';
 import { useToolStreamStore } from '../../stores/tool-stream';
+import { useTaskFlowStore } from '../../stores/task-flow';
 import {
   DELTA_FIRST,
   DELTA_SECOND,
@@ -79,6 +80,7 @@ function resetStores() {
     pendingTools: [],
     bgActivity: null,
   });
+  useTaskFlowStore.getState().clear();
 }
 
 describe('Stale stream recovery — tool hang + reconnect fixes', () => {
@@ -122,6 +124,7 @@ describe('Stale stream recovery — tool hang + reconnect fixes', () => {
         _streamStartedAt: twoMinutesAgo,
         _lastDeltaAt: twoMinutesAgo,
       });
+      useTaskFlowStore.getState().startRun('run-1', 'main');
       injectPendingTool({
         startedAt: twoMinutesAgo,
         lastEventAt: twoMinutesAgo, // no events for 130s
@@ -135,6 +138,7 @@ describe('Stale stream recovery — tool hang + reconnect fixes', () => {
       expect(useChatStore.getState().streaming).toBe(false);
       expect(useChatStore.getState().streamText).toBeNull();
       expect(useChatStore.getState().runId).toBeNull();
+      expect(useTaskFlowStore.getState().flow?.activeIndex).toBe(-1);
     });
 
     it('does not recover when some tools still have recent events', () => {

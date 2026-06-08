@@ -121,7 +121,7 @@ export class ReviewerClient {
 
     // Skip adapter resolution when disabled and no explicit supervisorModel.
     // The fallback model (main model) may use an unsupported reviewer API (e.g.
-    // openai-codex-responses). We don't need an adapter until the supervisor is
+    // openai-chatgpt-responses). We don't need an adapter until the supervisor is
     // enabled — _resolveAdapter() is re-called by updateSupervisorConfig() at
     // enable time so hot-enable always gets a fresh resolution.
     if (!cfg.enabled && !cfg.supervisorModel) {

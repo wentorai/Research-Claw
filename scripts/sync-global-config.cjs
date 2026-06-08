@@ -102,17 +102,14 @@ function merge(target, source, _path) {
   return result;
 }
 
-// --- Fix channels: ensure commands.native=false for all existing channels ---
-// RC registers 529 commands, which exceeds every IM channel's command menu limit.
-// Without this, Telegram (and others) enter a BOT_COMMANDS_TOO_MUCH retry loop
-// that blocks message processing for 15+ minutes.
+// --- Fix channels: OC 2026.6.1+ rejects channels.*.commands (not in schema) ---
+// Older OC used commands.native=false to avoid BOT_COMMANDS_TOO_MUCH on Telegram.
 let projectChanged = false;
 if (project.channels) {
   for (const [name, ch] of Object.entries(project.channels)) {
     if (name === 'defaults' || typeof ch !== 'object' || ch === null) continue;
-    if (!ch.commands) ch.commands = {};
-    if (ch.commands.native !== false) {
-      ch.commands.native = false;
+    if (ch.commands) {
+      delete ch.commands;
       projectChanged = true;
     }
   }
@@ -121,7 +118,7 @@ if (project.channels) {
     const tmp = PROJECT_CONFIG + '.tmp.' + process.pid;
     fs.writeFileSync(tmp, out);
     fs.renameSync(tmp, PROJECT_CONFIG);
-    console.log('[sync] Fixed channels.*.commands.native=false in project config');
+    console.log('[sync] Removed channels.*.commands (OC 2026.6.1 schema)');
   }
 }
 
@@ -172,6 +169,14 @@ if (global.plugins?.entries) {
 
 // --- Merge into global config ---
 const merged = merge(global, overlay);
+
+// merge() keeps target-only keys; strip stale channels.*.commands left in ~/.openclaw
+if (merged.channels) {
+  for (const [name, ch] of Object.entries(merged.channels)) {
+    if (name === 'defaults' || typeof ch !== 'object' || ch === null) continue;
+    if (ch.commands) delete ch.commands;
+  }
+}
 
 // --- Atomic write: temp → rename (survives disk-full) ---
 fs.mkdirSync(GLOBAL_DIR, { recursive: true, mode: 0o700 });

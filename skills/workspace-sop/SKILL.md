@@ -26,20 +26,19 @@ expose rollback — you are the user's interface for rollback and diff.
 
 ## Directory Conventions
 
+Two top-level user directories (system `.ResearchClaw/` is hidden from the dashboard):
+
 ```
-sources/
-  papers/        ← imported PDFs, full-text downloads
-  data/          ← datasets, raw data files
-  references/    ← BibTeX, RIS, supplementary materials
-outputs/
-  drafts/        ← manuscript drafts, notes
-  figures/       ← generated plots, diagrams
-  exports/       ← PDF/DOCX exports, slide decks
-  reports/       ← analysis reports, summaries
-.ResearchClaw/   ← system files (hidden from dashboard)
+sources/       ← user uploads, imported PDFs, datasets, references
+outputs/       ← agent-generated drafts, figures, exports, reports
+.ResearchClaw/ ← system prompt files (hidden)
 ```
 
-`sources/` = user inputs. `outputs/` = agent-generated files.
+Optional subdirs (created on demand, not required):
+`sources/papers/`, `sources/data/`, `sources/references/`
+`outputs/drafts/`, `outputs/figures/`, `outputs/exports/`, `outputs/reports/`
+
+`sources/` = user input. `outputs/` = agent-generated files.
 
 ## Commit Message Prefixes
 

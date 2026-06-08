@@ -29,6 +29,7 @@ import {
   ReloadOutlined,
   SettingOutlined,
   UpOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { List } from 'react-window';
@@ -45,15 +46,17 @@ import {
   type ChannelAccount,
   type PluginEntry,
 } from '../../stores/extensions';
+import { useSkillWorkshopStore } from '../../stores/skill-workshop';
 import { getThemeTokens } from '../../styles/theme';
 import { relativeTime } from '../../utils/relativeTime';
 import DockerFileModal from './DockerFileModal';
 import type { DockerFileModalProps } from './DockerFileModal';
+import SkillWorkshopTab from './SkillWorkshopTab';
 
 const { Text } = Typography;
 const { Search } = Input;
 
-type SubTab = 'skills' | 'channels' | 'plugins' | 'ppt';
+type SubTab = 'skills' | 'workshop' | 'channels' | 'plugins' | 'ppt';
 
 /** Channels that support QR code login via web.login.start / web.login.wait */
 const QR_LOGIN_CHANNELS = new Set(['openclaw-weixin', 'whatsapp']);
@@ -859,7 +862,13 @@ function PluginCard({
 
 // ── Skills Sub-Tab (virtualized) ─────────────────────────────────────────────
 
-function SkillsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
+function SkillsTab({
+  tokens,
+  onOpenWorkshop,
+}: {
+  tokens: ReturnType<typeof getThemeTokens>;
+  onOpenWorkshop?: () => void;
+}) {
   const { t } = useTranslation();
   const skills = useExtensionsStore((s) => s.skills);
   const skillsLoading = useExtensionsStore((s) => s.skillsLoading);
@@ -960,6 +969,20 @@ function SkillsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
 
   return (
     <>
+      {onOpenWorkshop && (
+        <div style={{ padding: '8px 12px 0', flexShrink: 0 }}>
+          <Button
+            block
+            size="small"
+            type="primary"
+            ghost
+            icon={<ToolOutlined />}
+            onClick={onOpenWorkshop}
+          >
+            {t('extensions.workshop.openTab', 'Skill Workshop — create & review proposals')}
+          </Button>
+        </div>
+      )}
       {/* Search/filter */}
       <div style={{ padding: '8px 12px 4px', flexShrink: 0 }}>
         <Search
@@ -1685,7 +1708,7 @@ export default function ExtensionsPanel() {
 
   const [activeTab, setActiveTab] = useState<SubTab>('skills');
   // Track which tabs have been visited — render once, then keep in DOM with display:none
-  const [visited, setVisited] = useState<Set<SubTab>>(() => new Set(['skills']));
+  const [visited, setVisited] = useState<Set<SubTab>>(() => new Set(['skills', 'workshop']));
 
   const handleTabChange = useCallback((tab: SubTab) => {
     setActiveTab(tab);
@@ -1698,19 +1721,33 @@ export default function ExtensionsPanel() {
   }, []);
 
   // Load data on connection
+  const workshopLoading = useSkillWorkshopStore((s) => s.loading);
+  const loadWorkshopProposals = useSkillWorkshopStore((s) => s.loadProposals);
+
   useEffect(() => {
     if (isConnected && !skillsLoaded) loadSkills();
     if (isConnected && !channelsLoaded) loadChannels();
     if (isConnected && !pluginsLoaded) loadPlugins();
   }, [isConnected, skillsLoaded, channelsLoaded, pluginsLoaded, loadSkills, loadChannels, loadPlugins]);
 
+  useEffect(() => {
+    if (isConnected && activeTab === 'workshop') {
+      void loadWorkshopProposals();
+    }
+  }, [isConnected, activeTab, loadWorkshopProposals]);
+
   const handleRefresh = useCallback(() => {
     if (activeTab === 'skills') loadSkills();
+    else if (activeTab === 'workshop') void loadWorkshopProposals();
     else if (activeTab === 'channels') loadChannels(true); // probe on manual refresh
     else loadPlugins();
-  }, [activeTab, loadSkills, loadChannels, loadPlugins]);
+  }, [activeTab, loadSkills, loadWorkshopProposals, loadChannels, loadPlugins]);
 
-  const isLoading = activeTab === 'skills' ? skillsLoading : activeTab === 'channels' ? channelsLoading : false;
+  const isLoading =
+    activeTab === 'skills' ? skillsLoading
+    : activeTab === 'workshop' ? workshopLoading
+    : activeTab === 'channels' ? channelsLoading
+    : false;
 
   const totalCount = useMemo(() => skills.length + channels.length, [skills, channels]);
   const activeCount = useMemo(
@@ -1770,13 +1807,13 @@ export default function ExtensionsPanel() {
       </div>
 
       {/* Sub-tab selector */}
-      <div style={{ padding: '8px 16px', flexShrink: 0 }}>
+      <div style={{ padding: '8px 16px', flexShrink: 0, overflowX: 'auto' }}>
         <Segmented
-          block
           value={activeTab}
           onChange={(val) => handleTabChange(val as SubTab)}
           options={[
             { label: t('extensions.tabs.skills', 'Skills'), value: 'skills' },
+            { label: t('extensions.tabs.workshop', 'Workshop'), value: 'workshop' },
             { label: t('extensions.tabs.channels', 'Channels'), value: 'channels' },
             { label: t('extensions.tabs.plugins', 'Plugins'), value: 'plugins' },
             { label: t('extensions.tabs.ppt', 'PPT'), value: 'ppt' },
@@ -1789,7 +1826,12 @@ export default function ExtensionsPanel() {
       <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
         {visited.has('skills') && (
           <div style={{ display: activeTab === 'skills' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-            <SkillsTab tokens={tokens} />
+            <SkillsTab tokens={tokens} onOpenWorkshop={() => handleTabChange('workshop')} />
+          </div>
+        )}
+        {visited.has('workshop') && (
+          <div style={{ display: activeTab === 'workshop' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+            <SkillWorkshopTab tokens={tokens} />
           </div>
         )}
         {visited.has('channels') && (

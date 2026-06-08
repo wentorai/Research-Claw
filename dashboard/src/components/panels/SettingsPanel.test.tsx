@@ -4,6 +4,7 @@ import React from 'react';
 import SettingsPanel from './SettingsPanel';
 import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
+import { serializeConfigForGatewayApply } from '../../utils/config-patch';
 
 // Mock antd App.useApp (modal.confirm + message)
 const mockModalConfirm = vi.fn();
@@ -468,7 +469,7 @@ describe('API key status guidance', () => {
     expect(screen.getByText(/OpenAI · settings\.providerConfigured/)).toBeTruthy();
   });
 
-  it('writes the current provider key into auth-profiles before applying config', async () => {
+  it('sends the current provider key with the atomic provider upsert', async () => {
     const mockRequest = vi.fn().mockImplementation((method: string) => {
       if (method === 'rc.auth.statuses') return Promise.resolve({ openai: { configured: true } });
       if (method === 'config.get') {
@@ -502,11 +503,10 @@ describe('API key status guidance', () => {
     const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
     await confirmCall.onOk();
 
-    expect(mockRequest).toHaveBeenCalledWith('rc.auth.setApiKey', {
-      provider: 'openai',
-      apiKey: 'sk-fresh-openai',
-    });
-    expect(mockRequest).toHaveBeenCalledWith('config.apply', expect.any(Object));
+    expect(mockRequest).toHaveBeenCalledWith('rc.provider.upsert', expect.objectContaining({
+      desiredConfig: expect.any(Object),
+      authActions: [{ provider: 'openai', apiKey: 'sk-fresh-openai' }],
+    }));
   });
 
   it('clears the auth-profile key when the user removes it and saves', async () => {
@@ -541,9 +541,9 @@ describe('API key status guidance', () => {
     const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
     await confirmCall.onOk();
 
-    expect(mockRequest).toHaveBeenCalledWith('rc.auth.clearApiKey', {
-      provider: 'openai',
-    });
+    expect(mockRequest).toHaveBeenCalledWith('rc.provider.upsert', expect.objectContaining({
+      authActions: [{ provider: 'openai', clear: true }],
+    }));
   });
 
   it('does not write the redacted sentinel back into config when only auth-profiles has the key', async () => {
@@ -572,10 +572,10 @@ describe('API key status guidance', () => {
     const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
     await confirmCall.onOk();
 
-    const applyCall = mockRequest.mock.calls.find((call: unknown[]) => call[0] === 'config.apply');
-    expect(applyCall).toBeTruthy();
-    const applyPayload = applyCall?.[1] as { raw: string };
-    expect(applyPayload.raw).not.toContain('__OPENCLAW_REDACTED__');
+    const upsertCall = mockRequest.mock.calls.find((call: unknown[]) => call[0] === 'rc.provider.upsert');
+    expect(upsertCall).toBeTruthy();
+    const upsertPayload = upsertCall?.[1] as { desiredConfig: Record<string, unknown> };
+    expect(JSON.stringify(upsertPayload.desiredConfig)).not.toContain('__OPENCLAW_REDACTED__');
   });
 
   it('preserves a previously seen redacted provider when a later config.get snapshot omits it', async () => {
@@ -654,11 +654,12 @@ describe('API key status guidance', () => {
     const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
     await confirmCall.onOk();
 
-    const applyCall = mockRequest.mock.calls.find((call: unknown[]) => call[0] === 'config.apply');
-    expect(applyCall).toBeTruthy();
-    const applyPayload = applyCall?.[1] as { raw: string };
-    expect(applyPayload.raw).toContain('"zai-coding-global"');
-    expect(applyPayload.raw).toContain('__OPENCLAW_REDACTED__');
+    const upsertCall = mockRequest.mock.calls.find((call: unknown[]) => call[0] === 'rc.provider.upsert');
+    expect(upsertCall).toBeTruthy();
+    const upsertPayload = upsertCall?.[1] as { desiredConfig: Record<string, unknown> };
+    const serialized = JSON.stringify(upsertPayload.desiredConfig);
+    expect(serialized).toContain('"zai-coding-global"');
+    expect(serialized).toContain('__OPENCLAW_REDACTED__');
   });
 });
 
@@ -730,10 +731,10 @@ describe('Restart Research-Claw button', () => {
     const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
     await confirmCall.onOk();
 
-    // Should have called config.get then config.apply with same raw
+    // Should have called config.get then config.apply with serialized snapshot config
     expect(mockRequest).toHaveBeenCalledWith('config.get', {});
     expect(mockRequest).toHaveBeenCalledWith('config.apply', {
-      raw: '{"test":true}',
+      raw: serializeConfigForGatewayApply(makeGatewayConfig()),
       baseHash: 'abc123',
     });
     expect(mockMessageSuccess).toHaveBeenCalledWith('settings.restartSuccess');

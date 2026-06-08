@@ -23,7 +23,7 @@
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 14;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -231,6 +231,68 @@ CREATE TABLE IF NOT EXISTS rc_monitors (
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );`;
 
+const RC_MEMORIES = `
+CREATE TABLE IF NOT EXISTS rc_memories (
+  id              TEXT PRIMARY KEY,
+  type            TEXT NOT NULL CHECK(type IN ('user', 'feedback', 'project', 'reference')),
+  name            TEXT NOT NULL,
+  description     TEXT,
+  content         TEXT NOT NULL,
+  metadata        TEXT DEFAULT '{}',
+  related_paper_id TEXT REFERENCES rc_papers(id) ON DELETE SET NULL,
+  related_task_id  TEXT REFERENCES rc_tasks(id) ON DELETE SET NULL,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  accessed_at     TEXT,
+  access_count    INTEGER DEFAULT 0,
+  is_active       INTEGER DEFAULT 1,
+  is_private      INTEGER DEFAULT 0
+);`;
+
+const RC_MEMORY_TAGS = `
+CREATE TABLE IF NOT EXISTS rc_memory_tags (
+  id        TEXT PRIMARY KEY,
+  name      TEXT NOT NULL UNIQUE,
+  color     TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`;
+
+const RC_MEMORY_TAG_LINKS = `
+CREATE TABLE IF NOT EXISTS rc_memory_tag_links (
+  memory_id TEXT NOT NULL REFERENCES rc_memories(id) ON DELETE CASCADE,
+  tag_id    TEXT NOT NULL REFERENCES rc_memory_tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (memory_id, tag_id)
+);`;
+
+const RC_MEMORY_LINKS = `
+CREATE TABLE IF NOT EXISTS rc_memory_links (
+  id              TEXT PRIMARY KEY,
+  from_memory_id  TEXT NOT NULL REFERENCES rc_memories(id) ON DELETE CASCADE,
+  to_memory_id    TEXT NOT NULL REFERENCES rc_memories(id) ON DELETE CASCADE,
+  context         TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(from_memory_id, to_memory_id)
+);`;
+
+const RC_SESSIONS = `
+CREATE TABLE IF NOT EXISTS rc_sessions (
+  id                  TEXT PRIMARY KEY,
+  started_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at            TEXT,
+  events_count        INTEGER NOT NULL DEFAULT 0,
+  memories_extracted  INTEGER NOT NULL DEFAULT 0,
+  metadata            TEXT DEFAULT '{}'
+);`;
+
+const RC_SESSION_EVENTS = `
+CREATE TABLE IF NOT EXISTS rc_session_events (
+  id          TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL REFERENCES rc_sessions(id) ON DELETE CASCADE,
+  event_type  TEXT NOT NULL CHECK(event_type IN ('session_start', 'user_prompt', 'tool_use', 'assistant_response', 'session_end')),
+  timestamp   TEXT NOT NULL DEFAULT (datetime('now')),
+  data        TEXT NOT NULL DEFAULT '{}'
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -250,6 +312,12 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   RC_HEARTBEAT_LOG,
   RC_CRON_STATE,
   RC_MONITORS,
+  RC_MEMORIES,
+  RC_MEMORY_TAGS,
+  RC_MEMORY_TAG_LINKS,
+  RC_MEMORY_LINKS,
+  RC_SESSIONS,
+  RC_SESSION_EVENTS,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -304,6 +372,32 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   // rc_monitors indexes
   `CREATE INDEX IF NOT EXISTS idx_rc_monitors_enabled     ON rc_monitors(enabled);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_monitors_source_type ON rc_monitors(source_type);`,
+
+  // rc_memories indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_memories_type           ON rc_memories(type);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_memories_active         ON rc_memories(is_active);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_memories_private        ON rc_memories(is_private);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_memories_paper          ON rc_memories(related_paper_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_memories_task           ON rc_memories(related_task_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_memories_accessed       ON rc_memories(accessed_at);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_memories_access_count   ON rc_memories(access_count);`,
+
+  // rc_memory_tag_links indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_memory_tag_links_memory ON rc_memory_tag_links(memory_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_memory_tag_links_tag    ON rc_memory_tag_links(tag_id);`,
+
+  // rc_memory_links indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_memory_links_from       ON rc_memory_links(from_memory_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_memory_links_to         ON rc_memory_links(to_memory_id);`,
+
+  // rc_sessions indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_sessions_started       ON rc_sessions(started_at);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_sessions_ended         ON rc_sessions(ended_at);`,
+
+  // rc_session_events indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_session_events_session  ON rc_session_events(session_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_session_events_type     ON rc_session_events(event_type);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_session_events_timestamp ON rc_session_events(timestamp);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────
@@ -316,6 +410,13 @@ export const CREATE_FTS_SQL: readonly string[] = [
   notes,
   keywords,
   content='rc_papers',
+  content_rowid='rowid'
+);`,
+  `CREATE VIRTUAL TABLE IF NOT EXISTS rc_memories_fts USING fts5(
+  name,
+  description,
+  content,
+  content='rc_memories',
   content_rowid='rowid'
 );`,
 ];
@@ -349,5 +450,28 @@ END;`,
 BEGIN
   INSERT INTO rc_papers_fts(rc_papers_fts, rowid, title, authors, abstract, notes, keywords)
     VALUES ('delete', old.rowid, old.title, old.authors, old.abstract, old.notes, old.keywords);
+END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS rc_memories_fts_insert
+  AFTER INSERT ON rc_memories
+BEGIN
+  INSERT INTO rc_memories_fts(rowid, name, description, content)
+    VALUES (new.rowid, new.name, new.description, new.content);
+END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS rc_memories_fts_update
+  AFTER UPDATE ON rc_memories
+BEGIN
+  INSERT INTO rc_memories_fts(rc_memories_fts, rowid, name, description, content)
+    VALUES ('delete', old.rowid, old.name, old.description, old.content);
+  INSERT INTO rc_memories_fts(rowid, name, description, content)
+    VALUES (new.rowid, new.name, new.description, new.content);
+END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS rc_memories_fts_delete
+  BEFORE DELETE ON rc_memories
+BEGIN
+  INSERT INTO rc_memories_fts(rc_memories_fts, rowid, name, description, content)
+    VALUES ('delete', old.rowid, old.name, old.description, old.content);
 END;`,
 ];

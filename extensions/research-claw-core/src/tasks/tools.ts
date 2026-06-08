@@ -11,7 +11,8 @@
  *   7. task_link_file        — Link a task to a workspace file
  *   8. cron_update_schedule  — Update cron preset schedule
  *   9. send_notification     — Push a notification to the dashboard bell
- *  10. task_delete           — Permanently delete a task
+ *  10. task_flow_stage      — Report multi-step task progress to the dashboard UI
+ *  11. task_delete           — Permanently delete a task
  *
  * Each tool uses plain JSON Schema objects for parameters (no TypeBox).
  * Registered via api.registerTool() from the OpenClaw plugin SDK.
@@ -631,7 +632,67 @@ export function createTaskTools(service: TaskService): ToolDefinition[] {
     },
   });
 
-  // ── 10. task_delete ────────────────────────────────────────────────
+  // ── 10. task_flow_stage ───────────────────────────────────────────
+
+  tools.push({
+    name: 'task_flow_stage',
+    description:
+      'Report progress for a multi-step task so the user sees a staged task flow in chat ' +
+      '(instead of a blank "thinking" state). Call at the start and end of each major step. ' +
+      'Use 2–6 concise stages per task. Does not create database tasks.',
+    parameters: {
+      type: 'object',
+      properties: {
+        label: {
+          type: 'string',
+          description: 'Short human-readable stage name shown to the user (≤12 words)',
+        },
+        status: {
+          type: 'string',
+          enum: ['start', 'progress', 'done', 'error'],
+          description: 'start = entering this step; progress = sub-update; done = step finished; error = step failed',
+        },
+        step: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Optional 1-based step index (use with total for ordered flows)',
+        },
+        total: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Optional total number of steps when known upfront',
+        },
+        detail: {
+          type: 'string',
+          description: 'Optional sub-detail under the active stage (tool name, file path, etc.)',
+        },
+      },
+      required: ['label', 'status'],
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
+      if (typeof params.label !== 'string' || !params.label.trim()) {
+        return fail('label is required and must be a non-empty string');
+      }
+      const validStatuses = ['start', 'progress', 'done', 'error'] as const;
+      const status = typeof params.status === 'string' ? params.status : '';
+      if (!validStatuses.includes(status as typeof validStatuses[number])) {
+        return fail(`status must be one of: ${validStatuses.join(', ')}`);
+      }
+      const label = params.label.trim();
+      const detail = typeof params.detail === 'string' ? params.detail.trim() : undefined;
+      const step = typeof params.step === 'number' && Number.isFinite(params.step)
+        ? Math.max(1, Math.floor(params.step))
+        : undefined;
+      const total = typeof params.total === 'number' && Number.isFinite(params.total)
+        ? Math.max(1, Math.floor(params.total))
+        : undefined;
+
+      const payload = { label, status, step, total, detail };
+      return ok(`Task flow stage: ${label} (${status})`, payload);
+    },
+  });
+
+  // ── 11. task_delete ────────────────────────────────────────────────
 
   tools.push({
     name: 'task_delete',

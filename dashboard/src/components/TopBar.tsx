@@ -7,13 +7,14 @@ import type { AgentStatus } from '../stores/ui';
 const STATUS_COLORS: Record<AgentStatus, string> = {
   idle: '#22C55E',
   thinking: '#F59E0B',
+  compacting: '#8B5CF6',
   tool_running: '#F59E0B',
   streaming: '#3B82F6',
   error: '#EF4444',
   disconnected: '#6B7280',
 };
 
-const PULSE_STATES = new Set<AgentStatus>(['thinking', 'tool_running', 'streaming']);
+const PULSE_STATES = new Set<AgentStatus>(['thinking', 'compacting', 'tool_running', 'streaming']);
 
 function AgentStatusDot({ status }: { status: AgentStatus }) {
   const { t } = useTranslation();

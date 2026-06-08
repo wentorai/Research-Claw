@@ -1,5 +1,8 @@
 {
   "id": "openclaw-weixin",
+  "activation": {
+    "onStartup": true
+  },
   "channels": ["openclaw-weixin"],
   "configSchema": {
     "type": "object",

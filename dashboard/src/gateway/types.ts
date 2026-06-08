@@ -1,17 +1,17 @@
 /**
  * Gateway WS RPC v3 frame types.
- * Based on OpenClaw protocol-schemas.ts (PROTOCOL_VERSION = 3).
+ * Based on OpenClaw gateway protocol v4 (OC 2026.6.1+).
  *
  * OpenClaw requires minProtocol/maxProtocol (a version range), not a single
- * "protocol" field.  Both are set to 3 for now.
+ * "protocol" field.
  */
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Minimum protocol version we support. */
-export const MIN_PROTOCOL = 3;
+export const MIN_PROTOCOL = 4;
 /** Maximum protocol version we support. */
-export const MAX_PROTOCOL = 3;
+export const MAX_PROTOCOL = 4;
 
 // --- Frame Types ---
 
@@ -96,6 +96,7 @@ export interface ChatMessage {
   content?: string | Array<{ type: string; text?: string; source?: unknown; [key: string]: unknown }>;
   text?: string;
   timestamp?: number;
+  idempotencyKey?: string;
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;

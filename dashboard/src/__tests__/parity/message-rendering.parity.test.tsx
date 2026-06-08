@@ -105,7 +105,7 @@ describe('Message rendering parity with OpenClaw native UI', () => {
       render(<MessageBubble message={textOnly} />);
 
       expect(screen.getByText('Hello world')).toBeInTheDocument();
-      expect(screen.queryByRole('img')).toBeNull();
+      expect(screen.queryByAltText('Attached image')).toBeNull();
     });
   });
 

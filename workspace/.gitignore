@@ -61,6 +61,3 @@ node_modules/
 # Environment / secrets
 .env
 .env.*
-
-# Auto-added: file exceeds size limit
-/uploads/*

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MenuProps } from 'antd';
-import { Button, Input, Segmented, Select, Spin, Tag, Tooltip, Typography, Dropdown, message } from 'antd';
+import { Button, Input, Modal, Segmented, Select, Spin, Tag, Tooltip, Typography, Dropdown, message } from 'antd';
 import {
   BookOutlined,
   CloseCircleOutlined,
@@ -8,6 +8,7 @@ import {
   FilePdfOutlined,
   FolderAddOutlined,
   LoadingOutlined,
+  QuestionCircleOutlined,
   SearchOutlined,
   StarFilled,
   StarOutlined,
@@ -17,8 +18,10 @@ import { List as VirtualList } from 'react-window';
 import { useLibraryStore, type Paper, type PaperFilter, type ReadStatus, type LibraryCollection } from '../../stores/library';
 import { useGatewayStore } from '../../stores/gateway';
 import { useChatStore } from '../../stores/chat';
-import { getThemeTokens } from '../../styles/theme';
 import { useConfigStore } from '../../stores/config';
+import { useUiStore } from '../../stores/ui';
+import { getThemeTokens } from '../../styles/theme';
+import { buildIntraViewSendPayload } from '../../utils/intraview-prompt';
 import EditTagsModal from './EditTagsModal';
 
 // react-window v2 row component for virtual list
@@ -81,6 +84,7 @@ interface PaperListItemProps {
 
 function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
   const { t } = useTranslation();
+  const locale = useConfigStore((s) => s.locale);
   const updatePaperStatus = useLibraryStore((s) => s.updatePaperStatus);
   const activeTab = useLibraryStore((s) => s.activeTab);
   const ratePaper = useLibraryStore((s) => s.ratePaper);
@@ -88,6 +92,10 @@ function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
   const collections = useLibraryStore((s) => s.collections);
   const addPaperToCollection = useLibraryStore((s) => s.addPaperToCollection);
   const send = useChatStore((s) => s.send);
+  const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
+
+  const [intraViewOpen, setIntraViewOpen] = useState(false);
+  const [intraViewQuestion, setIntraViewQuestion] = useState('');
 
   const authorsText = useMemo(() => {
     if (!paper.authors?.length) return '';
@@ -115,7 +123,30 @@ function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
     }
   };
 
-  const menuItems = [
+  const handleIntraViewSubmit = () => {
+    const question = intraViewQuestion.trim();
+    if (!question) {
+      message.warning(t('library.intraView.questionRequired'));
+      return;
+    }
+    const { agentMessage, displayText } = buildIntraViewSendPayload(paper, question, locale);
+    send(agentMessage, undefined, { displayText });
+    setIntraViewOpen(false);
+    setIntraViewQuestion('');
+    setRightPanelOpen(false);
+    message.success(t('library.intraView.sentHint'));
+    if (paper.read_status === 'unread') {
+      updatePaperStatus(paper.id, 'reading');
+    }
+  };
+
+  const menuItems: MenuProps['items'] = [
+    {
+      key: 'intraView',
+      label: t('library.paperActions.intraView'),
+      icon: <QuestionCircleOutlined />,
+      onClick: () => setIntraViewOpen(true),
+    },
     {
       key: 'openPdf',
       label: t('library.paperActions.openPdf'),
@@ -201,101 +232,143 @@ function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
   };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 8,
-        padding: '8px 16px',
-        cursor: 'pointer',
-        borderBottom: `1px solid ${tokens.border.default}`,
-      }}
-    >
-      <div onClick={handleStatusClick} style={{ cursor: 'pointer', paddingTop: 2 }}>
-        <StatusBadge status={paper.read_status} />
-      </div>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <Text
+    <>
+      <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']}>
+        <div
           style={{
-            fontSize: 13,
-            fontWeight: 500,
-            color: tokens.text.primary,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
+            display: 'flex',
+            gap: 8,
+            padding: '8px 16px',
+            cursor: 'pointer',
+            borderBottom: `1px solid ${tokens.border.default}`,
           }}
         >
-          {paper.title}
-        </Text>
-
-        <div style={{ fontSize: 12, color: tokens.text.secondary, marginTop: 2 }}>
-          {authorsText}
-          {paper.year ? ` \u00B7 ${paper.year}` : ''}
-        </div>
-
-        {paper.venue && (
-          <div style={{ fontSize: 12, color: tokens.text.muted, marginTop: 1 }}>
-            {paper.venue}
+          <div onClick={handleStatusClick} style={{ cursor: 'pointer', paddingTop: 2 }}>
+            <StatusBadge status={paper.read_status} />
           </div>
-        )}
 
-        {visibleTags.length > 0 && (
-          <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {visibleTags.map((tag) => (
-              <Tag key={tag} style={{ fontSize: 10, lineHeight: '16px', margin: 0, padding: '0 4px' }}>
-                {tag}
-              </Tag>
-            ))}
-            {extraTagCount > 0 && (
-              <Tag style={{ fontSize: 10, lineHeight: '16px', margin: 0, padding: '0 4px' }}>
-                +{extraTagCount}
-              </Tag>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: tokens.text.primary,
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
+              {paper.title}
+            </Text>
+
+            <div style={{ fontSize: 12, color: tokens.text.secondary, marginTop: 2 }}>
+              {authorsText}
+              {paper.year ? ` \u00B7 ${paper.year}` : ''}
+            </div>
+
+            {paper.venue && (
+              <div style={{ fontSize: 12, color: tokens.text.muted, marginTop: 1 }}>
+                {paper.venue}
+              </div>
+            )}
+
+            {visibleTags.length > 0 && (
+              <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {visibleTags.map((tag) => (
+                  <Tag key={tag} style={{ fontSize: 10, lineHeight: '16px', margin: 0, padding: '0 4px' }}>
+                    {tag}
+                  </Tag>
+                ))}
+                {extraTagCount > 0 && (
+                  <Tag style={{ fontSize: 10, lineHeight: '16px', margin: 0, padding: '0 4px' }}>
+                    +{extraTagCount}
+                  </Tag>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-        <Button
-          type="text"
-          size="small"
-          onClick={handleStarClick}
-          icon={
-            paper.rating ? (
-              <StarFilled style={{ color: tokens.accent.amber, fontSize: 14 }} />
-            ) : (
-              <StarOutlined style={{ color: tokens.text.muted, fontSize: 14 }} />
-            )
-          }
-          style={{ padding: 0, width: 24, height: 24 }}
-        />
-        <Dropdown
-          menu={{ items: collectionMenuItems, onClick: handleCollectionMenuClick }}
-          trigger={['click']}
-          placement="bottomRight"
-        >
-          <Tooltip title={t('library.addToCollectionTooltip')}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
             <Button
               type="text"
               size="small"
-              icon={<FolderAddOutlined style={{ color: tokens.text.muted, fontSize: 14 }} />}
+              onClick={handleStarClick}
+              icon={
+                paper.rating ? (
+                  <StarFilled style={{ color: tokens.accent.amber, fontSize: 14 }} />
+                ) : (
+                  <StarOutlined style={{ color: tokens.text.muted, fontSize: 14 }} />
+                )
+              }
               style={{ padding: 0, width: 24, height: 24 }}
-              onClick={(e) => e.stopPropagation()}
             />
-          </Tooltip>
-        </Dropdown>
-        <Dropdown menu={{ items: menuItems }} trigger={['click']} placement="bottomRight">
-          <Button
-            type="text"
-            size="small"
-            icon={<EllipsisOutlined style={{ color: tokens.text.muted, fontSize: 14 }} />}
-            style={{ padding: 0, width: 24, height: 24 }}
-            onClick={(e) => e.stopPropagation()}
-          />
-        </Dropdown>
-      </div>
-    </div>
+            <Dropdown
+              menu={{ items: collectionMenuItems, onClick: handleCollectionMenuClick }}
+              trigger={['click']}
+              placement="bottomRight"
+            >
+              <Tooltip title={t('library.addToCollectionTooltip')}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<FolderAddOutlined style={{ color: tokens.text.muted, fontSize: 14 }} />}
+                  style={{ padding: 0, width: 24, height: 24 }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </Tooltip>
+            </Dropdown>
+            <Dropdown menu={{ items: menuItems }} trigger={['click']} placement="bottomRight">
+              <Button
+                type="text"
+                size="small"
+                icon={<EllipsisOutlined style={{ color: tokens.text.muted, fontSize: 14 }} />}
+                style={{ padding: 0, width: 24, height: 24 }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Dropdown>
+          </div>
+        </div>
+      </Dropdown>
+
+      <Modal
+        title={t('library.intraView.title')}
+        open={intraViewOpen}
+        onCancel={() => {
+          setIntraViewOpen(false);
+          setIntraViewQuestion('');
+        }}
+        onOk={handleIntraViewSubmit}
+        okText={t('library.intraView.submit')}
+        cancelText={t('library.intraView.cancel')}
+        destroyOnHidden
+      >
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+          {t('library.linkVsFileHint')}
+        </Text>
+        <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>
+          {paper.title}
+        </Text>
+        {!paper.pdf_path && (
+          <Text type="warning" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            {t('library.intraView.noPdfWarning')}
+          </Text>
+        )}
+        <Input.TextArea
+          value={intraViewQuestion}
+          onChange={(e) => setIntraViewQuestion(e.target.value)}
+          placeholder={t('library.intraView.questionPlaceholder')}
+          rows={3}
+          autoFocus
+          onPressEnter={(e) => {
+            if (!e.shiftKey) {
+              e.preventDefault();
+              handleIntraViewSubmit();
+            }
+          }}
+        />
+      </Modal>
+    </>
   );
 }
 

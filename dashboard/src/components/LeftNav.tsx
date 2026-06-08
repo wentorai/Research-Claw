@@ -3,6 +3,7 @@ import { Button, Dropdown, Input, Modal, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined,
   BookOutlined,
+  FileSearchOutlined,
   FolderOutlined,
   CheckSquareOutlined,
   EyeOutlined,
@@ -25,6 +26,8 @@ import { useUiStore, type PanelTab } from '../stores/ui';
 import { useSessionsStore, MAIN_SESSION_KEY } from '../stores/sessions';
 import { normalizeSessionKey } from '../utils/session-key';
 import { removeScheduledJobForSession } from '../utils/remove-cron-for-session';
+import { isPaperReviewCronSessionRow } from '../utils/paper-review-run';
+import { isStagedWritingCronSessionRow } from '../utils/staged-writing-run';
 
 const { Text } = Typography;
 
@@ -38,6 +41,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: 'library', icon: <BookOutlined />, labelKey: 'nav.library' },
   { key: 'workspace', icon: <FolderOutlined />, labelKey: 'nav.workspace' },
+  { key: 'review', icon: <FileSearchOutlined />, labelKey: 'nav.review' },
   { key: 'tasks', icon: <CheckSquareOutlined />, labelKey: 'nav.tasks' },
   { key: 'monitor', icon: <EyeOutlined />, labelKey: 'nav.monitor' },
   { key: 'supervisor', icon: <SafetyCertificateOutlined />, labelKey: 'nav.supervisor' },
@@ -148,6 +152,8 @@ export default function LeftNav() {
     const cron: typeof list = [];
     for (const s of list) {
       if (isCronSession(s.key)) {
+        if (isPaperReviewCronSessionRow(s)) continue;
+        if (isStagedWritingCronSessionRow(s)) continue;
         cron.push(s);
       } else {
         user.push(s);

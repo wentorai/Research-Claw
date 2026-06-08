@@ -1,6 +1,6 @@
 {
   "name": "@research-claw/wentor-connect",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "description": "PLACEHOLDER — Wentor platform integration (account, skills sync). Not part of MVP.",
   "type": "module",
   "main": "dist/index.js",
@@ -10,7 +10,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "openclaw": "2026.3.13",
+    "openclaw": "2026.6.1",
     "typescript": "^5.7.0"
   },
   "peerDependencies": {

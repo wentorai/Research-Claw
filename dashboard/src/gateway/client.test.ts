@@ -111,7 +111,7 @@ describe('GatewayClient', () => {
       ok: true,
       payload: {
         type: 'hello-ok',
-        protocol: 3,
+        protocol: 4,
         server: { version: '1.0.0', connId: 'conn-123' },
         features: { methods: ['health'], events: [] },
         policy: { tickIntervalMs: 30_000 },
@@ -138,7 +138,7 @@ describe('GatewayClient', () => {
       expect(client.isConnected).toBe(true);
       expect(client.connectionState).toBe('connected');
       expect(onHello).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'hello-ok', protocol: 3 }),
+        expect.objectContaining({ type: 'hello-ok', protocol: 4 }),
       );
     });
 
@@ -392,7 +392,7 @@ describe('GatewayClient', () => {
 
       const error = await resultPromise;
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toBe('Connection closed');
+      expect((error as Error).message).toBe('Connection closed while waiting for slow.method');
     });
   });
 
@@ -415,8 +415,8 @@ describe('GatewayClient', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       const sentFrame = JSON.parse(mockWsInstance.send.mock.calls[0][0]);
-      expect(sentFrame.params.minProtocol).toBe(3);
-      expect(sentFrame.params.maxProtocol).toBe(3);
+      expect(sentFrame.params.minProtocol).toBe(4);
+      expect(sentFrame.params.maxProtocol).toBe(4);
     });
 
     it('sends client id, name, version, platform, and mode in connect frame', async () => {
