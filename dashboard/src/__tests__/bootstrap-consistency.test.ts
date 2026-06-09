@@ -52,6 +52,7 @@ const ACTUAL_TASK_TOOLS = [
   'task_link',
   'task_note',
   'task_link_file',
+  'task_flow_stage',
   'task_delete',
   'cron_update_schedule',
   'send_notification',
@@ -81,7 +82,7 @@ const ACTUAL_MONITOR_TOOLS = [
   'monitor_note',
 ] as const;
 
-/** All 43 agent tools (17 + 10 + 11 + 5) */
+/** All 44 agent tools (17 + 11 + 11 + 5) */
 const ALL_AGENT_TOOLS = [
   ...ACTUAL_LITERATURE_TOOLS,
   ...ACTUAL_TASK_TOOLS,
@@ -184,10 +185,10 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
       expect(ACTUAL_LITERATURE_TOOLS.length).toBe(17);
     });
 
-    it('states Tasks has 10 tools', () => {
+    it('states Tasks has 11 tools', () => {
       if (!hasBootstrapFiles) return;
-      expect(agentsMd).toMatch(/Tasks\s+\(10 tools\)/);
-      expect(ACTUAL_TASK_TOOLS.length).toBe(10);
+      expect(agentsMd).toMatch(/Tasks\s+\(11 tools\)/);
+      expect(ACTUAL_TASK_TOOLS.length).toBe(11);
     });
 
     it('states Workspace has 11 tools', () => {
@@ -207,8 +208,8 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
       expect(agentsMd).toMatch(/Memory\s+\(2 tools\)/);
     });
 
-    it('total local agent tool count is 43 (17 + 10 + 11 + 5)', () => {
-      expect(ALL_AGENT_TOOLS.length).toBe(43);
+    it('total local agent tool count is 44 (17 + 11 + 11 + 5)', () => {
+      expect(ALL_AGENT_TOOLS.length).toBe(44);
     });
   });
 
