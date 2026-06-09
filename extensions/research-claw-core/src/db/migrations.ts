@@ -189,7 +189,7 @@ const MIGRATIONS: readonly Migration[] = [
     sql: [
       `CREATE TABLE IF NOT EXISTS rc_memories (
   id              TEXT PRIMARY KEY,
-  type            TEXT NOT NULL CHECK(type IN ('user', 'feedback', 'project', 'reference')),
+  type            TEXT NOT NULL CHECK(type IN ('user', 'feedback', 'project', 'reference', 'agent')),
   name            TEXT NOT NULL,
   description     TEXT,
   content         TEXT NOT NULL,
