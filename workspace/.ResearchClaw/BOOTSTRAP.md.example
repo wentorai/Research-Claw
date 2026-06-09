@@ -80,7 +80,7 @@ communication preferences -- just follow this default.
 
    **CRITICAL: When enabling ANY channel, you MUST include
    `commands.native: false` in the config patch. Research-Claw registers
-   500+ commands (49 local + 34 API tools + 438 skills + built-in) which exceeds every IM channel's command menu limit.
+   500+ commands (47 local + 18 API tools + 433 skills + built-in) which exceeds every IM channel's command menu limit.
    Without this, the gateway enters a crash loop.**
 
    **CRITICAL: After writing config via `config.patch`, do NOT call
@@ -280,7 +280,7 @@ AND populate **TOOLS.md** (the L3 environment memo) with detected values:
   structured result, record "(检测失败)" — do NOT report "not installed" or
   suggest installation. Only if the tool call succeeds AND reports not installed,
   inform user:
-  "Research skill pack not found. Install for 438 research skills + 34 API tools:
+  "Research skill pack not found. Install for 433 research skills + 18 API tools:
   `openclaw plugins install @wentorai/research-plugins`"
   Record install status in Environment.
 - If user provided Zotero Web API key or other API keys during Step 2,

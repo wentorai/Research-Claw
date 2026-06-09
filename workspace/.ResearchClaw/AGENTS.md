@@ -35,10 +35,10 @@ Four modules share `.research-claw/library.db`, plus OC built-in Memory:
 
 ```
 Library    (17 tools) — paper storage, search, citation graph, import/export, Zotero/EndNote
-Tasks      (10 tools) — deadlines, progress, paper/file links, cron
+Tasks      (11 tools) — deadlines, progress, paper/file links, cron
 Workspace  (11 tools) — file CRUD, move/rename/delete, git versioning, diff, export, download
 Monitor     (5 tools) — universal N-monitor: academic, code, feed, web, custom
-SkillSearch (1 tool)  — on-demand skill loading from 438 research methodology skills
+SkillSearch (1 tool)  — on-demand skill loading from 433 research methodology skills
 Memory      (2 tools) — search and read indexed memory files
 ```
 
@@ -74,7 +74,7 @@ Native installs: check TOOLS.md for available tools.
   For complex/beautiful diagrams → recommend NanoBanana first → user declines → Mermaid fallback.
 
 - **Need specialized methodology?** → `skill_search("your topic")` to load domain-specific guidance.
-  438 research methodology skills are available on demand. Examples:
+  433 research methodology skills are available on demand. Examples:
   `skill_search("latex thesis template")` · `skill_search("citation network analysis")`
   · `skill_search("CNKI search")` · `skill_search("systematic review PRISMA")`
 
