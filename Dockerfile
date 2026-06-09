@@ -119,7 +119,7 @@ RUN mkdir -p /defaults/research-plugins && cd /tmp && \
 # 烘焙配置模板 + 系统提示词到 /defaults/，entrypoint 会同步到 volume
 RUN mkdir -p /defaults/bootstrap-prompts && \
     cp config/openclaw.example.json /defaults/openclaw.example.json && \
-    # L1 system prompts (force-updated on every container start)
+    # L1 system prompts (version-gated refresh at container start)
     cp workspace/.ResearchClaw/AGENTS.md \
        workspace/.ResearchClaw/HEARTBEAT.md /defaults/bootstrap-prompts/ && \
     # L3 user-owned + L2 onboarding templates (copied only if missing)
@@ -128,8 +128,7 @@ RUN mkdir -p /defaults/bootstrap-prompts && \
        workspace/.ResearchClaw/TOOLS.md.example \
        workspace/.ResearchClaw/BOOTSTRAP.md.example \
        workspace/.ResearchClaw/USER.md.example /defaults/bootstrap-prompts/ && \
-    cp workspace/MEMORY.md.example /defaults/bootstrap-prompts/ && \
-    cp workspace/USER.md.example /defaults/bootstrap-prompts/ws-USER.md.example
+    cp workspace/MEMORY.md.example /defaults/bootstrap-prompts/
 
 # ── 运行时 ───────────────────────────────────────────────────────────
 # CLI wrapper: 让 `openclaw` 命令在容器内直接可用

@@ -241,10 +241,16 @@ fi
 RC_DIR=/app/workspace/.ResearchClaw
 BP=/defaults/bootstrap-prompts
 mkdir -p "$RC_DIR"
-# L1 system prompts: always force-update the .ResearchClaw/ canonical copy from
-# the image (safe — no user data).
+# L1 system prompts (AGENTS/HEARTBEAT): version-gated refresh of the
+# .ResearchClaw/ canonical copy, same pattern as the openclaw.json handling
+# above — update on fresh install or version change, re-seed if missing,
+# no rewrite on a same-version restart. L1 files are system-managed machine
+# contracts (no .example = system-owned); user customization belongs in L3.
+# $CURRENT_VERSION still holds the pre-upgrade version captured earlier.
 for f in AGENTS.md HEARTBEAT.md; do
-  [ -f "$BP/$f" ] && cp "$BP/$f" "$RC_DIR/$f"
+  if [ -f "$BP/$f" ] && { [ "$CURRENT_VERSION" != "$IMAGE_VERSION" ] || [ ! -f "$RC_DIR/$f" ]; }; then
+    cp "$BP/$f" "$RC_DIR/$f"
+  fi
 done
 # Only HEARTBEAT.md is mirrored to the workspace root — OC's heartbeat system
 # reads workspace/HEARTBEAT.md directly and the pnpm patch doesn't cover
@@ -262,8 +268,7 @@ fi
 [ ! -f /app/workspace/MEMORY.md ] && [ -f "$BP/MEMORY.md.example" ] && cp "$BP/MEMORY.md.example" /app/workspace/MEMORY.md
 # NOTE: do NOT seed a root workspace/USER.md — USER.md is relocatable, so
 # migratePromptFiles() seeds .ResearchClaw/USER.md and leaves a root symlink.
-# A real root file would only be renamed to .bak by the migration. ($BP still
-# carries an unused ws-USER.md.example from the image build — harmless vestige.)
+# A real root file would only be renamed to .bak by the migration.
 
 # Token: config file is source of truth; env var is a convenience override.
 # Override via env: docker run -e OPENCLAW_GATEWAY_TOKEN=your-secret ...
