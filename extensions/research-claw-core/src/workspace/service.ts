@@ -600,8 +600,10 @@ export class WorkspaceService {
    * - a wrong symlink is replaced;
    * - a pre-existing real file is preserved as .bak (or removed if a .bak
    *   already holds the prior backup) before the symlink is created;
-   * - if symlink creation is not permitted (native Windows without Developer
-   *   Mode), it degrades silently — the bootstrap hook still injects content.
+   * - if symlink creation fails, it degrades silently — the bootstrap hook
+   *   still injects content. Unreachable in the current support matrix
+   *   (install.sh dies on non-mac/Linux; Windows runs via WSL2/Docker, both
+   *   POSIX), kept as defensive redundancy for a future native-Windows port.
    * The target is relative so the link survives the workspace being moved.
    */
   private async linkRootToSubdir(filename: string): Promise<void> {
@@ -632,15 +634,37 @@ export class WorkspaceService {
         // Real file/dir at root — preserve as .bak, but never clobber an
         // existing backup (the canonical copy already lives in .ResearchClaw/).
         const bakPath = rootPath + '.bak';
+        let bakExists = false;
         try {
           await fsp.access(bakPath, fs.constants.F_OK);
-          await fsp.rm(rootPath, { force: true, recursive: true });
+          bakExists = true;
         } catch {
-          try {
+          // no backup yet
+        }
+        try {
+          if (!bakExists) {
             await fsp.rename(rootPath, bakPath);
-          } catch {
-            return;
+          } else if (st.isFile() && (await this.duplicatesExisting(rootPath, [
+            path.join(this.root, relTarget), bakPath,
+          ]))) {
+            // True duplicate of canonical or backup — nothing unique to keep.
+            await fsp.rm(rootPath, { force: true });
+          } else {
+            // Unique content (or a directory): never delete — move to the
+            // first free numbered backup slot instead.
+            let n = 1;
+            while (n < 100) {
+              try {
+                await fsp.access(`${bakPath}.${n}`, fs.constants.F_OK);
+                n += 1;
+              } catch {
+                break;
+              }
+            }
+            await fsp.rename(rootPath, `${bakPath}.${n}`);
           }
+        } catch {
+          return;
         }
       }
     }
@@ -648,9 +672,29 @@ export class WorkspaceService {
     try {
       await fsp.symlink(relTarget, rootPath);
     } catch {
-      // Graceful degradation (e.g. EPERM on native Windows without Dev Mode).
-      // Root path stays absent; content is still provided via agent:bootstrap.
+      // Graceful degradation: root path stays absent; content is still
+      // injected via agent:bootstrap. Only native Windows without Developer
+      // Mode hits EPERM here — unreachable today (gateway runs on mac/Linux/
+      // WSL2/Docker only, all POSIX); kept as defensive redundancy.
     }
+  }
+
+  /** True if the file at srcPath is byte-identical to any of the candidates. */
+  private async duplicatesExisting(srcPath: string, candidates: string[]): Promise<boolean> {
+    let src: Buffer;
+    try {
+      src = await fsp.readFile(srcPath);
+    } catch {
+      return false;
+    }
+    for (const candidate of candidates) {
+      try {
+        if (src.equals(await fsp.readFile(candidate))) return true;
+      } catch {
+        // candidate unreadable — not a duplicate of it
+      }
+    }
+    return false;
   }
 
   /**

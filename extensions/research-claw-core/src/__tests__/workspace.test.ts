@@ -430,6 +430,46 @@ describe('WorkspaceService', () => {
       expect(fs.existsSync(rootPath + '.bak')).toBe(false);
     });
 
+    it('never destroys unique root content even when canonical and .bak both exist', async () => {
+      // Reachable state: initial migration left USER.md.bak; the user later
+      // replaced the root symlink with a real file (e.g. `mv draft.md USER.md`)
+      // expecting it to take effect. The next init() must not delete it.
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'USER.md'), 'canonical');
+      fs.writeFileSync(path.join(tmpDir, 'USER.md.bak'), 'old backup');
+      fs.writeFileSync(path.join(tmpDir, 'USER.md'), 'unique user content');
+
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      const rootPath = path.join(tmpDir, 'USER.md');
+      expect(fs.lstatSync(rootPath).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(rootPath + '.bak', 'utf-8')).toBe('old backup');
+      // The unique content must survive somewhere on disk.
+      const survivors = fs.readdirSync(tmpDir)
+        .filter((f) => f.startsWith('USER.md.bak'))
+        .map((f) => fs.readFileSync(path.join(tmpDir, f), 'utf-8'));
+      expect(survivors).toContain('unique user content');
+    });
+
+    it('removes a true-duplicate root file without growing .bak.N backups', async () => {
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'USER.md'), 'canonical');
+      fs.writeFileSync(path.join(tmpDir, 'USER.md.bak'), 'old backup');
+      // Root content identical to canonical — safe to drop, nothing unique.
+      fs.writeFileSync(path.join(tmpDir, 'USER.md'), 'canonical');
+
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      const rootPath = path.join(tmpDir, 'USER.md');
+      expect(fs.lstatSync(rootPath).isSymbolicLink()).toBe(true);
+      const baks = fs.readdirSync(tmpDir).filter((f) => f.startsWith('USER.md.bak'));
+      expect(baks).toEqual(['USER.md.bak']); // no .bak.1 churn for duplicates
+    });
+
     it('does not create a dangling symlink when the file exists nowhere', async () => {
       svc = new WorkspaceService(makeConfig(tmpDir));
       await svc.init();
