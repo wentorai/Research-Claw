@@ -172,16 +172,10 @@ function resolveModelDef(
   const profileLabel = options?.profileLabel?.trim();
   const displayName =
     profileLabel && isApiProfileProviderKey(provider) ? profileLabel : modelId;
-  // DeepSeek v4 thinking mode requires reasoning_content replay across turns.
-  // Our current gateway message pipeline doesn't persist/replay that field yet,
-  // so force non-thinking mode to avoid 400 errors in multi-turn chats.
-  const forceReasoningOff =
-    provider === 'deepseek' &&
-    /^deepseek-v4-(flash|pro)$/i.test(modelId);
   return {
     id: modelId,
     name: displayName,
-    reasoning: forceReasoningOff ? false : (known?.reasoning ?? false),
+    reasoning: known?.reasoning ?? false,
     input: known?.input ?? ['text', 'image'],
     contextWindow: known?.contextWindow ?? 32_000,
     maxTokens: known?.maxTokens ?? 16_384,
@@ -346,9 +340,13 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
       thinkingDefault: 'medium',
       subagents: { announceTimeoutMs: 480000 },
       heartbeat: { every: '30m', lightContext: true, isolatedSession: true },
+      // Disabled by default: RC ships with deepseek as the primary model, which
+      // exposes no embeddings endpoint. With memorySearch enabled and no reachable
+      // provider, OC falls back to the "openai" embeddings backend and loops on
+      // "[memory] embeddings retryable error". Users with an embeddings-capable
+      // provider can re-enable it from Settings.
       memorySearch: {
-        enabled: true,
-        sources: ['memory'],
+        enabled: false,
       },
     },
   },

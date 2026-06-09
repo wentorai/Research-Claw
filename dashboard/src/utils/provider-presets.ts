@@ -192,8 +192,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.deepseek.com',
     api: 'openai-completions',
     models: [
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', reasoning: false, input: ['text'], contextWindow: 1_000_000, maxTokens: 384_000 },
-      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', reasoning: false, input: ['text'], contextWindow: 1_000_000, maxTokens: 384_000 },
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', reasoning: true, input: ['text'], contextWindow: 1_000_000, maxTokens: 384_000 },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', reasoning: true, input: ['text'], contextWindow: 1_000_000, maxTokens: 384_000 },
     ],
     urlPattern: /api\.deepseek\.com/i,
   },

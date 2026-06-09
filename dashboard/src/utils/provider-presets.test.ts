@@ -150,11 +150,11 @@ describe('DeepSeek provider preset', () => {
     expect(pro.maxTokens).toBe(384_000);
   });
 
-  it('defaults DeepSeek v4 models to non-thinking mode', () => {
+  it('marks DeepSeek v4 models as reasoning models', () => {
     const flash = deepseek.models.find((m) => m.id === 'deepseek-v4-flash')!;
     const pro = deepseek.models.find((m) => m.id === 'deepseek-v4-pro')!;
-    expect(flash.reasoning).toBe(false);
-    expect(pro.reasoning).toBe(false);
+    expect(flash.reasoning).toBe(true);
+    expect(pro.reasoning).toBe(true);
   });
 
   it('can be resolved by provider key', () => {

@@ -35,6 +35,19 @@ describe('buildSaveConfig', () => {
     expect((defaults.imageModel as Record<string, string>).primary).toBe('openai/gpt-4o');
   });
 
+  it('disables memorySearch by default (deepseek has no embeddings endpoint)', () => {
+    const config = buildSaveConfig(null, {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      textModel: 'gpt-4o',
+    });
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    const memorySearch = defaults.memorySearch as Record<string, unknown> | undefined;
+    expect(memorySearch?.enabled).toBe(false);
+  });
+
   it('respects preset input capabilities — text-only models stay text-only', () => {
     const config = buildSaveConfig(null, {
       provider: 'zai',
@@ -617,7 +630,7 @@ describe('buildSaveConfig', () => {
     expect(models[0].reasoning).toBe(false);
   });
 
-  it('forces DeepSeek v4 models to non-thinking mode', () => {
+  it('enables thinking mode for DeepSeek v4 reasoning models', () => {
     const config = buildSaveConfig(null, {
       provider: 'deepseek',
       baseUrl: 'https://api.deepseek.com',
@@ -628,7 +641,7 @@ describe('buildSaveConfig', () => {
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
     const models = providers.deepseek.models as Array<{ id: string; reasoning: boolean }>;
     expect(models[0].id).toBe('deepseek-v4-flash');
-    expect(models[0].reasoning).toBe(false);
+    expect(models[0].reasoning).toBe(true);
   });
 
   // --- PR #18: MiniMax M2.7 model support ---
