@@ -70,7 +70,7 @@ function persistKey(key: string) {
   }
 }
 
-import { isMainSessionKey, normalizeSessionKey } from '../utils/session-key';
+import { isHeartbeatSessionKey, isMainSessionKey, normalizeSessionKey } from '../utils/session-key';
 import { isSessionRowStale } from '../utils/session-freshness';
 import { useConfigStore } from './config';
 
@@ -107,7 +107,8 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
         includeDerivedTitles: true,
         limit: 1000,
       });
-      const serverSessions = result.sessions ?? [];
+      // Drop synthetic heartbeat sessions (isolatedSession runs in "<base>:heartbeat").
+      const serverSessions = (result.sessions ?? []).filter((s) => !isHeartbeatSessionKey(s.key));
       // Ensure the main session is always present in the list
       const sessions = serverSessions.some((s) => isMain(s.key))
         ? serverSessions

@@ -32,6 +32,18 @@ export function isMainSessionKey(key: string): boolean {
   return k === 'main';
 }
 
+/**
+ * Check if a key refers to a synthetic heartbeat session (e.g. "main:heartbeat").
+ * Heartbeat runs in an isolated "<base>:heartbeat" session that must never appear
+ * in the user-facing session list.
+ *
+ * Mirrors OC isSyntheticSessionMaintenanceKey (openclaw/src/config/sessions/store-maintenance.ts).
+ */
+export function isHeartbeatSessionKey(key: string): boolean {
+  const rest = normalizeSessionKey(key);
+  return rest === 'heartbeat' || rest.endsWith(':heartbeat') || rest.includes(':heartbeat:');
+}
+
 /** Bare dashboard key → gateway session store key (agent:main:…). */
 export function toGatewaySessionKey(key: string): string {
   if (!key) return 'agent:main:main';

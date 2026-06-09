@@ -345,7 +345,7 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
       compaction: { mode: 'safeguard' },
       thinkingDefault: 'medium',
       subagents: { announceTimeoutMs: 480000 },
-      heartbeat: { every: '30m', lightContext: true },
+      heartbeat: { every: '30m', lightContext: true, isolatedSession: true },
       memorySearch: {
         enabled: true,
         sources: ['memory'],

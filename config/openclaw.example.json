@@ -29,7 +29,8 @@
       },
       "heartbeat": {
         "every": "30m",
-        "lightContext": true
+        "lightContext": true,
+        "isolatedSession": true
       },
       "sandbox": {
         "mode": "off"

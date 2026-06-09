@@ -302,13 +302,20 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
-  // 11. Heartbeat — ensure lightContext is true to minimize token cost
+  // 11. Heartbeat — lightContext keeps token cost low; isolatedSession runs heartbeat
+  // turns in <base>:heartbeat so they never pollute the main session transcript.
   if (!c.agents.defaults.heartbeat) {
-    c.agents.defaults.heartbeat = { every: '30m', lightContext: true };
+    c.agents.defaults.heartbeat = { every: '30m', lightContext: true, isolatedSession: true };
     changed = true;
-  } else if (c.agents.defaults.heartbeat.lightContext !== true) {
-    c.agents.defaults.heartbeat.lightContext = true;
-    changed = true;
+  } else {
+    if (c.agents.defaults.heartbeat.lightContext !== true) {
+      c.agents.defaults.heartbeat.lightContext = true;
+      changed = true;
+    }
+    if (c.agents.defaults.heartbeat.isolatedSession !== true) {
+      c.agents.defaults.heartbeat.isolatedSession = true;
+      changed = true;
+    }
   }
   if (!isGlobal && !c.plugins?.entries) {
     if (!c.plugins) c.plugins = {};
