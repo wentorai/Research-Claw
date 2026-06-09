@@ -31,6 +31,7 @@ export default function MessageInput() {
   const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const historyAnchorRef = useRef<HTMLDivElement>(null);
   const send = useChatStore((s) => s.send);
   const abort = useChatStore((s) => s.abort);
   const inputRestore = useChatStore((s) => s.inputRestore);
@@ -474,11 +475,12 @@ export default function MessageInput() {
               disabled={!isConnected || sending}
             />
           </Tooltip>
-          <div className="chat-composer-history">
+          <div className="chat-composer-history" ref={historyAnchorRef}>
             <InputHistoryPopup
               items={inputHistory.items()}
               visible={historyPopupOpen}
               align="right"
+              anchorRef={historyAnchorRef}
               onSelect={(historyText) => {
                 setText(historyText);
                 setHistoryPopupOpen(false);
