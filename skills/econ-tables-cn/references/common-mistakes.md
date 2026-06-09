@@ -1,0 +1,37 @@
+# Common Table Mistakes
+
+- Missing N.
+- Missing R-squared or reporting an irrelevant R-squared.
+- Fixed effects not labeled.
+- Cluster level not disclosed.
+- Controls change across columns without explanation.
+- Coefficients and standard errors split into separate columns.
+- Too many decimal places.
+- Stars shown but convention missing.
+- Main text claims a result that is not visible in the table.
+- Robustness table changes sample and model at the same time.
+- First-stage IV table absent.
+- DiD table shown without event-study or pre-trend evidence.
+- Appendix table formatting differs from main table.
+- Notes are copied from another paper and mismatch the table.
+- Variable labels are cryptic or inconsistent with theory.
+- Checklist item 17: verify this against the target journal instructions before submission.
+- Checklist item 18: verify this against the target journal instructions before submission.
+- Checklist item 19: verify this against the target journal instructions before submission.
+- Checklist item 20: verify this against the target journal instructions before submission.
+- Checklist item 21: verify this against the target journal instructions before submission.
+- Checklist item 22: verify this against the target journal instructions before submission.
+- Checklist item 23: verify this against the target journal instructions before submission.
+- Checklist item 24: verify this against the target journal instructions before submission.
+- Checklist item 25: verify this against the target journal instructions before submission.
+- Checklist item 26: verify this against the target journal instructions before submission.
+- Checklist item 27: verify this against the target journal instructions before submission.
+- Checklist item 28: verify this against the target journal instructions before submission.
+- Checklist item 29: verify this against the target journal instructions before submission.
+- Checklist item 30: verify this against the target journal instructions before submission.
+- Checklist item 31: verify this against the target journal instructions before submission.
+- Checklist item 32: verify this against the target journal instructions before submission.
+- Checklist item 33: verify this against the target journal instructions before submission.
+- Checklist item 34: verify this against the target journal instructions before submission.
+- Checklist item 35: verify this against the target journal instructions before submission.
+- Checklist item 36: verify this against the target journal instructions before submission.

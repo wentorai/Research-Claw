@@ -1,0 +1,8 @@
+econ-charts-cn
+Copyright 2026 Research-Claw Contributors
+
+Independently developed. All chart templates written from public documentation
+of cited statistical packages (coefplot/eventdd/binscatter/dotwhisker/fixest/
+binsreg/forestplot/sf/igraph/matplotlib/seaborn/plotly/geopandas/networkx).
+No source code copied from any third-party project. Skill structure inspired by
+existing Research-Claw skills (skills/publication-figure-cn/).
