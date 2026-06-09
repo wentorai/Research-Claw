@@ -812,12 +812,17 @@ const DEGRADATION_HINTS: Record<string, string> = {
 function resolvePptRoot(api: PluginApi, cfg: PluginConfig): string {
   // Prefer a repo checked out at RC root: ./ppt-master (submodule or clone).
   // Keep backward compatibility: ./integrations/ppt-master.
-  const userProvided = cfg.pptRoot ? api.resolvePath(cfg.pptRoot) : null;
+  // api.resolvePath() is plugin-dir-relative, but the ppt-master submodule lives
+  // at the RC git root — so resolve each relative spec against the git root first
+  // (dev/submodule layout), then the plugin dir (bundled/installed layout).
+  const gitRoot = findGitRoot(api.resolvePath('.'));
+  const expand = (rel: string): string[] =>
+    path.isAbsolute(rel) ? [rel] : [path.join(gitRoot, rel), api.resolvePath(rel)];
   const candidates = [
-    userProvided,
-    api.resolvePath('ppt-master'),
-    api.resolvePath('integrations/ppt-master'),
-  ].filter(Boolean) as string[];
+    ...(cfg.pptRoot ? expand(cfg.pptRoot) : []),
+    ...expand('ppt-master'),
+    ...expand('integrations/ppt-master'),
+  ];
 
   for (const root of candidates) {
     // "pptRoot" must contain the skill scripts at skills/ppt-master/scripts/.
