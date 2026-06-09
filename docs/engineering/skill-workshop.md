@@ -1,3 +1,11 @@
+---
+doc: engineering/skill-workshop.md
+audience: 开发者 — 渠道 B(仓库按需阅读,不注入运行时)
+status: 现行 · 2026-06-09 核验仍与代码一致
+source-of-truth: 代码优先(skill_workshop 工具 + dashboard 技能工坊面板)
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
+---
+
 # Skill Workshop in Research-Claw
 
 Research-Claw uses OpenClaw 2026.6.1 **Skill Workshop** for governed skill creation and updates.

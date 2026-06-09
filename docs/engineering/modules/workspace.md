@@ -1,15 +1,21 @@
-# 03c — Workspace & Git Tracking Module
+---
+doc: engineering/modules/workspace.md
+audience: 开发者 — 渠道 B(仓库按需阅读,不注入运行时)
+status: 现行 · 2026-06-09 核验仍与代码一致
+source-of-truth: 代码优先(src/workspace/);本文保留设计意图,易变数字以代码为准
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
+---
 
-> Structured workspace directory for research files with automatic Git-based
-> version tracking. The agent commits on behalf of the researcher; it never
-> auto-pushes.
+# Workspace & Git 跟踪模块
+
+> 为研究文件提供结构化工作区,并用 Git 自动做版本跟踪。Agent 代研究者提交,
+> 但**从不 auto-push**。
 
 | Field | Value |
 |-------|-------|
-| **Status** | Draft |
-| **Depends on** | `02` (Engineering Architecture — HTTP route registration, RPC protocol) |
-| **Consumed by** | `03b` (task-file linking), `03e` (WorkspacePanel component), `03f` (plugin aggregation) |
-| **Namespace** | `rc.ws.*` (11 WS RPC methods + 1 HTTP route) |
+| **Namespace** | `rc.ws.*`(方法数以 `src/workspace/rpc.ts` 为准) |
+| **Depends on** | [architecture.md](../architecture.md)(HTTP route / RPC 协议) |
+| **Consumed by** | [tasks.md](./tasks.md)(任务-文件关联)、[dashboard-ui.md](./dashboard-ui.md)(WorkspacePanel) |
 | **Agent tools** | 8 (`workspace_save`, `workspace_read`, `workspace_list`, `workspace_diff`, `workspace_history`, `workspace_restore`, `workspace_move`, `workspace_export`) |
 | **HTTP routes** | 1 (`POST /rc/upload`) |
 

@@ -1,0 +1,276 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.6.1",
+    "lastTouchedAt": "2026-06-09T04:42:33.219Z"
+  },
+  "env": {
+    "vars": {
+      "ZOTERO_API_KEY": "__OPENCLAW_REDACTED__",
+      "ZOTERO_USER_ID": "20005784",
+      "RC_MINIMAX_UPSTREAM_BASEURL": "https://api.minimax.io/anthropic"
+    },
+    "HTTP_PROXY": "",
+    "HTTPS_PROXY": ""
+  },
+  "browser": {
+    "enabled": true,
+    "defaultProfile": "research-claw",
+    "profiles": {
+      "research-claw": {
+        "cdpPort": 18800,
+        "color": "#EF4444"
+      }
+    }
+  },
+  "ui": {
+    "assistant": {
+      "name": "Research-Claw"
+    }
+  },
+  "models": {
+    "providers": {
+      "minimax": {
+        "baseUrl": "https://api.minimax.io/anthropic",
+        "apiKey": "__OPENCLAW_REDACTED__",
+        "api": "anthropic-messages",
+        "models": [
+          {
+            "id": "MiniMax-M2.7",
+            "name": "MiniMax-M2.7",
+            "api": "anthropic-messages",
+            "reasoning": true,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      },
+      "openai": {
+        "baseUrl": "https://chatgpt.com/backend-api",
+        "api": "openai-chatgpt-responses",
+        "models": [
+          {
+            "id": "gpt-5.4",
+            "name": "gpt-5.4",
+            "api": "openai-chatgpt-responses",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 128000,
+            "maxTokens": 16384
+          }
+        ]
+      },
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "deepseek-v4-pro",
+            "name": "deepseek-v4-pro",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "contextWindow": 1000000,
+            "maxTokens": 384000
+          }
+        ],
+        "apiKey": "sk-1e9e325117c44bf09d7cf3df7417e186"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "deepseek/deepseek-v4-pro"
+      },
+      "imageModel": {
+        "primary": "deepseek/deepseek-v4-pro"
+      },
+      "workspace": "/Users/liusiyuan/Downloads/wentor/research-claw/workspace",
+      "skipBootstrap": true,
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "thinkingDefault": "medium",
+      "timeoutSeconds": 300,
+      "heartbeat": {
+        "every": "15m",
+        "lightContext": true,
+        "isolatedSession": true
+      },
+      "subagents": {
+        "announceTimeoutMs": 480000
+      },
+      "sandbox": {
+        "mode": "off"
+      }
+    }
+  },
+  "tools": {
+    "profile": "full",
+    "sessions": {
+      "visibility": "all"
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "session": {
+    "reset": {
+      "mode": "idle",
+      "idleMinutes": 525600
+    }
+  },
+  "cron": {
+    "enabled": true
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "botToken": "8789604075:AAHi1vmKMq7RYAGOI5PwA4uKH9n_4TTAeMo",
+      "groupPolicy": "allowlist",
+      "streaming": {
+        "mode": "partial"
+      }
+    }
+  },
+  "discovery": {
+    "wideArea": {
+      "enabled": false
+    },
+    "mdns": {
+      "mode": "off"
+    }
+  },
+  "gateway": {
+    "port": 28789,
+    "mode": "local",
+    "bind": "loopback",
+    "controlUi": {
+      "root": "/Users/liusiyuan/Downloads/wentor/research-claw/dashboard/dist",
+      "allowedOrigins": [
+        "http://127.0.0.1:28789",
+        "http://localhost:28789",
+        "http://127.0.0.1:5175",
+        "http://localhost:5175"
+      ]
+    },
+    "auth": {
+      "mode": "none",
+      "token": "research-claw"
+    }
+  },
+  "skills": {
+    "load": {
+      "extraDirs": [
+        "/Users/liusiyuan/Downloads/wentor/research-claw/skills",
+        "/Users/liusiyuan/Downloads/wentor/research-claw/workspace/skills"
+      ]
+    },
+    "workshop": {
+      "autonomous": {
+        "enabled": false
+      },
+      "approvalPolicy": "pending",
+      "maxPending": 50,
+      "maxSkillBytes": 40000
+    },
+    "entries": {
+      "node-inspect-debugger": {
+        "enabled": false
+      },
+      "automation-skills": {
+        "enabled": false
+      },
+      "tmux": {
+        "enabled": false
+      }
+    }
+  },
+  "plugins": {
+    "enabled": true,
+    "allow": [
+      "research-claw-core",
+      "research-plugins",
+      "openclaw-weixin",
+      "telegram",
+      "discord",
+      "dual-model-supervisor"
+    ],
+    "load": {
+      "paths": [
+        "/Users/liusiyuan/Downloads/wentor/research-claw/extensions/research-claw-core",
+        "/Users/liusiyuan/Downloads/wentor/research-claw/extensions/openclaw-weixin",
+        "/Users/liusiyuan/Downloads/wentor/research-claw/extensions/dual-model-supervisor"
+      ]
+    },
+    "entries": {
+      "research-claw-core": {
+        "enabled": true,
+        "config": {
+          "dbPath": "/Users/liusiyuan/.research-claw/library.db",
+          "autoTrackGit": true,
+          "defaultCitationStyle": "apa",
+          "heartbeatDeadlineWarningHours": 48
+        }
+      },
+      "openclaw-weixin": {
+        "enabled": true
+      },
+      "dual-model-supervisor": {
+        "enabled": true,
+        "config": {
+          "enabled": false,
+          "supervisorModel": "",
+          "reviewMode": "off",
+          "appendReviewToChannelOutput": true
+        },
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    },
+    "bundledDiscovery": "compat",
+    "installs": {
+      "research-claw-core": {
+        "source": "path",
+        "sourcePath": "./extensions/research-claw-core"
+      },
+      "openclaw-weixin": {
+        "source": "path",
+        "sourcePath": "./extensions/openclaw-weixin"
+      },
+      "dual-model-supervisor": {
+        "source": "path",
+        "sourcePath": "./extensions/dual-model-supervisor"
+      },
+      "research-plugins": {
+        "source": "npm",
+        "spec": "@wentorai/research-plugins",
+        "installPath": "~/.openclaw/extensions/research-plugins"
+      }
+    }
+  }
+}

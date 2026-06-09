@@ -1,6 +1,14 @@
+---
+doc: engineering/qa-test-spec.md
+audience: 开发者 / QA — 渠道 B(仓库按需阅读,不注入运行时)
+status: 现行 · 全量功能清单与验收用例(唯一 QA 清单)
+source-of-truth: 代码 + 飞书使用指南;功能以当前代码实现为准
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
+---
+
 # Research-Claw 功能清单与测试用例
 
-> **版本基准：** v0.7.0 · OpenClaw 2026.6.1  
+> **版本基准：** 当前版本以根 `package.json` 为准 · OpenClaw 2026.6.1  
 > **来源：** [飞书《00-科研龙虾使用指南》](https://thesisagent.feishu.cn/docx/EN1Odi3dMoAPW2xkwWVcCAybnFg)、项目 README、`docs/00-reference-map.md` 及当前代码实现  
 > **测试入口：** Dashboard `http://127.0.0.1:28789` · Gateway `ws://127.0.0.1:28789`  
 > **优先级：** P0 = 阻塞发布 · P1 = 核心功能 · P2 = 增强/边界  
@@ -679,8 +687,8 @@ TC-A-01, TC-A-03, TC-A-04, TC-B-01, TC-C-01, TC-C-02, TC-C-14, TC-E-01, TC-E-02,
 | 论文评审分阶段编排 | `paper-review-stages.ts` 存在，**当前 UI 未接入** |
 | 知识图谱插件 | 仅设计文档，无实现 |
 | `nav.memory` i18n | 翻译键存在，**无 LeftNav 入口**（RC 记忆模块默认未启用，不纳入本清单） |
-| Dashboard parity 测试漂移 | 已修复；见 `docs/bugFix/04-ISSUE_dashboard_parity_test_drift.md` |
+| Dashboard parity 测试漂移 | 已修复(详见 git 历史) |
 
 ---
 
-*文档版本：2026-06-07 · Research-Claw v0.7.0 · OpenClaw 2026.6.1 · 对照本地代码优化（不含 RC 记忆模块）*
+*功能以当前代码实现为准（版本号见根 `package.json`）· OpenClaw 2026.6.1 · 不含 RC 记忆模块清单*
