@@ -322,7 +322,11 @@ export default function ProviderPickerModal({
                 ) : section.id === 'custom' ? (
                   <>
                     {renderSavedCustomCards()}
-                    {renderCards(visible.filter((id) => !savedCustomIds.has(id)))}
+                    {/* When the "Add custom API profile" card is present it already covers the
+                        empty-state custom slot, so the bare `custom` preset card is redundant. */}
+                    {renderCards(
+                      visible.filter((id) => !savedCustomIds.has(id) && !(onAddCustomProfile && id === 'custom')),
+                    )}
                     {onAddCustomProfile ? (
                       <Card
                         size="small"
