@@ -313,8 +313,12 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
       const snapshot = await client.request<{ hash?: string }>('config.get', {});
       const baseHash = snapshot.hash ?? undefined;
 
+      // OC 2026.6.1 validates the full merged config on config.patch and rejects
+      // the RC-only `plugins.installs` key. Strip it in the same patch; run.sh's
+      // ensure-config re-adds it on the next startup.
       const patch = {
         channels: { [channelId]: { enabled } },
+        plugins: { installs: null },
       };
 
       await client.request('config.patch', {
@@ -342,9 +346,12 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
       const snapshot = await client.request<{ hash?: string }>('config.get', {});
       const baseHash = snapshot.hash ?? undefined;
 
-      // JSON merge patch: null = delete key
+      // JSON merge patch: null = delete key. Also strip the RC-only
+      // `plugins.installs` key, which OC 2026.6.1's config validation rejects;
+      // run.sh's ensure-config re-adds it on the next startup.
       const patch = {
         channels: { [channelId]: null },
+        plugins: { installs: null },
       };
 
       await client.request('config.patch', {
@@ -421,7 +428,7 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
           // the newly-saved QR credentials are picked up by the channel runtime.
           client.request<{ hash?: string }>('config.get', {}).then((snap) => {
             client.request('config.patch', {
-              raw: JSON.stringify({ channels: { [channelId]: { enabled: true } } }),
+              raw: JSON.stringify({ channels: { [channelId]: { enabled: true } }, plugins: { installs: null } }),
               ...(snap.hash ? { baseHash: snap.hash } : {}),
               note: 'Reload after QR login',
             }).catch(() => { /* best-effort */ });
