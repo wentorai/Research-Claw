@@ -427,9 +427,12 @@ function ChannelCard({
   const isEnabled = bestAccount?.enabled !== false;
 
   // Status priority: disabled > hasError > connected > configured > not configured
-  // A disabled channel (enabled=false in config) should show as "disabled", not "error"
+  // A disabled channel (enabled=false in config) should show as "disabled", not "error".
+  // An unconfigured channel is NEVER an error: OC reports lastError="not configured"
+  // for channels lacking credentials (e.g. Telegram without a botToken), which is a
+  // benign idle state, not a failure. Only escalate to error once configured.
   const derivedDown = isEnabled && isConfigured && !isRunning && !isConnected;
-  const hasError = isEnabled && (!!bestAccount?.lastError || derivedDown);
+  const hasError = isEnabled && isConfigured && (!!bestAccount?.lastError || derivedDown);
 
   const statusColor = !isEnabled
     ? tokens.text.muted
@@ -659,7 +662,7 @@ function ChannelCard({
                 </div>
               )}
 
-              {account.lastError && (
+              {account.lastError && account.configured && (
                 <div
                   style={{
                     margin: '4px 0 4px 20px',
