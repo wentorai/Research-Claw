@@ -539,6 +539,12 @@ export default function SettingsPanel() {
         setForceRegenerate(cc.forceRegenerate ?? false);
         setMaxRegenerateAttempts(cc.maxRegenerateAttempts ?? 3);
       }
+      // Fold the supervisor fields into the baseline once, on first settle. Later
+      // re-applies (reconnects) must not re-baseline, or they'd swallow core edits.
+      if (!supervisorBaselinedRef.current) {
+        supervisorBaselinedRef.current = true;
+        setBaselineTick((t) => t + 1);
+      }
     }
   }, [supervisorConfig, gatewayConfig]);
 
@@ -562,6 +568,13 @@ export default function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const pendingRestart = useConfigStore((s) => s.pendingConfigRestart);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // Dirty tracking: the Save button stays disabled until a config-class field
+  // diverges from the last config-driven snapshot. UI-only prefs (showSystemFiles,
+  // notificationSoundEnabled) persist instantly and are intentionally excluded.
+  const [configBaseline, setConfigBaseline] = useState<string | null>(null);
+  const [baselineTick, setBaselineTick] = useState(0);
+  const supervisorBaselinedRef = useRef(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [supervisorAdvancedOpen, setSupervisorAdvancedOpen] = useState(false);
 
@@ -597,6 +610,44 @@ export default function SettingsPanel() {
   const [textApiKeyDeletePending, setTextApiKeyDeletePending] = useState(false);
   const [visionApiKeyDeletePending, setVisionApiKeyDeletePending] = useState(false);
   const [authConfiguredByProvider, setAuthConfiguredByProvider] = useState<Record<string, boolean>>({});
+
+  // Serialized snapshot of every field that feeds buildSaveConfig — the unit the
+  // dirty check compares against the baseline. Keep this in sync with performSave.
+  const formSignature = useMemo(
+    () =>
+      JSON.stringify([
+        provider, baseUrl, api, apiKey, textModel,
+        visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey,
+        proxyEnabled, proxyUrl,
+        webSearchEnabled, webSearchProvider, webSearchApiKey,
+        heartbeatEnabled, heartbeatInterval,
+        supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
+        reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
+        textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
+        profileLabel,
+      ]),
+    [
+      provider, baseUrl, api, apiKey, textModel,
+      visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey,
+      proxyEnabled, proxyUrl,
+      webSearchEnabled, webSearchProvider, webSearchApiKey,
+      heartbeatEnabled, heartbeatInterval,
+      supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
+      reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
+      textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
+      profileLabel,
+    ],
+  );
+  const formSignatureRef = useRef(formSignature);
+  formSignatureRef.current = formSignature;
+
+  // Re-baseline only after a genuine config-driven hydration (baselineTick bump),
+  // never on user edits — so the dirty flag survives reconnects with pending edits.
+  useEffect(() => {
+    setConfigBaseline(formSignatureRef.current);
+  }, [baselineTick]);
+
+  const isDirty = configBaseline !== null && formSignature !== configBaseline;
 
   // Supervisor provider helpers (depend on authConfiguredByProvider)
   const supervisorIsOAuth = supervisorProvider ? isOAuthProvider(supervisorProvider) : false;
@@ -1000,6 +1051,8 @@ export default function SettingsPanel() {
       profileLabelRef.current[p.id] = p.label;
     }
 
+    // Form was just reset from config (mount / refresh / post-save) — re-baseline.
+    setBaselineTick((t) => t + 1);
   }, [gatewayConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefresh = useCallback(() => {
@@ -2145,23 +2198,7 @@ export default function SettingsPanel() {
         </>
       )}
 
-      {/* ── Save config (model + vision + proxy) ── */}
       <Divider style={{ margin: '4px 0 8px' }} />
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-            {t('settings.restartHint')}
-          </Text>
-          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-            {textApiKeyStatus}
-            {visionApiKeyStatus ? ` · ${visionApiKeyStatus}` : ''}
-          </Text>
-        </div>
-        <Button type="primary" size="small" onClick={handleSave} loading={saving || pendingRestart} disabled={pendingRestart} style={{ flexShrink: 0 }}>
-          {pendingRestart ? t('setup.gatewayRestarting') : t('settings.save')}
-        </Button>
-      </div>
 
       <Collapse
         activeKey={systemPromptOpen ? ['systemPrompt'] : []}
@@ -2208,6 +2245,35 @@ export default function SettingsPanel() {
       <AboutSection />
 
       <div style={{ height: 16 }} />
+
+      {/* Save action pinned to the panel bottom so it stays reachable at any scroll position. */}
+      <div
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          margin: '0 -16px',
+          padding: '8px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          background: 'var(--surface)',
+          borderTop: '1px solid var(--border)',
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+            {t('settings.restartHint')}
+          </Text>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+            {textApiKeyStatus}
+            {visionApiKeyStatus ? ` · ${visionApiKeyStatus}` : ''}
+          </Text>
+        </div>
+        <Button type="primary" size="small" onClick={handleSave} loading={saving || pendingRestart} disabled={pendingRestart || !isDirty} style={{ flexShrink: 0 }}>
+          {pendingRestart ? t('setup.gatewayRestarting') : t('settings.save')}
+        </Button>
+      </div>
     </div>
   );
 }

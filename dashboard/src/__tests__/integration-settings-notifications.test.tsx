@@ -155,11 +155,17 @@ function minimalGatewayConfig() {
   };
 }
 
-function clickConfigSaveButton(): void {
+function getConfigSaveButton(): HTMLElement {
   const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
-  const configButton = saveButtons.find((button) => button.parentElement?.textContent?.includes('settings.restartHint'))
+  return saveButtons.find((button) => button.parentElement?.textContent?.includes('settings.restartHint'))
     ?? saveButtons[0];
-  fireEvent.click(configButton);
+}
+
+// Save is gated on changes, so the enable re-render must commit before we click —
+// otherwise under load the click can land on a still-disabled button (a no-op).
+async function clickConfigSaveButton(): Promise<void> {
+  await waitFor(() => expect(getConfigSaveButton()).toBeEnabled());
+  fireEvent.click(getConfigSaveButton());
 }
 
 /** Mocks for Settings save flow (performSave uses provider validate + upsert). */
@@ -265,7 +271,9 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     await waitFor(() => {
       expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
     });
-    clickConfigSaveButton();
+    // Dirty the form so the Save button is enabled (Save is gated on changes).
+    fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
+    await clickConfigSaveButton();
 
     // Modal.confirm should have been called
     expect(mockModalConfirm).toHaveBeenCalledTimes(1);
@@ -301,7 +309,9 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     await waitFor(() => {
       expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
     });
-    clickConfigSaveButton();
+    // Dirty the form so the Save button is enabled (Save is gated on changes).
+    fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
+    await clickConfigSaveButton();
 
     // Provider upsert should NOT run before confirm — only Modal.confirm was invoked
     const upsertCalls = mockRequest.mock.calls.filter(
@@ -329,7 +339,9 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     await waitFor(() => {
       expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
     });
-    clickConfigSaveButton();
+    // Dirty the form so the Save button is enabled (Save is gated on changes).
+    fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
+    await clickConfigSaveButton();
 
     expect(mockModalConfirm).toHaveBeenCalledTimes(1);
 

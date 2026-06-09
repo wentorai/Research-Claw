@@ -271,6 +271,9 @@ describe('PR #18: syncNeeded — form sync gating', () => {
 
     render(<SettingsPanel />);
 
+    // Dirty the form so the Save button is enabled (Save is gated on changes).
+    fireEvent.change(screen.getByDisplayValue('old-model'), { target: { value: 'old-model-edited' } });
+
     // Click save button to trigger modal.confirm
     const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
     fireEvent.click(saveButtons[0]);
@@ -567,6 +570,9 @@ describe('API key status guidance', () => {
     render(<SettingsPanel />);
     expect(screen.getByDisplayValue('glm-5')).toBeTruthy();
 
+    // Dirty the form so the Save button is enabled (Save is gated on changes).
+    fireEvent.change(screen.getByDisplayValue('glm-5'), { target: { value: 'glm-5-edited' } });
+
     clickConfigSaveButton();
 
     const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
@@ -648,6 +654,9 @@ describe('API key status guidance', () => {
         },
       });
     });
+
+    // Form keeps the stale glm-5 (syncNeeded false); dirty it so Save is enabled.
+    fireEvent.change(screen.getByDisplayValue('glm-5'), { target: { value: 'glm-5-edited' } });
 
     clickConfigSaveButton();
 
@@ -757,5 +766,74 @@ describe('Restart Research-Claw button', () => {
     await confirmCall.onOk();
 
     expect(mockMessageError).toHaveBeenCalledWith('settings.restartFailed');
+  });
+});
+
+// ============================================================
+// Save button dirty gating — disabled until a config field changes
+// ============================================================
+
+describe('Save button dirty gating', () => {
+  function getConfigSaveButton(): HTMLButtonElement {
+    const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
+    const btn = saveButtons.find((b) => b.parentElement?.textContent?.includes('settings.restartHint')) ?? saveButtons[0];
+    return btn as HTMLButtonElement;
+  }
+
+  beforeEach(() => {
+    mockModalConfirm.mockReset();
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({
+      client: createMockClient(),
+      state: 'connected',
+      serverVersion: '0.6.3',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('disables the save button when the form matches the loaded config', () => {
+    useConfigStore.setState({ gatewayConfig: makeGatewayConfig('m1', 'openai', 'https://api.openai.com/v1') });
+
+    render(<SettingsPanel />);
+
+    expect(getConfigSaveButton().disabled).toBe(true);
+  });
+
+  it('enables the save button after editing a config field', () => {
+    useConfigStore.setState({ gatewayConfig: makeGatewayConfig('m1', 'openai', 'https://api.openai.com/v1') });
+
+    render(<SettingsPanel />);
+    expect(getConfigSaveButton().disabled).toBe(true);
+
+    fireEvent.change(screen.getByDisplayValue('m1'), { target: { value: 'm2' } });
+
+    expect(getConfigSaveButton().disabled).toBe(false);
+  });
+
+  it('disables the save button again when the edit is reverted to the baseline', () => {
+    useConfigStore.setState({ gatewayConfig: makeGatewayConfig('m1', 'openai', 'https://api.openai.com/v1') });
+
+    render(<SettingsPanel />);
+
+    const modelInput = screen.getByDisplayValue('m1');
+    fireEvent.change(modelInput, { target: { value: 'm2' } });
+    expect(getConfigSaveButton().disabled).toBe(false);
+
+    fireEvent.change(screen.getByDisplayValue('m2'), { target: { value: 'm1' } });
+    expect(getConfigSaveButton().disabled).toBe(true);
   });
 });
