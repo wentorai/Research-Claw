@@ -637,7 +637,7 @@
     "configSource": "Source: openclaw.json",
     "configLoading": "Loading config...",
     "refreshConfig": "Refresh",
-    "restartHint": "Changes are saved to openclaw.json. The gateway will restart automatically. Proxy changes require a full restart (openclaw gateway --force).",
+    "restartHint": "Saving writes the config and restarts the gateway; the dashboard reconnects automatically.",
     "saved": "Saved",
     "saveFailed": "Save failed — the gateway may have restarted. Try again",
     "copyFailed": "Copy failed — your browser may not support clipboard access",
@@ -1085,7 +1085,7 @@
       "group": {
         "local": "Research-Claw Local",
         "research-plugins": "Research-Plugins",
-        "managed": "Managed Skills",
+        "managed": "Research-Claw Built-in",
         "bundled": "OpenClaw Bundled"
       }
     },

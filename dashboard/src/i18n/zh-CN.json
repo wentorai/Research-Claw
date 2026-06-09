@@ -637,7 +637,7 @@
     "configSource": "配置来源：openclaw.json",
     "configLoading": "加载配置中...",
     "refreshConfig": "刷新",
-    "restartHint": "配置已保存到 openclaw.json，gateway 将自动重启。代理变更需要完全重启网关（openclaw gateway --force）。",
+    "restartHint": "保存后将写入配置并自动重启网关，仪表盘会自动重连。",
     "saved": "已保存",
     "saveFailed": "保存失败 — 网关可能已重启，请重试",
     "copyFailed": "复制失败 — 浏览器可能不支持剪贴板访问",
@@ -1085,7 +1085,7 @@
       "group": {
         "local": "科研龙虾本地",
         "research-plugins": "科研技能库",
-        "managed": "托管技能",
+        "managed": "科研龙虾内置",
         "bundled": "OpenClaw 内置"
       }
     },

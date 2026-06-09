@@ -900,8 +900,14 @@ function SkillsTab({
     for (const group of GROUP_ORDER) {
       const groupSkills = map.get(group)!;
       if (groupSkills.length === 0) continue;
+      // For the built-in groups (科研龙虾内置 / OpenClaw 内置), float OFF skills to the
+      // top so a just-disabled skill stays visible instead of being lost among the ON ones.
+      const ordered =
+        group === 'managed' || group === 'bundled'
+          ? [...groupSkills].sort((a, b) => Number(b.disabled) - Number(a.disabled))
+          : groupSkills;
       items.push({ type: 'header', group });
-      for (const skill of groupSkills) {
+      for (const skill of ordered) {
         items.push({ type: 'skill', skill });
       }
     }
