@@ -36,8 +36,18 @@
 - `init-memory-demo.sh` now targets the correct `~/.research-claw/library.db`.
 - `docker-entrypoint.sh` `IMAGE_VERSION` aligned to `0.7.0`.
 
+### Post-release fixes (2026-06-09)
+- **ppt-master 对齐上游 v2.9.0**(`57dc7e5 → 8ac18bb3`):Python 基线提升至 **3.10+**
+  (上游用 PEP 604 `X | None`,3.9 导入即崩);导出改传 `-o` 显式输出路径,屏蔽上游默认
+  输出目录变更;`pdf_to_md.py` 移除经核实对 RC 零影响。
+- **ppt-master 集成路径解析修复**:dashboard「检查状态」此前始终报「集成路径不完整」——
+  `api.resolvePath()` 是插件目录相对,而 ppt-master 子模块装在仓库根,两者从不重合。改为
+  经 `findGitRoot()` 按仓库根优先、插件目录兜底解析。详见
+  `docs/postmortem/ppt-master-v290-upgrade-and-path-resolution.md`。
+
 ## Quality gates
 - Dashboard tests: **1338 pass**.
+- 插件 tests: **566 pass**;`tsc --noEmit`: green。
 - `pnpm build`: green (extensions + dashboard).
 
 ## Upgrade
