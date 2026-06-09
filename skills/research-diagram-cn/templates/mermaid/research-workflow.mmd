@@ -1,0 +1,29 @@
+%% 研究流程图：选题 → 文献 → 设计 → 数据 → 分析 → 写作 → 投稿
+%% 在 https://mermaid.live/ 直接预览
+flowchart TD
+    A([研究选题]) --> B[文献综述<br/>Web of Science / 中国知网]
+    B --> C{研究问题<br/>是否清晰?}
+    C -- 否 --> B
+    C -- 是 --> D[研究设计<br/>识别策略 + 假设]
+    D --> E[数据采集<br/>CSMAR / Wind / CFPS]
+    E --> F[数据清洗<br/>变量构造 / 缺失处理]
+    F --> G[实证分析<br/>主回归 / IV / DiD / RDD]
+    G --> H{结果是否<br/>稳健显著?}
+    H -- 否 --> I[补充稳健性<br/>调整样本 / 加控制变量]
+    I --> G
+    H -- 是 --> J[论文写作<br/>Intro→Theory→Data→Result→Discussion]
+    J --> K[内部 review<br/>组会 / 合作者反馈]
+    K --> L[期刊投稿<br/>选刊 + 准备 cover letter]
+    L --> M{审稿结果}
+    M -- Reject --> N[修改并改投]
+    N --> L
+    M -- R&R --> O[Response to referees<br/>逐条回复]
+    O --> L
+    M -- Accept --> P([发表])
+
+    classDef start fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef end_ fill:#e3f2fd,stroke:#1565c0,stroke-width:2px;
+    classDef decision fill:#fff8e1,stroke:#f57f17,stroke-width:2px;
+    class A start;
+    class P end_;
+    class C,H,M decision;
