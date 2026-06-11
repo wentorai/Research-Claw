@@ -925,7 +925,7 @@ describe('buildSaveConfig', () => {
     const existing = {
       models: {
         providers: {
-          'openai-codex': {
+          openai: {
             baseUrl: 'https://chatgpt.com/backend-api',
             api: 'openai-chatgpt-responses',
             models: [{ id: 'gpt-5.4', input: ['text', 'image'] }],
@@ -934,13 +934,13 @@ describe('buildSaveConfig', () => {
       },
       agents: {
         defaults: {
-          model: { primary: 'openai-codex/gpt-5.4' },
+          model: { primary: 'openai/gpt-5.4' },
         },
       },
     };
 
     const config = buildSaveConfig(existing as unknown as Record<string, unknown>, {
-      provider: 'openai-codex',
+      provider: 'openai',
       baseUrl: 'https://chatgpt.com/backend-api',
       api: 'openai-chatgpt-responses',
       textModel: 'gpt-5.4',
@@ -950,21 +950,21 @@ describe('buildSaveConfig', () => {
     } as any);
 
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
-    expect(providers['openai-codex']).toBeDefined();
+    expect(providers.openai).toBeDefined();
     expect(providers.zai).toBeDefined();
     expect(providers.zai.apiKey).toBe('sk-zai-keep');
   });
 
   it('migrates the legacy OpenAI Codex API protocol name before saving', () => {
     const config = buildSaveConfig(null, {
-      provider: 'openai-codex',
+      provider: 'openai',
       baseUrl: 'https://chatgpt.com/backend-api',
       api: 'openai-codex-responses',
       textModel: 'gpt-5.4',
     } as ConfigPatchInput);
 
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
-    expect(providers['openai-codex'].api).toBe('openai-chatgpt-responses');
+    expect(providers.openai.api).toBe('openai-chatgpt-responses');
   });
 });
 

@@ -381,10 +381,16 @@ describe('Provider preset metadata — openclaw/src/agents/provider-capabilities
     expect(preset.baseUrl).toBe('https://api.anthropic.com');
   });
 
-  it('OpenAI preset uses openai-completions API protocol', () => {
+  it('OpenAI preset is the ChatGPT OAuth config (2026.6.1 unified provider identity)', () => {
+    // OpenClaw 2026.6.1 retired the `openai-codex` provider id and folded ChatGPT
+    // OAuth into provider `openai`. RC uses ChatGPT subscription OAuth, so the
+    // `openai` preset carries the chatgpt.com/backend-api + openai-chatgpt-responses
+    // config. The codex transport (→ /codex/responses, the CF-allowed path) is only
+    // selected when the provider id normalizes to `openai`. Raw api.openai.com api-key
+    // access is reached via the `custom` preset.
     const preset = getPreset('openai');
-    expect(preset.api).toBe('openai-completions');
-    expect(preset.baseUrl).toBe('https://api.openai.com/v1');
+    expect(preset.api).toBe('openai-chatgpt-responses');
+    expect(preset.baseUrl).toBe('https://chatgpt.com/backend-api');
   });
 
   it('all presets have valid API protocol types', () => {

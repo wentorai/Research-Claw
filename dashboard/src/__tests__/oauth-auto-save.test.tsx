@@ -103,7 +103,7 @@ describe('OAuth auto-save flow', () => {
     render(
       <OAuthModal
         open={true}
-        provider="openai-codex"
+        provider="openai"
         onClose={onClose}
         onSuccess={onSuccess}
       />,
@@ -132,7 +132,7 @@ describe('OAuth auto-save flow', () => {
     render(
       <OAuthModal
         open={true}
-        provider="openai-codex"
+        provider="openai"
         onClose={onClose}
         onSuccess={onSuccess}
       />,
@@ -165,7 +165,7 @@ describe('OAuth auto-save flow', () => {
     render(
       <OAuthModal
         open={true}
-        provider="openai-codex"
+        provider="openai"
         onClose={onClose}
         onSuccess={onSuccess}
       />,
@@ -204,7 +204,7 @@ describe('OAuth auto-save flow', () => {
     render(
       <OAuthModal
         open={true}
-        provider="openai-codex"
+        provider="openai"
         onClose={onClose}
         onSuccess={onSuccess}
       />,
@@ -242,7 +242,7 @@ describe('OAuth auto-save flow', () => {
     render(
       <OAuthModal
         open={true}
-        provider="openai-codex"
+        provider="openai"
         onClose={onClose}
       />,
     );
@@ -277,7 +277,7 @@ describe('OAuth auto-save flow', () => {
     render(
       <OAuthModal
         open={true}
-        provider="openai-codex"
+        provider="openai"
         onClose={onClose}
         onSuccess={onSuccess}
       />,

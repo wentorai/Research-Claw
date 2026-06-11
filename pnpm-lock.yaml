@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   openclaw@2026.6.1:
-    hash: g46iykywpgoxjc3rt57hkxxoo4
+    hash: lu5gi3xetyvfgh3sypp2yovzte
     path: patches/openclaw@2026.6.1.patch
 
 importers:
@@ -18,7 +18,7 @@ importers:
     dependencies:
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=g46iykywpgoxjc3rt57hkxxoo4)
+        version: 2026.6.1(patch_hash=lu5gi3xetyvfgh3sypp2yovzte)
     devDependencies:
       concurrently:
         specifier: ^9.1.0
@@ -144,7 +144,7 @@ importers:
     dependencies:
       openclaw:
         specifier: '>=2026.3.22'
-        version: 2026.6.1(patch_hash=g46iykywpgoxjc3rt57hkxxoo4)
+        version: 2026.6.1(patch_hash=lu5gi3xetyvfgh3sypp2yovzte)
       qrcode-terminal:
         specifier: 0.12.0
         version: 0.12.0
@@ -191,7 +191,7 @@ importers:
         version: 22.19.15
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=g46iykywpgoxjc3rt57hkxxoo4)
+        version: 2026.6.1(patch_hash=lu5gi3xetyvfgh3sypp2yovzte)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -10620,7 +10620,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  openclaw@2026.6.1(patch_hash=g46iykywpgoxjc3rt57hkxxoo4):
+  openclaw@2026.6.1(patch_hash=lu5gi3xetyvfgh3sypp2yovzte):
     dependencies:
       '@agentclientprotocol/sdk': 0.22.1(zod@4.4.3)
       '@anthropic-ai/sdk': 0.100.1(zod@4.4.3)

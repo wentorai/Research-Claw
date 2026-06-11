@@ -379,7 +379,7 @@ describe('API key status guidance', () => {
 
   it('shows keep-current-key guidance via placeholder when the current provider already has a configured key', () => {
     useConfigStore.setState({
-      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+      gatewayConfig: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
         apiKey: '__OPENCLAW_REDACTED__',
       }),
     });
@@ -392,7 +392,7 @@ describe('API key status guidance', () => {
 
   it('shows replace guidance after typing a new API key', () => {
     useConfigStore.setState({
-      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+      gatewayConfig: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
         apiKey: '__OPENCLAW_REDACTED__',
       }),
     });
@@ -407,7 +407,7 @@ describe('API key status guidance', () => {
 
   it('shows delete guidance after clearing an existing API key', () => {
     useConfigStore.setState({
-      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+      gatewayConfig: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
         apiKey: '__OPENCLAW_REDACTED__',
       }),
     });
@@ -421,7 +421,7 @@ describe('API key status guidance', () => {
 
   it('removes "configured" suffix from provider button after clearing API key', () => {
     useConfigStore.setState({
-      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+      gatewayConfig: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
         apiKey: '__OPENCLAW_REDACTED__',
       }),
     });
@@ -439,7 +439,7 @@ describe('API key status guidance', () => {
 
   it('does not keep the existing-key placeholder after clear is requested', () => {
     useConfigStore.setState({
-      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+      gatewayConfig: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
         apiKey: '__OPENCLAW_REDACTED__',
       }),
     });
@@ -454,7 +454,7 @@ describe('API key status guidance', () => {
 
   it('marks inactive providers with configured status in the provider picker labels', () => {
     useConfigStore.setState({
-      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+      gatewayConfig: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
         apiKey: '__OPENCLAW_REDACTED__',
         extraProviders: {
           anthropic: {
@@ -469,34 +469,34 @@ describe('API key status guidance', () => {
 
     render(<SettingsPanel />);
 
-    expect(screen.getByText(/OpenAI · settings\.providerConfigured/)).toBeTruthy();
+    expect(screen.getByText(/DeepSeek · settings\.providerConfigured/)).toBeTruthy();
   });
 
   it('sends the current provider key with the atomic provider upsert', async () => {
     const mockRequest = vi.fn().mockImplementation((method: string) => {
-      if (method === 'rc.auth.statuses') return Promise.resolve({ openai: { configured: true } });
+      if (method === 'rc.auth.statuses') return Promise.resolve({ deepseek: { configured: true } });
       if (method === 'config.get') {
         return Promise.resolve({
-          config: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+          config: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
             apiKey: '__OPENCLAW_REDACTED__',
           }),
           hash: 'hash123',
         });
       }
-      if (method === 'rc.auth.setApiKey') return Promise.resolve({ ok: true, provider: 'openai', profileId: 'openai:manual' });
+      if (method === 'rc.auth.setApiKey') return Promise.resolve({ ok: true, provider: 'deepseek', profileId: 'deepseek:manual' });
       if (method === 'config.apply') return Promise.resolve({});
       return Promise.resolve({});
     });
 
     useGatewayStore.setState({ client: createMockClient(mockRequest) });
     useConfigStore.setState({
-      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+      gatewayConfig: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
         apiKey: '__OPENCLAW_REDACTED__',
       }),
     });
 
     render(<SettingsPanel />);
-    expect(screen.getByDisplayValue('gpt-4o')).toBeTruthy();
+    expect(screen.getByDisplayValue('deepseek-v4-pro')).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText('setup.apiKeyExisting'), {
       target: { value: 'sk-fresh-openai' },
@@ -508,35 +508,35 @@ describe('API key status guidance', () => {
 
     expect(mockRequest).toHaveBeenCalledWith('rc.provider.upsert', expect.objectContaining({
       desiredConfig: expect.any(Object),
-      authActions: [{ provider: 'openai', apiKey: 'sk-fresh-openai' }],
+      authActions: [{ provider: 'deepseek', apiKey: 'sk-fresh-openai' }],
     }));
   });
 
   it('clears the auth-profile key when the user removes it and saves', async () => {
     const mockRequest = vi.fn().mockImplementation((method: string) => {
-      if (method === 'rc.auth.statuses') return Promise.resolve({ openai: { configured: true } });
+      if (method === 'rc.auth.statuses') return Promise.resolve({ deepseek: { configured: true } });
       if (method === 'config.get') {
         return Promise.resolve({
-          config: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+          config: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
             apiKey: '__OPENCLAW_REDACTED__',
           }),
           hash: 'hash456',
         });
       }
-      if (method === 'rc.auth.clearApiKey') return Promise.resolve({ ok: true, provider: 'openai', removed: ['openai:manual'] });
+      if (method === 'rc.auth.clearApiKey') return Promise.resolve({ ok: true, provider: 'deepseek', removed: ['deepseek:manual'] });
       if (method === 'config.apply') return Promise.resolve({});
       return Promise.resolve({});
     });
 
     useGatewayStore.setState({ client: createMockClient(mockRequest) });
     useConfigStore.setState({
-      gatewayConfig: makeGatewayConfig('gpt-4o', 'openai', 'https://api.openai.com/v1', {
+      gatewayConfig: makeGatewayConfig('deepseek-v4-pro', 'deepseek', 'https://api.deepseek.com', {
         apiKey: '__OPENCLAW_REDACTED__',
       }),
     });
 
     render(<SettingsPanel />);
-    expect(screen.getByDisplayValue('gpt-4o')).toBeTruthy();
+    expect(screen.getByDisplayValue('deepseek-v4-pro')).toBeTruthy();
 
     fireEvent.click(screen.getByText('settings.clearApiKey'));
     clickConfigSaveButton();
@@ -545,7 +545,7 @@ describe('API key status guidance', () => {
     await confirmCall.onOk();
 
     expect(mockRequest).toHaveBeenCalledWith('rc.provider.upsert', expect.objectContaining({
-      authActions: [{ provider: 'openai', clear: true }],
+      authActions: [{ provider: 'deepseek', clear: true }],
     }));
   });
 

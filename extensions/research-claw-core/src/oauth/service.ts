@@ -65,13 +65,16 @@ interface OAuthProviderDef {
 }
 
 const PROVIDERS: Record<string, OAuthProviderDef> = {
-  'openai-codex': {
+  // OpenClaw 2026.6.1 unified the OpenAI provider identity; ChatGPT OAuth now
+  // lives under `openai` (formerly `openai-codex`). The credential profile id
+  // must match what the kernel reads for provider `openai`.
+  openai: {
     authUrl: 'https://auth.openai.com/oauth/authorize',
     tokenUrl: 'https://auth.openai.com/oauth/token',
     clientId: 'app_EMoamEEZ73f0CkXaXp7hrann',
     redirectUri: 'http://localhost:1455/auth/callback',
     scope: 'openid profile email offline_access',
-    profileId: 'openai-codex:codex-cli',
+    profileId: 'openai:codex-cli',
     extraAuthParams: {
       id_token_add_organizations: 'true',
       codex_cli_simplified_flow: 'true',

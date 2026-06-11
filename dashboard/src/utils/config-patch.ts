@@ -142,8 +142,9 @@ const RC_MINIMAX_UPSTREAM_BASEURL_ENV = 'RC_MINIMAX_UPSTREAM_BASEURL';
 function providerSupportsRedactedApiKeySentinel(providerKey: string): boolean {
   // Providers that authenticate via OAuth profiles should not emit an apiKey sentinel
   // when the user leaves the apiKey field empty.
-  // `openai-codex` uses auth-profiles (oauth refresh) rather than apiKey in config.
-  if (providerKey === 'openai-codex') return false;
+  // `openai` (ChatGPT OAuth, unified from the retired `openai-codex` id) uses
+  // auth-profiles (oauth refresh) rather than an apiKey in config.
+  if (providerKey === 'openai') return false;
   // Ollama runs locally with no API key required. The OC Ollama extension injects
   // a default placeholder key ("ollama-local") during discovery, so the dashboard
   // should never emit a redacted sentinel for ollama providers.

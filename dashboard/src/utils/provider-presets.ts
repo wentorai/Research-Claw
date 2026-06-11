@@ -72,27 +72,17 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     urlPattern: /anthropic\.com/i,
   },
   {
+    // OpenClaw 2026.6.1 unified the OpenAI provider identity: the retired
+    // `openai-codex` provider id is folded into `openai`. The ChatGPT OAuth
+    // transport (baseUrl chatgpt.com/backend-api → /codex/responses) is only
+    // selected when the provider id normalizes to `openai`, so this preset MUST
+    // keep id `openai`. Raw api.openai.com api-key access is served by `custom`.
     id: 'openai',
-    label: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    api: 'openai-completions',
-    models: [
-      { id: 'gpt-5.4', name: 'GPT-5.4', reasoning: true, input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
-      { id: 'gpt-5.4-pro', name: 'GPT-5.4 Pro', reasoning: true, input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
-      { id: 'gpt-5.2', name: 'GPT-5.2', reasoning: true, input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
-      { id: 'gpt-4.1', name: 'GPT-4.1', input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
-      { id: 'gpt-4o', name: 'GPT-4o', input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
-      { id: 'gpt-5-mini', name: 'GPT-5 Mini', input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
-    ],
-    urlPattern: /openai\.com/i,
-  },
-  {
-    id: 'openai-codex',
-    label: 'OpenAI Codex (ChatGPT OAuth)',
+    label: 'OpenAI ChatGPT (OAuth)',
     baseUrl: 'https://chatgpt.com/backend-api',
     api: 'openai-chatgpt-responses',
     models: [
-      { id: 'gpt-5.4', name: 'Codex GPT-5.4 (OAuth)', reasoning: true, input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
+      { id: 'gpt-5.4', name: 'GPT-5.4 (ChatGPT OAuth)', reasoning: true, input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
     ],
     urlPattern: /chatgpt\.com\/backend-api/i,
   },

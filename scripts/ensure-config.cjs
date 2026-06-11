@@ -418,6 +418,25 @@ function ensureConfig(filePath) {
       }
     }
 
+    // Repoint any `openai-codex/<model>` references to `openai/<model>` so the
+    // retired provider id never leaves a dangling model ref after the rename above.
+    const rewriteCodexRef = (ref) =>
+      typeof ref === 'string' && ref.startsWith('openai-codex/')
+        ? 'openai/' + ref.slice('openai-codex/'.length)
+        : ref;
+    const defaults = c.agents?.defaults;
+    if (defaults && typeof defaults === 'object') {
+      for (const block of [defaults.model, defaults.imageModel]) {
+        if (block && typeof block === 'object' && typeof block.primary === 'string') {
+          const next = rewriteCodexRef(block.primary);
+          if (next !== block.primary) {
+            block.primary = next;
+            changed = true;
+          }
+        }
+      }
+    }
+
     const tg = c.channels?.telegram;
     if (tg && typeof tg.streaming === 'string') {
       const mode = tg.streaming;
