@@ -1,0 +1,8 @@
+publication-figure-cn
+Copyright 2026 Research-Claw Contributors
+
+Independently developed. Matplotlib templates written from public matplotlib
+documentation. No source code was copied from any existing project.
+
+Skill structure (frontmatter format) inspired by existing Research-Claw skills
+(skills/plotting-sop/, skills/academic-writing/).
