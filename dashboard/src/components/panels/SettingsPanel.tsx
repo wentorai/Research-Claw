@@ -1127,6 +1127,25 @@ export default function SettingsPanel() {
     true,
   );
 
+  // A preset's protocol is fixed by its identity; URL is overridable only to reach
+  // same-protocol relays/mirrors. Warn when a remote preset's URL is pointed elsewhere,
+  // since a relay that speaks a different protocol needs a Custom profile instead.
+  const isLocalPreset = (id: string) => id === 'ollama' || id === 'vllm';
+  const normalizeEndpoint = (url: string) => url.trim().replace(/\/+$/, '');
+  const textPresetUrlOverridden =
+    !isApiProfileProviderKey(provider) &&
+    !isOAuthProviderSelected &&
+    !isLocalPreset(provider) &&
+    !!baseUrl.trim() &&
+    normalizeEndpoint(baseUrl) !== normalizeEndpoint(currentPreset.baseUrl);
+  const visionPresetUrlOverridden =
+    visionSeparateProvider &&
+    !isApiProfileProviderKey(visionProvider) &&
+    !isOAuthProvider(visionProvider) &&
+    !isLocalPreset(visionProvider) &&
+    !!visionBaseUrl.trim() &&
+    normalizeEndpoint(visionBaseUrl) !== normalizeEndpoint(visionPreset.baseUrl);
+
   // Load gateway config when connected
   useEffect(() => {
     if (state === 'connected' && !gatewayConfig && !gatewayConfigLoading) {
@@ -1822,18 +1841,25 @@ export default function SettingsPanel() {
             children: (
               <>
                 <SettingRow label={t('settings.customApiUrl')}>
-                  <Input
-                    value={baseUrl}
-                    onChange={(e) => {
-                      setBaseUrl(e.target.value);
-                      if (isApiProfileProviderKey(provider)) setApi(inferApiFromUrl(e.target.value));
-                      setProbeResult((prev) => ({ ...prev, text: undefined }));
-                    }}
-                    size="small"
-                    style={{ width: 220 }}
-                    placeholder="https://api.openai.com/v1"
-                    disabled={probing === 'text'}
-                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                    <Input
+                      value={baseUrl}
+                      onChange={(e) => {
+                        setBaseUrl(e.target.value);
+                        if (isApiProfileProviderKey(provider)) setApi(inferApiFromUrl(e.target.value));
+                        setProbeResult((prev) => ({ ...prev, text: undefined }));
+                      }}
+                      size="small"
+                      style={{ width: 220 }}
+                      placeholder="https://api.openai.com/v1"
+                      disabled={probing === 'text'}
+                    />
+                    {textPresetUrlOverridden && (
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        {t('settings.presetUrlProtocolHint')}
+                      </Text>
+                    )}
+                  </div>
                 </SettingRow>
 
                 {isApiProfileProviderKey(provider) && (
@@ -1973,7 +1999,55 @@ export default function SettingsPanel() {
             </div>
           </SettingRow>
 
-          {/* Vision API URL + Protocol + Key — only when different provider */}
+          {visionSeparateProvider && (
+            <SettingRow label={t('settings.visionApiKey')}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                <Input
+                  value={visionApiKey}
+                  onChange={(e) => {
+                    deleteVisionApiKeyRef.current = false;
+                    setVisionApiKeyDeletePending(false);
+                    const v = e.target.value;
+                    setVisionApiKey(v);
+                    if (v.trim()) {
+                      visionApiKeyCacheRef.current[visionProvider] = v.trim();
+                    }
+                    setProbeResult((prev) => ({ ...prev, vision: undefined }));
+                  }}
+                  size="small"
+                  style={{ width: 220 }}
+                  disabled={probing === 'vision'}
+                  placeholder={currentVisionProviderHasSavedKey && !visionApiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder')}
+                />
+                {visionApiKeyStatus ? (
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {visionApiKeyStatus}
+                  </Text>
+                ) : null}
+                {(currentVisionProviderHasSavedKey || !!visionApiKey.trim()) && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', width: 220 }}>
+                    <Button
+                      size="small"
+                      type="link"
+                      danger
+                      style={{ padding: '0 4px', flexShrink: 0 }}
+                      onClick={() => {
+                        deleteVisionApiKeyRef.current = true;
+                        setVisionApiKeyDeletePending(true);
+                        setVisionApiKey('');
+                        setVisionApiKeyConfigured(false);
+                        delete visionApiKeyCacheRef.current[visionProvider];
+                      }}
+                    >
+                      {t('settings.clearApiKey')}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </SettingRow>
+          )}
+
+          {/* Vision API URL + Protocol — only when different provider */}
           {visionSeparateProvider && (
             <Collapse
               activeKey={visionAdvancedOpen ? ['vision-advanced'] : []}
@@ -1986,18 +2060,25 @@ export default function SettingsPanel() {
                   children: (
             <>
               <SettingRow label={t('settings.visionBaseUrl')}>
-                <Input
-                  value={visionBaseUrl}
-                  onChange={(e) => {
-                    setVisionBaseUrl(e.target.value);
-                    if (isApiProfileProviderKey(visionProvider)) setVisionApi(inferApiFromUrl(e.target.value));
-                    setProbeResult((prev) => ({ ...prev, vision: undefined }));
-                  }}
-                  size="small"
-                  style={{ width: 220 }}
-                  placeholder="https://api.openai.com/v1"
-                  disabled={probing === 'vision'}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                  <Input
+                    value={visionBaseUrl}
+                    onChange={(e) => {
+                      setVisionBaseUrl(e.target.value);
+                      if (isApiProfileProviderKey(visionProvider)) setVisionApi(inferApiFromUrl(e.target.value));
+                      setProbeResult((prev) => ({ ...prev, vision: undefined }));
+                    }}
+                    size="small"
+                    style={{ width: 220 }}
+                    placeholder="https://api.openai.com/v1"
+                    disabled={probing === 'vision'}
+                  />
+                  {visionPresetUrlOverridden && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {t('settings.presetUrlProtocolHint')}
+                    </Text>
+                  )}
+                </div>
               </SettingRow>
 
               {isApiProfileProviderKey(visionProvider) && (
@@ -2052,52 +2133,6 @@ export default function SettingsPanel() {
                   </div>
                 </SettingRow>
               )}
-
-              <SettingRow label={t('settings.visionApiKey')}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
-                  <Input
-                    value={visionApiKey}
-                    onChange={(e) => {
-                      deleteVisionApiKeyRef.current = false;
-                      setVisionApiKeyDeletePending(false);
-                      const v = e.target.value;
-                      setVisionApiKey(v);
-                      if (v.trim()) {
-                        visionApiKeyCacheRef.current[visionProvider] = v.trim();
-                      }
-                      setProbeResult((prev) => ({ ...prev, vision: undefined }));
-                    }}
-                    size="small"
-                    style={{ width: 220 }}
-                    disabled={probing === 'vision'}
-                    placeholder={currentVisionProviderHasSavedKey && !visionApiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder')}
-                  />
-                  {visionApiKeyStatus ? (
-                    <Text type="secondary" style={{ fontSize: 11 }}>
-                      {visionApiKeyStatus}
-                    </Text>
-                  ) : null}
-                  {(currentVisionProviderHasSavedKey || !!visionApiKey.trim()) && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', width: 220 }}>
-                      <Button
-                        size="small"
-                        type="link"
-                        danger
-                        style={{ padding: '0 4px', flexShrink: 0 }}
-                        onClick={() => {
-                          deleteVisionApiKeyRef.current = true;
-                          setVisionApiKeyDeletePending(true);
-                          setVisionApiKey('');
-                          setVisionApiKeyConfigured(false);
-                          delete visionApiKeyCacheRef.current[visionProvider];
-                        }}
-                      >
-                        {t('settings.clearApiKey')}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </SettingRow>
             </>
                   ),
                 },
