@@ -163,6 +163,19 @@ index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c
  	const date = now.toISOString().slice(0, 10).replaceAll("-", "");
  	const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 10);
  	return `${normalized.slice(0, 60)}-${date}-${suffix}`;
+diff --git a/dist/sessions-helpers-BHxfvpmm.js b/dist/sessions-helpers-BHxfvpmm.js
+index 0be286a1199da7aa73fe235969712a5eb58a1f93..c3c16feb9c62303c140a8816267aebfdfd534208 100644
+--- a/dist/sessions-helpers-BHxfvpmm.js
++++ b/dist/sessions-helpers-BHxfvpmm.js
+@@ -212,7 +212,7 @@ async function resolveSessionReference(params) {
+ 		key: params.sessionKey,
+ 		requesterInternalKey: params.requesterInternalKey
+ 	}) ?? params.sessionKey.trim();
+-	if (rawInput === "current") {
++	if (rawInput === "current" && params.requesterInternalKey) {
+ 		const resolvedCurrent = await resolveSessionReferenceByKeyOrSessionId({
+ 			raw: rawInput,
+ 			alias: params.alias,
 diff --git a/dist/workspace-CgsM_arl.js b/dist/workspace-CgsM_arl.js
 index d03d8c1d80264fee95aeb9dd62bc0efefa1b3773..3331b2dcd97d1a5be95386b7816dbdd8307742b4 100644
 --- a/dist/workspace-CgsM_arl.js
