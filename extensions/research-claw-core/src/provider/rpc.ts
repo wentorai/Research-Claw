@@ -307,6 +307,8 @@ async function probeProtocol(params: Record<string, unknown>): Promise<ProbeProt
     try {
       const response = await fetch(endpoint, init);
       const klass = classifyStatus(response.status);
+      // We classify on status alone; release the socket without draining the body.
+      await response.body?.cancel().catch(() => {});
       attempts.push({ protocol, endpoint, status: response.status, klass });
       if (klass === 'hit') {
         return { detected: protocol, reason: 'detected', attempts };
