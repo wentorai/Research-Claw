@@ -109,4 +109,67 @@ describe('api-profiles', () => {
   it('slugify handles empty label', () => {
     expect(slugifyProfileLabel('   ')).toBe('profile');
   });
+
+  it('lists configured presets alongside custom profiles', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'deepseek/deepseek-chat' } } },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: 'https://chatgpt.com/backend-api',
+            api: 'openai-chatgpt-responses',
+            models: [{ id: 'gpt-5.4' }],
+          },
+          deepseek: {
+            baseUrl: 'https://api.deepseek.com',
+            apiKey: 'sk-deepseek',
+            api: 'openai-completions',
+            models: [{ id: 'deepseek-chat' }],
+          },
+          'custom-relay-a': {
+            baseUrl: 'https://a.example/v1',
+            apiKey: 'sk-a',
+            api: 'openai-completions',
+            models: [{ id: 'glm-4', name: '中转站 A' }],
+          },
+        },
+      },
+    };
+    const profiles = listApiProfilesFromConfig(config);
+    expect(profiles).toHaveLength(3);
+
+    const openai = profiles.find((p) => p.id === 'openai');
+    expect(openai?.isBuiltin).toBe(true);
+    expect(openai?.requiresApiKey).toBe(false);
+    expect(openai?.label).toBe('OpenAI ChatGPT (OAuth)');
+
+    const deepseek = profiles.find((p) => p.id === 'deepseek');
+    expect(deepseek?.isBuiltin).toBe(true);
+    expect(deepseek?.requiresApiKey).toBe(true);
+    expect(deepseek?.isActive).toBe(true);
+
+    const custom = profiles.find((p) => p.id === 'custom-relay-a');
+    expect(custom?.isBuiltin).toBe(false);
+    expect(custom?.requiresApiKey).toBe(true);
+  });
+
+  it('excludes preset entries with no configured models', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'deepseek/deepseek-chat' } } },
+      models: {
+        providers: {
+          // Residual scaffold — no models configured, must be skipped.
+          minimax: { baseUrl: 'https://api.minimax.io/v1' },
+          openai: { baseUrl: 'https://chatgpt.com/backend-api', models: [] },
+          deepseek: {
+            baseUrl: 'https://api.deepseek.com',
+            apiKey: 'sk-deepseek',
+            models: [{ id: 'deepseek-chat' }],
+          },
+        },
+      },
+    };
+    const profiles = listApiProfilesFromConfig(config);
+    expect(profiles.map((p) => p.id)).toEqual(['deepseek']);
+  });
 });

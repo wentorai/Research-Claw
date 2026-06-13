@@ -387,7 +387,10 @@ describe('API key status guidance', () => {
     render(<SettingsPanel />);
 
     expect(screen.getByPlaceholderText('setup.apiKeyExisting')).toBeTruthy();
-    expect(screen.getByText(/settings\.providerConfigured/)).toBeTruthy();
+    // The configured deepseek preset now also surfaces as a saved API profile
+    // row, so the "configured" suffix can appear on both the provider button
+    // and the profile row.
+    expect(screen.getAllByText(/settings\.providerConfigured/).length).toBeGreaterThan(0);
   });
 
   it('shows replace guidance after typing a new API key', () => {
@@ -428,13 +431,15 @@ describe('API key status guidance', () => {
 
     render(<SettingsPanel />);
 
-    // Before clear: suffix is visible
-    expect(screen.getByText(/settings\.providerConfigured/)).toBeTruthy();
+    // Before clear: the provider button shows the configured suffix.
+    // (Scope to the button label form "DeepSeek · …" so the saved-profile
+    // row's own "configured" suffix does not interfere.)
+    expect(screen.getByText(/DeepSeek · settings\.providerConfigured/)).toBeTruthy();
 
     fireEvent.click(screen.getByText('settings.clearApiKey'));
 
-    // After clear: suffix must disappear immediately
-    expect(screen.queryByText(/settings\.providerConfigured/)).toBeNull();
+    // After clear: the provider button suffix must disappear immediately.
+    expect(screen.queryByText(/DeepSeek · settings\.providerConfigured/)).toBeNull();
   });
 
   it('does not keep the existing-key placeholder after clear is requested', () => {
@@ -669,6 +674,126 @@ describe('API key status guidance', () => {
     const serialized = JSON.stringify(upsertPayload.desiredConfig);
     expect(serialized).toContain('"zai-coding-global"');
     expect(serialized).toContain('__OPENCLAW_REDACTED__');
+  });
+});
+
+// ============================================================
+// Saved API profile switch ("Use" / 切换)
+// ============================================================
+
+describe('Saved API profile switch', () => {
+  /** Config with two custom profiles; custom-relay-a is active. */
+  function makeTwoProfileConfig() {
+    return {
+      agents: {
+        defaults: {
+          model: { primary: 'custom-relay-a/m0' },
+          imageModel: { primary: 'custom-relay-a/m0' },
+        },
+      },
+      models: {
+        providers: {
+          'custom-relay-a': {
+            baseUrl: 'https://a.example/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'm0', name: 'Relay A' }],
+          },
+          'custom-relay-b': {
+            baseUrl: 'https://b.example/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'gpt-4o', name: 'Relay B' }],
+          },
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    mockModalConfirm.mockReset();
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({
+      client: createMockClient(),
+      state: 'connected',
+      serverVersion: '0.7.1',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('upserts a config whose primary points at the target profile and shows success', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.auth.statuses') return Promise.resolve({});
+      if (method === 'config.get') {
+        return Promise.resolve({ config: makeTwoProfileConfig(), hash: 'hash-switch' });
+      }
+      if (method === 'rc.provider.upsert') return Promise.resolve({});
+      return Promise.resolve({});
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({ gatewayConfig: makeTwoProfileConfig() });
+
+    render(<SettingsPanel />);
+
+    // The non-active profile (Relay B) exposes a "Use" control.
+    const useButton = screen.getByText('settings.apiProfilesUse');
+    await act(async () => {
+      fireEvent.click(useButton);
+    });
+
+    const upsertCall = mockRequest.mock.calls.find((call: unknown[]) => call[0] === 'rc.provider.upsert');
+    expect(upsertCall).toBeTruthy();
+    const upsertPayload = upsertCall?.[1] as { desiredConfig: Record<string, unknown> };
+    const defaults = (upsertPayload.desiredConfig.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('custom-relay-b/gpt-4o');
+
+    // Switching must not drop the non-target provider entry from the upsert payload.
+    const providers = (
+      (upsertPayload.desiredConfig.models as Record<string, unknown>).providers as Record<string, unknown>
+    );
+    expect(providers['custom-relay-a']).toBeDefined();
+
+    expect(mockMessageSuccess).toHaveBeenCalled();
+    expect(mockMessageError).not.toHaveBeenCalled();
+  });
+
+  it('shows an error message when the switch upsert rejects', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.auth.statuses') return Promise.resolve({});
+      if (method === 'config.get') {
+        return Promise.resolve({ config: makeTwoProfileConfig(), hash: 'hash-switch' });
+      }
+      if (method === 'rc.provider.upsert') return Promise.reject(new Error('switch failed'));
+      return Promise.resolve({});
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({ gatewayConfig: makeTwoProfileConfig() });
+
+    render(<SettingsPanel />);
+
+    const useButton = screen.getByText('settings.apiProfilesUse');
+    await act(async () => {
+      fireEvent.click(useButton);
+    });
+
+    expect(mockMessageError).toHaveBeenCalled();
+    expect(mockMessageSuccess).not.toHaveBeenCalled();
   });
 });
 

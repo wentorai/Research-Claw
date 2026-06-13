@@ -1,7 +1,8 @@
 {
   "common": {
     "ok": "确定",
-    "cancel": "取消"
+    "cancel": "取消",
+    "delete": "删除"
   },
   "app": {
     "name": "WentorOS·科研龙虾",
@@ -635,9 +636,11 @@
     "apiProfilesAddHint": "例如：中转站 A、公司网关",
     "apiProfilesInUse": "使用中",
     "apiProfilesUse": "使用",
+    "apiProfilesOAuth": "OAuth 登录",
     "apiProfilesDeleteTitle": "删除此配置？",
     "apiProfilesDeleteDesc": "将删除「{{name}}」的已保存凭据。",
     "apiProfilesDeleted": "已删除该 API 配置",
+    "apiProfilesActivated": "已切换 API 配置",
     "apiProfileName": "配置名称",
     "primaryModel": "文本端点",
     "enableVision": "启用独立视觉模型（可选）",

@@ -14,7 +14,9 @@
 import {
   getActiveModelPrimary,
   isApiProfileProviderKey,
+  isBuiltinProviderKey,
   listApiProfilesFromConfig,
+  type ApiProfile,
 } from './api-profiles';
 import { getPreset } from './provider-presets';
 
@@ -624,7 +626,9 @@ export function buildDeleteApiProfilesConfig(
   const base = currentConfig ? structuredClone(currentConfig) : structuredClone(rcDefaults);
   mergeRcDefaultsIntoBase(base);
 
-  const deleteSet = new Set(deleteIds.filter((id) => isApiProfileProviderKey(id)));
+  const deleteSet = new Set(
+    deleteIds.filter((id) => isApiProfileProviderKey(id) || isBuiltinProviderKey(id)),
+  );
   const providers = cloneExistingProviders(base);
 
   for (const removeId of deleteSet) {
@@ -634,6 +638,58 @@ export function buildDeleteApiProfilesConfig(
   const result: Record<string, unknown> = { ...base };
   result.models = { providers: providers as Record<string, unknown> };
   finalizeModelsProvidersAndAgentDefaults(result);
+  return result;
+}
+
+/**
+ * Switch the active model to a saved API profile without rewriting any provider
+ * entries from (possibly stale) form state.
+ *
+ * Operates on a deep clone of the current merged config and changes ONLY
+ * `agents.defaults.model.primary` to `${profile.id}/${modelId}`. Every other
+ * field — including all provider entries and their (possibly redacted) apiKey
+ * sentinels — is left byte-for-byte unchanged so the gateway's existing
+ * resolveExistingApiKey / REDACTED_SENTINEL round-trip applies on upsert.
+ *
+ * When `profile.modelId` is empty, falls back to the first model id of the
+ * profile's provider entry (`providers[profile.id].models[0].id`). Throws a
+ * clear validation error when no usable model id can be resolved.
+ */
+export function buildActivateProfileConfig(
+  currentMergedConfig: Record<string, unknown> | null,
+  profile: ApiProfile,
+): Record<string, unknown> {
+  const result = currentMergedConfig ? structuredClone(currentMergedConfig) : {};
+
+  const providers = (result.models as Record<string, unknown> | undefined)?.providers as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  const entry = providers?.[profile.id];
+  if (!entry) {
+    throw new Error(`API profile "${profile.label || profile.id}" is not present in the current configuration.`);
+  }
+
+  let modelId = profile.modelId?.trim() ?? '';
+  if (!modelId) {
+    const models = entry?.models as Array<{ id?: string }> | undefined;
+    modelId = models?.[0]?.id?.trim() ?? '';
+  }
+  if (!modelId) {
+    throw new Error(`No model id available for API profile "${profile.label || profile.id}".`);
+  }
+
+  const agents = (result.agents as Record<string, unknown> | undefined) ?? {};
+  const defaults = (agents.defaults as Record<string, unknown> | undefined) ?? {};
+  const modelBlock = (defaults.model as Record<string, unknown> | undefined) ?? {};
+
+  result.agents = {
+    ...agents,
+    defaults: {
+      ...defaults,
+      model: { ...modelBlock, primary: `${profile.id}/${modelId}` },
+    },
+  };
+
   return result;
 }
 

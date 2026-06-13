@@ -1,7 +1,8 @@
 {
   "common": {
     "ok": "OK",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "delete": "Delete"
   },
   "app": {
     "name": "WentorOS·ResearchClaw",
@@ -635,9 +636,11 @@
     "apiProfilesAddHint": "e.g. Relay A, Company gateway",
     "apiProfilesInUse": "In use",
     "apiProfilesUse": "Use",
+    "apiProfilesOAuth": "OAuth",
     "apiProfilesDeleteTitle": "Delete profile?",
     "apiProfilesDeleteDesc": "This removes saved credentials for \"{{name}}\".",
     "apiProfilesDeleted": "API profile removed",
+    "apiProfilesActivated": "Switched API profile",
     "apiProfileName": "Profile name",
     "primaryModel": "Text Endpoint",
     "enableVision": "Independent Vision Model (optional)",

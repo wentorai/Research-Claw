@@ -5,6 +5,7 @@
 
 import { getPreset, PROVIDER_PRESETS } from './provider-presets';
 import { REDACTED_SENTINEL, resolveExistingApiKey } from './config-patch';
+import { isOAuthProvider } from './oauth-providers';
 
 export const API_PROFILE_PROVIDER_PREFIX = 'custom-';
 export const LEGACY_CUSTOM_PROVIDER_ID = 'custom';
@@ -20,6 +21,10 @@ export interface ApiProfile {
   apiKeyConfigured: boolean;
   /** True when agents.defaults.model.primary uses this provider. */
   isActive: boolean;
+  /** True for a configured preset provider (openai/deepseek/…), not a custom-* slot. */
+  isBuiltin: boolean;
+  /** False for OAuth providers (token lives gateway-side, no apiKey needed). */
+  requiresApiKey: boolean;
 }
 
 const BUILTIN_PROVIDER_IDS = new Set(PROVIDER_PRESETS.map((p) => p.id));
@@ -118,17 +123,30 @@ export function listApiProfilesFromConfig(
 
   const profiles: ApiProfile[] = [];
   for (const [id, entry] of Object.entries(providers)) {
-    if (!isApiProfileProviderKey(id)) continue;
+    const isCustom = isApiProfileProviderKey(id);
+    const isBuiltin = isBuiltinProviderKey(id) && !isCustom;
+    if (!isCustom && !isBuiltin) continue;
+
+    // A provider is "configured" only once it carries at least one model. Skip
+    // residual scaffolds so empty preset entries never surface as switchable.
+    const models = entry.models as Array<{ id?: string }> | undefined;
+    if (!Array.isArray(models) || models.length === 0) continue;
+
     const modelId = modelIdFromProviderEntry(id, entry, primary);
     const apiKeyRaw = entry.apiKey;
+    const label = isBuiltin
+      ? getPreset(id)?.label ?? labelFromProviderEntry(id, entry)
+      : labelFromProviderEntry(id, entry) || '自定义 API';
     profiles.push({
       id,
-      label: labelFromProviderEntry(id, entry) || '自定义 API',
+      label,
       baseUrl: (entry.baseUrl as string) ?? '',
       api: (entry.api as string) ?? getPreset('custom').api,
       modelId,
       apiKeyConfigured: typeof apiKeyRaw === 'string' && apiKeyRaw.length > 0,
       isActive: id === activeProviderKey,
+      isBuiltin,
+      requiresApiKey: !isOAuthProvider(id),
     });
   }
 

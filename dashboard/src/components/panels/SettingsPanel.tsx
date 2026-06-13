@@ -25,6 +25,7 @@ import { useUiStore } from '../../stores/ui';
 import { getThemeTokens } from '../../styles/theme';
 import { buildThemedModalStyles, confirmApplyAppUpdate } from '../../utils/app-update-ui';
 import {
+  buildActivateProfileConfig,
   buildDeleteApiProfilesConfig,
   buildSaveConfig,
   extractConfigFields,
@@ -1378,12 +1379,72 @@ export default function SettingsPanel() {
     [applyConfigFieldsToForm, loadGatewayConfig, refreshAuthStatuses, t],
   );
 
+  /**
+   * Switch agents.defaults.model.primary to a saved profile WITHOUT re-saving
+   * the (stale) form state. Mirrors performSave's upsert/operation wiring but
+   * only mutates `primary` via buildActivateProfileConfig — provider entries
+   * (and their redacted apiKey sentinels) are left untouched so the gateway's
+   * existing sentinel round-trip applies on upsert.
+   */
+  const performActivateProfile = useCallback(
+    async (profile: ApiProfile) => {
+      const client = useGatewayStore.getState().client;
+      if (!client?.isConnected) throw new Error(t('oauth.notConnected'));
+
+      const configStore = useConfigStore.getState();
+      const operationId = configStore.beginConfigOperation('validating');
+      setSaving(true);
+      try {
+        const configSnapshot = await client.request<{
+          parsed?: Record<string, unknown>;
+          config?: Record<string, unknown>;
+          hash?: string;
+        }>('config.get', {});
+        const latestProjectConfig = (configSnapshot.parsed ?? configSnapshot.config ?? null) as Record<
+          string,
+          unknown
+        > | null;
+        const mergedProjectConfig = mergeProjectConfigsPreservingProviders(
+          latestProjectConfig,
+          projectConfigCacheRef.current,
+        );
+
+        const fullConfig = buildActivateProfileConfig(mergedProjectConfig, profile);
+
+        configStore.setConfigOperationPhase('persisting');
+        configStore.setPendingConfigRestart(true);
+        await client.request('rc.provider.upsert', {
+          operationId,
+          desiredConfig: fullConfig,
+          authActions: [],
+        });
+        configStore.setConfigOperationPhase('restart_scheduled');
+        projectConfigCacheRef.current = fullConfig;
+
+        syncNeeded.current = true;
+        message.success(
+          t('settings.apiProfilesActivated', { defaultValue: 'Switched API profile' }),
+        );
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : String(error);
+        configStore.setConfigOperationPhase('failed', messageText);
+        if (client.isConnected && !/connection closed|not connected/i.test(messageText)) {
+          configStore.setPendingConfigRestart(false);
+        }
+        message.error(t('settings.saveFailed'));
+        throw error;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [message, t],
+  );
+
   const handleActivateApiProfile = useCallback(
     async (profile: ApiProfile) => {
-      loadApiProfileIntoForm(profile);
-      await performSave();
+      await performActivateProfile(profile);
     },
-    [loadApiProfileIntoForm, performSave],
+    [performActivateProfile],
   );
 
   const handleDeleteApiProfile = useCallback(

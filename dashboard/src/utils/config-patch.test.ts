@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildActivateProfileConfig,
   buildDeleteApiProfilesConfig,
   buildSaveConfig,
   extractConfigFields,
@@ -11,6 +12,7 @@ import {
   serializeConfigForGatewayApply,
   type ConfigPatchInput,
 } from './config-patch';
+import type { ApiProfile } from './api-profiles';
 
 describe('buildSaveConfig', () => {
   it('builds single-provider config with preset model capabilities', () => {
@@ -1403,6 +1405,67 @@ describe('buildDeleteApiProfilesConfig', () => {
     expect((defaults.model as { primary?: string }).primary).toBe('minimax/MiniMax-M2.7');
   });
 
+  it('removes a configured preset entry and keeps other providers', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'custom-relay-a/m0' } } },
+      models: {
+        providers: {
+          deepseek: {
+            baseUrl: 'https://api.deepseek.com',
+            apiKey: 'sk-deepseek',
+            models: [{ id: 'deepseek-chat' }],
+          },
+          minimax: { baseUrl: 'https://api.minimax.io/v1', models: [{ id: 'MiniMax-M2.7' }] },
+          'custom-relay-a': { baseUrl: 'https://a.example/v1', models: [{ id: 'm0' }] },
+        },
+      },
+    };
+    const result = buildDeleteApiProfilesConfig(config, ['deepseek']);
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers.deepseek).toBeUndefined();
+    expect(providers.minimax).toBeDefined();
+    expect(providers['custom-relay-a']).toBeDefined();
+  });
+
+  it('repoints primary to a remaining provider when deleting the active preset', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'deepseek/deepseek-chat' } } },
+      models: {
+        providers: {
+          deepseek: {
+            baseUrl: 'https://api.deepseek.com',
+            apiKey: 'sk-deepseek',
+            models: [{ id: 'deepseek-chat' }],
+          },
+          minimax: { baseUrl: 'https://api.minimax.io/v1', models: [{ id: 'MiniMax-M2.7' }] },
+        },
+      },
+    };
+    const result = buildDeleteApiProfilesConfig(config, ['deepseek']);
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers.deepseek).toBeUndefined();
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('minimax/MiniMax-M2.7');
+  });
+
+  it('never introduces or mutates auth/oauth keys when deleting an OAuth preset', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'openai/gpt-5.4' } } },
+      models: {
+        providers: {
+          openai: { baseUrl: 'https://chatgpt.com/backend-api', models: [{ id: 'gpt-5.4' }] },
+          minimax: { baseUrl: 'https://api.minimax.io/v1', models: [{ id: 'MiniMax-M2.7' }] },
+        },
+      },
+    };
+    const result = buildDeleteApiProfilesConfig(config, ['openai']);
+    expect('auth' in result).toBe(false);
+    expect('authProfiles' in result).toBe(false);
+    expect('oauth' in result).toBe(false);
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers.openai).toBeUndefined();
+  });
+
   it('does not restore providers marked for deletion during save', () => {
     const base = {
       agents: { defaults: { model: { primary: 'custom-relay-b/m1' } } },
@@ -1423,5 +1486,140 @@ describe('buildDeleteApiProfilesConfig', () => {
     });
     const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
     expect(providers['custom-relay-a']).toBeUndefined();
+  });
+});
+
+describe('buildActivateProfileConfig', () => {
+  function makeProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
+    return {
+      id: 'custom-relay-b',
+      label: 'Relay B',
+      baseUrl: 'https://b.example/v1',
+      api: 'openai-completions',
+      modelId: 'gpt-4o',
+      apiKeyConfigured: true,
+      isActive: false,
+      isBuiltin: false,
+      requiresApiKey: true,
+      ...overrides,
+    };
+  }
+
+  function makeConfig(): Record<string, unknown> {
+    return {
+      agents: {
+        defaults: {
+          model: { primary: 'custom-relay-a/m0' },
+          imageModel: { primary: 'custom-relay-a/m0' },
+          heartbeat: { every: '30m' },
+        },
+      },
+      models: {
+        providers: {
+          'custom-relay-a': {
+            baseUrl: 'https://a.example/v1',
+            api: 'openai-completions',
+            apiKey: 'sk-relay-a',
+            models: [{ id: 'm0', name: 'Relay A' }],
+          },
+          'custom-relay-b': {
+            baseUrl: 'https://b.example/v1',
+            api: 'openai-completions',
+            apiKey: 'sk-relay-b',
+            models: [{ id: 'gpt-4o', name: 'Relay B' }],
+          },
+        },
+      },
+    };
+  }
+
+  it('points agents.defaults.model.primary at the target profile', () => {
+    const result = buildActivateProfileConfig(makeConfig(), makeProfile());
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('custom-relay-b/gpt-4o');
+  });
+
+  it('keeps a non-target provider entry and its apiKey unchanged (deep clone, nothing dropped)', () => {
+    const result = buildActivateProfileConfig(makeConfig(), makeProfile());
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers['custom-relay-a']).toBeDefined();
+    expect(providers['custom-relay-a'].apiKey).toBe('sk-relay-a');
+    expect(providers['custom-relay-a'].baseUrl).toBe('https://a.example/v1');
+    expect(providers['custom-relay-b']).toBeDefined();
+    expect(providers['custom-relay-b'].apiKey).toBe('sk-relay-b');
+  });
+
+  it('falls back to providers[id].models[0].id when profile.modelId is empty', () => {
+    const result = buildActivateProfileConfig(makeConfig(), makeProfile({ modelId: '' }));
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('custom-relay-b/gpt-4o');
+  });
+
+  it('does not mutate the input config (pure)', () => {
+    const cfg = makeConfig();
+    const snapshot = JSON.stringify(cfg);
+    buildActivateProfileConfig(cfg, makeProfile());
+    expect(JSON.stringify(cfg)).toBe(snapshot);
+  });
+
+  it('leaves everything except primary byte-for-byte identical', () => {
+    const cfg = makeConfig();
+    const result = buildActivateProfileConfig(cfg, makeProfile());
+    const expected = makeConfig();
+    (((expected.agents as Record<string, unknown>).defaults as Record<string, unknown>).model as Record<string, unknown>).primary =
+      'custom-relay-b/gpt-4o';
+    expect(result).toEqual(expected);
+  });
+
+  it('switches primary to a builtin preset and keeps the previous provider intact', () => {
+    const cfg = {
+      agents: { defaults: { model: { primary: 'openai/gpt-5.4' } } },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: 'https://chatgpt.com/backend-api',
+            api: 'openai-chatgpt-responses',
+            models: [{ id: 'gpt-5.4' }],
+          },
+          deepseek: {
+            baseUrl: 'https://api.deepseek.com',
+            api: 'openai-completions',
+            apiKey: 'sk-deepseek',
+            models: [{ id: 'deepseek-chat' }],
+          },
+        },
+      },
+    };
+    const result = buildActivateProfileConfig(
+      cfg,
+      makeProfile({
+        id: 'deepseek',
+        label: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com',
+        modelId: 'deepseek-chat',
+        api: 'openai-completions',
+        isBuiltin: true,
+        requiresApiKey: true,
+      }),
+    );
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('deepseek/deepseek-chat');
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers.openai).toBeDefined();
+    expect(providers.openai.models).toEqual([{ id: 'gpt-5.4' }]);
+  });
+
+  it('throws a clear validation error when modelId is empty and provider has no models', () => {
+    const cfg = makeConfig();
+    const providers = (cfg.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    providers['custom-relay-b'].models = [];
+    expect(() => buildActivateProfileConfig(cfg, makeProfile({ modelId: '' }))).toThrow();
+  });
+
+  it('throws when the profile provider is absent from the merged config (even with a modelId)', () => {
+    const cfg = makeConfig();
+    expect(() =>
+      buildActivateProfileConfig(cfg, makeProfile({ id: 'custom-ghost', modelId: 'gpt-4o' })),
+    ).toThrow(/not present in the current configuration/);
   });
 });

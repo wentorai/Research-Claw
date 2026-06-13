@@ -114,7 +114,9 @@ export default function ApiProfilesSection({
                       disabled={loading}
                       onClick={(e) => {
                         e.stopPropagation();
-                        void onActivateProfile(profile);
+                        // The handler surfaces its own success/error feedback; catch
+                        // here only to avoid an unhandled promise rejection.
+                        onActivateProfile(profile).catch(() => {});
                       }}
                     >
                       {t('settings.apiProfilesUse', { defaultValue: 'Use' })}
@@ -154,9 +156,11 @@ export default function ApiProfilesSection({
                   description={
                     <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
                       {summarizeUrl(profile.baseUrl)} · {profile.modelId || '—'}
-                      {profile.apiKeyConfigured
-                        ? ` · ${t('settings.providerConfigured')}`
-                        : ` · ${t('settings.apiKeyMissing')}`}
+                      {!profile.requiresApiKey
+                        ? ` · ${t('settings.apiProfilesOAuth', { defaultValue: 'OAuth' })}`
+                        : profile.apiKeyConfigured
+                          ? ` · ${t('settings.providerConfigured')}`
+                          : ` · ${t('settings.apiKeyMissing')}`}
                     </span>
                   }
                 />
