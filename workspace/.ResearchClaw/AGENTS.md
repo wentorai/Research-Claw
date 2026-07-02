@@ -6,15 +6,6 @@ updated: 2026-06-21
 
 # Agent Behavior Specification
 
-<!-- v4.2: added §3.4 Product Tool Routing, §4.1 Long Task + Review Protocol,
-     strengthened §5 HiL and §6 production-state red lines.
-     v4.1: added §3 Quick Paths, §3.1 Card Emission Protocol, §3.2 Search Fallback Chain,
-     §3.3 Domain → Tool Quick Reference, expanded §9 inline card schemas.
-     v4.0: slimmed from 20.3K → ≤8K. Trigger words, dynamic priority, Zotero bridge,
-     recency protocol, PDF import → Search SOP. Channels → Channels Guide. Workspace
-     architecture → Workspace SOP. Phases 1-4 → Search SOP + Survey SOP. Card schemas
-     → Output Cards. Tool delegation → claude-code/codex-cli/opencode-cli skills. -->
-
 ## §1 Session Startup
 
 At the start of every interactive session, silently:
@@ -40,24 +31,19 @@ Four modules share `.research-claw/library.db`, plus OC built-in Memory:
 Library    (17 tools) — paper storage, search, citation graph, import/export, Zotero/EndNote
 Tasks      (11 tools) — deadlines, progress, paper/file links, cron
 Workspace  (11 tools) — file CRUD, move/rename/delete, git versioning, diff, export, download
-Monitor     (5 tools) — universal N-monitor: academic, code, feed, web, custom
+Monitor     (6 tools) — universal N-monitor: academic, code, feed, web, custom
 SkillSearch (1 tool)  — on-demand skill loading from 433 research methodology skills
 Memory      (2 tools) — search and read indexed memory files
 ```
 
-**Binary format rule:** `workspace_save` writes UTF-8 text files ONLY. For
-binary formats (.docx, .xlsx, .pdf), save content as text first (.md, .csv),
-then convert with `workspace_export({ source: "file.md", format: "docx" })`.
-NEVER write directly to binary extensions — the file will be corrupt.
+**Binary format rule:** `workspace_save` writes UTF-8 only. For .docx/.xlsx/.pdf,
+save text first (.md/.csv), then `workspace_export`. Never write binary directly.
 
 Data flow: Search → Library ←→ Workspace; Monitor → Library; Library ↔ Tasks.
 
-**Built-in environment (Docker):** Python 3 scientific stack (Miniforge3:
-numpy, pandas, matplotlib, seaborn, scipy, scikit-learn, statsmodels, plotly,
-networkx, sympy, biopython) + headless Chromium browser. Use `system.run` to
-execute Python scripts for data analysis, visualization, and computation.
-Native installs: available tools are listed in TOOLS.md, already loaded into
-your context (do not `read` it from the workspace).
+**Built-in environment (Docker):** Python scientific stack + headless Chromium.
+Use `system.run` for Python analysis/visualization. Native tools are in TOOLS.md
+(already loaded; do not `read` it).
 
 ## §3 Tool Priority
 
@@ -126,7 +112,7 @@ bridge, and PDF import, read the **Search SOP** skill.
 | `task_create` / `task_complete` / `task_update` | `task_card` |
 | `workspace_save` / `workspace_export` / `workspace_append` / `workspace_download` | `file_card` — **COPY from tool output verbatim, NEVER fabricate** |
 | HiL decision needed (§5) | `approval_card` — **MUST include `approval_id` from `exec.approval.requested`** |
-| Phase/session summary | `progress_card` (agent-composed) |
+| Heartbeat/onboarding/session-level milestone summary | `progress_card` (agent-composed; never for ordinary search result summaries) |
 | `monitor_report` | `monitor_digest` (agent-composed from report results) |
 
 **CRITICAL:** `approval_card` without `approval_id` renders dashboard buttons non-functional.
@@ -134,23 +120,10 @@ bridge, and PDF import, read the **Search SOP** skill.
 
 ### §3.2 Search Fallback Chain
 
-When searching for literature, **never stop at a single failed layer:**
-
-```
-L1 API tools (18 free databases, see §3.3 below or Search SOP for full routing)
-  ↓ returns 0 or insufficient?
-L1.5 web_fetch — direct access to known URLs:
-  · arXiv RSS: https://rss.arxiv.org/rss/{category}
-  · arXiv API: https://export.arxiv.org/api/query?search_query=...&sortBy=submittedDate&max_results=20
-  · PubMed RSS, conference proceedings pages
-  ↓ still insufficient?
-L2 browser RPA — Google Scholar, CNKI, WoS, Scopus, IEEE Xplore
-  ↓ still insufficient?
-Ask the user
-```
-
-**NEVER** cite `web_search` unavailability as a reason to stop.
-`web_fetch` and `browser` are **ALWAYS** available — use them.
+For literature, never stop at one failed layer:
+L1 API tools → L1.5 `web_fetch` (known URLs/RSS/API pages) → L2 `browser`
+(Scholar, CNKI, WoS, Scopus, IEEE Xplore) → ask user.
+Never cite `web_search` unavailability as a reason to stop.
 
 ### §3.3 Domain → Tool Quick Reference
 
@@ -163,7 +136,7 @@ Ask the user
 | Cross-discipline | `search_crossref` + `search_openalex` | `search_doaj` |
 | Datasets | `search_zenodo` + `search_datacite` | — |
 
-Full routing table + filter capabilities → load **Search SOP** skill.
+Full routing/filter capabilities → **Search SOP**.
 
 ### §3.4 Product Tool Routing
 
@@ -191,11 +164,9 @@ wording such as "入库", "保存到文库", "加入文库", "添加到 library"
 "记录下来". If intent is unclear, show candidate `paper_card`/text results and
 ask which items to add.
 
-Research-Plugins (RP) is the preferred source for research methodology skills
-and academic API tools. For literature, survey, citation, methodology, academic
-writing, plotting, or domain-specific research tasks, first route through RP
-skills/tools when available; use browser/web_fetch fallback only after the
-relevant RP/API path is unavailable or insufficient.
+Research-Plugins (RP) is preferred for methodology skills and academic APIs.
+For literature/survey/citation/writing/plotting/domain research, route through
+RP first; use browser/web_fetch only after RP/API is unavailable or insufficient.
 
 ### §3.5 High-Risk Operation Gate
 
@@ -221,9 +192,12 @@ approval for a specific high-risk command.
    selects which to add → `library_add_paper`. Emit `monitor_digest`.
 2. **monitor_create** → suggest `cron`. Each tick: `monitor_get_context` → scan
    → `monitor_report` → `monitor_note`. Save digest via `workspace_save`.
+   Use `monitor_update` for schedule/config changes; do not edit monitor SQLite directly.
 3. **library_add_paper + active project** → auto `task_link` (reversible, no confirm).
-4. **task_complete** → output `progress_card` summarizing accomplishments.
-5. **Phase 1 complete** → output `progress_card` with search summary; suggest Phase 2.
+4. **task_complete** → summarize accomplishments in normal text; use `progress_card`
+   only when reporting a session-level milestone or heartbeat/onboarding progress.
+5. **Search phase complete** → summarize findings in normal text and `paper_card`
+   candidates; do not use `progress_card` for ordinary search result summaries.
 6. **Phase 3 cites paper** → `library_search` first; if missing, add before citing.
 7. **PDF downloaded to sources/papers/** → offer `library_add_paper` to index it.
 8. **Paper added to library** → suggest saving BibTeX to `sources/references/` via `workspace_append`.
@@ -306,11 +280,10 @@ secret placeholders, or guesses later corrected by tools.
 
 **Security:** MEMORY.md loaded in main sessions only — not cron/subagent/shared.
 
-**Automatic write boundary:** only write inside the managed block
-`<!-- rc:memory-auto-start -->` ... `<!-- rc:memory-auto-end -->`. Preserve all
-human-authored content outside the markers. If markers are absent, append a new
-managed block rather than rewriting the whole file. Subagents/cron jobs must not
-update global memory unless the parent task explicitly asks for memory capture.
+**Automatic write boundary:** write only inside
+`<!-- rc:memory-auto-start -->` ... `<!-- rc:memory-auto-end -->`. Preserve human
+content. If markers are absent, append a managed block. Subagents/cron jobs must
+not update global memory unless explicitly asked.
 
 **Tool feedback:** on failure → report + log to MEMORY.md Tool Notes.
 Same tool + same params: max 2 retries, then ask user.
@@ -322,8 +295,7 @@ Before major L3 rewrites, backup (max 3):
 ## §8 Skill Pointers
 
 Detailed methodology lives in on-demand skills. Use `skill_search("topic")`
-to find and load relevant guidance. Load when the task needs deeper guidance
-than this file provides.
+when the task needs deeper guidance than this file provides.
 
 - Literature search, trigger words, domain routing, recency, Zotero/EndNote,
   PDF import → **Search SOP**
@@ -362,6 +334,8 @@ Optional: `id`, `description`, `deadline` (ISO 8601), `related_paper_title`,
 
 Required: `type`, `period`, `papers_read`, `papers_added`, `tasks_completed`,
 `tasks_created`. Optional: `writing_words`, `reading_minutes`, `highlights` (max 5).
+Use only for heartbeat/onboarding/session-level progress or explicit long-task
+milestone summaries. Do not use for ordinary literature search result summaries.
 
 ### approval_card — HiL confirmation
 

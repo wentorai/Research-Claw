@@ -1,5 +1,5 @@
 /**
- * Bootstrap Consistency Tests — AGENTS.md v4.0/v4.1 & TOOLS.md v4.0
+ * Bootstrap Consistency Tests — AGENTS.md v4.x & TOOLS.md v4.x
  *
  * Validates that the bootstrap files (AGENTS.md, TOOLS.md) exist,
  * have valid structure, and the AGENTS.md module map accurately
@@ -73,16 +73,17 @@ const ACTUAL_WORKSPACE_TOOLS = [
   'workspace_download',
 ] as const;
 
-/** 5 monitor agent tools (from monitor/tools.ts) */
+/** 6 monitor agent tools (from monitor/tools.ts) */
 const ACTUAL_MONITOR_TOOLS = [
   'monitor_create',
   'monitor_list',
+  'monitor_update',
   'monitor_report',
   'monitor_get_context',
   'monitor_note',
 ] as const;
 
-/** All 44 agent tools (17 + 11 + 11 + 5) */
+/** All 45 agent tools (17 + 11 + 11 + 6) */
 const ALL_AGENT_TOOLS = [
   ...ACTUAL_LITERATURE_TOOLS,
   ...ACTUAL_TASK_TOOLS,
@@ -127,7 +128,7 @@ const hasBootstrapFiles = agentsMd.length > 0 && toolsMd.length > 0;
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () => {
+describe('Bootstrap file consistency (AGENTS.md v4.x & TOOLS.md v4.x)', () => {
   // ── Precondition ──────────────────────────────────────────────────────
 
   it('bootstrap files exist and are non-empty', () => {
@@ -141,14 +142,14 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
   // ── Structural integrity ──────────────────────────────────────────────
 
   describe('Structural integrity', () => {
-    it('AGENTS.md has YAML frontmatter with version 4.0', () => {
+    it('AGENTS.md has YAML frontmatter with version 4.x', () => {
       if (!hasBootstrapFiles) return;
-      expect(agentsMd).toMatch(/^---\nfile: AGENTS\.md\nversion: 4\.[01]/);
+      expect(agentsMd).toMatch(/^---\nfile: AGENTS\.md\nversion: 4\.\d+/);
     });
 
-    it('TOOLS.md has YAML frontmatter with version 4.0', () => {
+    it('TOOLS.md has YAML frontmatter with version 4.x', () => {
       if (!hasBootstrapFiles) return;
-      expect(toolsMd).toMatch(/^---\nfile: TOOLS\.md\nversion: 4\.0/);
+      expect(toolsMd).toMatch(/^---\nfile: TOOLS\.md\nversion: 4\.\d+/);
     });
 
     it('AGENTS.md has all expected v4.0 section headers', () => {
@@ -197,10 +198,10 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
       expect(ACTUAL_WORKSPACE_TOOLS.length).toBe(11);
     });
 
-    it('states Monitor has 5 tools', () => {
+    it('states Monitor has 6 tools', () => {
       if (!hasBootstrapFiles) return;
-      expect(agentsMd).toMatch(/Monitor\s+\(5 tools\)/);
-      expect(ACTUAL_MONITOR_TOOLS.length).toBe(5);
+      expect(agentsMd).toMatch(/Monitor\s+\(6 tools\)/);
+      expect(ACTUAL_MONITOR_TOOLS.length).toBe(6);
     });
 
     it('states Memory has 2 tools', () => {
@@ -208,8 +209,8 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
       expect(agentsMd).toMatch(/Memory\s+\(2 tools\)/);
     });
 
-    it('total local agent tool count is 44 (17 + 11 + 11 + 5)', () => {
-      expect(ALL_AGENT_TOOLS.length).toBe(44);
+    it('total local agent tool count is 45 (17 + 11 + 11 + 6)', () => {
+      expect(ALL_AGENT_TOOLS.length).toBe(45);
     });
   });
 
@@ -350,6 +351,7 @@ describe('Bootstrap file consistency (AGENTS.md v4.0/v4.1 & TOOLS.md v4.0)', () 
         'library_search',
         'monitor_report',
         'monitor_create',
+        'monitor_update',
         'monitor_get_context',
         'monitor_note',
         'task_link',
