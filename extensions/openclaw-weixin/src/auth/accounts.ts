@@ -374,6 +374,8 @@ export function resolveWeixinAccount(
   const id = normalizeAccountId(raw);
   const section = cfg.channels?.["openclaw-weixin"] as WeixinSectionConfig | undefined;
   const accountCfg: WeixinAccountConfig = section?.accounts?.[id] ?? section ?? {};
+  const sectionEnabled = section?.enabled !== false;
+  const accountEnabled = accountCfg.enabled !== false;
 
   const accountData = loadWeixinAccount(id);
   const token = accountData?.token?.trim() || undefined;
@@ -384,7 +386,7 @@ export function resolveWeixinAccount(
     baseUrl: stateBaseUrl || DEFAULT_BASE_URL,
     cdnBaseUrl: accountCfg.cdnBaseUrl?.trim() || CDN_BASE_URL,
     token,
-    enabled: accountCfg.enabled !== false,
+    enabled: sectionEnabled && accountEnabled,
     configured: Boolean(token),
     name: accountCfg.name?.trim() || undefined,
   };
