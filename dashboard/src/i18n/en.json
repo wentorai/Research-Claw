@@ -968,7 +968,16 @@
       "tasksCreated": "Tasks created",
       "writingWords": "Words written",
       "readingMinutes": "Reading time (min)",
-      "highlights": "Key Points"
+      "highlights": "Key Points",
+      "moreHighlights": "{{count}} more",
+      "period": {
+        "today": "Today",
+        "this_week": "This week",
+        "this_month": "This month",
+        "session": "Session",
+        "heartbeat": "Heartbeat",
+        "onboarding": "Onboarding"
+      }
     },
     "approval": {
       "title": "Approval Required",

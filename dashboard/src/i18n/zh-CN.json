@@ -968,7 +968,16 @@
       "tasksCreated": "任务已创建",
       "writingWords": "写作字数",
       "readingMinutes": "阅读时长（分钟）",
-      "highlights": "关键点"
+      "highlights": "关键点",
+      "moreHighlights": "还有 {{count}} 条",
+      "period": {
+        "today": "今日",
+        "this_week": "本周",
+        "this_month": "本月",
+        "session": "本次会话",
+        "heartbeat": "心跳检查",
+        "onboarding": "初始化"
+      }
     },
     "approval": {
       "title": "需要审批",

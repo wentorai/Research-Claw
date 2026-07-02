@@ -102,6 +102,18 @@ describe('CodeBlock', () => {
     expect(screen.getByText('data.csv')).toBeInTheDocument();
   });
 
+  it('renders a legacy key-value file_card', () => {
+    render(
+      <CodeBlock className="language-file_card">
+        {'type: file_card\npath: outputs/forms/application.docx\nsize: 35KB\nmime_type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\n'}
+      </CodeBlock>,
+    );
+
+    expect(screen.getByText('application.docx')).toBeInTheDocument();
+    expect(screen.getByText('outputs/forms/application.docx')).toBeInTheDocument();
+    expect(screen.getByText('35.0 KB')).toBeInTheDocument();
+  });
+
   it('falls back to code block when JSON is malformed for card type', () => {
     render(
       <CodeBlock className="language-paper_card">

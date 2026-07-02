@@ -66,6 +66,13 @@ describe('ProgressCard', () => {
     expect(screen.getByText('Submitted draft to advisor')).toBeInTheDocument();
   });
 
+  it('truncates very long highlights', () => {
+    const longHighlight = 'A'.repeat(140);
+    render(<ProgressCard {...fullProgress} highlights={[longHighlight]} />);
+    expect(screen.queryByText(longHighlight)).not.toBeInTheDocument();
+    expect(screen.getByText(/…$/)).toBeInTheDocument();
+  });
+
   it('handles missing highlights gracefully', () => {
     render(<ProgressCard {...fullProgress} highlights={undefined} />);
     expect(screen.queryByText('card.progress.highlights')).not.toBeInTheDocument();

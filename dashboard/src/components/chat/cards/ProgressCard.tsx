@@ -9,6 +9,8 @@ import { getThemeTokens } from '@/styles/theme';
 import type { ProgressCard as ProgressCardType } from '@/types/cards';
 
 const { Text } = Typography;
+const MAX_HIGHLIGHTS = 5;
+const MAX_HIGHLIGHT_CHARS = 96;
 
 interface MetricRowProps {
   label: string;
@@ -16,25 +18,38 @@ interface MetricRowProps {
   tokens: ReturnType<typeof getThemeTokens>;
 }
 
-function MetricRow({ label, value, tokens }: MetricRowProps) {
+function MetricPill({ label, value, tokens }: MetricRowProps) {
   return (
     <div
       style={{
         display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '4px 0',
+        flexDirection: 'column',
+        gap: 3,
+        minWidth: 0,
+        padding: '8px 10px',
+        border: `1px solid ${tokens.border.default}`,
+        borderRadius: 6,
+        background: tokens.bg.surfaceHover,
       }}
     >
-      <Text style={{ fontSize: 12, color: tokens.text.muted, textAlign: 'left' }}>
+      <Text
+        style={{
+          fontSize: 11,
+          color: tokens.text.muted,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
         {label}
       </Text>
       <Text
+        strong
         style={{
-          fontSize: 13,
+          fontSize: 16,
           color: tokens.text.primary,
           fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-          textAlign: 'right',
+          lineHeight: 1.1,
         }}
       >
         {value}
@@ -43,10 +58,24 @@ function MetricRow({ label, value, tokens }: MetricRowProps) {
   );
 }
 
+function formatPeriod(period: string, t: ReturnType<typeof useTranslation>['t']): string {
+  const key = `card.progress.period.${period}`;
+  const translated = t(key);
+  return translated === key ? period : translated;
+}
+
+function truncateHighlight(value: string): string {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (compact.length <= MAX_HIGHLIGHT_CHARS) return compact;
+  return `${compact.slice(0, MAX_HIGHLIGHT_CHARS - 1)}…`;
+}
+
 export default function ProgressCard(props: ProgressCardType) {
   const { t } = useTranslation();
   const theme = useConfigStore((s) => s.theme);
   const tokens = getThemeTokens(theme);
+  const highlights = (props.highlights ?? []).slice(0, MAX_HIGHLIGHTS).map(truncateHighlight);
+  const hiddenHighlightCount = Math.max((props.highlights?.length ?? 0) - MAX_HIGHLIGHTS, 0);
 
   // Urgent border: if highlights contain overdue/urgent keywords, use red
   const hasUrgent = props.highlights?.some((h) =>
@@ -55,56 +84,68 @@ export default function ProgressCard(props: ProgressCardType) {
   const borderColor = hasUrgent ? '#EF4444' : tokens.accent.blue;
 
   return (
-    <CardContainer borderColor={borderColor}>
+    <CardContainer borderColor={borderColor} maxWidth={520}>
       {/* Header: icon + title + period */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <BarChartOutlined style={{ fontSize: 20, color: tokens.accent.blue }} />
-        <div style={{ flex: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <BarChartOutlined style={{ fontSize: 18, color: borderColor }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
           <Text strong style={{ fontSize: 15, color: tokens.text.primary }}>
             {t('card.progress.title')}
           </Text>
-          <Text style={{ fontSize: 12, color: tokens.text.muted, marginLeft: 8 }}>
-            {props.period}
+          <Text
+            style={{
+              fontSize: 12,
+              color: tokens.text.muted,
+              marginLeft: 8,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {formatPeriod(props.period, t)}
           </Text>
         </div>
       </div>
 
-      {/* Metrics grid — 2 columns */}
+      {/* Metrics grid */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '0 24px',
-          marginBottom: props.highlights && props.highlights.length > 0 ? 12 : 0,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))',
+          gap: 8,
+          marginBottom: highlights.length > 0 ? 10 : 0,
         }}
       >
-        <MetricRow label={t('card.progress.papersRead')} value={props.papers_read} tokens={tokens} />
-        <MetricRow label={t('card.progress.papersAdded')} value={props.papers_added} tokens={tokens} />
-        <MetricRow label={t('card.progress.tasksCompleted')} value={props.tasks_completed} tokens={tokens} />
-        <MetricRow label={t('card.progress.tasksCreated')} value={props.tasks_created} tokens={tokens} />
+        <MetricPill label={t('card.progress.papersRead')} value={props.papers_read} tokens={tokens} />
+        <MetricPill label={t('card.progress.papersAdded')} value={props.papers_added} tokens={tokens} />
+        <MetricPill label={t('card.progress.tasksCompleted')} value={props.tasks_completed} tokens={tokens} />
+        <MetricPill label={t('card.progress.tasksCreated')} value={props.tasks_created} tokens={tokens} />
         {props.writing_words != null && (
-          <MetricRow label={t('card.progress.writingWords')} value={props.writing_words} tokens={tokens} />
+          <MetricPill label={t('card.progress.writingWords')} value={props.writing_words} tokens={tokens} />
         )}
         {props.reading_minutes != null && (
-          <MetricRow label={t('card.progress.readingMinutes')} value={props.reading_minutes} tokens={tokens} />
+          <MetricPill label={t('card.progress.readingMinutes')} value={props.reading_minutes} tokens={tokens} />
         )}
       </div>
 
       {/* Highlights */}
-      {props.highlights && props.highlights.length > 0 && (
+      {highlights.length > 0 && (
         <div>
-          <Text style={{ fontSize: 12, color: tokens.text.muted, display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: 11, color: tokens.text.muted, display: 'block', marginBottom: 6 }}>
             {t('card.progress.highlights')}:
           </Text>
-          <ul style={{ margin: 0, paddingLeft: 20 }}>
-            {props.highlights.map((item, idx) => (
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {highlights.map((item, idx) => (
               <li key={idx}>
-                <Text style={{ fontSize: 13, color: tokens.text.secondary, lineHeight: 1.5 }}>
+                <Text style={{ fontSize: 12, color: tokens.text.secondary, lineHeight: 1.45 }}>
                   {item}
                 </Text>
               </li>
             ))}
           </ul>
+          {hiddenHighlightCount > 0 && (
+            <Text style={{ fontSize: 11, color: tokens.text.muted, display: 'block', marginTop: 4 }}>
+              {t('card.progress.moreHighlights', { count: hiddenHighlightCount })}
+            </Text>
+          )}
         </div>
       )}
     </CardContainer>

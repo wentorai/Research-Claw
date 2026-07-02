@@ -55,11 +55,12 @@ describe('ProgressCard edge cases', () => {
     };
     render(<ProgressCard {...manyHighlights} />);
     expect(screen.getByText('Highlight 1')).toBeInTheDocument();
-    expect(screen.getByText('Highlight 15')).toBeInTheDocument();
-    // All 15 should be rendered
-    for (let i = 1; i <= 15; i++) {
+    for (let i = 1; i <= 5; i++) {
       expect(screen.getByText(`Highlight ${i}`)).toBeInTheDocument();
     }
+    expect(screen.queryByText('Highlight 6')).not.toBeInTheDocument();
+    expect(screen.queryByText('Highlight 15')).not.toBeInTheDocument();
+    expect(screen.getByText('card.progress.moreHighlights')).toBeInTheDocument();
   });
 
   it('renders zero values for all metrics', () => {
