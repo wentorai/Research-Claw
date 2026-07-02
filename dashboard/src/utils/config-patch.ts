@@ -3,8 +3,7 @@
  *
  * Uses config.apply (full replacement + restart) instead of config.patch
  * (deep merge). Model metadata (contextWindow, maxTokens, reasoning) comes
- * from presets; the gateway's restoreRedactedValues() handles API key
- * round-trips. Non-active providers are preserved — only the edited provider
+ * from presets. Non-active providers are preserved — only the edited provider
  * (and optional separate vision provider) are merged in.
  *
  * Uses OpenClaw's native provider keys (e.g. 'zai', 'openai', 'anthropic')
@@ -22,7 +21,7 @@ import { getPreset } from './provider-presets';
 import { findCatalogEntry } from './oc-catalog-align';
 import { getModelCatalogCache } from './catalog-cache';
 
-/** Sentinel value OpenClaw uses to redact secrets in resolved config */
+/** Legacy sentinel value OpenClaw may return in redacted config snapshots. */
 export const REDACTED_SENTINEL = '__OPENCLAW_REDACTED__';
 const RC_DB_PATH_DEFAULT = '~/.research-claw/library.db';
 
@@ -32,7 +31,7 @@ export interface ConfigPatchInput {
   baseUrl: string;
   /** API protocol: 'openai-completions' | 'anthropic-messages' | etc. */
   api?: string;
-  /** Omit or empty → preserve existing key via sentinel round-trip */
+  /** Omit or empty → preserve existing key on the backend. */
   apiKey?: string;
   textModel: string;
   /** Informational only — the builder derives vision intent from `visionModel` (tri-state). */
@@ -53,8 +52,7 @@ export interface ConfigPatchInput {
   visionApi?: string;
   /** undefined = don't touch env, "" = clear proxy, "http://..." = set proxy */
   proxyUrl?: string;
-  /** Hint: the gateway reported an API key is configured (even if redacted).
-   *  Used as fallback to emit the sentinel when resolveExistingApiKey fails. */
+  /** Hint: the gateway reported an API key is configured (even if redacted). */
   apiKeyConfigured?: boolean;
   /** Same hint for the vision provider */
   visionApiKeyConfigured?: boolean;
@@ -151,19 +149,6 @@ function minimaxProxyBaseUrl(): string {
 }
 
 const RC_MINIMAX_UPSTREAM_BASEURL_ENV = 'RC_MINIMAX_UPSTREAM_BASEURL';
-
-function providerSupportsRedactedApiKeySentinel(providerKey: string): boolean {
-  // Providers that authenticate via OAuth profiles should not emit an apiKey sentinel
-  // when the user leaves the apiKey field empty.
-  // `openai` (ChatGPT OAuth, unified from the retired `openai-codex` id) uses
-  // auth-profiles (oauth refresh) rather than an apiKey in config.
-  if (providerKey === 'openai') return false;
-  // Ollama runs locally with no API key required. The OC Ollama extension injects
-  // a default placeholder key ("ollama-local") during discovery, so the dashboard
-  // should never emit a redacted sentinel for ollama providers.
-  if (providerKey === 'ollama') return false;
-  return true;
-}
 
 /** Returns true when the provider runs locally and does not require an API key. */
 export function isLocalProvider(providerKey: string): boolean {
@@ -408,7 +393,8 @@ function preserveVisionImageRef(
 
 /**
  * Resolve the existing API key from project config for a given provider.
- * Returns the key (may be REDACTED_SENTINEL) or undefined if not found.
+ * Redacted placeholders are treated as unavailable config data and are never
+ * returned into a save payload.
  */
 export function resolveExistingApiKey(
   projectConfig: Record<string, unknown> | null,
@@ -418,7 +404,7 @@ export function resolveExistingApiKey(
   const providers = (projectConfig.models as Record<string, unknown> | undefined)
     ?.providers as Record<string, Record<string, unknown>> | undefined;
   const key = providers?.[providerKey]?.apiKey;
-  return typeof key === 'string' ? key : undefined;
+  return typeof key === 'string' && key !== REDACTED_SENTINEL ? key : undefined;
 }
 
 function cloneExistingProviders(
@@ -435,7 +421,7 @@ function cloneExistingProviders(
  *
  * OpenClaw's config.get can occasionally elide inactive providers after the
  * user switches providers. When that happens, we still want Settings to retain
- * the last known provider entry (including redacted apiKey sentinels) so a
+ * the last known provider entry so a
  * later config.apply can round-trip those secrets safely.
  */
 export function mergeProjectConfigsPreservingProviders(
@@ -482,7 +468,7 @@ export function mergeProjectConfigsPreservingProviders(
     };
   }
 
-  return merged;
+  return stripRedactedSentinels(merged) as Record<string, unknown>;
 }
 
 /**
@@ -654,7 +640,7 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
       'task_link', 'task_note', 'task_link_file', 'cron_update_schedule', 'send_notification',
       'workspace_save', 'workspace_read', 'workspace_list', 'workspace_diff',
       'workspace_history', 'workspace_restore', 'workspace_move',
-      'monitor_create', 'monitor_list', 'monitor_report', 'monitor_get_context', 'monitor_note',
+      'monitor_create', 'monitor_list', 'monitor_update', 'monitor_report', 'monitor_get_context', 'monitor_note',
       'library_import_ris', 'library_zotero_detect', 'library_zotero_import',
       'library_endnote_detect', 'library_endnote_import',
       'library_zotero_local_detect', 'library_zotero_local_import',
@@ -686,14 +672,33 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
   cron: { enabled: true },
 };
 
+function stripRedactedSentinels(value: unknown): unknown {
+  if (value === REDACTED_SENTINEL) return undefined;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stripRedactedSentinels(item))
+      .filter((item) => item !== undefined);
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      const stripped = stripRedactedSentinels(child);
+      if (stripped !== undefined) out[key] = stripped;
+    }
+    return out;
+  }
+  return value;
+}
+
 /**
- * RC-only keys written to disk (ensure-config.cjs) that OpenClaw's config.apply
- * Zod schema rejects. Strip only for gateway apply; startup ensure-config re-adds them.
+ * RC-only keys written to disk (ensure-config.cjs). Strip only for gateway
+ * apply; startup ensure-config re-adds RC-only keys.
  */
 export function sanitizeConfigForGatewayApply(
   config: Record<string, unknown>,
 ): Record<string, unknown> {
-  const out = structuredClone(config);
+  const out = stripRedactedSentinels(structuredClone(config)) as Record<string, unknown>;
+
   const plugins = out.plugins as Record<string, unknown> | undefined;
   if (plugins && 'installs' in plugins) {
     const { installs: _installs, ...restPlugins } = plugins;
@@ -823,7 +828,7 @@ export function buildDeleteApiProfilesConfig(
   const result: Record<string, unknown> = { ...base };
   result.models = { providers: providers as Record<string, unknown> };
   finalizeModelsProvidersAndAgentDefaults(result);
-  return result;
+  return stripRedactedSentinels(result) as Record<string, unknown>;
 }
 
 /**
@@ -832,9 +837,8 @@ export function buildDeleteApiProfilesConfig(
  *
  * Operates on a deep clone of the current merged config and changes ONLY
  * `agents.defaults.model.primary` to `${profile.id}/${modelId}`. Every other
- * field — including all provider entries and their (possibly redacted) apiKey
- * sentinels — is left byte-for-byte unchanged so the gateway's existing
- * resolveExistingApiKey / REDACTED_SENTINEL round-trip applies on upsert.
+ * field — including all provider entries — is left unchanged. The backend
+ * preserves existing real API keys when this config omits them.
  *
  * When `profile.modelId` is empty, falls back to the first model id of the
  * profile's provider entry (`providers[profile.id].models[0].id`). Throws a
@@ -875,7 +879,7 @@ export function buildActivateProfileConfig(
     },
   };
 
-  return result;
+  return stripRedactedSentinels(result) as Record<string, unknown>;
 }
 
 /**
@@ -973,11 +977,8 @@ export function buildSaveConfig(
       const restoreKeyApiKey = restoreVal?.apiKey ?? '';
       if (isLocalProvider(restoreKey)) {
         providerEntry.apiKey = '';
-      } else if (providerSupportsRedactedApiKeySentinel(restoreKey)) {
-        // Only set explicit apiKey for providers that support it.
-        if (typeof restoreKeyApiKey === 'string' && restoreKeyApiKey.trim()) {
-          providerEntry.apiKey = restoreKeyApiKey.trim();
-        }
+      } else if (typeof restoreKeyApiKey === 'string' && restoreKeyApiKey.trim()) {
+        providerEntry.apiKey = restoreKeyApiKey.trim();
       }
 
       // MiniMax OAuth sk-cp-* handling for restored providers too.
@@ -1030,8 +1031,6 @@ export function buildSaveConfig(
     const existing = resolveExistingApiKey(currentConfig, providerKey);
     if (existing) {
       textProvider.apiKey = existing;
-    } else if (input.apiKeyConfigured && providerSupportsRedactedApiKeySentinel(providerKey)) {
-      textProvider.apiKey = REDACTED_SENTINEL;
     }
   }
 
@@ -1085,8 +1084,6 @@ export function buildSaveConfig(
         visionEntry.apiKey = existingVision;
       } else if (trimmedTextKey) {
         visionEntry.apiKey = trimmedTextKey;
-      } else if (input.visionApiKeyConfigured && providerSupportsRedactedApiKeySentinel(visionProviderKey)) {
-        visionEntry.apiKey = REDACTED_SENTINEL;
       }
     }
 
@@ -1170,10 +1167,13 @@ export function buildSaveConfig(
       const resolveKey = (): string | undefined => {
         if (input.webSearchApiKey) return input.webSearchApiKey;
         const scopedExisting = (existingSearch?.[prov] as Record<string, unknown> | undefined)?.apiKey;
-        if (typeof scopedExisting === 'string' && scopedExisting.length > 0) return scopedExisting;
+        if (typeof scopedExisting === 'string' && scopedExisting.length > 0 && scopedExisting !== REDACTED_SENTINEL) {
+          return scopedExisting;
+        }
         const topExisting = existingSearch?.apiKey;
-        if (typeof topExisting === 'string' && topExisting.length > 0) return topExisting;
-        if (input.webSearchApiKeyConfigured) return REDACTED_SENTINEL;
+        if (typeof topExisting === 'string' && topExisting.length > 0 && topExisting !== REDACTED_SENTINEL) {
+          return topExisting;
+        }
         return undefined;
       };
       const key = resolveKey();
@@ -1256,7 +1256,7 @@ export function buildSaveConfig(
     };
   }
 
-  return result;
+  return stripRedactedSentinels(result) as Record<string, unknown>;
 }
 
 /**

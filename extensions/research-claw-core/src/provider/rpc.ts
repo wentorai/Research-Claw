@@ -26,6 +26,7 @@ interface ProviderRpcDeps {
 }
 
 const ALLOWED_TOP_LEVEL_KEYS = ['models', 'env', 'tools'] as const;
+const REDACTED_API_KEY = '__OPENCLAW_REDACTED__';
 
 function asRecord(value: unknown): ConfigRecord | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -87,6 +88,81 @@ function getProvider(config: ConfigRecord, providerId: string): ConfigRecord | u
   return asRecord(providers?.[providerId]);
 }
 
+function stripRedactedSentinels(incoming: unknown): unknown {
+  if (incoming === REDACTED_API_KEY) {
+    return undefined;
+  }
+
+  if (Array.isArray(incoming)) {
+    return incoming
+      .map((item) => stripRedactedSentinels(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (incoming && typeof incoming === 'object') {
+    const incomingRecord = incoming as ConfigRecord;
+    const out: ConfigRecord = {};
+    for (const [key, value] of Object.entries(incomingRecord)) {
+      const stripped = stripRedactedSentinels(value);
+      if (stripped !== undefined) out[key] = stripped;
+    }
+    return out;
+  }
+
+  return incoming;
+}
+
+function hasRealApiKey(entry: ConfigRecord | undefined): boolean {
+  return typeof entry?.apiKey === 'string' && entry.apiKey.length > 0 && entry.apiKey !== REDACTED_API_KEY;
+}
+
+function preserveMissingProviderApiKeys(incoming: ConfigRecord, current: ConfigRecord): void {
+  const incomingProviders = asRecord(asRecord(incoming.models)?.providers);
+  const currentProviders = asRecord(asRecord(current.models)?.providers);
+  if (!incomingProviders || !currentProviders) return;
+
+  for (const [provider, incomingEntryRaw] of Object.entries(incomingProviders)) {
+    const incomingEntry = asRecord(incomingEntryRaw);
+    const currentEntry = asRecord(currentProviders[provider]);
+    if (!incomingEntry || !hasRealApiKey(currentEntry)) continue;
+    if (!('apiKey' in incomingEntry)) {
+      incomingEntry.apiKey = currentEntry?.apiKey;
+    }
+  }
+}
+
+function preserveMissingWebSearchApiKeys(incoming: ConfigRecord, current: ConfigRecord): void {
+  const incomingSearch = asRecord(asRecord(asRecord(incoming.tools)?.web)?.search);
+  const currentSearch = asRecord(asRecord(asRecord(current.tools)?.web)?.search);
+  if (!incomingSearch || !currentSearch) return;
+
+  const currentTopKey = currentSearch.apiKey;
+  if (
+    !('apiKey' in incomingSearch) &&
+    typeof currentTopKey === 'string' &&
+    currentTopKey.length > 0 &&
+    currentTopKey !== REDACTED_API_KEY
+  ) {
+    incomingSearch.apiKey = currentTopKey;
+  }
+
+  for (const [provider, incomingProviderRaw] of Object.entries(incomingSearch)) {
+    const incomingProvider = asRecord(incomingProviderRaw);
+    const currentProvider = asRecord(currentSearch[provider]);
+    if (!incomingProvider || !hasRealApiKey(currentProvider)) continue;
+    if (!('apiKey' in incomingProvider)) {
+      incomingProvider.apiKey = currentProvider?.apiKey;
+    }
+  }
+}
+
+function prepareDesiredConfigForPersist(incoming: ConfigRecord, current: ConfigRecord): ConfigRecord {
+  const desired = stripRedactedSentinels(incoming) as ConfigRecord;
+  preserveMissingProviderApiKeys(desired, current);
+  preserveMissingWebSearchApiKeys(desired, current);
+  return desired;
+}
+
 function validateDesiredConfig(desired: ConfigRecord): {
   ok: boolean;
   provider: string;
@@ -108,11 +184,13 @@ function validateDesiredConfig(desired: ConfigRecord): {
 }
 
 function applyDesiredProviderConfig(draft: ConfigRecord, desired: ConfigRecord): void {
+  const restoredDesired = prepareDesiredConfigForPersist(desired, draft);
+
   for (const key of ALLOWED_TOP_LEVEL_KEYS) {
-    if (key in desired) draft[key] = clone(desired[key]);
+    if (key in restoredDesired) draft[key] = clone(restoredDesired[key]);
   }
 
-  const desiredAgents = asRecord(desired.agents);
+  const desiredAgents = asRecord(restoredDesired.agents);
   const desiredDefaults = asRecord(desiredAgents?.defaults);
   if (desiredDefaults) {
     const currentAgents = asRecord(draft.agents) ?? {};
@@ -122,7 +200,7 @@ function applyDesiredProviderConfig(draft: ConfigRecord, desired: ConfigRecord):
     };
   }
 
-  const desiredPlugins = asRecord(desired.plugins);
+  const desiredPlugins = asRecord(restoredDesired.plugins);
   const desiredEntries = asRecord(desiredPlugins?.entries);
   const desiredSupervisor = desiredEntries?.['dual-model-supervisor'];
   if (desiredSupervisor !== undefined) {
@@ -190,8 +268,6 @@ const PROBE_PROTOCOLS: readonly ApiProtocol[] = [
   'openai-responses',
   'anthropic-messages',
 ];
-
-const REDACTED_API_KEY = '__OPENCLAW_REDACTED__';
 
 type ProbeClass = 'hit' | 'auth' | 'absent' | 'error';
 

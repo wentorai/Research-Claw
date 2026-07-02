@@ -741,7 +741,7 @@ describe('API key status guidance', () => {
     const upsertPayload = upsertCall?.[1] as { desiredConfig: Record<string, unknown> };
     const serialized = JSON.stringify(upsertPayload.desiredConfig);
     expect(serialized).toContain('"zai-coding-global"');
-    expect(serialized).toContain('__OPENCLAW_REDACTED__');
+    expect(serialized).not.toContain('__OPENCLAW_REDACTED__');
   });
 });
 

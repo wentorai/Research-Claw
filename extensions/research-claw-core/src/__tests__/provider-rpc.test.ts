@@ -5,6 +5,7 @@ import type { RegisterMethod } from '../types.js';
 interface TestProviderConfig {
   baseUrl: string;
   api: string;
+  apiKey?: string;
   models: Array<{ id: string; name: string; api?: string }>;
 }
 
@@ -112,6 +113,35 @@ describe('provider RPC', () => {
     }> }).providers;
     expect(providers['openai-codex'].api).toBe('openai-chatgpt-responses');
     expect(providers['openai-codex'].models[0].api).toBe('openai-chatgpt-responses');
+  });
+
+  it('preserves existing real API key when the desired config omits it', async () => {
+    const { handlers, config } = setup();
+    const current = desiredConfig();
+    current.models.providers.openai.apiKey = 'sk-existing';
+    config.models = current.models;
+
+    const desired = desiredConfig();
+    delete desired.models.providers.openai.apiKey;
+    await handlers.get('rc.provider.upsert')!({ desiredConfig: desired });
+
+    const providers = (config.models as TestDesiredConfig['models']).providers;
+    expect(providers.openai.apiKey).toBe('sk-existing');
+  });
+
+  it('strips legacy redacted API key placeholders before persisting', async () => {
+    const { handlers, config } = setup();
+    const current = desiredConfig();
+    current.models.providers.openai.apiKey = '__OPENCLAW_REDACTED__';
+    config.models = current.models;
+
+    const desired = desiredConfig();
+    desired.models.providers.openai.apiKey = '__OPENCLAW_REDACTED__';
+    await handlers.get('rc.provider.upsert')!({ desiredConfig: desired });
+
+    const providers = (config.models as TestDesiredConfig['models']).providers;
+    expect(providers.openai.apiKey).toBeUndefined();
+    expect(JSON.stringify(config)).not.toContain('__OPENCLAW_REDACTED__');
   });
 
   it('activates a provider without replacing provider inventory', async () => {

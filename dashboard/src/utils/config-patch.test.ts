@@ -564,7 +564,7 @@ describe('buildSaveConfig', () => {
 
     const providers = (merged?.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
     expect(providers['zai-coding-global']).toBeDefined();
-    expect(providers['zai-coding-global'].apiKey).toBe(REDACTED_SENTINEL);
+    expect(providers['zai-coding-global'].apiKey).toBeUndefined();
     expect(providers.minimax).toBeDefined();
   });
 
@@ -612,7 +612,7 @@ describe('buildSaveConfig', () => {
 
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
     expect(providers['zai-coding-global']).toBeDefined();
-    expect(providers['zai-coding-global'].apiKey).toBe(REDACTED_SENTINEL);
+    expect(providers['zai-coding-global'].apiKey).toBeUndefined();
     expect(providers.minimax).toBeDefined();
   });
 
@@ -752,9 +752,9 @@ describe('buildSaveConfig', () => {
     expect(hb.activeHours).toEqual({ start: '08:00', end: '22:00' });
   });
 
-  // --- New tests: sentinel round-trip ---
+  // --- Legacy redaction placeholders ---
 
-  it('preserves redacted sentinel when no new key is provided', () => {
+  it('does not preserve redacted sentinel when no new key is provided', () => {
     const existing = {
       models: {
         providers: {
@@ -770,7 +770,8 @@ describe('buildSaveConfig', () => {
     });
 
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
-    expect(providers.openai.apiKey).toBe(REDACTED_SENTINEL);
+    expect(providers.openai.apiKey).toBeUndefined();
+    expect(JSON.stringify(config)).not.toContain(REDACTED_SENTINEL);
   });
 
   // --- New tests: contextWindow / maxTokens from presets ---
@@ -1382,6 +1383,43 @@ describe('sanitizeConfigForGatewayApply', () => {
     expect(plugins.entries).toBeDefined();
     const raw = JSON.parse(serializeConfigForGatewayApply(config)) as Record<string, unknown>;
     expect((raw.plugins as Record<string, unknown>).installs).toBeUndefined();
+  });
+
+  it('removes redaction sentinels before config.apply', () => {
+    const config = {
+      env: {
+        vars: {
+          OLLAMA_API_KEY: REDACTED_SENTINEL,
+          RC_MINIMAX_UPSTREAM_BASEURL: 'https://api.minimax.io/anthropic',
+        },
+      },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: 'https://api.openai.com/v1',
+            apiKey: REDACTED_SENTINEL,
+          },
+        },
+      },
+      tools: {
+        web: {
+          search: {
+            apiKey: REDACTED_SENTINEL,
+            provider: 'brave',
+          },
+        },
+      },
+    };
+    const raw = JSON.parse(serializeConfigForGatewayApply(config)) as Record<string, unknown>;
+    const vars = ((raw.env as Record<string, unknown>).vars as Record<string, unknown>);
+    expect(vars.OLLAMA_API_KEY).toBeUndefined();
+    expect(vars.RC_MINIMAX_UPSTREAM_BASEURL).toBe('https://api.minimax.io/anthropic');
+    const providers = (raw.models as { providers: Record<string, { apiKey?: string }> }).providers;
+    expect(providers.openai.apiKey).toBeUndefined();
+    const search = (((raw.tools as Record<string, unknown>).web as Record<string, unknown>).search as Record<string, unknown>);
+    expect(search.apiKey).toBeUndefined();
+    expect(search.provider).toBe('brave');
+    expect(JSON.stringify(raw)).not.toContain(REDACTED_SENTINEL);
   });
 });
 

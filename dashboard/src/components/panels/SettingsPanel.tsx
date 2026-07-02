@@ -152,20 +152,17 @@ function AboutSection() {
   const configTheme = useConfigStore((s) => s.theme);
   const tokens = useMemo(() => getThemeTokens(configTheme), [configTheme]);
   const [restarting, setRestarting] = useState(false);
-  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingConfigRestart = useConfigStore((s) => s.pendingConfigRestart);
   const updateInfo = useUiStore((s) => s.appUpdateInfo);
   const setUpdateInfo = useUiStore((s) => s.setAppUpdateInfo);
   const [updateChecking, setUpdateChecking] = useState(false);
 
-  // Reset restarting state when gateway reconnects with fresh config
-  const gatewayConfigForReset = useConfigStore((s) => s.gatewayConfig);
-  const configSeenAtStartRef = useRef<unknown>(null);
+  // Reset the local About-section spinner when the shared restart verifier finishes.
   useEffect(() => {
-    if (restarting && gatewayConfigForReset && gatewayConfigForReset !== configSeenAtStartRef.current) {
+    if (restarting && !pendingConfigRestart) {
       setRestarting(false);
-      if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
     }
-  }, [gatewayConfigForReset, restarting]);
+  }, [pendingConfigRestart, restarting]);
 
   const runCheckUpdates = useCallback(async () => {
     const client = useGatewayStore.getState().client;
@@ -250,6 +247,10 @@ function AboutSection() {
       onOk: async () => {
         const client = useGatewayStore.getState().client;
         if (!client?.isConnected) return;
+        const configStore = useConfigStore.getState();
+        configStore.beginConfigOperation('persisting');
+        configStore.setPendingConfigRestart(true);
+        setRestarting(true);
         try {
           const snapshot = await client.request<{
             parsed?: Record<string, unknown>;
@@ -263,14 +264,12 @@ function AboutSection() {
             baseHash: snapshot.hash,
           });
           message.success(t('settings.restartSuccess'));
-          configSeenAtStartRef.current = useConfigStore.getState().gatewayConfig;
-          setRestarting(true);
-          // Safety timeout: reset after 30s if gateway never reconnects
-          restartTimerRef.current = setTimeout(() => {
-            setRestarting(false);
-            message.warning(t('settings.restartFailed'));
-          }, 30_000);
-        } catch {
+          configStore.setConfigOperationPhase('restart_scheduled');
+        } catch (error) {
+          const messageText = error instanceof Error ? error.message : String(error);
+          configStore.setConfigOperationPhase('failed', messageText);
+          configStore.setPendingConfigRestart(false);
+          setRestarting(false);
           message.error(t('settings.restartFailed'));
         }
       },
@@ -1695,9 +1694,9 @@ export default function SettingsPanel() {
   /**
    * Switch agents.defaults.model.primary to a saved profile WITHOUT re-saving
    * the (stale) form state. Mirrors performSave's upsert/operation wiring but
-   * only mutates `primary` via buildActivateProfileConfig — provider entries
-   * (and their redacted apiKey sentinels) are left untouched so the gateway's
-   * existing sentinel round-trip applies on upsert.
+   * only mutates `primary` via buildActivateProfileConfig. The final
+   * config.apply payload is still sanitized so reserved redaction placeholders
+   * from config.get are never submitted back as literal config data.
    */
   const performActivateProfile = useCallback(
     async (profile: ApiProfile) => {
