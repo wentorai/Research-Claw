@@ -225,7 +225,8 @@ describe('OpenClaw subagent job sync', () => {
       },
     }));
 
-    const result = syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath });
+    const syncOptions = { sessionsJsonPath: sessionsPath, maxAgeDays: 365 };
+    const result = syncOpenClawSubagentJobs(service, syncOptions);
     expect(result.synced).toBe(1);
     const jobs = service.list();
     expect(jobs).toHaveLength(1);
@@ -251,7 +252,7 @@ describe('OpenClaw subagent job sync', () => {
       ['review', 'completed', 100],
     ]);
 
-    syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath });
+    syncOpenClawSubagentJobs(service, syncOptions);
     expect(service.get('openclaw:child-session-id').updated_at).toBe('2026-06-14 12:05:00');
   });
 
@@ -299,7 +300,7 @@ describe('OpenClaw subagent job sync', () => {
       },
     }));
 
-    const result = syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath });
+    const result = syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath, maxAgeDays: 365 });
     expect(result.synced).toBe(1);
     const jobs = service.list();
     expect(jobs).toHaveLength(1);
@@ -346,7 +347,7 @@ describe('OpenClaw subagent job sync', () => {
       },
     }));
 
-    syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath });
+    syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath, maxAgeDays: 365 });
     const jobs = service.list();
     // Must reuse the pre-created job, not spawn an orphan openclaw:<id> row.
     expect(jobs).toHaveLength(1);
