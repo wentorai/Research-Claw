@@ -54,6 +54,36 @@ info() { printf "${C}  ▸${N} %s\n" "$1"; }
 warn() { printf "${Y}  ⚠${N} %s\n" "$1"; }
 die()  { printf "${R}  ✗ %s${N}\n" "$1" >&2; printf "  ${D}Report: ${ISSUES_URL}${N}\n" >&2; exit 1; }
 
+# Run a long command with a visible heartbeat instead of dead silence.
+# Full output is captured to a temp log. On a TTY one line shows the label and
+# elapsed seconds; otherwise a liveness line prints every 15s. Set
+# HB_SHOW_FAIL_LOG=1 to dump the log tail on failure (leave unset for attempts
+# that have a quieter fallback path).
+run_with_heartbeat() {
+  local _label="$1"; shift
+  local _log _pid _rc=0 _t=0
+  _log="$(mktemp)"
+  "$@" >"$_log" 2>&1 &
+  _pid=$!
+  while kill -0 "$_pid" 2>/dev/null; do
+    sleep 1
+    _t=$((_t + 1))
+    if [ -t 1 ]; then
+      printf "\r${C}  ▸${N} %s... %ss" "$_label" "$_t"
+    elif [ $((_t % 15)) -eq 0 ]; then
+      printf "  ▸ %s... %ss elapsed\n" "$_label" "$_t"
+    fi
+  done
+  wait "$_pid" || _rc=$?
+  if [ -t 1 ] && [ "$_t" -gt 0 ]; then printf "\r\033[2K"; fi
+  if [ "$_rc" -ne 0 ] && [ "${HB_SHOW_FAIL_LOG:-0}" = "1" ] && [ -s "$_log" ]; then
+    warn "$_label failed (exit $_rc). Last output:"
+    tail -5 "$_log" | sed 's/^/      /' >&2
+  fi
+  rm -f "$_log"
+  return "$_rc"
+}
+
 ensure_ppt_master() {
   local target_dir="$INSTALL_DIR/ppt-master"
   local scripts_root="$target_dir/skills/ppt-master/scripts"
@@ -389,7 +419,7 @@ install_node_nvm() {
   nvm install "$NODE_MIN" </dev/null && nvm use "$NODE_MIN" </dev/null && nvm alias default "$NODE_MIN" </dev/null
 }
 
-NODE_MAX=24  # Node 25+ is Current (not LTS); native modules (better-sqlite3) may not compile
+NODE_MAX=24  # better-sqlite3 12.x ships prebuilds up to Node 24; Node 25+ must compile from source (needs local C++ toolchain)
 
 ensure_node() {
   # Activate fnm/nvm if installed but not in PATH (curl|bash doesn't source .zshrc)
@@ -519,6 +549,68 @@ export GIT_TERMINAL_PROMPT=0
 export GCM_INTERACTIVE=Never
 export GIT_ASKPASS=true
 
+# --- Git proxy preflight ---
+# git's http.proxy CONFIG takes precedence over HTTP(S)_PROXY env vars, so a
+# stale proxy port left in ~/.gitconfig (e.g. after a proxy client changed its
+# port) breaks every clone/pull even when the shell proxy env is correct.
+# Strategy: probe the configured proxy's TCP port; if dead, override it for
+# THIS script's git commands only (env proxy if alive, otherwise direct).
+# Never rewrite the user's git config — print the fix and let them decide.
+
+# Append an env-level git config override. Applies to every git command this
+# script (and its children, incl. submodule clones) runs, without touching
+# the user's git config files.
+add_git_config() {
+  local n="${GIT_CONFIG_COUNT:-0}"
+  export "GIT_CONFIG_KEY_${n}=$1" "GIT_CONFIG_VALUE_${n}=$2"
+  export GIT_CONFIG_COUNT=$((n + 1))
+}
+
+# TCP-probe the host:port of a proxy URL (http://host:port, socks5://host:port).
+# Returns 0 if connectable, 1 if not, 0 if the URL has no explicit port (can't
+# judge cheaply — don't interfere).
+_proxy_alive() {
+  local hostport host port
+  hostport="${1#*://}"; hostport="${hostport%%/*}"; hostport="${hostport##*@}"
+  host="${hostport%%:*}"; port="${hostport##*:}"
+  [ -n "$host" ] && [ -n "$port" ] && [ "$host" != "$port" ] || return 0
+  if command -v nc &>/dev/null; then
+    nc -z -w 2 "$host" "$port" &>/dev/null
+  else
+    (exec 3<>"/dev/tcp/$host/$port") &>/dev/null
+  fi
+}
+
+preflight_git_proxy() {
+  local cfg_http cfg_https dead="" env_proxy
+  cfg_http="$(git config --get http.proxy 2>/dev/null || true)"
+  cfg_https="$(git config --get https.proxy 2>/dev/null || true)"
+  [ -z "$cfg_http" ] && [ -z "$cfg_https" ] && return 0
+
+  local cfg
+  for cfg in "$cfg_http" "$cfg_https"; do
+    if [ -n "$cfg" ] && ! _proxy_alive "$cfg"; then dead="$cfg"; break; fi
+  done
+  [ -z "$dead" ] && return 0
+
+  warn "Your git config sets a proxy that is not responding: $dead"
+  warn "(git config proxy OVERRIDES the HTTP_PROXY/HTTPS_PROXY environment variables)"
+  env_proxy="${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}"
+  if [ -n "$env_proxy" ] && _proxy_alive "$env_proxy"; then
+    warn "Using your environment proxy for this install instead: $env_proxy"
+    add_git_config "http.proxy" "$env_proxy"
+    add_git_config "https.proxy" "$env_proxy"
+  else
+    warn "Connecting directly (no proxy) for this install."
+    add_git_config "http.proxy" ""
+    add_git_config "https.proxy" ""
+  fi
+  warn "Your git config was NOT modified. To fix it permanently:"
+  warn "  git config --global --unset http.proxy; git config --global --unset https.proxy"
+}
+
+preflight_git_proxy
+
 # --- [5/8] Clone or update ---
 if [ -d "$INSTALL_DIR/.git" ]; then
   info "Updating existing installation..."
@@ -544,7 +636,6 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   # Remove untracked files that may conflict with incoming changes.
   # Gitignored files (config, data, node_modules, workspace runtime) are preserved.
   git clean -fd 2>/dev/null || true
-
   # --- Self-healing dual-remote update ---
   # Try the existing origin first (Gitee for most installs). If it fails — most
   # commonly a Gitee anonymous-fetch 401 that now fast-fails instead of hanging,
@@ -554,7 +645,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   _BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
   [ "$_BRANCH" = "HEAD" ] && _BRANCH="main"
   _PULLED=false
-  if git pull --rebase --autostash 2>/dev/null; then
+  if run_with_heartbeat "Updating from origin" git pull --rebase --autostash; then
     _PULLED=true
   else
     git rebase --abort 2>/dev/null || true
@@ -562,7 +653,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     warn "Update from origin failed — trying GitHub mirror..."
     git remote set-url github "$GITHUB_REPO" 2>/dev/null \
       || git remote add github "$GITHUB_REPO" 2>/dev/null || true
-    if git fetch --depth 1 github "$_BRANCH" 2>/dev/null \
+    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Updating from GitHub mirror" git fetch --depth 1 github "$_BRANCH" \
        && (git reset --hard "github/$_BRANCH" 2>/dev/null || git reset --hard FETCH_HEAD 2>/dev/null); then
       _PULLED=true
       ok "Updated from GitHub mirror"
@@ -573,6 +664,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     warn "git pull failed. Possible causes:"
     warn "  - Network issue (try again later)"
     warn "  - VPN/proxy interference (try disabling VPN or switching to direct connection)"
+    warn "  - Stale git proxy config (check: git config --get http.proxy)"
     # --- Graceful fallback: start existing installation if runnable ---
     if [ -f "node_modules/openclaw/dist/entry.js" ]; then
       # Revert any partial changes from interrupted rebase/pull
@@ -618,12 +710,14 @@ else
         warn "Failed to clone from both Gitee and GitHub. Possible causes:"
         warn "  - Network issue (both Gitee and GitHub unreachable)"
         warn "  - VPN/proxy interference (try disabling VPN virtual adapter mode)"
+        warn "  - Stale git proxy config (check: git config --get http.proxy)"
         die "Clone failed. Check your network and try again."
       fi
     else
       warn "Failed to clone repository. Possible causes:"
       warn "  - Network issue (repository unreachable)"
       warn "  - VPN/proxy interference (try disabling VPN virtual adapter mode)"
+      warn "  - Stale git proxy config (check: git config --get http.proxy)"
       die "Clone failed. Check your network and try again."
     fi
   fi
@@ -638,9 +732,7 @@ ensure_ppt_master
 # some environments convert this to SSH (git@github.com:...) which fails
 # without SSH keys. This env-level override forces HTTPS without modifying
 # the user's global git config.
-export GIT_CONFIG_COUNT=1
-export GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf"
-export GIT_CONFIG_VALUE_0="git@github.com:"
+add_git_config "url.https://github.com/.insteadOf" "git@github.com:"
 
 # --- [5/8 cont.] pnpm ---
 ensure_pnpm
@@ -695,9 +787,36 @@ _pnpm_install() {
     echo y | PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" install "$@"
   fi
 }
+
+# Diagnose a failed pnpm install: if a native module failed to COMPILE via
+# node-gyp (happens when no prebuilt binary matches this Node/platform), the
+# problem is the local C/C++ toolchain, not the network — say so explicitly.
+_hint_native_build_failure() {
+  grep -q "gyp ERR" "$1" 2>/dev/null || return 0
+  warn "A native module failed to compile (node-gyp). Your C/C++ toolchain is broken or missing."
+  if [ "$(uname -s)" = "Darwin" ]; then
+    warn "Fix (macOS) — reinstall Xcode Command Line Tools, then re-run this installer:"
+    warn "  sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install"
+  else
+    warn "Fix (Linux) — install build tools, then re-run this installer:"
+    warn "  sudo apt-get install -y build-essential python3   # Debian/Ubuntu"
+  fi
+  warn "Alternative: switch to Node.js $NODE_MIN LTS — prebuilt binaries, no compilation needed."
+}
+
+_pnpm_install_with_diagnostics() {
+  local _log
+  _log="$(mktemp)"
+  if ! (_pnpm_install --frozen-lockfile 2>/dev/null || _pnpm_install) 2>&1 | tee "$_log"; then
+    _hint_native_build_failure "$_log"
+    rm -f "$_log"
+    return 1
+  fi
+  rm -f "$_log"
+}
 if ! $UPDATE_FAILED; then
   info "Installing dependencies..."
-  if ! (_pnpm_install --frozen-lockfile 2>/dev/null || _pnpm_install); then
+  if ! _pnpm_install_with_diagnostics; then
     die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
   fi
   ok "Dependencies installed"
@@ -994,7 +1113,7 @@ ensure_native_modules() {
   # Use $GW_NODE_DIR in PATH so native modules compile for the correct Node
   info "Rebuild failed — clean reinstalling dependencies..."
   rm -rf node_modules
-  if ! (_pnpm_install --frozen-lockfile 2>/dev/null || _pnpm_install); then
+  if ! _pnpm_install_with_diagnostics; then
     die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
   fi
   # Rebuild dashboard after clean install

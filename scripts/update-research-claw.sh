@@ -23,15 +23,39 @@ export GIT_ASKPASS=true
 
 GITHUB_REPO="https://github.com/wentorai/Research-Claw.git"
 
+# Heartbeat wrapper: capture output to a log and print a liveness line every
+# 15s. This script usually runs non-interactively (dashboard "Apply update"),
+# where a silent slow `git pull` is indistinguishable from a hang.
+run_with_heartbeat() {
+  local _label="$1"; shift
+  local _log _pid _rc=0 _t=0
+  _log="$(mktemp)"
+  "$@" >"$_log" 2>&1 &
+  _pid=$!
+  while kill -0 "$_pid" 2>/dev/null; do
+    sleep 1
+    _t=$((_t + 1))
+    if [ -t 1 ]; then
+      printf "\r[update-research-claw] %s... %ss" "$_label" "$_t"
+    elif [ $((_t % 15)) -eq 0 ]; then
+      printf "[update-research-claw] %s... %ss elapsed\n" "$_label" "$_t"
+    fi
+  done
+  wait "$_pid" || _rc=$?
+  if [ -t 1 ] && [ "$_t" -gt 0 ]; then printf "\r\033[2K"; fi
+  rm -f "$_log"
+  return "$_rc"
+}
+
 OLD_HEAD=$(git rev-parse HEAD)
-git pull --ff-only 2>/dev/null || true
+run_with_heartbeat "pulling from origin" git pull --ff-only || true
 
 # If default remote had no new commits (Gitee may lag behind GitHub), try GitHub
 if [ "$(git rev-parse HEAD)" = "$OLD_HEAD" ]; then
   git remote set-url github "$GITHUB_REPO" 2>/dev/null \
     || git remote add github "$GITHUB_REPO" 2>/dev/null \
     || true
-  if git fetch github main 2>/dev/null; then
+  if run_with_heartbeat "fetching github/main" git fetch github main; then
     git merge --ff-only github/main 2>/dev/null || true
   fi
 fi
