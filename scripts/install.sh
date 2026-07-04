@@ -52,7 +52,31 @@ fi
 ok()   { printf "${G}  ✓${N} %s\n" "$1"; }
 info() { printf "${C}  ▸${N} %s\n" "$1"; }
 warn() { printf "${Y}  ⚠${N} %s\n" "$1"; }
-die()  { printf "${R}  ✗ %s${N}\n" "$1" >&2; printf "  ${D}Report: ${ISSUES_URL}${N}\n" >&2; exit 1; }
+die()  {
+  printf "${R}  ✗ %s${N}\n" "$1" >&2
+  [ -n "${RC_LOG:-}" ] && [ -s "${RC_LOG:-}" ] && printf "  ${D}Diagnostic log (attach to bug reports): ${RC_LOG}${N}\n" >&2
+  printf "  ${D}Report: ${ISSUES_URL}${N}\n" >&2
+  exit 1
+}
+
+# ── Diagnostic breadcrumb log ─────────────────────────────────────────
+# Key decisions and failure details land here so a failed install has an
+# attachable log. Screen output is NOT tee'd (that would break TTY detection
+# and progress rendering for child processes).
+RC_LOG="${TMPDIR:-/tmp}/rc-install-$(date +%Y%m%d-%H%M%S).log"
+rclog() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >>"$RC_LOG" 2>/dev/null || true; }
+
+INSTALL_START_TS=$(date +%s)
+_elapsed() {
+  local _s=$(( $(date +%s) - INSTALL_START_TS ))
+  printf '%dm%02ds' $((_s / 60)) $((_s % 60))
+}
+
+step() { printf "\n${C}  ▸ [%s/8]${N} ${B}%s${N}\n" "$1" "$2"; rclog "step $1/8: $2"; }
+
+# Interrupted installs are fully resumable — say so instead of dying silently.
+# (The gateway launch section at the end replaces this trap with its own.)
+trap 'printf "\n${Y}  ⚠ Interrupted.${N} Nothing is broken — this installer is resumable.\n  Re-run the same command to continue where it left off:\n    ${B}curl -fsSL https://wentor.ai/install.sh | bash${N}\n  ${D}Diagnostic log: ${RC_LOG}${N}\n\n"; exit 130' INT TERM
 
 # Run a long command with a visible heartbeat instead of dead silence.
 # Full output is captured to a temp log. On a TTY one line shows the label and
@@ -123,8 +147,11 @@ cat <<'ART'
 ART
 printf "${N}\n  ${B}科研龙虾 — AI-Powered Local Research Assistant${N}\n"
 printf "  ${D}https://wentor.ai${N}\n\n"
+printf "  ${D}8 steps · first install ~5-15 min (deps + build) · update ~1-3 min${N}\n"
+printf "  ${D}Safe to interrupt: re-running resumes where it left off${N}\n"
 
 # --- [1/8] Platform ---
+step 1 "Platform check"
 OS="$(uname -s)"
 case "$OS" in
   Darwin) RC_OS=mac ;;
@@ -132,6 +159,14 @@ case "$OS" in
   *)      die "Unsupported OS: $OS. Use macOS or Linux." ;;
 esac
 info "Platform: $OS / $(uname -m)"
+rclog "platform: $(uname -a)"
+
+# Disk space preflight (~3 GB for node_modules + build; failing late is the worst UX)
+_avail_gb=$(df -g "$HOME" 2>/dev/null | awk 'NR==2 {print $4}' || df -BG "$HOME" 2>/dev/null | awk 'NR==2 {gsub("G","",$4); print $4}')
+if [ -n "${_avail_gb:-}" ] && [ "$_avail_gb" -lt 5 ] 2>/dev/null; then
+  warn "Low disk space: ${_avail_gb} GB free. Install needs ~3 GB (dependencies + build)."
+  rclog "low disk: ${_avail_gb}GB"
+fi
 
 # --- Linux package helper (supports apt, dnf, yum, pacman, apk) ---
 pkg_install() {
@@ -167,6 +202,7 @@ build_pkg_names() {
 }
 
 # --- [2/8] Git ---
+step 2 "Git"
 if ! command -v git &>/dev/null; then
   if [ "$RC_OS" = linux ]; then
     pkg_install git
@@ -186,6 +222,7 @@ else
 fi
 
 # --- [3/8] Build tools (macOS + Linux) ---
+step 3 "Build tools"
 if [ "$RC_OS" = mac ]; then
   # Xcode CLT is required for native module compilation (better-sqlite3)
   if ! xcode-select -p &>/dev/null; then
@@ -345,6 +382,7 @@ rc_install_profile_block() {
 }
 
 # --- [4/8] Node.js 22+ ---
+step 4 "Node.js runtime"
 # Supports nvm, fnm, and system Node. Prefers existing version manager.
 install_node_fnm() {
   info "Installing Node.js $NODE_MIN via fnm..."
@@ -612,6 +650,7 @@ preflight_git_proxy() {
 preflight_git_proxy
 
 # --- [5/8] Clone or update ---
+step 5 "Fetch source"
 if [ -d "$INSTALL_DIR/.git" ]; then
   info "Updating existing installation..."
   cd "$INSTALL_DIR"
@@ -769,6 +808,7 @@ if [ "$GW_NODE" != "$(command -v node)" ]; then
   info "Gateway Node: $("$GW_NODE" -v) (conda openclaw)"
 fi
 
+step 6 "Install dependencies + build (the longest step)"
 # --- [6/8] Install + build ---
 # Put $GW_NODE first in PATH so pnpm compiles native modules (better-sqlite3)
 # for the gateway's Node, not the system Node. This avoids ABI mismatch entirely.
@@ -815,7 +855,7 @@ _pnpm_install_with_diagnostics() {
   rm -f "$_log"
 }
 if ! $UPDATE_FAILED; then
-  info "Installing dependencies..."
+  info "Installing dependencies (~1-3 min, pnpm output streams below)..."
   if ! _pnpm_install_with_diagnostics; then
     die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
   fi
@@ -1051,16 +1091,10 @@ done
   cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md"
 
 if ! $UPDATE_FAILED; then
-  info "Building..."
-  BUILD_LOG="$(mktemp)"
-  if PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build >"$BUILD_LOG" 2>&1; then
-    tail -3 "$BUILD_LOG"
-  else
-    tail -20 "$BUILD_LOG"
-    rm -f "$BUILD_LOG"
+  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Building dashboard + extensions (~1-2 min)" \
+      env PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build; then
     die "Build failed. Try: cd $INSTALL_DIR && pnpm build"
   fi
-  rm -f "$BUILD_LOG"
   ok "Build complete"
 
   # --- Verify dashboard build ---
@@ -1076,6 +1110,7 @@ if ! $UPDATE_FAILED; then
   fi
 fi
 
+step 7 "Native modules check"
 # --- [7/8] Ensure native modules work with gateway Node ---
 # better-sqlite3 is a C++ addon. pnpm compiles it for whatever `node` is in PATH,
 # but the gateway may run under a different Node (conda). Incremental repairs
@@ -1175,6 +1210,7 @@ else
   fi
 fi
 
+step 8 "Research plugins"
 # --- [8/8] Register research-plugins (skills + agent tools) ---
 # Install deterministically into ~/.openclaw/extensions/research-plugins.
 # We deliberately do NOT use `openclaw plugins install`: OC 2026.6.1 installs the
@@ -1237,7 +1273,7 @@ rp_network_hint() {
   printf "    ${C}NPM_REGISTRY=https://registry.npmmirror.com${N} curl -fsSL https://wentor.ai/install.sh | bash\n"
 }
 
-info "Installing research-plugins..."
+info "Installing research-plugins (npm download, up to 2 min on slow networks)..."
 RP_LOG="$(mktemp)"
 if [ -d "$PLUGIN_DIR" ]; then
   # Update existing: backup → install → restore on failure
@@ -1338,7 +1374,7 @@ else
 fi
 
 # --- Done ---
-printf "\n  ${G}${B}Ready!${N}\n\n"
+printf "\n  ${G}${B}Ready!${N}  ${D}(total $(_elapsed))${N}\n\n"
 printf "  ${B}Dashboard:${N}  ${C}${DASHBOARD_URL}${N}\n"
 printf "  ${B}Location:${N}   $INSTALL_DIR\n"
 printf "  ${B}Start:${N}      cd $INSTALL_DIR && bash scripts/run.sh\n"
