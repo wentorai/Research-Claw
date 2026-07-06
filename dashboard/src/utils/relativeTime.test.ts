@@ -42,6 +42,10 @@ describe('relativeTime', () => {
     expect(relativeTime(fiveMinAgo, 'en')).toBe('5m ago');
   });
 
+  it('treats SQLite UTC timestamps as UTC instead of local time', () => {
+    expect(relativeTime('2026-03-14 11:55:00', 'en')).toBe('5m ago');
+  });
+
   it('returns "Xh ago" for < 24 hours ago (EN)', () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 3600_000).toISOString();
     expect(relativeTime(threeHoursAgo, 'en')).toBe('3h ago');

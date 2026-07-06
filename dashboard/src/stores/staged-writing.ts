@@ -106,7 +106,6 @@ export const useStagedWritingStore = create<StagedWritingState>((set, get) => {
         schedule: { kind: 'cron' as const, expr: WRITING_CRON_EXPR },
         sessionTarget: 'isolated',
         sessionKey: `cron:rc-writing:${params.jobId}:${params.stageId}`,
-        delivery: { mode: 'none' as const },
         payload: {
           kind: 'agentTurn',
           message: params.prompt,

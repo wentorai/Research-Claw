@@ -644,6 +644,26 @@ describe('Issue 8: Notification Channel A - polling', () => {
     expect(notifications[0].type).toBe('system');
     expect(notifications[0].title).toBe('Scan complete');
     expect(notifications[0].dedupKey).toBe('custom:n-1');
+    expect(notifications[0].timestamp).toBe('2026-03-14T10:00:00.000Z');
+  });
+
+  it('preserves SQLite timestamps on custom notifications', async () => {
+    const mockRequest = vi.fn().mockResolvedValue({
+      overdue: [],
+      upcoming: [],
+      custom: [
+        { id: 'n-1', type: 'system', title: 'Old review done', body: null, created_at: '2026-06-06 08:27:06' },
+      ],
+    });
+
+    useGatewayStore.setState({
+      client: createMockClient(mockRequest),
+      state: 'connected',
+    });
+
+    await useUiStore.getState().checkNotifications();
+
+    expect(useUiStore.getState().notifications[0].timestamp).toBe('2026-06-06T08:27:06.000Z');
   });
 
   it('deduplicates notifications on repeated polling', async () => {

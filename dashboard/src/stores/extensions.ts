@@ -318,7 +318,12 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
       // ensure-config re-adds it on the next startup.
       const patch = {
         channels: { [channelId]: { enabled } },
-        plugins: { installs: null },
+        plugins: {
+          installs: null,
+          ...(QR_LOGIN_CHANNELS.has(channelId)
+            ? { entries: { [channelId]: { enabled } } }
+            : {}),
+        },
       };
 
       await client.request('config.patch', {

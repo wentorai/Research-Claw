@@ -171,6 +171,43 @@ describe('logoutChannel', () => {
   });
 });
 
+describe('enableChannel', () => {
+  it('patches regular channel enabled state', async () => {
+    mockRequest
+      .mockResolvedValueOnce({ hash: 'abc123' })
+      .mockResolvedValueOnce({ ok: true });
+
+    await useExtensionsStore.getState().enableChannel('telegram', false);
+
+    expect(mockRequest).toHaveBeenCalledWith('config.patch', expect.objectContaining({
+      raw: JSON.stringify({
+        channels: { telegram: { enabled: false } },
+        plugins: { installs: null },
+      }),
+      baseHash: 'abc123',
+    }));
+  });
+
+  it('also toggles the plugin entry for QR-login channels', async () => {
+    mockRequest
+      .mockResolvedValueOnce({ hash: 'abc123' })
+      .mockResolvedValueOnce({ ok: true });
+
+    await useExtensionsStore.getState().enableChannel('openclaw-weixin', false);
+
+    expect(mockRequest).toHaveBeenCalledWith('config.patch', expect.objectContaining({
+      raw: JSON.stringify({
+        channels: { 'openclaw-weixin': { enabled: false } },
+        plugins: {
+          installs: null,
+          entries: { 'openclaw-weixin': { enabled: false } },
+        },
+      }),
+      baseHash: 'abc123',
+    }));
+  });
+});
+
 // ── Plugins ──────────────────────────────────────────────────────────────────
 
 describe('loadPlugins', () => {

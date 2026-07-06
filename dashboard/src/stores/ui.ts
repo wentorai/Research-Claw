@@ -43,6 +43,10 @@ export interface Notification {
   };
 }
 
+type AddNotificationInput = Omit<Notification, 'id' | 'timestamp' | 'read'> & {
+  timestamp?: string;
+};
+
 // ── Persist notification + read state across refreshes via localStorage ──
 
 const NOTIFICATIONS_STORAGE = 'rc-notifications';
@@ -149,6 +153,15 @@ function saveLastAppUpdateCheckAt(timestamp: number): void {
   }
 }
 
+function normalizeNotificationTimestamp(value: string | undefined): string {
+  if (!value) return new Date().toISOString();
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
 /** Sort notifications by timestamp descending (newest first). Direct string comparison — ISO 8601 is lexicographically sortable. */
 function sortByTimestampDesc(a: Notification, b: Notification): number {
   return b.timestamp > a.timestamp ? 1 : b.timestamp < a.timestamp ? -1 : 0;
@@ -197,7 +210,7 @@ interface UiState {
   toggleLeftNav: () => void;
   setLeftNavCollapsed: (collapsed: boolean) => void;
   setAgentStatus: (status: AgentStatus) => void;
-  addNotification: (n: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
+  addNotification: (n: AddNotificationInput) => void;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   clearNotifications: () => void;
@@ -302,7 +315,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
     const notification: Notification = {
       ...n,
       id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
+      timestamp: normalizeNotificationTimestamp(n.timestamp),
       read: alreadyRead,
     };
     set((s) => {
@@ -421,6 +434,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
             type: (n.type as Notification['type']) || 'system',
             title: n.title,
             body: n.body ?? undefined,
+            timestamp: n.created_at,
             dedupKey: `custom:${n.id}`,
           });
         }

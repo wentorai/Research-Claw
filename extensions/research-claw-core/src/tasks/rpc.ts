@@ -429,7 +429,8 @@ export function registerTaskRpc(registerMethod: RegisterMethod, service: TaskSer
   registerMethod('rc.cron.presets.setJobId', async (params: Record<string, unknown>) => {
     try {
       const presetId = requireString(params.preset_id, 'preset_id');
-      const jobId = requireString(params.job_id, 'job_id');
+      const rawJobId = params.job_id;
+      const jobId = typeof rawJobId === 'string' ? rawJobId.trim() : '';
 
       return service.cronPresetsSetJobId(presetId, jobId);
     } catch (err) {

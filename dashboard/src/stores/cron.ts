@@ -13,6 +13,15 @@ export interface CronPreset {
   gateway_job_id: string | null;
 }
 
+type CronJobRow = { id?: unknown; sessionKey?: unknown; name?: unknown; schedule?: unknown; payload?: unknown };
+type CronJobSnapshot = {
+  id: string;
+  sessionKey: string | null;
+  name: string;
+  schedule: unknown;
+  payload: Record<string, unknown>;
+};
+
 // Agent turn messages for cron presets.
 // NOTE: arxiv_daily_scan and citation_tracking_weekly have been superseded
 // by the monitor system (seed monitors). Only task/reminder presets remain here.
@@ -20,6 +29,28 @@ const PRESET_AGENT_TURNS: Record<string, string> = {
   deadline_reminders_daily:
     'List tasks due within 24 hours using task_list and send me a summary.',
 };
+
+function buildCronAgentTurn(params: {
+  name: string;
+  schedule: string;
+  message: string;
+  sessionKey: string;
+}): Record<string, unknown> {
+  return {
+    name: params.name,
+    schedule: { kind: 'cron' as const, expr: params.schedule },
+    sessionTarget: 'isolated',
+    sessionKey: params.sessionKey,
+    payload: {
+      kind: 'agentTurn',
+      message: params.message,
+    },
+    delivery: {
+      mode: 'none',
+      channel: 'last',
+    },
+  };
+}
 
 interface CronState {
   presets: CronPreset[];
@@ -39,6 +70,72 @@ const _inflightPresets = new Set<string>();
 // Reset when presetsLoaded goes back to false (gateway disconnect → reconnect).
 let _reconciled = false;
 
+function extractCronJobs(res: unknown): CronJobSnapshot[] | null {
+  const jobs = Array.isArray(res)
+    ? res
+    : res && typeof res === 'object'
+      ? Object.values(res as Record<string, unknown>).find(Array.isArray)
+      : null;
+
+  if (!Array.isArray(jobs)) return null;
+
+  return jobs.flatMap((job) => {
+    if (!job || typeof job !== 'object') return [];
+    const row = job as CronJobRow;
+    if (typeof row.id !== 'string' || !row.id) return [];
+    return [{
+      id: row.id,
+      sessionKey: typeof row.sessionKey === 'string' && row.sessionKey ? row.sessionKey : null,
+      name: typeof row.name === 'string' ? row.name : '',
+      schedule: row.schedule,
+      payload: row.payload && typeof row.payload === 'object'
+        ? row.payload as Record<string, unknown>
+        : {},
+    }];
+  });
+}
+
+async function loadCronJobs(): Promise<CronJobSnapshot[] | null> {
+  const client = useGatewayStore.getState().client;
+  if (!client?.isConnected) return null;
+
+  try {
+    return extractCronJobs(await client.request<unknown>('cron.list', {}));
+  } catch (err) {
+    console.warn('[CronStore] cron.list failed:', err);
+    return null;
+  }
+}
+
+function expectedPresetSessionKey(presetId: string): string {
+  return `cron:rc-preset:${presetId}`;
+}
+
+function expectedPresetName(preset: CronPreset): string {
+  return preset.name;
+}
+
+function cronJobMatchesPreset(job: CronJobSnapshot, preset: CronPreset): boolean {
+  if (job.sessionKey === expectedPresetSessionKey(preset.id)) return true;
+  if (job.id === preset.gateway_job_id) return true;
+  return job.name === expectedPresetName(preset);
+}
+
+function cronJobNeedsRefresh(preset: CronPreset, job: CronJobSnapshot): boolean {
+  if (job.sessionKey && job.sessionKey !== expectedPresetSessionKey(preset.id)) return true;
+  if (Object.keys(job.payload).length > 0 && job.payload.kind !== 'agentTurn') return true;
+
+  const message = PRESET_AGENT_TURNS[preset.id] ?? `Run cron preset: ${preset.id}`;
+  if (typeof job.payload.message === 'string' && job.payload.message !== message) return true;
+
+  const schedule = job.schedule && typeof job.schedule === 'object'
+    ? job.schedule as Record<string, unknown>
+    : {};
+  if (Object.keys(schedule).length > 0 && (schedule.kind !== 'cron' || schedule.expr !== preset.schedule)) return true;
+
+  return false;
+}
+
 /**
  * Re-register enabled cron presets with the gateway after a restart.
  *
@@ -55,32 +152,63 @@ async function reconcileEnabledPresets(presets: CronPreset[]): Promise<void> {
   const client = useGatewayStore.getState().client;
   if (!client?.isConnected) return;
 
-  const enabled = presets.filter((p) => p.enabled);
-  if (enabled.length === 0) return;
+  const cronJobs = await loadCronJobs();
+  if (!cronJobs) return;
 
-  for (const preset of enabled) {
+  for (const preset of presets) {
     if (_inflightPresets.has(preset.id)) continue;
     _inflightPresets.add(preset.id);
     try {
-      // 1. Remove stale gateway job (silent fail — job may not exist after restart)
-      if (preset.gateway_job_id) {
+      const matches = cronJobs.filter((job) => cronJobMatchesPreset(job, preset));
+
+      if (!preset.enabled) {
+        for (const job of matches) {
+          try {
+            await client.request('cron.remove', { id: job.id });
+          } catch {
+            // Job may already be gone.
+          }
+        }
+        if (preset.gateway_job_id) {
+          await client.request('rc.cron.presets.setJobId', {
+            preset_id: preset.id,
+            job_id: '',
+          });
+        }
+        continue;
+      }
+
+      const preferred = matches.find((job) => job.id === preset.gateway_job_id && !cronJobNeedsRefresh(preset, job))
+        ?? matches.find((job) => !cronJobNeedsRefresh(preset, job));
+      const duplicates = matches.filter((job) => job.id !== preferred?.id);
+
+      for (const job of duplicates) {
         try {
-          await client.request('cron.remove', { id: preset.gateway_job_id });
+          await client.request('cron.remove', { id: job.id });
         } catch {
-          // Expected after gateway restart — job no longer exists
+          // Stale duplicate may already be gone.
         }
       }
 
-      // 2. Create fresh gateway cron job (stable sessionKey → reuses session across restarts)
-      const message = PRESET_AGENT_TURNS[preset.id] ?? `Run cron preset: ${preset.id}`;
-      const cronResult = await client.request<{ id: string }>('cron.add', {
-        name: preset.name,
-        schedule: { kind: 'cron' as const, expr: preset.schedule },
-        message,
-        sessionKey: `cron:rc-preset:${preset.id}`,
-      });
+      if (preferred) {
+        if (preferred.id !== preset.gateway_job_id) {
+          await client.request('rc.cron.presets.setJobId', {
+            preset_id: preset.id,
+            job_id: preferred.id,
+          });
+        }
+        continue;
+      }
 
-      // 3. Persist new gateway job ID
+      // Create fresh gateway cron job (stable sessionKey → reuses session across restarts)
+      const message = PRESET_AGENT_TURNS[preset.id] ?? `Run cron preset: ${preset.id}`;
+      const cronResult = await client.request<{ id: string }>('cron.add', buildCronAgentTurn({
+        name: preset.name,
+        message,
+        schedule: preset.schedule,
+        sessionKey: expectedPresetSessionKey(preset.id),
+      }));
+
       if (cronResult?.id) {
         await client.request('rc.cron.presets.setJobId', {
           preset_id: preset.id,
@@ -136,12 +264,12 @@ export const useCronStore = create<CronState>()((set, get) => ({
 
       // 3. Create actual gateway cron job (stable sessionKey → no duplicate sessions)
       const message = PRESET_AGENT_TURNS[presetId] ?? `Run cron preset: ${presetId}`;
-      const cronResult = await client.request<{ id: string }>('cron.add', {
+      const cronResult = await client.request<{ id: string }>('cron.add', buildCronAgentTurn({
         name: preset.name,
-        schedule: { kind: 'cron' as const, expr: preset.schedule },
         message,
+        schedule: preset.schedule,
         sessionKey: `cron:rc-preset:${presetId}`,
-      });
+      }));
 
       // 4. Store the gateway job ID in our DB
       if (cronResult?.id) {
@@ -219,12 +347,12 @@ export const useCronStore = create<CronState>()((set, get) => ({
 
         // Create new gateway job with updated schedule (stable sessionKey)
         const message = PRESET_AGENT_TURNS[presetId] ?? `Run cron preset: ${presetId}`;
-        const cronResult = await client.request<{ id: string }>('cron.add', {
+        const cronResult = await client.request<{ id: string }>('cron.add', buildCronAgentTurn({
           name: preset.name,
-          schedule: { kind: 'cron' as const, expr: schedule },
           message,
+          schedule,
           sessionKey: `cron:rc-preset:${presetId}`,
-        });
+        }));
 
         // Store new gateway job ID
         if (cronResult?.id) {

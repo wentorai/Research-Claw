@@ -304,7 +304,6 @@ export const usePaperReviewStore = create<PaperReviewState>((set, get) => {
         schedule: { kind: 'cron' as const, expr: REVIEW_CRON_EXPR },
         sessionTarget: 'isolated',
         sessionKey: `cron:rc-review:${params.reviewId}:${params.jobSuffix}`,
-        delivery: { mode: 'none' as const },
         payload: {
           kind: 'agentTurn',
           message: params.prompt,

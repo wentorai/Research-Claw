@@ -13,7 +13,7 @@ export function relativeTime(
     return locale.startsWith('zh') ? '从未运行' : 'Never run';
   }
 
-  const date = new Date(isoString);
+  const date = parseTimestamp(isoString);
   const now = Date.now();
   const diffMs = now - date.getTime();
 
@@ -41,6 +41,13 @@ export function relativeTime(
   if (diffHour < 24) return `${diffHour}h ago`;
   if (diffDay < 7) return `${diffDay}d ago`;
   return formatFullDate(date);
+}
+
+function parseTimestamp(value: string): Date {
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+  return new Date(normalized);
 }
 
 function formatFullDate(date: Date): string {

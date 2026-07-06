@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useCronStore, type CronPreset } from './cron';
+import { resetCronReconciled, useCronStore, type CronPreset } from './cron';
 
 // ── Mock Gateway ────────────────────────────────────────────────────────────
 
@@ -62,6 +62,7 @@ describe('Cron Store', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockGatewayClient.isConnected = true;
+    resetCronReconciled();
     useCronStore.setState({
       presets: [],
       presetsLoaded: false,
@@ -72,7 +73,9 @@ describe('Cron Store', () => {
 
   describe('loadPresets', () => {
     it('calls rc.cron.presets.list RPC and stores result', async () => {
-      mockRequest.mockResolvedValueOnce({ presets: FIVE_PRESETS });
+      mockRequest.mockResolvedValueOnce({
+        presets: FIVE_PRESETS.map((preset) => ({ ...preset, enabled: false })),
+      });
 
       await useCronStore.getState().loadPresets();
 
@@ -103,6 +106,84 @@ describe('Cron Store', () => {
       expect(useCronStore.getState().presetsLoaded).toBe(false);
       warnSpy.mockRestore();
     });
+
+    it('removes duplicate gateway jobs and keeps one active preset job', async () => {
+      const active = makePreset({
+        id: 'group_meeting_prep',
+        name: 'Group Meeting Prep',
+        schedule: '0 9 * * 1-5',
+        enabled: true,
+        gateway_job_id: 'gw-current',
+      });
+
+      mockRequest
+        .mockResolvedValueOnce({ presets: [active] })
+        .mockResolvedValueOnce({
+          jobs: [
+            {
+              id: 'gw-current',
+              name: 'Group Meeting Prep',
+              sessionKey: 'cron:rc-preset:group_meeting_prep',
+              schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
+              payload: { kind: 'agentTurn', message: 'Run cron preset: group_meeting_prep' },
+            },
+            {
+              id: 'gw-duplicate-a',
+              name: 'Group Meeting Prep',
+              sessionKey: 'cron:rc-preset:group_meeting_prep',
+              schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
+              payload: { kind: 'agentTurn', message: 'Run cron preset: group_meeting_prep' },
+            },
+            {
+              id: 'gw-duplicate-b',
+              name: 'Group Meeting Prep',
+              sessionKey: 'cron:rc-preset:group_meeting_prep',
+              schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
+              payload: { kind: 'agentTurn', message: 'Run cron preset: group_meeting_prep' },
+            },
+          ],
+        })
+        .mockResolvedValue({ presets: [active] });
+
+      await useCronStore.getState().loadPresets();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(mockRequest).toHaveBeenCalledWith('cron.remove', { id: 'gw-duplicate-a' });
+      expect(mockRequest).toHaveBeenCalledWith('cron.remove', { id: 'gw-duplicate-b' });
+      expect(mockRequest).not.toHaveBeenCalledWith('cron.add', expect.anything());
+    });
+
+    it('removes stale gateway jobs for disabled presets', async () => {
+      const disabled = makePreset({
+        id: 'group_meeting_prep',
+        name: 'Group Meeting Prep',
+        schedule: '0 9 * * 1-5',
+        enabled: false,
+        gateway_job_id: 'gw-disabled',
+      });
+
+      mockRequest
+        .mockResolvedValueOnce({ presets: [disabled] })
+        .mockResolvedValueOnce({
+          jobs: [{
+            id: 'gw-disabled',
+            name: 'Group Meeting Prep',
+            sessionKey: 'cron:rc-preset:group_meeting_prep',
+            schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
+            payload: { kind: 'agentTurn', message: 'Run cron preset: group_meeting_prep' },
+          }],
+        })
+        .mockResolvedValue({ presets: [{ ...disabled, gateway_job_id: null }] });
+
+      await useCronStore.getState().loadPresets();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(mockRequest).toHaveBeenCalledWith('cron.remove', { id: 'gw-disabled' });
+      expect(mockRequest).toHaveBeenCalledWith('rc.cron.presets.setJobId', {
+        preset_id: 'group_meeting_prep',
+        job_id: '',
+      });
+    });
   });
 
   // ── activatePreset ─────────────────────────────────────────────────────
@@ -129,8 +210,16 @@ describe('Cron Store', () => {
       expect(mockRequest).toHaveBeenNthCalledWith(2, 'cron.add', {
         name: 'arXiv Daily Scan',
         schedule: { kind: 'cron', expr: '0 7 * * *' },
-        message: 'Run cron preset: arxiv_daily_scan',
+        sessionTarget: 'isolated',
         sessionKey: 'cron:rc-preset:arxiv_daily_scan',
+        payload: {
+          kind: 'agentTurn',
+          message: 'Run cron preset: arxiv_daily_scan',
+        },
+        delivery: {
+          mode: 'none',
+          channel: 'last',
+        },
       });
       expect(mockRequest).toHaveBeenNthCalledWith(3, 'rc.cron.presets.setJobId', {
         preset_id: 'arxiv_daily_scan',
@@ -145,13 +234,17 @@ describe('Cron Store', () => {
       mockRequest.mockResolvedValueOnce({ ok: true }); // activate
       mockRequest.mockResolvedValueOnce({ id: 'gw-job-002' }); // cron.add
       mockRequest.mockResolvedValueOnce({ ok: true }); // setJobId
-      mockRequest.mockResolvedValueOnce({ presets: FIVE_PRESETS }); // reload
+      mockRequest.mockResolvedValueOnce({
+        presets: FIVE_PRESETS.map((preset) => ({ ...preset, enabled: false })),
+      }); // reload
 
       await useCronStore.getState().activatePreset('group_meeting_prep');
 
       expect(mockRequest).toHaveBeenNthCalledWith(2, 'cron.add', expect.objectContaining({
-        message: 'Run cron preset: group_meeting_prep',
         sessionKey: 'cron:rc-preset:group_meeting_prep',
+        payload: expect.objectContaining({
+          message: 'Run cron preset: group_meeting_prep',
+        }),
       }));
     });
 
@@ -213,7 +306,6 @@ describe('Cron Store', () => {
       await useCronStore.getState().activatePreset('arxiv_daily_scan');
 
       // Should have attempted activate (failed) then reload
-      expect(mockRequest).toHaveBeenCalledTimes(2);
       expect(mockRequest).toHaveBeenNthCalledWith(2, 'rc.cron.presets.list', {});
       errorSpy.mockRestore();
     });
@@ -364,7 +456,6 @@ describe('Cron Store', () => {
 
       await useCronStore.getState().deletePreset('arxiv_daily_scan');
 
-      expect(mockRequest).toHaveBeenCalledTimes(2);
       expect(mockRequest).toHaveBeenNthCalledWith(2, 'rc.cron.presets.list', {});
       errorSpy.mockRestore();
     });
