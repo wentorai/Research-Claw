@@ -5,7 +5,7 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 40 agent tools (17 literature + 10 task + 7 workspace + 5 monitor + 1 skill_search)
+ *   - 53 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job)
  *   - 92 WS RPC methods + 2 HTTP routes = 94 interface methods
  *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* = 92 WS; POST /rc/upload + GET /rc/download = 2 HTTP)
  *   - 10 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×3, gateway_start, agent:bootstrap)
@@ -896,8 +896,10 @@ const RESEARCH_CLAW_AGENT_TOOLS = [
   'workspace_download',
   'monitor_create',
   'monitor_list',
+  'monitor_update',
   'monitor_report',
   'monitor_get_context',
+  'monitor_collect_candidates',
   'monitor_note',
   'ppt_init',
   'ppt_export',
@@ -946,6 +948,10 @@ const plugin: PluginDefinition = {
       _monitorService = new MonitorService(_dbManager.db);
       _jobService = new JobService(_dbManager.db);
       _monitorService.seedDefaults();
+      const repairedMonitorPrompts = _monitorService.repairLegacyDefaultPrompts();
+      if (repairedMonitorPrompts > 0) {
+        api.logger.info(`[monitor] repaired ${repairedMonitorPrompts} legacy default prompt(s) for collector-first runs`);
+      }
 
       _wsConfig = {
         root: resolveWorkspaceRoot(api, cfg.workspace?.root),
@@ -1080,7 +1086,7 @@ const plugin: PluginDefinition = {
       },
     });
 
-    // ── 4. Register tools (51 total) ─────────────────────────────────
+    // ── 4. Register tools (53 total) ─────────────────────────────────
     // Tool registration is runtime-scoped in OpenClaw. The same plugin module
     // may be reused across discovery, gateway, hot-reload, and agent-runtime
     // passes, but each pass receives a fresh api/registry. Keep stateful
@@ -2518,7 +2524,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (51 tools, 122 WS RPC + 2 HTTP = 124 interfaces, 9 hooks, 1 session monitoring service)');
+    api.logger.info('Research-Claw Core registered (53 tools, 122 WS RPC + 2 HTTP = 124 interfaces, 9 hooks, 1 session monitoring service)');
     _hooksRegistered = true;
     }
   },

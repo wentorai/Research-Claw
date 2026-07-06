@@ -20,6 +20,8 @@ describe('research-claw-core plugin contracts', () => {
     expect(runtimeTools).toContain('task_list');
     expect(runtimeTools).toContain('workspace_read');
     expect(runtimeTools).toContain('monitor_list');
+    expect(runtimeTools).toContain('monitor_update');
+    expect(runtimeTools).toContain('monitor_collect_candidates');
   });
 
   it('registers agent tools on every plugin register pass', async () => {

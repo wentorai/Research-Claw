@@ -1,7 +1,7 @@
 /**
  * Monitor system — RPC methods
  *
- * 12 methods:
+ * 14 methods:
  *   - rc.monitor.list       → list all monitors (with optional filters)
  *   - rc.monitor.get        → get a single monitor with last_results
  *   - rc.monitor.create     → create monitor (dashboard registers cron on enable)
@@ -11,6 +11,8 @@
  *   - rc.monitor.run        → manual trigger via gateway cron.run
  *   - rc.monitor.history    → execution history via gateway cron.runs
  *   - rc.monitor.report     → persist scan results with fingerprints
+ *   - rc.monitor.reportError → persist failed scan status
+ *   - rc.monitor.collectCandidates → collect source candidates before agent analysis
  *   - rc.monitor.setJobId   → bind gateway job ID
  *   - rc.monitor.getContext  → load config + memory for agent execution
  *   - rc.monitor.updateNote  → write/update adaptive notes
@@ -196,6 +198,31 @@ export function registerMonitorRpc(registerMethod: RegisterMethod, service: Moni
       const summary = optionalString(params.summary, 'summary');
 
       return service.report(id, results, fingerprints, summary);
+    } catch (err) {
+      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    }
+  });
+
+  // ── rc.monitor.reportError ───────────────────────────────────────
+  // Called by dashboard reconciliation when a scheduled cron run fails before
+  // the agent can call monitor_report.
+  registerMethod('rc.monitor.reportError', async (params: Record<string, unknown>) => {
+    try {
+      const id = requireString(params.id, 'id');
+      const error = requireString(params.error, 'error');
+      service.reportError(id, error);
+      return { ok: true, monitor: service.get(id) };
+    } catch (err) {
+      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    }
+  });
+
+  // ── rc.monitor.collectCandidates ─────────────────────────────────
+  registerMethod('rc.monitor.collectCandidates', async (params: Record<string, unknown>) => {
+    try {
+      const id = requireString(params.id, 'id');
+      const limit = optionalNumber(params.limit, 'limit', 1, 100);
+      return service.collectMonitorCandidates(id, { limit });
     } catch (err) {
       throw err instanceof RpcValidationError ? new Error(err.message) : err;
     }

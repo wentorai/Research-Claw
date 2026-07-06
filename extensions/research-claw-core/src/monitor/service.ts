@@ -8,7 +8,12 @@
 
 import type BetterSqlite3 from 'better-sqlite3';
 type Database = BetterSqlite3.Database;
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  collectMonitorCandidates as collectCandidates,
+  type MonitorCollectorOptions,
+  type MonitorCollectorResult,
+} from './collector.js';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -281,11 +286,13 @@ function validateCron(expr: string): boolean {
 function defaultAgentPrompt(category: string, filters: Record<string, unknown>): string {
   const protocol =
     'EXECUTION PROTOCOL (mandatory, follow every step):\n' +
-    '1. READ: Call monitor_get_context with this monitor\'s ID to load memory.\n' +
-    '2. EXECUTE: Perform the monitoring task described below.\n' +
-    '3. REPORT: Call monitor_report with results array + fingerprints array.\n' +
-    '4. OBSERVE: If anything notable happened (source errors, patterns), call monitor_note.\n' +
-    '5. NOTIFY: If new findings > 0 and notify is enabled, call send_notification.\n\n';
+    'Tool boundary: Use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only. Do not call read, task_flow_stage, workspace_* or other task/workspace tools for scheduled monitor runs.\n' +
+    '1. CONTEXT: Call monitor_get_context with this monitor\'s ID to load memory.\n' +
+    '2. COLLECT: Call monitor_collect_candidates to collect source candidates.\n' +
+    '3. ANALYZE: Filter and summarize the collected candidates; only use browser/search if collector errors or misses required context.\n' +
+    '4. REPORT: Call monitor_report with final results array and the exact fingerprint values returned by monitor_collect_candidates for accepted candidates. Do not invent date-based or summary-based fingerprints.\n' +
+    '5. OBSERVE: If anything notable happened (source errors, patterns), call monitor_note.\n' +
+    '6. NOTIFY: If new findings > 0 and notify is enabled, call send_notification.\n\n';
 
   switch (category) {
     case 'academic':
@@ -298,33 +305,59 @@ function defaultAgentPrompt(category: string, filters: Record<string, unknown>):
         '- Economics \u2192 search_crossref(journal=...)\n' +
         '- Physics \u2192 search_arxiv + search_inspire\n' +
         '- General \u2192 search_crossref\n' +
-        'Generate fingerprints: doi:{value} or arxiv:{id} for each paper found.';
+        'Fallback only when collector fingerprints are unavailable: use doi:{value} or arxiv:{id} for each paper found.';
     case 'code':
       return protocol +
         'TASK: Check the target repository for new releases, tags, or significant updates.\n' +
-        'Use browser to visit the target URL. Extract release notes and changes.\n' +
-        'Generate fingerprints: gh:{repo}:release:{tag} or gh:{repo}:commit:{sha}.';
+        'Use collected candidates from the core collector layer. Summarize releases, tags, commits, or trending repositories from the candidate data.\n' +
+        'Fallback only when collector fingerprints are unavailable: use gh:{repo}:release:{tag} or gh:{repo}:commit:{sha}.';
     case 'feed':
       return protocol +
         'TASK: Fetch the RSS/Atom feed at the target URL.\n' +
         'Parse entries, filter by configured keywords if any.\n' +
-        'Generate fingerprints: rss:{entry_url} or rss:guid:{guid} for each entry.';
+        'Fallback only when collector fingerprints are unavailable: use rss:{entry_url} or rss:guid:{guid} for each entry.';
     case 'web':
       return protocol +
-        'TASK: Visit the target webpage using browser.\n' +
-        'Take a snapshot and compare with previous content (from memory).\n' +
+        'TASK: Check the target webpage through the core collector layer.\n' +
+        'Compare collected candidates or page summary with previous content from memory.\n' +
         'If meaningfully changed, extract and summarize the differences.\n' +
-        'Generate fingerprints: web:sha256:{content_hash}.';
+        'Fallback only when collector fingerprints are unavailable: use a stable canonical URL fingerprint, not the current date.';
     case 'social':
       return protocol +
         'TASK: Check the target social media account/hashtag for new posts.\n' +
-        'Use browser to visit the target. Extract noteworthy updates.\n' +
-        'Generate fingerprints: social:{platform}:{post_id}.';
+        'Use collected candidates from the core collector layer. Extract noteworthy updates.\n' +
+        'Fallback only when collector fingerprints are unavailable: use social:{platform}:{post_id}.';
     default:
       return protocol +
-        'TASK: Execute the monitoring task. Use available tools (search, browser, fetch) as appropriate.\n' +
-        'Generate a unique fingerprint for each distinct finding.';
+        'TASK: Execute the monitoring task through the core collector layer and analyze the collected candidates.\n' +
+        'Use collector fingerprints for each distinct finding whenever available.';
   }
+}
+
+function isLegacyDefaultAgentPrompt(prompt: string): boolean {
+  return prompt.includes('EXECUTION PROTOCOL (mandatory, follow every step):')
+    && (
+      (
+        prompt.includes('2. EXECUTE: Perform the monitoring task described below.')
+        && prompt.includes('3. REPORT: Call monitor_report with results array + fingerprints array.')
+      )
+      || (
+        prompt.includes('1. READ: Call monitor_get_context with this monitor\'s ID to load memory.')
+        && prompt.includes('2. COLLECT: Call monitor_collect_candidates to collect source candidates.')
+        && !prompt.includes('Tool boundary:')
+      )
+      || (
+        prompt.includes('Tool boundary: Use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only.')
+        && (
+          prompt.includes('Use browser to visit the target URL. Extract release notes and changes.')
+          || prompt.includes('TASK: Visit the target webpage using browser.')
+          || prompt.includes('Use browser to visit the target. Extract noteworthy updates.')
+          || prompt.includes('Use available tools (search, browser, fetch) as appropriate.')
+          || prompt.includes('4. REPORT: Call monitor_report with final results array + fingerprints array.')
+          || prompt.includes('Generate fingerprints: web:sha256:{content_hash}.')
+        )
+      )
+    );
 }
 
 // ── Service class ─────────────────────────────────────────────────────
@@ -363,6 +396,40 @@ export class MonitorService {
     });
 
     insertAll();
+  }
+
+  /**
+   * Upgrade monitors that still use the historical generated prompt.
+   * User-authored prompts are left alone unless they match the old default
+   * protocol signature exactly enough to be unsafe for collector-first runs.
+   */
+  repairLegacyDefaultPrompts(): number {
+    const rows = this.db.prepare('SELECT id, source_type, filters, agent_prompt FROM rc_monitors').all() as Array<{
+      id: string;
+      source_type: string;
+      filters: string;
+      agent_prompt: string;
+    }>;
+
+    const stmt = this.db.prepare(`
+      UPDATE rc_monitors
+      SET agent_prompt = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `);
+
+    let changed = 0;
+    const updateAll = this.db.transaction(() => {
+      for (const row of rows) {
+        if (!isLegacyDefaultAgentPrompt(row.agent_prompt || '')) continue;
+        let filters: Record<string, unknown> = {};
+        try { filters = JSON.parse(row.filters) as Record<string, unknown>; } catch { /* keep empty */ }
+        stmt.run(defaultAgentPrompt(row.source_type, filters), row.id);
+        changed += 1;
+      }
+    });
+
+    updateAll();
+    return changed;
   }
 
   // ── CRUD ──────────────────────────────────────────────────────────
@@ -488,15 +555,23 @@ export class MonitorService {
     const memory = monitor.memory;
     const findingCount = Array.isArray(results) ? results.length : 0;
 
-    // Deduplicate input fingerprints, then filter against seen
-    const uniqueFingerprints = [...new Set(fingerprints)];
+    const fingerprintGroups = buildFingerprintGroups(monitor, results, fingerprints);
+    const uniqueFingerprints = [...new Set(fingerprintGroups.flat())];
     const seenSet = new Set(memory.seen);
-    const newFingerprints = uniqueFingerprints.filter((fp) => !seenSet.has(fp));
-    const newCount = newFingerprints.length;
+    const runSeenSet = new Set(seenSet);
+    let newCount = 0;
+    for (const group of fingerprintGroups) {
+      if (group.length === 0 || group.some((fp) => runSeenSet.has(fp))) continue;
+      newCount += 1;
+      for (const fp of group) runSeenSet.add(fp);
+    }
 
-    // Append new fingerprints to seen (FIFO cap 2000)
-    for (const fp of newFingerprints) {
+    // Append all aliases for reported findings so future runs can dedupe even if
+    // the model returns collector fingerprints or URL-derived fingerprints.
+    for (const fp of uniqueFingerprints) {
+      if (seenSet.has(fp)) continue;
       memory.seen.push(fp);
+      seenSet.add(fp);
     }
     while (memory.seen.length > 2000) {
       memory.seen.shift();
@@ -539,6 +614,11 @@ export class MonitorService {
         updated_at = datetime('now')
       WHERE id = ?
     `).run(error, id);
+  }
+
+  async collectMonitorCandidates(id: string, opts?: MonitorCollectorOptions): Promise<MonitorCollectorResult> {
+    const monitor = this.get(id);
+    return collectCandidates(monitor, opts);
   }
 
   // ── Get context for agent execution ─────────────────────────────
@@ -593,4 +673,96 @@ export class MonitorService {
     ).all() as MonitorRow[];
     return rows.map(rowToMonitor);
   }
+}
+
+function buildFingerprintGroups(monitor: Monitor, results: unknown[], fingerprints: string[]): string[][] {
+  const groups: string[][] = [];
+
+  if (results.length === 0) {
+    return fingerprints
+      .map((fp) => (typeof fp === 'string' && fp.trim() ? [fp.trim()] : []))
+      .filter((group) => group.length > 0);
+  }
+
+  for (let i = 0; i < results.length; i++) {
+    const group = new Set<string>();
+    const provided = fingerprints[i];
+    if (typeof provided === 'string' && provided.trim()) group.add(provided.trim());
+
+    const stable = stableFingerprintsForResult(monitor, results[i]);
+    for (const fp of stable) group.add(fp);
+
+    if (group.size > 0) groups.push([...group]);
+  }
+
+  if (fingerprints.length > results.length && groups.length > 0) {
+    const last = new Set(groups[groups.length - 1]);
+    for (const fp of fingerprints.slice(results.length)) {
+      if (typeof fp === 'string' && fp.trim()) last.add(fp.trim());
+    }
+    groups[groups.length - 1] = [...last];
+  }
+
+  return groups;
+}
+
+function stableFingerprintsForResult(monitor: Monitor, result: unknown): string[] {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return [];
+  const row = result as Record<string, unknown>;
+  const url = stringField(row, 'url') || stringField(row, 'link') || stringField(row, 'html_url');
+  if (url) {
+    const canonical = canonicalizeUrl(url);
+    if (canonical) {
+      const source = fingerprintSource(monitor.source_type);
+      return [
+        fingerprint(source, canonical),
+        fingerprint('monitor', `${monitor.id}:url:${canonical}`),
+      ];
+    }
+  }
+
+  const id = stringField(row, 'id') || stringField(row, 'guid') || stringField(row, 'doi') || stringField(row, 'arxiv_id');
+  if (id) return [fingerprint(fingerprintSource(monitor.source_type), id)];
+
+  const title = stringField(row, 'title');
+  if (title) return [fingerprint(fingerprintSource(monitor.source_type), `${monitor.id}:title:${title}`)];
+  return [];
+}
+
+function fingerprintSource(sourceType: string): string {
+  const type = sourceType.toLowerCase();
+  if (type === 'feed' || type === 'rss' || type === 'atom') return 'rss';
+  if (type === 'github' || type === 'code') return 'gh';
+  if (type === 'api') return 'api';
+  if (type === 'web' || type === 'webpage') return 'web';
+  return type || 'monitor';
+}
+
+function stringField(row: Record<string, unknown>, key: string): string | undefined {
+  const value = row[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function canonicalizeUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|sourceSSR$|spm$|from$|ref$|ref_src$|share_token$)/i.test(key)) {
+        url.searchParams.delete(key);
+      }
+    }
+    url.searchParams.sort();
+    return url.toString();
+  } catch {
+    return value.trim();
+  }
+}
+
+function fingerprint(prefix: string, value: string): string {
+  return `${prefix}:${value || 'unknown'}:${hash(value).slice(0, 16)}`;
+}
+
+function hash(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }

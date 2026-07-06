@@ -10,11 +10,11 @@
  *   - create() default prompt generation
  *   - seedDefaults() idempotency
  *   - CRUD: create, get, list, update, delete, toggle
- *   - RPC: parameter validation for all 12 methods
- *   - Tools: output format for all 5 tools
+ *   - RPC: parameter validation for monitor methods
+ *   - Tools: output format for monitor tools
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { createTestDb } from './setup.js';
@@ -139,7 +139,62 @@ describe('MonitorService', () => {
       const academic = svc.get('academic-daily');
       expect(academic.agent_prompt).toContain('EXECUTION PROTOCOL');
       expect(academic.agent_prompt).toContain('monitor_get_context');
+      expect(academic.agent_prompt).toContain('monitor_collect_candidates');
       expect(academic.agent_prompt).toContain('monitor_report');
+
+      const code = svc.get('code-trending');
+      expect(code.agent_prompt).toContain('core collector layer');
+      expect(code.agent_prompt).not.toContain('Use browser to visit the target URL');
+    });
+
+    it('repairs legacy generated monitor prompts', () => {
+      svc.seedDefaults();
+      const legacyPrompt =
+        'EXECUTION PROTOCOL (mandatory, follow every step):\n' +
+        '1. READ: Call monitor_get_context with this monitor\'s ID to load memory.\n' +
+        '2. EXECUTE: Perform the monitoring task described below.\n' +
+        '3. REPORT: Call monitor_report with results array + fingerprints array.\n' +
+        '4. OBSERVE: If anything notable happened (source errors, patterns), call monitor_note.\n' +
+        '5. NOTIFY: If new findings > 0 and notify is enabled, call send_notification.\n\n' +
+        'TASK: Visit the target webpage using browser.';
+
+      db.prepare('UPDATE rc_monitors SET agent_prompt = ? WHERE id = ?').run(legacyPrompt, 'web-watch');
+
+      expect(svc.repairLegacyDefaultPrompts()).toBe(1);
+      const repaired = svc.get('web-watch');
+      expect(repaired.agent_prompt).toContain('monitor_collect_candidates');
+      expect(repaired.agent_prompt).toContain('exact fingerprint values returned by monitor_collect_candidates');
+      expect(repaired.agent_prompt).not.toContain('2. EXECUTE: Perform the monitoring task described below.');
+    });
+
+    it('repairs collector-first generated prompts that still contain legacy browser hints', () => {
+      svc.seedDefaults();
+      const legacyCollectorPrompt =
+        'EXECUTION PROTOCOL (mandatory, follow every step):\n' +
+        'Tool boundary: Use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only. Do not call read, task_flow_stage, workspace_* or other task/workspace tools for scheduled monitor runs.\n' +
+        '1. CONTEXT: Call monitor_get_context with this monitor\'s ID to load memory.\n' +
+        '2. COLLECT: Call monitor_collect_candidates to collect source candidates.\n' +
+        '3. ANALYZE: Filter and summarize the collected candidates; only use browser/search if collector errors or misses required context.\n' +
+        '4. REPORT: Call monitor_report with final results array + fingerprints array.\n' +
+        '5. OBSERVE: If anything notable happened (source errors, patterns), call monitor_note.\n' +
+        '6. NOTIFY: If new findings > 0 and notify is enabled, call send_notification.\n\n' +
+        'TASK: Check the target repository for new releases, tags, or significant updates.\n' +
+        'Use browser to visit the target URL. Extract release notes and changes.\n' +
+        'Generate fingerprints: gh:{repo}:release:{tag} or gh:{repo}:commit:{sha}.';
+
+      db.prepare('UPDATE rc_monitors SET agent_prompt = ? WHERE id = ?').run(legacyCollectorPrompt, 'code-trending');
+
+      expect(svc.repairLegacyDefaultPrompts()).toBe(1);
+      const repaired = svc.get('code-trending');
+      expect(repaired.agent_prompt).toContain('Use collected candidates from the core collector layer');
+      expect(repaired.agent_prompt).not.toContain('Use browser to visit the target URL');
+      expect(repaired.agent_prompt).not.toContain('final results array + fingerprints array');
+    });
+
+    it('does not repair custom prompts', () => {
+      const custom = svc.create(makeInput({ agent_prompt: 'Custom prompt here' }));
+      expect(svc.repairLegacyDefaultPrompts()).toBe(0);
+      expect(svc.get(custom.id).agent_prompt).toBe('Custom prompt here');
     });
   });
 
@@ -233,7 +288,7 @@ describe('MonitorService', () => {
     it('generates web prompt for web source_type', () => {
       const m = svc.create({ name: 'Web', source_type: 'web' });
       expect(m.agent_prompt).toContain('webpage');
-      expect(m.agent_prompt).toContain('web:sha256:');
+      expect(m.agent_prompt).toContain('stable canonical URL fingerprint');
     });
 
     it('generates social prompt for social source_type', () => {
@@ -246,7 +301,7 @@ describe('MonitorService', () => {
       const m = svc.create({ name: 'Custom', source_type: 'my-custom-type' });
       expect(m.agent_prompt).toContain('EXECUTION PROTOCOL');
       expect(m.agent_prompt).toContain('monitoring task');
-      expect(m.agent_prompt).toContain('unique fingerprint');
+      expect(m.agent_prompt).toContain('collector fingerprints');
     });
 
     it('uses user-provided agent_prompt instead of default', () => {
@@ -483,7 +538,8 @@ describe('MonitorService', () => {
       expect(updated.last_results).toEqual(results);
       expect(updated.check_count).toBe(1);
       expect(updated.finding_count).toBe(2); // 2 new fingerprints
-      expect(updated.memory.seen).toEqual(['doi:10.1/a', 'doi:10.1/b']);
+      expect(updated.memory.seen).toContain('doi:10.1/a');
+      expect(updated.memory.seen).toContain('doi:10.1/b');
     });
 
     it('records a run entry', () => {
@@ -498,7 +554,7 @@ describe('MonitorService', () => {
 
     it('deduplicates repeated fingerprints within same call', () => {
       const m = svc.create(makeInput());
-      const updated = svc.report(m.id, [{ a: 1 }, { a: 2 }], ['fp:dup', 'fp:dup', 'fp:dup']);
+      const updated = svc.report(m.id, [{ value: 1 }, { value: 2 }], ['fp:dup', 'fp:dup', 'fp:dup']);
       expect(updated.memory.seen).toEqual(['fp:dup']);
       expect(updated.memory.runs[0].new_count).toBe(1);
     });
@@ -517,12 +573,41 @@ describe('MonitorService', () => {
       expect(updated.memory.seen).toContain('doi:new-1');
     });
 
-    it('finding_count accumulates only new fingerprints', () => {
+    it('deduplicates repeated result URLs even when model fingerprints change', () => {
+      const m = svc.create(makeInput({ source_type: 'web' }));
+      const result = {
+        title: '拼多多 2027届研发实习生',
+        url: 'https://www.nowcoder.com/feed/main/detail/abc123?sourceSSR=search&utm_source=test',
+      };
+
+      svc.report(m.id, [result], ['web:sha256:nowcoder_20260702_v1']);
+      const updated = svc.report(m.id, [{
+        ...result,
+        url: 'https://www.nowcoder.com/feed/main/detail/abc123',
+      }], ['web:sha256:nowcoder_20260703_v1']);
+
+      expect(updated.memory.runs[1].new_count).toBe(0);
+      expect(updated.finding_count).toBe(1);
+    });
+
+    it('counts new findings by result item instead of extra fingerprint aliases', () => {
+      const m = svc.create(makeInput({ source_type: 'web' }));
+      const updated = svc.report(m.id, [{
+        title: 'One finding',
+        url: 'https://example.com/post/1',
+      }], ['fp:one', 'fp:one-alias']);
+
+      expect(updated.memory.runs[0].new_count).toBe(1);
+      expect(updated.finding_count).toBe(1);
+      expect(updated.memory.seen).toContain('fp:one-alias');
+    });
+
+    it('finding_count accumulates only new result groups', () => {
       const m = svc.create(makeInput());
 
       svc.report(m.id, [{ a: 1 }], ['fp:1', 'fp:2']);       // +2 new
       const updated = svc.report(m.id, [{ a: 1 }], ['fp:2', 'fp:3']); // +1 new (fp:2 seen)
-      expect(updated.finding_count).toBe(3); // 2 + 1
+      expect(updated.finding_count).toBe(1); // extra fingerprints are aliases for one result item
     });
 
     it('FIFO eviction: caps seen at 2000, oldest removed first', () => {
@@ -659,6 +744,56 @@ describe('MonitorService', () => {
       expect(mem.seen).toEqual(['fp:1']);
       expect(mem.runs).toHaveLength(1);
       expect(mem.notes).toBe('');
+    });
+  });
+
+  // ── collectMonitorCandidates() ───────────────────────────────────
+
+  describe('collectMonitorCandidates()', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('collects RSS candidates and filters by keywords', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => `
+          <rss><channel>
+            <item>
+              <title>Security internship opens</title>
+              <link>https://example.com/security-internship</link>
+              <guid>item-1</guid>
+              <pubDate>Mon, 29 Jun 2026 09:00:00 GMT</pubDate>
+              <description>Cyber security role</description>
+            </item>
+            <item>
+              <title>Unrelated marketing role</title>
+              <link>https://example.com/marketing</link>
+              <guid>item-2</guid>
+            </item>
+          </channel></rss>
+        `,
+      }));
+
+      const m = svc.create(makeInput({
+        source_type: 'feed',
+        target: 'https://example.com/feed.xml',
+        filters: { keywords: ['security'] },
+      }));
+
+      const result = await svc.collectMonitorCandidates(m.id);
+
+      expect(result.strategy).toBe('rss');
+      expect(result.errors).toEqual([]);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]).toEqual(expect.objectContaining({
+        title: 'Security internship opens',
+        url: 'https://example.com/security-internship',
+        source: 'example.com',
+      }));
+      expect(result.candidates[0].fingerprint).toMatch(/^rss:/);
     });
   });
 
@@ -869,12 +1004,13 @@ describe('Monitor RPC', () => {
     return await handler(params);
   }
 
-  it('registers all 12 RPC methods', () => {
-    expect(handlers.size).toBe(12);
+  it('registers all 14 RPC methods', () => {
+    expect(handlers.size).toBe(14);
     const expected = [
       'rc.monitor.list', 'rc.monitor.get', 'rc.monitor.create', 'rc.monitor.update',
       'rc.monitor.delete', 'rc.monitor.toggle', 'rc.monitor.run', 'rc.monitor.history',
-      'rc.monitor.report', 'rc.monitor.setJobId', 'rc.monitor.getContext', 'rc.monitor.updateNote',
+      'rc.monitor.report', 'rc.monitor.reportError', 'rc.monitor.collectCandidates', 'rc.monitor.setJobId',
+      'rc.monitor.getContext', 'rc.monitor.updateNote',
     ];
     for (const m of expected) {
       expect(handlers.has(m)).toBe(true);
@@ -1081,6 +1217,63 @@ describe('Monitor RPC', () => {
     });
   });
 
+  // ── rc.monitor.reportError ───────────────────────────────────────
+
+  describe('rc.monitor.reportError', () => {
+    it('persists failed run status via RPC', async () => {
+      const m = svc.create(makeInput());
+      const result = await call('rc.monitor.reportError', {
+        id: m.id,
+        error: 'LLM idle timeout',
+      }) as any;
+
+      expect(result.ok).toBe(true);
+      expect(result.monitor.last_error).toBe('LLM idle timeout');
+      expect(result.monitor.check_count).toBe(1);
+      expect(svc.get(m.id).last_error).toBe('LLM idle timeout');
+    });
+
+    it('rejects missing error', async () => {
+      const m = svc.create(makeInput());
+      await expect(call('rc.monitor.reportError', { id: m.id }))
+        .rejects.toThrow('error is required');
+    });
+  });
+
+  // ── rc.monitor.collectCandidates ─────────────────────────────────
+
+  describe('rc.monitor.collectCandidates', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('returns collected candidates via RPC', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '<rss><channel><item><title>AI News</title><link>https://example.com/ai</link><guid>ai-1</guid></item></channel></rss>',
+      }));
+
+      const m = svc.create(makeInput({
+        source_type: 'feed',
+        target: 'https://example.com/feed.xml',
+        filters: {},
+      }));
+
+      const result = await call('rc.monitor.collectCandidates', { id: m.id, limit: 5 }) as any;
+      expect(result.monitor_id).toBe(m.id);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0].title).toBe('AI News');
+    });
+
+    it('rejects invalid limit', async () => {
+      const m = svc.create(makeInput());
+      await expect(call('rc.monitor.collectCandidates', { id: m.id, limit: 101 }))
+        .rejects.toThrow('limit must be <= 100');
+    });
+  });
+
   // ── rc.monitor.setJobId ───────────────────────────────────────────
 
   describe('rc.monitor.setJobId', () => {
@@ -1170,14 +1363,16 @@ describe('Monitor Agent Tools', () => {
     return findTool(name).execute('test-call-id', params);
   }
 
-  it('creates exactly 5 tools', () => {
-    expect(tools).toHaveLength(5);
+  it('creates exactly 7 tools', () => {
+    expect(tools).toHaveLength(7);
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'monitor_collect_candidates',
       'monitor_create',
       'monitor_get_context',
       'monitor_list',
       'monitor_note',
       'monitor_report',
+      'monitor_update',
     ]);
   });
 
@@ -1284,6 +1479,62 @@ describe('Monitor Agent Tools', () => {
     });
   });
 
+  // ── monitor_update ────────────────────────────────────────────────
+
+  describe('monitor_update', () => {
+    it('updates schedule through the agent tool', async () => {
+      const m = svc.create(makeInput({ name: 'Schedule Me', schedule: '0 8 * * *' }));
+      const result = await exec('monitor_update', {
+        monitor_id: m.id,
+        schedule: '30 9 * * *',
+      });
+
+      expect(result.content[0].text).toContain('Monitor updated');
+      expect(result.details.schedule).toBe('30 9 * * *');
+      expect(svc.get(m.id).schedule).toBe('30 9 * * *');
+    });
+
+    it('updates filters and enabled state', async () => {
+      const m = svc.create(makeInput({ name: 'Config Me', enabled: false }));
+      const result = await exec('monitor_update', {
+        monitor_id: m.id,
+        filters: { keywords: ['security'] },
+        enabled: true,
+      });
+
+      expect(result.details.filters).toEqual({ keywords: ['security'] });
+      expect(result.details.enabled).toBe(true);
+    });
+
+    it('returns error for invalid cron expressions', async () => {
+      const m = svc.create(makeInput());
+      const result = await exec('monitor_update', {
+        monitor_id: m.id,
+        schedule: 'bad cron',
+      });
+
+      expect(result.content[0].text).toContain('Error:');
+      expect(result.details.error).toContain('Invalid cron expression');
+    });
+
+    it('returns error when no update field is provided', async () => {
+      const m = svc.create(makeInput());
+      const result = await exec('monitor_update', { monitor_id: m.id });
+
+      expect(result.content[0].text).toContain('Error: at least one update field is required');
+    });
+
+    it('returns error for non-object filters', async () => {
+      const m = svc.create(makeInput());
+      const result = await exec('monitor_update', {
+        monitor_id: m.id,
+        filters: ['bad'],
+      });
+
+      expect(result.content[0].text).toContain('Error: filters must be an object');
+    });
+  });
+
   // ── monitor_report ────────────────────────────────────────────────
 
   describe('monitor_report', () => {
@@ -1318,7 +1569,7 @@ describe('Monitor Agent Tools', () => {
         results: [{ title: 'New' }],
         fingerprints: ['fp:3'],
       });
-      expect(result.content[0].text).toContain('Seen pool: 3 items');
+      expect(result.content[0].text).toContain('Seen pool: 4 items');
     });
 
     it('handles non-array results gracefully', async () => {
@@ -1355,6 +1606,86 @@ describe('Monitor Agent Tools', () => {
       const result = await exec('monitor_get_context', { monitor_id: 'ghost' });
       expect(result.content[0].text).toContain('Error:');
       expect(result.content[0].text).toContain('Monitor not found');
+    });
+  });
+
+  // ── monitor_collect_candidates ───────────────────────────────────
+
+  describe('monitor_collect_candidates', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('collects candidates through the agent tool', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '<rss><channel><item><title>Release note</title><link>https://example.com/release</link><guid>release-1</guid></item></channel></rss>',
+      }));
+      const m = svc.create(makeInput({
+        source_type: 'feed',
+        target: 'https://example.com/feed.xml',
+        filters: {},
+      }));
+
+      const result = await exec('monitor_collect_candidates', { monitor_id: m.id });
+
+      expect(result.content[0].text).toContain('Collected 1 candidate');
+      expect(result.details.candidates[0].title).toBe('Release note');
+      expect(result.details.candidates[0].fingerprint).toMatch(/^rss:/);
+    });
+
+    it('extracts candidates from dynamic page script payloads', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => `
+          <html><head><title>Search</title></head><body>
+            <div id="__next"></div>
+            <script id="__NEXT_DATA__" type="application/json">
+              {"props":{"pageProps":{"items":[{"title":"拼多多 2027届研发实习生","url":"https:\\/\\/www.nowcoder.com\\/feed\\/main\\/detail\\/abc123?sourceSSR=search","summary":"岗位含安全"}]}}}
+            </script>
+          </body></html>
+        `,
+      }));
+      const m = svc.create(makeInput({
+        source_type: 'web',
+        target: 'https://www.nowcoder.com/search?query=2027',
+        filters: { keywords: ['安全', '2027'] },
+      }));
+
+      const result = await exec('monitor_collect_candidates', { monitor_id: m.id });
+
+      expect(result.details.errors).toEqual([]);
+      expect(result.details.candidates).toHaveLength(1);
+      expect(result.details.candidates[0].title).toContain('拼多多');
+      expect(result.details.candidates[0].url).toBe('https://www.nowcoder.com/feed/main/detail/abc123');
+    });
+
+    it('returns a browser fallback error for anti-bot verification pages', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '<html><body><h1>为了更好的访问体验，请进行验证</h1></body></html>',
+      }));
+      const m = svc.create(makeInput({
+        source_type: 'web',
+        target: 'https://www.nowcoder.com/search?query=2027',
+        filters: {},
+      }));
+
+      const result = await exec('monitor_collect_candidates', { monitor_id: m.id });
+
+      expect(result.details.candidates).toHaveLength(0);
+      expect(result.details.errors[0]).toContain('browser_fallback_required');
+    });
+
+    it('returns error for missing monitor_id', async () => {
+      const result = await exec('monitor_collect_candidates', { monitor_id: '' });
+      expect(result.content[0].text).toContain('Error: monitor_id is required');
     });
   });
 

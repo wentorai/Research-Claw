@@ -1,16 +1,18 @@
 /**
  * Monitor system — Agent tools
  *
- * 5 tools:
+ * 7 tools:
  *   - monitor_create:      Create a new monitor for any source category
  *   - monitor_list:        List current monitors with status
+ *   - monitor_update:      Update monitor configuration, including schedule
  *   - monitor_report:      Report scan results with dedup fingerprints
  *   - monitor_get_context: Load monitor config + memory before execution
+ *   - monitor_collect_candidates: Collect source candidates before agent analysis
  *   - monitor_note:        Write adaptive notes for future runs
  */
 
 import type { ToolDefinition } from '../types.js';
-import { MonitorService } from './service.js';
+import { MonitorService, type MonitorPatch } from './service.js';
 
 function ok(text: string, details?: unknown): unknown {
   return { content: [{ type: 'text', text }], details: details ?? {} };
@@ -150,7 +152,95 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
     },
   });
 
-  // ── 3. monitor_report ────────────────────────────────────────────
+  // ── 3. monitor_update ────────────────────────────────────────────
+
+  tools.push({
+    name: 'monitor_update',
+    description:
+      'Update an existing monitor configuration. Use this when the user asks to rename a monitor, ' +
+      'change its schedule, target, filters, notification preference, or enable/disable state. ' +
+      'Schedule must be a 5-field cron expression. This updates the Research-Claw monitor record; ' +
+      'the dashboard reconciles the backing Gateway cron job after the monitor list reloads.',
+    parameters: {
+      type: 'object',
+      properties: {
+        monitor_id: {
+          type: 'string',
+          description: 'The monitor ID to update',
+        },
+        name: {
+          type: 'string',
+          description: 'New human-readable monitor name',
+        },
+        source_type: {
+          type: 'string',
+          description: 'New source category string',
+        },
+        target: {
+          type: 'string',
+          description: 'New target identifier or URL',
+        },
+        filters: {
+          type: 'object',
+          description: 'Replacement source-specific filter config',
+        },
+        schedule: {
+          type: 'string',
+          description: 'Replacement cron expression (5 fields), e.g. "30 9 * * *"',
+        },
+        enabled: {
+          type: 'boolean',
+          description: 'Whether the monitor should be enabled',
+        },
+        notify: {
+          type: 'boolean',
+          description: 'Whether to send notifications on new findings',
+        },
+        agent_prompt: {
+          type: 'string',
+          description: 'Replacement execution prompt for this monitor',
+        },
+      },
+      required: ['monitor_id'],
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
+      try {
+        const id = typeof params.monitor_id === 'string' ? params.monitor_id.trim() : '';
+        if (!id) return fail('monitor_id is required');
+
+        const patch: MonitorPatch = {};
+        if (typeof params.name === 'string') patch.name = params.name;
+        if (typeof params.source_type === 'string') patch.source_type = params.source_type;
+        if (typeof params.target === 'string') patch.target = params.target;
+        if (typeof params.filters === 'object' && params.filters !== null && !Array.isArray(params.filters)) {
+          patch.filters = params.filters as Record<string, unknown>;
+        } else if (params.filters !== undefined) {
+          return fail('filters must be an object');
+        }
+        if (typeof params.schedule === 'string') patch.schedule = params.schedule;
+        if (typeof params.enabled === 'boolean') patch.enabled = params.enabled;
+        if (typeof params.notify === 'boolean') patch.notify = params.notify;
+        if (typeof params.agent_prompt === 'string') patch.agent_prompt = params.agent_prompt;
+
+        if (Object.keys(patch).length === 0) {
+          return fail('at least one update field is required');
+        }
+
+        const monitor = service.update(id, patch);
+        return ok(
+          `Monitor updated: "${monitor.name}"\n` +
+          `ID: ${monitor.id}\n` +
+          `Schedule: ${monitor.schedule}\n` +
+          `Status: ${monitor.enabled ? 'enabled' : 'disabled'}`,
+          monitor,
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 4. monitor_report ────────────────────────────────────────────
 
   tools.push({
     name: 'monitor_report',
@@ -174,7 +264,7 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
         fingerprints: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Unique identifiers for deduplication (e.g. "doi:10.1234/...", "arxiv:2603.12345", "gh:org/repo:release:v1.0"). Compared against memory.seen to count new items.',
+          description: 'Unique identifiers for deduplication. Prefer exact fingerprint values returned by monitor_collect_candidates for accepted candidates. Do not invent date-based or summary-based fingerprints. Compared against memory.seen to count new items.',
         },
         summary: {
           type: 'string',
@@ -207,7 +297,7 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
     },
   });
 
-  // ── 4. monitor_get_context ───────────────────────────────────────
+  // ── 5. monitor_get_context ───────────────────────────────────────
 
   tools.push({
     name: 'monitor_get_context',
@@ -239,7 +329,42 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
     },
   });
 
-  // ── 5. monitor_note ──────────────────────────────────────────────
+  // ── 6. monitor_collect_candidates ────────────────────────────────
+
+  tools.push({
+    name: 'monitor_collect_candidates',
+    description:
+      'Collect raw monitor candidates in the core collector layer before analysis. ' +
+      'Use this after monitor_get_context and before monitor_report. The collector routes by source_type ' +
+      '(RSS/feed, API, web, GitHub/code) and returns candidate items with stable fingerprints. ' +
+      'If errors contain browser_fallback_required, use the browser tool to inspect the page and then report stable URL-based findings. ' +
+      'The agent should analyze/filter these candidates, then call monitor_report with the final findings.',
+    parameters: {
+      type: 'object',
+      properties: {
+        monitor_id: { type: 'string', description: 'The monitor ID' },
+        limit: { type: 'number', description: 'Maximum candidates to collect (1-100, default 25)' },
+      },
+      required: ['monitor_id'],
+    },
+    async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
+      const id = typeof params.monitor_id === 'string' ? params.monitor_id.trim() : '';
+      if (!id) return fail('monitor_id is required');
+      const limit = typeof params.limit === 'number' ? params.limit : undefined;
+      try {
+        const result = await service.collectMonitorCandidates(id, { limit });
+        return ok(
+          `Collected ${result.candidates.length} candidate(s) for monitor "${id}" using ${result.strategy}.` +
+          (result.errors.length ? ` Errors: ${result.errors.join('; ')}` : ''),
+          result,
+        );
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  });
+
+  // ── 7. monitor_note ──────────────────────────────────────────────
 
   tools.push({
     name: 'monitor_note',
