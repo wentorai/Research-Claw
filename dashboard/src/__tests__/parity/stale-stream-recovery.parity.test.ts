@@ -99,42 +99,43 @@ describe('Stale stream recovery — tool hang + reconnect fixes', () => {
 
   describe('Fix 1: Watchdog recovers when all pending tools are stale', () => {
     it('skips recovery when tools have recent activity', () => {
+      const staleAgo = Date.now() - 370_000;
       useChatStore.setState({
         streaming: true,
         runId: 'run-1',
-        _streamStartedAt: Date.now(),
-        _lastDeltaAt: null,
+        _streamStartedAt: staleAgo,
+        _lastDeltaAt: staleAgo,
       });
       injectPendingTool({ lastEventAt: Date.now() });
       _testWatchdog.start();
 
-      // Fast-forward 75s — beyond STALE_STREAM_TIMEOUT_MS (60s)
-      vi.advanceTimersByTime(75_000);
+      // Stream is stale, but the pending tool has recent activity.
+      vi.advanceTimersByTime(15_000);
 
       // Tool has recent activity → streaming should NOT be cleared
       expect(useChatStore.getState().streaming).toBe(true);
     });
 
     it('recovers when all pending tools exceed STALE_TOOL_MS with no events', () => {
-      const twoMinutesAgo = Date.now() - 130_000; // 130s > STALE_TOOL_MS (120s)
+      const staleAgo = Date.now() - 370_000; // 370s > STALE_STREAM_TIMEOUT_MS (360s)
 
       useChatStore.setState({
         streaming: true,
         runId: 'run-1',
-        _streamStartedAt: twoMinutesAgo,
-        _lastDeltaAt: twoMinutesAgo,
+        _streamStartedAt: staleAgo,
+        _lastDeltaAt: staleAgo,
       });
       useTaskFlowStore.getState().startRun('run-1', 'main');
       injectPendingTool({
-        startedAt: twoMinutesAgo,
-        lastEventAt: twoMinutesAgo, // no events for 130s
+        startedAt: staleAgo,
+        lastEventAt: staleAgo, // no events for 370s
       });
       _testWatchdog.start();
 
       // The watchdog runs every 15s (STALE_WATCHDOG_CHECK_MS)
       vi.advanceTimersByTime(15_000);
 
-      // All tools are stale + stream gap > 60s → should recover
+      // All tools are stale + stream gap > 360s → should recover
       expect(useChatStore.getState().streaming).toBe(false);
       expect(useChatStore.getState().streamText).toBeNull();
       expect(useChatStore.getState().runId).toBeNull();
@@ -142,13 +143,13 @@ describe('Stale stream recovery — tool hang + reconnect fixes', () => {
     });
 
     it('does not recover when some tools still have recent events', () => {
-      const twoMinutesAgo = Date.now() - 130_000;
+      const staleAgo = Date.now() - 370_000;
 
       useChatStore.setState({
         streaming: true,
         runId: 'run-1',
-        _streamStartedAt: twoMinutesAgo,
-        _lastDeltaAt: twoMinutesAgo,
+        _streamStartedAt: staleAgo,
+        _lastDeltaAt: staleAgo,
       });
 
       // Two tools: one stale, one active
@@ -158,14 +159,14 @@ describe('Stale stream recovery — tool hang + reconnect fixes', () => {
             toolCallId: 'tool-stale',
             name: 'exec',
             phase: 'running' as const,
-            startedAt: twoMinutesAgo,
-            lastEventAt: twoMinutesAgo,
+            startedAt: staleAgo,
+            lastEventAt: staleAgo,
           },
           {
             toolCallId: 'tool-active',
             name: 'exec',
             phase: 'running' as const,
-            startedAt: twoMinutesAgo,
+            startedAt: staleAgo,
             lastEventAt: Date.now(), // just had an event
           },
         ],
@@ -179,17 +180,17 @@ describe('Stale stream recovery — tool hang + reconnect fixes', () => {
     });
 
     it('clears pendingTools when all are stale during recovery', () => {
-      const twoMinutesAgo = Date.now() - 130_000;
+      const staleAgo = Date.now() - 370_000;
 
       useChatStore.setState({
         streaming: true,
         runId: 'run-1',
-        _streamStartedAt: twoMinutesAgo,
-        _lastDeltaAt: twoMinutesAgo,
+        _streamStartedAt: staleAgo,
+        _lastDeltaAt: staleAgo,
       });
       injectPendingTool({
-        startedAt: twoMinutesAgo,
-        lastEventAt: twoMinutesAgo,
+        startedAt: staleAgo,
+        lastEventAt: staleAgo,
       });
       _testWatchdog.start();
 
@@ -375,7 +376,7 @@ describe('Stale stream recovery — tool hang + reconnect fixes', () => {
       _testWatchdog.start();
 
       // After 15s check interval, gap from _lastDeltaAt is now ~35s
-      // Normal timeout (60s) would NOT trigger, but reconnect timeout (15s) should
+      // Normal timeout (360s) would NOT trigger, but reconnect timeout (15s) should
       vi.advanceTimersByTime(15_000);
 
       // With reconnect flag, 35s > 15s → should recover
@@ -396,7 +397,7 @@ describe('Stale stream recovery — tool hang + reconnect fixes', () => {
 
       vi.advanceTimersByTime(15_000);
 
-      // 45s < 60s normal timeout → should NOT recover yet
+      // 45s < 360s normal timeout → should NOT recover yet
       expect(useChatStore.getState().streaming).toBe(true);
     });
   });

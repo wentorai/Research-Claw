@@ -64,7 +64,7 @@ const GAP_DEBOUNCE_MS = 500;
  * "alive connection but stale model response" scenario.
  */
 let _staleStreamWatchdog: ReturnType<typeof setInterval> | null = null;
-const STALE_STREAM_TIMEOUT_MS = 60_000;
+const STALE_STREAM_TIMEOUT_MS = 360_000;
 const STALE_WATCHDOG_CHECK_MS = 15_000;
 /** Shorter stale timeout used after WS reconnect (Fix 3). */
 const RECONNECT_STALE_MS = 15_000;
@@ -1055,7 +1055,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       set({ sending: false, streaming: true, _streamStartedAt: Date.now(), _lastDeltaAt: null });
 
       // Start stale-streaming watchdog. Checks every 15s if no delta has arrived
-      // within 60s (covers both "no first delta" and "mid-stream death" scenarios).
+      // within 360s (covers both "no first delta" and "mid-stream death" scenarios).
       startStaleStreamWatchdog(get);
     } catch (err) {
       stopStaleStreamWatchdog();

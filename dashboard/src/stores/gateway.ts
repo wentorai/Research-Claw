@@ -59,14 +59,14 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         //
         // New behavior: if we have a pending runId (user sent a message and is
         // waiting for a response), keep the runId and streaming state alive.
-        // The stale-stream timer (60s) will recover if the run is truly dead.
+        // The stale-stream timer (360s) will recover if the run is truly dead.
         // Only clear streamText (partial stream data was lost during reconnect).
         void import('./chat').then(({ useChatStore }) => {
           const { runId } = useChatStore.getState();
           if (runId) {
             // Pending user-initiated run — preserve state, clear partial stream.
             // Fix 3: set _reconnectedAt so the stale-stream watchdog uses a shorter
-            // timeout (15s vs 60s) for faster recovery if the run completed during
+            // timeout (15s vs 360s) for faster recovery if the run completed during
             // the disconnect window and no more deltas will arrive.
             useChatStore.setState({ streamText: null, _reconnectedAt: Date.now() });
           } else {
