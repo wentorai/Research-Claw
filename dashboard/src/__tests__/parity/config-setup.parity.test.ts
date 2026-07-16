@@ -244,22 +244,22 @@ describe('config.apply param format — openclaw/src/gateway/protocol/schema/con
 });
 
 describe('Sentinel round-trip — openclaw/src/config/redact-snapshot.ts:418-452', () => {
-  // The gateway's restoreRedactedValues() walks the incoming config object and
-  // replaces REDACTED_SENTINEL values at sensitive paths with the on-disk original.
-  // Our buildSaveConfig must preserve REDACTED sentinels for keys the user didn't change.
+  // Redacted placeholders never enter the save payload: buildSaveConfig omits
+  // apiKey when the user didn't change it, and the extension's provider RPC
+  // (research-claw-core/src/provider/rpc.ts — stripRedactedSentinels +
+  // preserveMissingProviderApiKeys) restores the real on-disk key at apply time.
 
-  it('preserves redacted API key when user does not provide a new key', () => {
-    // redact-snapshot.ts:73 — REDACTED_SENTINEL = '__OPENCLAW_REDACTED__'
-    // redact-snapshot.ts:627-628 — if value === REDACTED_SENTINEL → restore from original
-    // config-patch.ts:137-142 — preserves existing key (which is REDACTED) when no new key
+  it('omits API key from payload when user does not provide a new key', () => {
+    // provider/rpc.ts preserveMissingProviderApiKeys — a provider entry without
+    // apiKey inherits the real key from the current on-disk config
     const { savedConfig } = simulateSetupWizardFlow(CONFIG_GET_ZAI_SINGLE, {
-      // No apiKey provided -> should keep sentinel
+      // No apiKey provided -> omitted from payload, preserved on the backend
       textModel: 'glm-4.7',
     });
 
     const providers = (savedConfig.models as Record<string, unknown>)
       .providers as Record<string, Record<string, unknown>>;
-    expect(providers.zai.apiKey).toBe(REDACTED_SENTINEL);
+    expect(providers.zai.apiKey).toBeUndefined();
   });
 
   it('replaces sentinel when user provides a new key', () => {
@@ -274,9 +274,9 @@ describe('Sentinel round-trip — openclaw/src/config/redact-snapshot.ts:418-452
     expect(providers.zai.apiKey).toBe('sk-brand-new-key');
   });
 
-  it('preserves both text and vision sentinels in dual-provider config', () => {
-    // When editing dual-provider config without changing keys,
-    // both providers keep their REDACTED values
+  it('omits both text and vision keys in dual-provider config when unchanged', () => {
+    // When editing dual-provider config without changing keys, neither provider
+    // carries a key in the payload; the backend restores both real keys
     const { savedConfig } = simulateSetupWizardFlow(CONFIG_GET_DUAL_PROVIDER, {
       // No apiKey or visionApiKey
       textModel: 'gpt-5.4',
@@ -288,8 +288,8 @@ describe('Sentinel round-trip — openclaw/src/config/redact-snapshot.ts:418-452
 
     const providers = (savedConfig.models as Record<string, unknown>)
       .providers as Record<string, Record<string, unknown>>;
-    expect(providers.openai.apiKey).toBe(REDACTED_SENTINEL);
-    expect(providers.zai.apiKey).toBe(REDACTED_SENTINEL);
+    expect(providers.openai.apiKey).toBeUndefined();
+    expect(providers.zai.apiKey).toBeUndefined();
   });
 
   it('sentinel value exactly matches OpenClaw constant', () => {
@@ -532,19 +532,19 @@ describe('Full SetupWizard flow — config.get -> edit -> config.apply', () => {
   });
 
   describe('Re-configuration (existing config)', () => {
-    it('changing model preserves API key sentinel', () => {
+    it('changing model omits unchanged API key from payload', () => {
       // The most common re-config: user changes model but not API key.
       // SetupWizard.tsx:149 — apiKey: apiKey.trim() || undefined
-      // When apiKey is empty (user didn't type anything), it becomes undefined
-      // config-patch.ts:137-142 — falls back to existing key (REDACTED sentinel)
+      // When apiKey is empty (user didn't type anything), it becomes undefined;
+      // provider/rpc.ts preserveMissingProviderApiKeys restores the real key
       const { savedConfig } = simulateSetupWizardFlow(CONFIG_GET_ZAI_SINGLE, {
         textModel: 'glm-4.7',
-        // No apiKey -> preserve sentinel
+        // No apiKey -> omitted, preserved on the backend
       });
 
       const providers = (savedConfig.models as Record<string, unknown>)
         .providers as Record<string, Record<string, unknown>>;
-      expect(providers.zai.apiKey).toBe(REDACTED_SENTINEL);
+      expect(providers.zai.apiKey).toBeUndefined();
       expect(providers.zai.models).toBeDefined();
 
       // Model ref updated
