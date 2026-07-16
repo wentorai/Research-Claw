@@ -914,7 +914,7 @@ const plugin: PluginDefinition = {
   id: 'research-claw-core',
   name: 'Research-Claw Core',
   description: 'Literature library, task management, and workspace tracking for academic research',
-  version: '0.7.4',
+  version: '0.7.5',
   contracts: {
     tools: RESEARCH_CLAW_AGENT_TOOLS,
   },
