@@ -15,8 +15,8 @@ import {
 } from './file-reference';
 
 describe('file-reference helpers', () => {
-  it('soft cap is 100MB', () => {
-    expect(MAX_REFERENCE_SIZE).toBe(100 * 1024 * 1024);
+  it('soft cap is 1GB (gateway streams to disk; server cap is 2GB)', () => {
+    expect(MAX_REFERENCE_SIZE).toBe(1024 * 1024 * 1024);
   });
 
   describe('isImagePath', () => {

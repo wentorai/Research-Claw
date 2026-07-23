@@ -1362,13 +1362,27 @@ export default function WorkspacePanel() {
       // Only trigger once for the first file in a multi-select batch
       if (file !== fileList[0]) return false;
 
+      // Client-side size gate (the drop path applies the same cap via applyDropPolicy).
+      const oversized = fileList.filter((f) => f.size > MAX_REFERENCE_SIZE);
+      const sized = fileList.filter((f) => f.size <= MAX_REFERENCE_SIZE);
+      if (oversized.length > 0) {
+        message.warning(
+          t('workspace.uploadSkippedLarge', {
+            count: oversized.length,
+            limit: Math.round(MAX_REFERENCE_SIZE / (1024 * 1024)),
+            defaultValue: `${oversized.length} file(s) over ${Math.round(MAX_REFERENCE_SIZE / (1024 * 1024))}MB were skipped`,
+          }),
+        );
+      }
+      if (sized.length === 0) return false;
+
       // Let the user pick where the batch lands (remembers the last choice).
       const choice = await askDestination(false);
       if (!choice) return false; // user cancelled
       const destBase = choice.dest;
       rememberDest(destBase);
 
-      const existing = await preflightConflicts(fileList.map((f) => `${destBase}/${f.name}`));
+      const existing = await preflightConflicts(sized.map((f) => `${destBase}/${f.name}`));
       let decisions: Map<string, ConflictAction> | null = null;
       if (existing.size > 0) {
         decisions = await askConflictDecisions(
@@ -1383,7 +1397,7 @@ export default function WorkspacePanel() {
       const counts = { success: 0, skipped: 0, conflict: 0, failed: 0 };
       const seen = new Set<string>();
       try {
-        for (const f of fileList) {
+        for (const f of sized) {
           const destPath = `${destBase}/${f.name}`;
           const action = decisions?.get(destPath);
           if (action === 'skip') {
@@ -1412,7 +1426,7 @@ export default function WorkspacePanel() {
       }
       return false;
     },
-    [askDestination, rememberDest, preflightConflicts, askConflictDecisions, reportUploadOutcome, loadData],
+    [askDestination, rememberDest, preflightConflicts, askConflictDecisions, reportUploadOutcome, loadData, message, t],
   );
 
   // --- External file drag-over detection (panel-level) ---

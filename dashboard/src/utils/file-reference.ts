@@ -7,9 +7,11 @@
  * via workspace_read are ever injected into the prompt.
  */
 
-/** Client-side soft cap for ingesting external files (memory protection: the
- *  gateway's multipart parser buffers the whole upload in memory). */
-export const MAX_REFERENCE_SIZE = 100 * 1024 * 1024; // 100MB
+/** Client-side soft cap for ingesting external files. The gateway streams
+ *  uploads to disk (O(1) memory) with its own 2GB default cap
+ *  (workspace.maxUploadSize) — this front gate just keeps accidental
+ *  huge drops from tying up the UI. */
+export const MAX_REFERENCE_SIZE = 1024 * 1024 * 1024; // 1GB
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|avif)$/i;
 

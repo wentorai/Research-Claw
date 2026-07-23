@@ -695,7 +695,7 @@ Multipart file upload for the dashboard drag-drop feature.
 | **Match** | Exact |
 | **Auth** | Gateway loopback only (requests must originate from 127.0.0.1) |
 | **Content-Type** | `multipart/form-data` |
-| **Max file size** | 100 MB |
+| **Max file size** | 2 GB server default (`workspace.maxUploadSize`); uploads stream to disk, memory stays O(1). Dashboard applies a 1 GB per-file front gate. |
 | **Registration** | Via `server.registerHttpRoute()` in the plugin init (see `02`) |
 
 #### Request Fields
@@ -728,7 +728,7 @@ Multipart file upload for the dashboard drag-drop feature.
 |--------|------|-----------|
 | 400 | `UPLOAD_NO_FILE` | No file field in request |
 | 400 | `UPLOAD_INVALID_DESTINATION` | Destination contains `..` or is absolute |
-| 413 | `UPLOAD_TOO_LARGE` | File exceeds 100 MB |
+| 413 | `UPLOAD_TOO_LARGE` | Request exceeds `workspace.maxUploadSize` (default 2 GB); aborted per-chunk mid-stream |
 | 500 | `UPLOAD_WRITE_FAILED` | Filesystem write error |
 
 #### Implementation Sketch
@@ -1218,9 +1218,11 @@ All workspace settings live under the `research-claw.workspace` key in
       // Default: 10485760 (10 MB)
       "maxGitFileSize": 10485760,
 
-      // Maximum upload file size (bytes) for the HTTP endpoint.
-      // Default: 104857600 (100 MB)
-      "maxUploadSize": 104857600,
+      // Maximum upload request size (bytes) for the HTTP endpoint. Uploads
+      // stream to <root>/.uploads-tmp/ (O(1) memory), so this is a sanity
+      // bound, not a memory guard.
+      // Default: 2147483648 (2 GB)
+      "maxUploadSize": 2147483648,
 
       // Git author name for auto-commits.
       // Default: "Research-Claw"

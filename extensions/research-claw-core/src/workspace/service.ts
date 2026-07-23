@@ -280,6 +280,8 @@ const HIDDEN_ROOT_ENTRIES = new Set([
   'MEMORY.md',
   // OS/tool artifacts
   '.DS_Store', 'Thumbs.db', '.gitignore',
+  // Streaming-upload staging dir (see workspace/multipart.ts)
+  '.uploads-tmp',
 ]);
 
 const DEFAULT_GITIGNORE = `# Research-Claw workspace — auto-generated
@@ -491,6 +493,9 @@ export class WorkspaceService {
 
     // Migrate legacy uploads/ → sources/ (idempotent)
     await this.migrateUploadsToSources();
+
+    // Sweep stale streaming-upload temp files (crashed/aborted uploads)
+    await this.cleanupStaleUploadTmp();
 
     // Create default .gitignore if it does not exist
     const gitignorePath = path.join(this.root, '.gitignore');
@@ -1186,6 +1191,98 @@ export class WorkspaceService {
       commit_hash: commitHash,
       is_new: isNew,
     };
+  }
+
+  /**
+   * Move an already-written temp file (from the streaming upload parser) into
+   * the workspace: save() minus the write — atomic rename from the staging dir
+   * (same filesystem), then the identical git-tracking path. The temp file is
+   * consumed on success and removed on failure.
+   */
+  async saveFromTempFile(
+    tmpAbsPath: string,
+    filePath: string,
+    commitMessage?: string,
+  ): Promise<{
+    path: string;
+    size: number;
+    committed: boolean;
+    commit_hash?: string;
+    is_new: boolean;
+  }> {
+    const fullPath = this.resolvePath(filePath);
+
+    const parentDir = path.dirname(fullPath);
+    await fsp.mkdir(parentDir, { recursive: true });
+
+    // Check if file already exists (for commit message prefix)
+    let isNew = true;
+    try {
+      await fsp.access(fullPath, fs.constants.F_OK);
+      isNew = false;
+    } catch {
+      // File does not exist — it is new
+    }
+
+    try {
+      await fsp.rename(tmpAbsPath, fullPath);
+    } catch (err) {
+      try {
+        await fsp.unlink(tmpAbsPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw new WorkspaceError(
+        `Failed to write file: ${(err as Error).message}`,
+        WS_WRITE_FAILED,
+        { path: filePath },
+      );
+    }
+
+    const fileStat = await fsp.stat(fullPath);
+
+    let committed = false;
+    let commitHash: string | undefined;
+    if (this.tracker) {
+      this.tracker.invalidateStatusCache();
+      try {
+        const prefix = isNew ? 'Add' : 'Update';
+        const message = commitMessage ?? `${prefix}: ${path.basename(filePath)}`;
+        const result = await this.tracker.commitFile(filePath, message);
+        committed = result.committed;
+        commitHash = result.hash;
+      } catch {
+        // Git failure is non-fatal for save operations
+      }
+    }
+
+    return {
+      path: filePath,
+      size: fileStat.size,
+      committed,
+      commit_hash: commitHash,
+      is_new: isNew,
+    };
+  }
+
+  /** Remove `.uploads-tmp/` entries older than one hour (crashed uploads). */
+  private async cleanupStaleUploadTmp(): Promise<void> {
+    const tmpDir = path.join(this.root, '.uploads-tmp');
+    try {
+      const entries = await fsp.readdir(tmpDir);
+      const cutoff = Date.now() - 60 * 60 * 1000;
+      for (const name of entries) {
+        const full = path.join(tmpDir, name);
+        try {
+          const stat = await fsp.stat(full);
+          if (stat.mtimeMs < cutoff) await fsp.unlink(full);
+        } catch {
+          // Entry vanished or unreadable — skip.
+        }
+      }
+    } catch {
+      // Staging dir does not exist yet — nothing to sweep.
+    }
   }
 
   // -----------------------------------------------------------------------

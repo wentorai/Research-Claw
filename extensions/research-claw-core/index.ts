@@ -33,6 +33,7 @@ import { WorkspaceService, type WorkspaceConfig } from './src/workspace/service.
 import { createWorkspaceTools } from './src/workspace/tools.js';
 import { registerWorkspaceRpc } from './src/workspace/rpc.js';
 import { normalizeConflictMode, resolveUploadConflict } from './src/workspace/upload-conflict.js';
+import { parseMultipartToTemp, type StreamedUpload } from './src/workspace/multipart.js';
 import { MonitorService } from './src/monitor/service.js';
 import { registerMonitorRpc } from './src/monitor/rpc.js';
 import { createMonitorTools } from './src/monitor/tools.js';
@@ -961,7 +962,9 @@ const plugin: PluginDefinition = {
         autoTrackGit: cfg.autoTrackGit ?? true,
         commitDebounceMs: cfg.workspace?.commitDebounceMs ?? 5000,
         maxGitFileSize: cfg.workspace?.maxGitFileSize ?? 10_485_760,
-        maxUploadSize: cfg.workspace?.maxUploadSize ?? 0,
+        // Default 2GB: uploads stream to disk (O(1) memory), so the cap is a
+        // sanity bound for a local workbench, not a memory guard.
+        maxUploadSize: cfg.workspace?.maxUploadSize ?? 2_147_483_648,
         gitAuthorName: cfg.workspace?.gitAuthorName ?? 'Research-Claw',
         gitAuthorEmail: cfg.workspace?.gitAuthorEmail ?? 'research-claw@wentor.ai',
       };
@@ -1614,8 +1617,14 @@ const plugin: PluginDefinition = {
           return true;
         }
 
+        let parsed: StreamedUpload | null = null;
         try {
-          const { file, destination, onConflict } = await parseMultipartUpload(req, wsConfig.maxUploadSize);
+          // Streaming parse: file bytes land in <root>/.uploads-tmp/ (O(1) memory).
+          parsed = await parseMultipartToTemp(req, {
+            maxSize: wsConfig.maxUploadSize,
+            tmpDir: path.join(wsConfig.root, '.uploads-tmp'),
+          });
+          const { file, destination, onConflict } = parsed;
 
           if (!file) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1664,7 +1673,8 @@ const plugin: PluginDefinition = {
 
           const finalName = conflict.fileName;
           const destPath = `${destDir}/${finalName}`;
-          const result = await wsService.save(destPath, file.data, `Upload: ${finalName} to ${destDir}`);
+          // Atomic rename out of the staging dir + the same git tracking as save().
+          const result = await wsService.saveFromTempFile(file.tmpPath, destPath, `Upload: ${finalName} to ${destDir}`);
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
@@ -1691,6 +1701,17 @@ const plugin: PluginDefinition = {
             error: { code: isTooLarge ? 'UPLOAD_TOO_LARGE' : 'UPLOAD_WRITE_FAILED', message },
           }));
           return true;
+        } finally {
+          // Remove the staging file on every path that did not consume it via
+          // rename (409 conflict, 400s, write failures). ENOENT after a
+          // successful rename is the normal case.
+          if (parsed?.file) {
+            try {
+              await fs.promises.unlink(parsed.file.tmpPath);
+            } catch {
+              // Already consumed or gone — fine.
+            }
+          }
         }
       },
     });
@@ -2577,104 +2598,3 @@ const plugin: PluginDefinition = {
 
 export default plugin;
 
-// ── Multipart upload parser ────────────────────────────────────────────
-
-interface UploadedFile {
-  filename: string;
-  data: Buffer;
-  mimeType: string;
-}
-
-export async function parseMultipartUpload(
-  req: IncomingMessage,
-  maxSize: number,
-): Promise<{ file: UploadedFile | null; destination: string; onConflict: string }> {
-  const contentType = req.headers['content-type'] ?? '';
-  const boundaryMatch = contentType.match(/boundary=(.+?)(?:;|$)/);
-  if (!boundaryMatch) {
-    throw new Error('Missing multipart boundary');
-  }
-
-  // Unquote boundary if quoted per RFC 2046
-  let boundary = boundaryMatch[1];
-  if (boundary.startsWith('"') && boundary.endsWith('"')) {
-    boundary = boundary.slice(1, -1);
-  }
-  const chunks: Buffer[] = [];
-  let totalSize = 0;
-
-  await new Promise<void>((resolve, reject) => {
-    req.on('data', (chunk: Buffer) => {
-      totalSize += chunk.length;
-      if (maxSize > 0 && totalSize > maxSize) {
-        req.destroy();
-        reject(new Error('UPLOAD_TOO_LARGE'));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', resolve);
-    req.on('error', reject);
-  });
-
-  const rawBody = Buffer.concat(chunks);
-  const boundaryBuf = Buffer.from(`--${boundary}`);
-
-  // Split raw body by boundary, preserving binary data
-  const partBuffers: Buffer[] = [];
-  let searchStart = 0;
-  while (searchStart < rawBody.length) {
-    const idx = rawBody.indexOf(boundaryBuf, searchStart);
-    if (idx === -1) {
-      partBuffers.push(rawBody.subarray(searchStart));
-      break;
-    }
-    if (idx > searchStart) {
-      partBuffers.push(rawBody.subarray(searchStart, idx));
-    }
-    searchStart = idx + boundaryBuf.length;
-  }
-
-  let file: UploadedFile | null = null;
-  let destination = '';
-  let onConflict = '';
-
-  for (const partBuf of partBuffers) {
-    // Find header/body separator (\r\n\r\n)
-    const separator = Buffer.from('\r\n\r\n');
-    const headerEnd = partBuf.indexOf(separator);
-    if (headerEnd === -1) continue;
-
-    // Parse headers as UTF-8 to correctly handle non-ASCII filenames
-    const headers = partBuf.subarray(0, headerEnd).toString('utf-8');
-
-    // Extract body as raw Buffer, strip trailing \r\n
-    let bodyBuf = partBuf.subarray(headerEnd + 4);
-    if (bodyBuf.length >= 2 && bodyBuf[bodyBuf.length - 2] === 0x0d && bodyBuf[bodyBuf.length - 1] === 0x0a) {
-      bodyBuf = bodyBuf.subarray(0, bodyBuf.length - 2);
-    }
-
-    const trimmedHeaders = headers.trim();
-    if (trimmedHeaders === '' || trimmedHeaders === '--') continue;
-
-    const nameMatch = headers.match(/name="([^"]+)"/);
-    const filenameMatch = headers.match(/filename="([^"]+)"/);
-    const ctMatch = headers.match(/Content-Type:\s*(.+?)(?:\r\n|$)/i);
-
-    if (!nameMatch) continue;
-
-    if (nameMatch[1] === 'file' && filenameMatch) {
-      file = {
-        filename: filenameMatch[1],
-        data: bodyBuf,
-        mimeType: ctMatch?.[1]?.trim() ?? 'application/octet-stream',
-      };
-    } else if (nameMatch[1] === 'destination') {
-      destination = bodyBuf.toString('utf-8').trim();
-    } else if (nameMatch[1] === 'onConflict') {
-      onConflict = bodyBuf.toString('utf-8').trim();
-    }
-  }
-
-  return { file, destination, onConflict };
-}
