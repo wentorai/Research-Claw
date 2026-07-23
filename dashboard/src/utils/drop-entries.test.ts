@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
+  applyDropPolicy,
   collectDroppedEntries,
   mapWithConcurrency,
   splitRelPath,
+  type CollectedDrop,
 } from './drop-entries';
 
 // --- Minimal FileSystemEntry mocks (webkitGetAsEntry tree) ---
@@ -136,5 +138,58 @@ describe('mapWithConcurrency', () => {
 
   it('handles an empty list', async () => {
     expect(await mapWithConcurrency([], 4, async (x) => x)).toEqual([]);
+  });
+});
+
+describe('applyDropPolicy', () => {
+  const drop = (sizes: number[]): CollectedDrop => ({
+    files: sizes.map((size, i) => ({
+      file: new File([new Uint8Array(size)], `f${i}.bin`),
+      relPath: `f${i}.bin`,
+      rootDir: null,
+    })),
+    hadDirectory: false,
+  });
+  const noopCallbacks = () => ({
+    warnOversize: vi.fn(),
+    confirmBulk: vi.fn(async () => true),
+  });
+
+  it('returns [] for an empty drop without invoking callbacks', async () => {
+    const cb = noopCallbacks();
+    expect(await applyDropPolicy({ files: [], hadDirectory: false }, { maxFileSize: 10, ...cb })).toEqual([]);
+    expect(cb.warnOversize).not.toHaveBeenCalled();
+    expect(cb.confirmBulk).not.toHaveBeenCalled();
+  });
+
+  it('filters oversized files with a single combined warning', async () => {
+    const cb = noopCallbacks();
+    const kept = await applyDropPolicy(drop([5, 50, 60]), { maxFileSize: 10, ...cb });
+    expect(kept?.map((d) => d.file.size)).toEqual([5]);
+    expect(cb.warnOversize).toHaveBeenCalledTimes(1);
+    expect(cb.warnOversize).toHaveBeenCalledWith(2, 0); // 10 bytes rounds to 0MB
+    expect(cb.confirmBulk).not.toHaveBeenCalled();
+  });
+
+  it('skips the bulk confirm below the thresholds', async () => {
+    const cb = noopCallbacks();
+    const kept = await applyDropPolicy(drop([1, 1, 1]), { maxFileSize: 10, ...cb });
+    expect(kept).toHaveLength(3);
+    expect(cb.confirmBulk).not.toHaveBeenCalled();
+  });
+
+  it('asks for confirmation above MAX_DROP_FILES and honors acceptance', async () => {
+    const cb = noopCallbacks();
+    const many = drop(Array.from({ length: 201 }, () => 1));
+    const kept = await applyDropPolicy(many, { maxFileSize: 10, ...cb });
+    expect(cb.confirmBulk).toHaveBeenCalledTimes(1);
+    expect(cb.confirmBulk).toHaveBeenCalledWith(201, 0);
+    expect(kept).toHaveLength(201);
+  });
+
+  it('returns null when the bulk confirm is declined', async () => {
+    const cb = { warnOversize: vi.fn(), confirmBulk: vi.fn(async () => false) };
+    const many = drop(Array.from({ length: 201 }, () => 1));
+    expect(await applyDropPolicy(many, { maxFileSize: 10, ...cb })).toBeNull();
   });
 });

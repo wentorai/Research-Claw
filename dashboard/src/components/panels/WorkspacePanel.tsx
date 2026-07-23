@@ -38,13 +38,13 @@ import UploadConflictModal, {
   type ConflictAction,
   type UploadConflict,
 } from './UploadConflictModal';
+import DestinationPickerModal, { type DestinationChoice } from './DestinationPickerModal';
 import { MAX_REFERENCE_SIZE, safeUploadName } from '../../utils/file-reference';
 import {
+  applyDropPolicy,
   collectDroppedEntries,
   mapWithConcurrency,
   splitRelPath,
-  MAX_DROP_FILES,
-  MAX_DROP_TOTAL_BYTES,
   UPLOAD_CONCURRENCY,
   type CollectedDrop,
 } from '../../utils/drop-entries';
@@ -356,9 +356,11 @@ interface FileTreeNodeProps {
   onMoveEnd?: () => void;
   onCreateItem?: (item: CreatingItem) => void;
   onCreateDone?: () => void;
+  /** External OS files dropped directly onto this directory node (Finder-style). */
+  onExternalDrop?: (destPath: string, dt: DataTransfer) => void;
 }
 
-function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingPath, creatingItem, onOpenFile, onDeleted, onMoved, onDragSrcChange, onMoveStart, onMoveEnd, onCreateItem, onCreateDone }: FileTreeNodeProps) {
+function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingPath, creatingItem, onOpenFile, onDeleted, onMoved, onDragSrcChange, onMoveStart, onMoveEnd, onCreateItem, onCreateDone, onExternalDrop }: FileTreeNodeProps) {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
   const client = useGatewayStore((s) => s.client);
@@ -527,6 +529,22 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     if (node.type !== 'directory') return;
+    // External OS files: directory nodes accept them directly (Finder-style).
+    // stopPropagation keeps the panel-root handler from also claiming the drop;
+    // dragenter/dragleave are NOT stopped so the panel overlay counter stays balanced.
+    if (e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('text/x-workspace-path')) {
+      if (!onExternalDrop) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      if (!dragOver) {
+        setDragOver(true);
+        if (!expanded) {
+          expandTimerRef.current = setTimeout(() => setExpanded(true), 500);
+        }
+      }
+      return;
+    }
     if (!e.dataTransfer.types.includes('text/x-workspace-path')) return;
     // Block invalid drop targets using the lifted dragSrcPath
     if (isInvalidDropTarget(dragSrcPath)) return;
@@ -539,7 +557,7 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
         expandTimerRef.current = setTimeout(() => setExpanded(true), 500);
       }
     }
-  }, [node.type, dragOver, expanded, dragSrcPath, isInvalidDropTarget]);
+  }, [node.type, dragOver, expanded, dragSrcPath, isInvalidDropTarget, onExternalDrop]);
 
   const handleDragLeave = useCallback(() => {
     setDragOver(false);
@@ -598,6 +616,17 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
       expandTimerRef.current = null;
     }
     if (node.type !== 'directory') return;
+    // External OS files dropped straight onto this folder — upload into it.
+    // onExternalDrop collects the DataTransfer entries synchronously (the item
+    // list is invalidated after this handler returns).
+    if (e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('text/x-workspace-path')) {
+      if (!onExternalDrop) return; // bubble to the panel-root handler
+      e.preventDefault();
+      e.stopPropagation();
+      onExternalDrop(node.path, e.dataTransfer);
+      setExpanded(true);
+      return;
+    }
     e.preventDefault();
 
     const srcPath = e.dataTransfer.getData('text/x-workspace-path');
@@ -622,7 +651,7 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
     } finally {
       onMoveEnd?.();
     }
-  }, [node, client, t, message, onMoved, isInvalidDropTarget, onMoveStart, onMoveEnd]);
+  }, [node, client, t, message, onMoved, isInvalidDropTarget, onMoveStart, onMoveEnd, onExternalDrop]);
 
   return (
     <div>
@@ -696,7 +725,7 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
             />
           )}
           {node.children?.map((child) => (
-            <FileTreeNode key={child.path} node={child} depth={depth + 1} tokens={tokens} workspaceRoot={workspaceRoot} dragSrcPath={dragSrcPath} movingPath={movingPath} creatingItem={creatingItem} onOpenFile={onOpenFile} onDeleted={onDeleted} onMoved={onMoved} onDragSrcChange={onDragSrcChange} onMoveStart={onMoveStart} onMoveEnd={onMoveEnd} onCreateItem={onCreateItem} onCreateDone={onCreateDone} />
+            <FileTreeNode key={child.path} node={child} depth={depth + 1} tokens={tokens} workspaceRoot={workspaceRoot} dragSrcPath={dragSrcPath} movingPath={movingPath} creatingItem={creatingItem} onOpenFile={onOpenFile} onDeleted={onDeleted} onMoved={onMoved} onDragSrcChange={onDragSrcChange} onMoveStart={onMoveStart} onMoveEnd={onMoveEnd} onCreateItem={onCreateItem} onCreateDone={onCreateDone} onExternalDrop={onExternalDrop} />
           ))}
         </>
       )}
@@ -907,15 +936,38 @@ export default function WorkspacePanel() {
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [workspaceRoot, setWorkspaceRoot] = useState('');
   const [uploading, setUploading] = useState(false);
+  // Ref mirror for concurrency guards: the state value goes stale inside async
+  // upload flows (closures capture the render-time value).
+  const uploadingRef = useRef(false);
   const [conflictPrompt, setConflictPrompt] = useState<{
     conflicts: UploadConflict[];
     resolve: (decisions: Map<string, ConflictAction> | null) => void;
   } | null>(null);
   const conflictPromptRef = useRef<typeof conflictPrompt>(null);
   conflictPromptRef.current = conflictPrompt;
-  // Resolve any pending conflict dialog on unmount so awaiting upload flows
-  // don't hang forever on a promise nobody can settle anymore.
-  useEffect(() => () => conflictPromptRef.current?.resolve(null), []);
+  const [destPrompt, setDestPrompt] = useState<{
+    hasFolders: boolean;
+    resolve: (choice: DestinationChoice | null) => void;
+  } | null>(null);
+  const destPromptRef = useRef<typeof destPrompt>(null);
+  destPromptRef.current = destPrompt;
+  // Last-used picker destination, persisted across sessions.
+  const [lastDest, setLastDest] = useState(() => {
+    try {
+      return localStorage.getItem('rc.ws.lastUploadDest') || 'sources';
+    } catch {
+      return 'sources';
+    }
+  });
+  // Resolve any pending dialog on unmount so awaiting upload flows don't hang
+  // forever on a promise nobody can settle anymore.
+  useEffect(
+    () => () => {
+      conflictPromptRef.current?.resolve(null);
+      destPromptRef.current?.resolve(null);
+    },
+    [],
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollRafRef = useRef<number | null>(null);
 
@@ -1065,6 +1117,8 @@ export default function WorkspacePanel() {
       dragSrcPathRef.current !== null ||
       movingPathRef.current !== null ||
       rootCreateTypeRef.current !== null ||
+      conflictPromptRef.current !== null ||
+      destPromptRef.current !== null ||
       document.hidden
     ) return;
     fetchingRef.current = true;
@@ -1232,10 +1286,32 @@ export default function WorkspacePanel() {
   const askConflictDecisions = useCallback(
     (conflicts: UploadConflict[]) =>
       new Promise<Map<string, ConflictAction> | null>((resolve) => {
+        // Settle any already-pending dialog so its promise can't leak.
+        conflictPromptRef.current?.resolve(null);
         setConflictPrompt({ conflicts, resolve });
       }),
     [],
   );
+
+  /** Open the destination picker; resolves null when the user cancels. */
+  const askDestination = useCallback(
+    (hasFolders: boolean) =>
+      new Promise<DestinationChoice | null>((resolve) => {
+        // Settle any already-pending picker so its promise can't leak.
+        destPromptRef.current?.resolve(null);
+        setDestPrompt({ hasFolders, resolve });
+      }),
+    [],
+  );
+
+  const rememberDest = useCallback((dest: string) => {
+    setLastDest(dest);
+    try {
+      localStorage.setItem('rc.ws.lastUploadDest', dest);
+    } catch {
+      // Private-mode storage failures are non-fatal.
+    }
+  }, []);
 
   const isConflictError = (err: unknown): boolean =>
     (err as UploadError | undefined)?.code === 'UPLOAD_FILE_EXISTS';
@@ -1282,11 +1358,17 @@ export default function WorkspacePanel() {
 
   const handleUpload = useCallback(
     async (file: File, fileList: File[]) => {
-      if (uploading) return false;
+      if (uploadingRef.current) return false;
       // Only trigger once for the first file in a multi-select batch
       if (file !== fileList[0]) return false;
 
-      const existing = await preflightConflicts(fileList.map((f) => `sources/${f.name}`));
+      // Let the user pick where the batch lands (remembers the last choice).
+      const choice = await askDestination(false);
+      if (!choice) return false; // user cancelled
+      const destBase = choice.dest;
+      rememberDest(destBase);
+
+      const existing = await preflightConflicts(fileList.map((f) => `${destBase}/${f.name}`));
       let decisions: Map<string, ConflictAction> | null = null;
       if (existing.size > 0) {
         decisions = await askConflictDecisions(
@@ -1295,12 +1377,14 @@ export default function WorkspacePanel() {
         if (!decisions) return false; // user cancelled
       }
 
+      if (uploadingRef.current) return false; // a concurrent flow won the race
+      uploadingRef.current = true;
       setUploading(true);
       const counts = { success: 0, skipped: 0, conflict: 0, failed: 0 };
       const seen = new Set<string>();
       try {
         for (const f of fileList) {
-          const destPath = `sources/${f.name}`;
+          const destPath = `${destBase}/${f.name}`;
           const action = decisions?.get(destPath);
           if (action === 'skip') {
             counts.skipped++;
@@ -1311,7 +1395,7 @@ export default function WorkspacePanel() {
             conflictActionToMode(action) ?? (seen.has(destPath) ? 'rename' : undefined);
           seen.add(destPath);
           try {
-            await uploadFileToWorkspace(f, 'sources', undefined, mode);
+            await uploadFileToWorkspace(f, destBase, undefined, mode);
             counts.success++;
           } catch (err) {
             if (isConflictError(err)) counts.conflict++;
@@ -1319,15 +1403,16 @@ export default function WorkspacePanel() {
             console.error(`[WorkspacePanel] upload failed for ${f.name}:`, err);
           }
         }
-        reportUploadOutcome('sources/', counts);
+        reportUploadOutcome(`${destBase}/`, counts);
         await loadData();
         setTimeout(() => loadData(), 1000);
       } finally {
+        uploadingRef.current = false;
         setUploading(false);
       }
       return false;
     },
-    [uploading, preflightConflicts, askConflictDecisions, reportUploadOutcome, loadData],
+    [askDestination, rememberDest, preflightConflicts, askConflictDecisions, reportUploadOutcome, loadData],
   );
 
   // --- External file drag-over detection (panel-level) ---
@@ -1358,52 +1443,46 @@ export default function WorkspacePanel() {
     }
   }, [isExternalFileDrag]);
 
-  /** Upload a flattened drop into sources/, preserving any folder structure. */
+  /** Upload a flattened drop into `destBase`, preserving any folder structure.
+   *  `preserveRootName` keeps the dropped folder's own (sanitized) name as the
+   *  first path segment instead of merging its contents into `destBase`. */
   const uploadDroppedToWorkspace = useCallback(
-    async (collected: CollectedDrop) => {
-      const all = collected.files;
-      if (all.length === 0) return;
-
-      const oversized = all.filter((d) => d.file.size > MAX_REFERENCE_SIZE);
-      const kept = all.filter((d) => d.file.size <= MAX_REFERENCE_SIZE);
-      if (oversized.length > 0) {
-        message.warning(
-          t('workspace.uploadSkippedLarge', {
-            count: oversized.length,
-            limit: Math.round(MAX_REFERENCE_SIZE / (1024 * 1024)),
-            defaultValue: `${oversized.length} file(s) over ${Math.round(MAX_REFERENCE_SIZE / (1024 * 1024))}MB were skipped`,
-          }),
-        );
-      }
-      if (kept.length === 0) return;
-
-      const totalBytes = kept.reduce((sum, d) => sum + d.file.size, 0);
-      if (kept.length > MAX_DROP_FILES || totalBytes > MAX_DROP_TOTAL_BYTES) {
-        const ok = await new Promise<boolean>((resolve) => {
-          modal.confirm({
-            title: t('workspace.uploadBulkTitle', { defaultValue: 'Upload many files?' }),
-            content: t('workspace.uploadBulkContent', {
-              count: kept.length,
-              size: Math.round(totalBytes / (1024 * 1024)),
-              defaultValue: `This drop contains ${kept.length} files (~${Math.round(totalBytes / (1024 * 1024))}MB). Upload all of them?`,
+    async (collected: CollectedDrop, destBase: string, opts?: { preserveRootName?: boolean }) => {
+      if (uploadingRef.current) return;
+      const kept = await applyDropPolicy(collected, {
+        maxFileSize: MAX_REFERENCE_SIZE,
+        warnOversize: (count, limit) =>
+          message.warning(
+            t('workspace.uploadSkippedLarge', {
+              count,
+              limit,
+              defaultValue: `${count} file(s) over ${limit}MB were skipped`,
             }),
-            okText: t('workspace.uploadBulkConfirm', { defaultValue: 'Upload all' }),
-            cancelText: t('common.cancel', 'Cancel'),
-            centered: true,
-            onOk: () => resolve(true),
-            onCancel: () => resolve(false),
-          });
-        });
-        if (!ok) return;
-      }
-
-      if (uploading) return;
+          ),
+        confirmBulk: (count, size) =>
+          new Promise<boolean>((resolve) => {
+            modal.confirm({
+              title: t('workspace.uploadBulkTitle', { defaultValue: 'Upload many files?' }),
+              content: t('workspace.uploadBulkContent', {
+                count,
+                size,
+                defaultValue: `This drop contains ${count} files (~${size}MB). Upload all of them?`,
+              }),
+              okText: t('workspace.uploadBulkConfirm', { defaultValue: 'Upload all' }),
+              cancelText: t('common.cancel', { defaultValue: 'Cancel' }),
+              centered: true,
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+            });
+          }),
+      });
+      if (!kept || kept.length === 0) return;
 
       // Resolve every file's target up front (also feeds the duplicate pre-flight).
       const seenPaths = new Set<string>();
       const targets = kept.map((d) => {
-        const { subDir, fileName } = splitRelPath(d.relPath, d.rootDir, safeUploadName);
-        const destDir = subDir ? `sources/${subDir}` : 'sources';
+        const { subDir, fileName } = splitRelPath(d.relPath, opts?.preserveRootName ? null : d.rootDir, safeUploadName);
+        const destDir = subDir ? `${destBase}/${subDir}` : destBase;
         const destPath = `${destDir}/${fileName}`;
         // Duplicate names within one batch race past the pre-flight — rename the later ones.
         const inBatchDupe = seenPaths.has(destPath);
@@ -1420,6 +1499,8 @@ export default function WorkspacePanel() {
         if (!decisions) return; // user cancelled
       }
 
+      if (uploadingRef.current) return; // a concurrent flow won the race
+      uploadingRef.current = true;
       setUploading(true);
       const counts = { success: 0, skipped: 0, conflict: 0, failed: 0 };
       try {
@@ -1440,14 +1521,15 @@ export default function WorkspacePanel() {
             console.error(`[WorkspacePanel] upload failed for ${tg.d.relPath}:`, err);
           }
         });
-        reportUploadOutcome('sources/', counts);
+        reportUploadOutcome(`${destBase}/`, counts);
         await loadData();
         setTimeout(() => loadData(), 1000);
       } finally {
+        uploadingRef.current = false;
         setUploading(false);
       }
     },
-    [uploading, loadData, t, message, modal, preflightConflicts, askConflictDecisions, reportUploadOutcome],
+    [loadData, t, message, modal, preflightConflicts, askConflictDecisions, reportUploadOutcome],
   );
 
   const handlePanelDrop = useCallback((e: React.DragEvent) => {
@@ -1456,10 +1538,50 @@ export default function WorkspacePanel() {
     dragEnterCounterRef.current = 0;
     setExternalDragOver(false);
 
-    // collectDroppedEntries captures dataTransfer entries synchronously, then
-    // expands dropped folders before uploading (preserving directory structure).
-    void collectDroppedEntries(e.dataTransfer).then((collected) => uploadDroppedToWorkspace(collected));
-  }, [isExternalFileDrag, uploadDroppedToWorkspace]);
+    // collectDroppedEntries captures dataTransfer entries synchronously (the
+    // item list is invalidated after this handler returns), THEN the picker
+    // opens — never the other way around.
+    void collectDroppedEntries(e.dataTransfer).then(async (collected) => {
+      if (collected.files.length === 0) return;
+      const hasFolders = collected.files.some((d) => d.rootDir !== null);
+      const choice = await askDestination(hasFolders);
+      if (!choice) return; // user cancelled
+      rememberDest(choice.dest);
+      await uploadDroppedToWorkspace(collected, choice.dest, { preserveRootName: choice.preserveRootName });
+    });
+  }, [isExternalFileDrag, askDestination, rememberDest, uploadDroppedToWorkspace]);
+
+  /** External files dropped directly onto a folder node — upload into it,
+   *  keeping a dropped folder's own name (Finder semantics). */
+  const handleNodeExternalDrop = useCallback((destPath: string, dt: DataTransfer) => {
+    // The node handler stopPropagation()s, so handlePanelDrop never resets the
+    // overlay counter — do it here or the red drop zone sticks.
+    dragEnterCounterRef.current = 0;
+    setExternalDragOver(false);
+    void collectDroppedEntries(dt).then((collected) => {
+      if (collected.files.length === 0) return;
+      void uploadDroppedToWorkspace(collected, destPath, { preserveRootName: true });
+    });
+  }, [uploadDroppedToWorkspace]);
+
+  /** Picker "new folder": recursive mkdir, refresh the tree, return the path. */
+  const handlePickerCreateFolder = useCallback(
+    async (parent: string, name: string): Promise<string | null> => {
+      const cleaned = name.replace(/[\\/]/g, '_').trim();
+      if (!cleaned || cleaned === '.' || cleaned === '..' || !client) return null;
+      const fullPath = parent ? `${parent}/${cleaned}` : cleaned;
+      try {
+        await client.request('rc.ws.mkdir', { path: fullPath });
+        await loadData();
+        return fullPath;
+      } catch (err) {
+        console.error('[WorkspacePanel] picker mkdir failed:', err);
+        message.error(t('workspace.createFailed', { defaultValue: 'Create failed' }));
+        return null;
+      }
+    },
+    [client, loadData, message, t],
+  );
 
   return (
     <div
@@ -1621,7 +1743,7 @@ export default function WorkspacePanel() {
             {/* Tree nodes */}
             {displayTree.length > 0 ? (
               displayTree.map((node) => (
-                <FileTreeNode key={node.path} node={node} depth={0} tokens={tokens} workspaceRoot={workspaceRoot} dragSrcPath={dragSrcPath} movingPath={movingPath} creatingItem={creatingItem} onOpenFile={setPreviewPath} onDeleted={loadData} onMoved={loadData} onDragSrcChange={setDragSrcPath} onMoveStart={setMovingPath} onMoveEnd={() => setMovingPath(null)} onCreateItem={setCreatingItem} onCreateDone={() => setCreatingItem(null)} />
+                <FileTreeNode key={node.path} node={node} depth={0} tokens={tokens} workspaceRoot={workspaceRoot} dragSrcPath={dragSrcPath} movingPath={movingPath} creatingItem={creatingItem} onOpenFile={setPreviewPath} onDeleted={loadData} onMoved={loadData} onDragSrcChange={setDragSrcPath} onMoveStart={setMovingPath} onMoveEnd={() => setMovingPath(null)} onCreateItem={setCreatingItem} onCreateDone={() => setCreatingItem(null)} onExternalDrop={handleNodeExternalDrop} />
               ))
             ) : debouncedQuery ? (
               <div style={{ padding: '16px', textAlign: 'center' }}>
@@ -1797,6 +1919,22 @@ export default function WorkspacePanel() {
         onCancel={() => {
           conflictPrompt?.resolve(null);
           setConflictPrompt(null);
+        }}
+      />
+
+      <DestinationPickerModal
+        open={destPrompt !== null}
+        tree={tree}
+        hasFolders={destPrompt?.hasFolders ?? false}
+        defaultDest={lastDest}
+        onCreateFolder={handlePickerCreateFolder}
+        onResolve={(choice) => {
+          destPrompt?.resolve(choice);
+          setDestPrompt(null);
+        }}
+        onCancel={() => {
+          destPrompt?.resolve(null);
+          setDestPrompt(null);
         }}
       />
     </div>

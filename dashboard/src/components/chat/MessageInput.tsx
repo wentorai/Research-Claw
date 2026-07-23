@@ -26,11 +26,10 @@ import {
   timestampedUploadName,
 } from '../../utils/file-reference';
 import {
+  applyDropPolicy,
   collectDroppedEntries,
   mapWithConcurrency,
   splitRelPath,
-  MAX_DROP_FILES,
-  MAX_DROP_TOTAL_BYTES,
   UPLOAD_CONCURRENCY,
   type CollectedDrop,
   type DroppedFile,
@@ -381,43 +380,35 @@ export default function MessageInput() {
    *  fan out: loose files → individual chips, folders → one folder chip each. */
   const ingestDroppedEntries = useCallback(
     async (collected: CollectedDrop) => {
-      const all = collected.files;
-      if (all.length === 0) return;
-
-      // Skip oversized single files (memory-protection cap) — one combined warning.
-      const oversized = all.filter((d) => d.file.size > MAX_REFERENCE_SIZE);
-      const kept = all.filter((d) => d.file.size <= MAX_REFERENCE_SIZE);
-      if (oversized.length > 0) {
-        message.warning(
-          t('chat.dropSkippedLarge', {
-            count: oversized.length,
-            limit: Math.round(MAX_REFERENCE_SIZE / (1024 * 1024)),
-            defaultValue: '{{count}} file(s) over {{limit}}MB were skipped',
-          }),
-        );
-      }
-      if (kept.length === 0) return;
-
-      // Confirm large batches before uploading everything.
-      const totalBytes = kept.reduce((sum, d) => sum + d.file.size, 0);
-      if (kept.length > MAX_DROP_FILES || totalBytes > MAX_DROP_TOTAL_BYTES) {
-        const ok = await new Promise<boolean>((resolve) => {
-          modal.confirm({
-            title: t('chat.dropBulkTitle', { defaultValue: 'Upload many files?' }),
-            content: t('chat.dropBulkContent', {
-              count: kept.length,
-              size: Math.round(totalBytes / (1024 * 1024)),
-              defaultValue: 'This drop contains {{count}} files (~{{size}}MB). Upload all of them?',
+      // Shared drop policy: skip oversized files, confirm very large batches.
+      const kept = await applyDropPolicy(collected, {
+        maxFileSize: MAX_REFERENCE_SIZE,
+        warnOversize: (count, limit) =>
+          message.warning(
+            t('chat.dropSkippedLarge', {
+              count,
+              limit,
+              defaultValue: '{{count}} file(s) over {{limit}}MB were skipped',
             }),
-            okText: t('chat.dropBulkConfirm', { defaultValue: 'Upload all' }),
-            cancelText: t('common.cancel', 'Cancel'),
-            centered: true,
-            onOk: () => resolve(true),
-            onCancel: () => resolve(false),
-          });
-        });
-        if (!ok) return;
-      }
+          ),
+        confirmBulk: (count, size) =>
+          new Promise<boolean>((resolve) => {
+            modal.confirm({
+              title: t('chat.dropBulkTitle', { defaultValue: 'Upload many files?' }),
+              content: t('chat.dropBulkContent', {
+                count,
+                size,
+                defaultValue: 'This drop contains {{count}} files (~{{size}}MB). Upload all of them?',
+              }),
+              okText: t('chat.dropBulkConfirm', { defaultValue: 'Upload all' }),
+              cancelText: t('common.cancel', { defaultValue: 'Cancel' }),
+              centered: true,
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+            });
+          }),
+      });
+      if (!kept || kept.length === 0) return;
 
       // Loose files keep the existing per-file behavior (images → vision thumbnail).
       const looseFiles = kept.filter((d) => d.rootDir === null);

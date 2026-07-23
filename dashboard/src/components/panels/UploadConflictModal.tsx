@@ -112,7 +112,7 @@ export default function UploadConflictModal({ open, conflicts, onResolve, onCanc
         onChange={(e) => setApplyAll(e.target.checked)}
         style={{ marginTop: 12 }}
       >
-        {t('workspace.conflictApplyAll', { defaultValue: 'Apply the same choice to all conflicts' })}
+        {t('workspace.conflictApplyAll', { defaultValue: 'Apply to ALL' })}
       </Checkbox>
     </Modal>
   );
