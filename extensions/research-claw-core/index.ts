@@ -1632,9 +1632,10 @@ const plugin: PluginDefinition = {
             return true;
           }
 
-          // Sanitize destination: resolve and verify it stays within workspace root
-          const destDir = destination || 'sources';
-          const resolvedDest = path.resolve(wsConfig.root, destDir);
+          // Sanitize destination: resolve and verify it stays within workspace root.
+          // '.' selects the workspace root itself; absent still defaults to sources.
+          const destDir = destination === '.' ? '' : (destination || 'sources');
+          const resolvedDest = path.resolve(wsConfig.root, destDir || '.');
           if (!resolvedDest.startsWith(path.resolve(wsConfig.root) + path.sep) && resolvedDest !== path.resolve(wsConfig.root)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: { code: 'UPLOAD_INVALID_PATH', message: 'Invalid destination path' } }));
@@ -1663,8 +1664,8 @@ const plugin: PluginDefinition = {
               ok: false,
               error: {
                 code: 'UPLOAD_FILE_EXISTS',
-                message: `Already exists: ${destDir}/${safeFilename}`,
-                path: `${destDir}/${safeFilename}`,
+                message: `Already exists: ${destDir ? `${destDir}/` : ''}${safeFilename}`,
+                path: `${destDir ? `${destDir}/` : ''}${safeFilename}`,
                 existing: conflict.existing,
               },
             }));
@@ -1672,9 +1673,9 @@ const plugin: PluginDefinition = {
           }
 
           const finalName = conflict.fileName;
-          const destPath = `${destDir}/${finalName}`;
+          const destPath = destDir ? `${destDir}/${finalName}` : finalName;
           // Atomic rename out of the staging dir + the same git tracking as save().
-          const result = await wsService.saveFromTempFile(file.tmpPath, destPath, `Upload: ${finalName} to ${destDir}`);
+          const result = await wsService.saveFromTempFile(file.tmpPath, destPath, `Upload: ${finalName} to ${destDir || '/'}`);
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({

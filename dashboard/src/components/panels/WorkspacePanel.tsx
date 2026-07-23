@@ -954,7 +954,9 @@ export default function WorkspacePanel() {
   // Last-used picker destination, persisted across sessions.
   const [lastDest, setLastDest] = useState(() => {
     try {
-      return localStorage.getItem('rc.ws.lastUploadDest') || 'sources';
+      // '' is a valid stored value (workspace root) — only null means unset.
+      const v = localStorage.getItem('rc.ws.lastUploadDest');
+      return v === null ? 'sources' : v;
     } catch {
       return 'sources';
     }
@@ -1382,7 +1384,7 @@ export default function WorkspacePanel() {
       const destBase = choice.dest;
       rememberDest(destBase);
 
-      const existing = await preflightConflicts(sized.map((f) => `${destBase}/${f.name}`));
+      const existing = await preflightConflicts(sized.map((f) => (destBase ? `${destBase}/${f.name}` : f.name)));
       let decisions: Map<string, ConflictAction> | null = null;
       if (existing.size > 0) {
         decisions = await askConflictDecisions(
@@ -1398,7 +1400,7 @@ export default function WorkspacePanel() {
       const seen = new Set<string>();
       try {
         for (const f of sized) {
-          const destPath = `${destBase}/${f.name}`;
+          const destPath = destBase ? `${destBase}/${f.name}` : f.name;
           const action = decisions?.get(destPath);
           if (action === 'skip') {
             counts.skipped++;
@@ -1409,7 +1411,8 @@ export default function WorkspacePanel() {
             conflictActionToMode(action) ?? (seen.has(destPath) ? 'rename' : undefined);
           seen.add(destPath);
           try {
-            await uploadFileToWorkspace(f, destBase, undefined, mode);
+            // '' = workspace root, sent as '.' on the wire.
+            await uploadFileToWorkspace(f, destBase || '.', undefined, mode);
             counts.success++;
           } catch (err) {
             if (isConflictError(err)) counts.conflict++;
@@ -1417,7 +1420,7 @@ export default function WorkspacePanel() {
             console.error(`[WorkspacePanel] upload failed for ${f.name}:`, err);
           }
         }
-        reportUploadOutcome(`${destBase}/`, counts);
+        reportUploadOutcome(destBase ? `${destBase}/` : '/', counts);
         await loadData();
         setTimeout(() => loadData(), 1000);
       } finally {
@@ -1496,8 +1499,9 @@ export default function WorkspacePanel() {
       const seenPaths = new Set<string>();
       const targets = kept.map((d) => {
         const { subDir, fileName } = splitRelPath(d.relPath, opts?.preserveRootName ? null : d.rootDir, safeUploadName);
-        const destDir = subDir ? `${destBase}/${subDir}` : destBase;
-        const destPath = `${destDir}/${fileName}`;
+        // destBase '' = workspace root; keep paths clean of leading slashes.
+        const destDir = [destBase, subDir].filter(Boolean).join('/');
+        const destPath = destDir ? `${destDir}/${fileName}` : fileName;
         // Duplicate names within one batch race past the pre-flight — rename the later ones.
         const inBatchDupe = seenPaths.has(destPath);
         seenPaths.add(destPath);
@@ -1527,7 +1531,8 @@ export default function WorkspacePanel() {
           const mode: UploadConflictMode | undefined =
             conflictActionToMode(action) ?? (tg.inBatchDupe ? 'rename' : undefined);
           try {
-            await uploadFileToWorkspace(tg.d.file, tg.destDir, tg.fileName, mode);
+            // '' = workspace root, sent as '.' on the wire.
+            await uploadFileToWorkspace(tg.d.file, tg.destDir || '.', tg.fileName, mode);
             counts.success++;
           } catch (err) {
             if (isConflictError(err)) counts.conflict++;
@@ -1535,7 +1540,7 @@ export default function WorkspacePanel() {
             console.error(`[WorkspacePanel] upload failed for ${tg.d.relPath}:`, err);
           }
         });
-        reportUploadOutcome(`${destBase}/`, counts);
+        reportUploadOutcome(destBase ? `${destBase}/` : '/', counts);
         await loadData();
         setTimeout(() => loadData(), 1000);
       } finally {

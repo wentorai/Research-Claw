@@ -60,6 +60,15 @@ describe('DestinationPickerModal', () => {
     expect(list.textContent).not.toContain('loose.txt');
   });
 
+  it('workspace root is the first option and resolves as empty dest', () => {
+    const { onResolve } = renderPicker();
+    const list = screen.getByTestId('dest-dir-list');
+    expect(list.firstChild?.textContent).toContain('workspace.destRootLabel');
+    fireEvent.click(screen.getByText('workspace.destRootLabel'));
+    fireEvent.click(screen.getByText('workspace.destUpload'));
+    expect(onResolve).toHaveBeenCalledWith({ dest: '', preserveRootName: false });
+  });
+
   it('resolves the clicked directory on OK', () => {
     const { onResolve } = renderPicker();
     fireEvent.click(screen.getByText('sources/papers'));

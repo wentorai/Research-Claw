@@ -62,7 +62,9 @@ export default function DestinationPickerModal({
   const dirs = useMemo(() => {
     const collected = collectDirs(tree);
     // Fresh workspace before the tree loads — offer the standard scaffold dirs.
-    return collected.length > 0 ? collected : [{ path: 'sources', depth: 0 }, { path: 'outputs', depth: 0 }];
+    const list = collected.length > 0 ? collected : [{ path: 'sources', depth: 0 }, { path: 'outputs', depth: 0 }];
+    // Workspace root is always the first option ('' internally, '.' on the wire).
+    return [{ path: '', depth: 0 }, ...list.map((d) => ({ ...d, depth: d.depth + 1 }))];
   }, [tree]);
 
   const [dest, setDest] = useState(defaultDest);
@@ -70,10 +72,10 @@ export default function DestinationPickerModal({
   const [creatingName, setCreatingName] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
 
-  // Reset per open: last-used destination (fall back to the first dir) + defaults.
+  // Reset per open: last-used destination (fall back to sources) + defaults.
   useEffect(() => {
     if (open) {
-      setDest(dirs.some((d) => d.path === defaultDest) ? defaultDest : (dirs[0]?.path ?? 'sources'));
+      setDest(dirs.some((d) => d.path === defaultDest) ? defaultDest : 'sources');
       setPreserve(true);
       setCreatingName(null);
     }
@@ -99,7 +101,7 @@ export default function DestinationPickerModal({
     <Modal
       open={open}
       centered
-      title={t('workspace.destTitle', { defaultValue: 'Upload to…' })}
+      title={t('workspace.destTitle', { defaultValue: 'Choose destination folder' })}
       okText={t('workspace.destUpload', { defaultValue: 'Upload' })}
       cancelText={t('common.cancel', { defaultValue: 'Cancel' })}
       onOk={() => onResolve({ dest, preserveRootName: hasFolders ? preserve : false })}
@@ -126,8 +128,8 @@ export default function DestinationPickerModal({
             }}
           >
             <FolderOutlined />
-            <Text ellipsis={{ tooltip: d.path }} style={{ flex: 1, minWidth: 0 }}>
-              {d.path}
+            <Text ellipsis={{ tooltip: d.path || '/' }} style={{ flex: 1, minWidth: 0 }}>
+              {d.path || t('workspace.destRootLabel', { defaultValue: 'Workspace root /' })}
             </Text>
           </div>
         ))}
@@ -148,7 +150,7 @@ export default function DestinationPickerModal({
           autoFocus
           value={creatingName}
           loading={createBusy}
-          placeholder={t('workspace.destNewFolderIn', { path: dest, defaultValue: 'New folder in {{path}}/' })}
+          placeholder={t('workspace.destNewFolderIn', { path: dest || '/', defaultValue: 'New folder in {{path}}/' })}
           enterButton={t('workspace.destCreate', { defaultValue: 'Create' })}
           onChange={(e) => setCreatingName(e.target.value)}
           onSearch={handleCreateFolder}
@@ -166,7 +168,7 @@ export default function DestinationPickerModal({
       )}
 
       <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-        {t('workspace.destTarget', { path: dest, defaultValue: 'Target: {{path}}/' })}
+        {t('workspace.destTarget', { path: dest || '/', defaultValue: 'Target: {{path}}/' })}
       </Text>
     </Modal>
   );

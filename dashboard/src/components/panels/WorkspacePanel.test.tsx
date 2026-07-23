@@ -286,6 +286,7 @@ describe('WorkspacePanel — destination picker & node drops', () => {
   };
 
   beforeEach(() => {
+    localStorage.removeItem('rc.ws.lastUploadDest'); // remember-last leaks across tests otherwise
     uploadMock.mockClear();
     mockRequest.mockReset();
     mockRequest.mockImplementation((method: string) => {
@@ -347,6 +348,23 @@ describe('WorkspacePanel — destination picker & node drops', () => {
     fireEvent.click(screen.getByText('workspace.destUpload'));
     await waitFor(() => expect(uploadMock).toHaveBeenCalledTimes(1));
     expect(uploadMock.mock.calls[0][1]).toBe('sources'); // default = last-used/sources
+  });
+
+  it('choosing workspace root in the picker sends "." as the wire destination', async () => {
+    renderPanel();
+    await screen.findByText('notes');
+    const panel = screen.getByText('workspace.fileTree').closest('div[style*="height: 100%"]')!;
+
+    act(() => {
+      panel.dispatchEvent(dropEvent(externalDT([new File(['x'], 'root.txt')])));
+    });
+
+    await screen.findByText('workspace.destTitle');
+    fireEvent.click(screen.getByText('workspace.destRootLabel'));
+    fireEvent.click(screen.getByText('workspace.destUpload'));
+    await waitFor(() => expect(uploadMock).toHaveBeenCalledTimes(1));
+    expect(uploadMock.mock.calls[0][1]).toBe('.');
+    expect(uploadMock.mock.calls[0][2]).toBe('root.txt');
   });
 
   it('folder drop via the picker preserves the top-level folder name by default', async () => {
