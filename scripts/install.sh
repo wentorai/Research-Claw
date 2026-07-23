@@ -1499,6 +1499,8 @@ fi
 
 CRASH_COUNT=0
 MAX_CRASHES=10
+# Run start for the farewell usage overview (mirrors run.sh).
+export RC_RUN_START_EPOCH=$(date +%s)
 
 while true; do
   START_TS=$(date +%s)
@@ -1510,7 +1512,9 @@ while true; do
   CODE=$?
 
   if $STOP; then
-    printf "\n  ${G}Stopped.${N}\n"
+    # Same farewell screen as run.sh. curl|bash makes $0 useless here — the
+    # script must be resolved via INSTALL_DIR (we cd'd there above).
+    RC_NODE="$GW_NODE" bash "$INSTALL_DIR/scripts/farewell.sh" || true
     exit 0
   fi
 

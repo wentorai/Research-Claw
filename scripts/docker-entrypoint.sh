@@ -345,6 +345,8 @@ fi
 
 STOP=false
 trap 'STOP=true' INT TERM
+# Run start for the farewell usage overview (mirrors run.sh).
+export RC_RUN_START_EPOCH=$(date +%s)
 
 while true; do
   # MiniMax OAuth (sk-cp-...) compatibility proxy (no-op unless configured).
@@ -359,6 +361,9 @@ while true; do
   kill "$PROXY_PID" >/dev/null 2>&1 || true
 
   if [ "$STOP" = "true" ]; then
+    # Same farewell screen as run.sh (farewell.sh auto-detects docker via
+    # /.dockerenv; without a TTY it degrades to plain text).
+    bash /app/scripts/farewell.sh || true
     exit 0
   fi
 
