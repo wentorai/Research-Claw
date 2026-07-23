@@ -14,7 +14,7 @@ export function installChatAbortKeyboardShortcuts(): void {
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (!isActiveChatRun()) return;
-    if (!isAbortGenerationShortcut(e, e.target)) return;
+    if (!isAbortGenerationShortcut(e)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     useChatStore.getState().abort();
