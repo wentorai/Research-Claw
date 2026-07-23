@@ -29,6 +29,9 @@ export interface CollectedDrop {
   files: DroppedFile[];
   /** True when at least one dropped item was a directory (entries API was used). */
   hadDirectory: boolean;
+  /** True when webkitGetAsEntry was unavailable: dropped-FOLDER contents are
+   *  silently missing from `files` — callers should warn the user. */
+  entriesUnsupported?: boolean;
 }
 
 /** Bulk-confirmation thresholds (shared so composer and panel behave alike). */
@@ -123,11 +126,14 @@ export async function collectDroppedEntries(dt: DataTransfer): Promise<Collected
   }
 
   if (!supportsEntries) {
-    // Fallback: directory expansion unavailable — loose files only.
+    // Fallback: directory expansion unavailable — loose files only. Folder
+    // contents are LOST here; the flag lets callers warn instead of dropping
+    // them silently.
     const files = dt.files ? Array.from(dt.files) : [];
     return {
       files: files.map((file) => ({ file, relPath: file.name, rootDir: null })),
       hadDirectory: false,
+      entriesUnsupported: true,
     };
   }
 

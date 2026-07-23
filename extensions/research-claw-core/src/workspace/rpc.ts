@@ -1,9 +1,11 @@
 /**
- * workspace/rpc — 11 Gateway WS RPC Handlers
+ * workspace/rpc — Gateway WS RPC handlers (13 rc.ws.* methods)
  *
- * Registers rc.ws.tree, rc.ws.read, rc.ws.save, rc.ws.history, rc.ws.diff,
- * rc.ws.restore, rc.ws.delete, rc.ws.saveImage, rc.ws.openExternal,
- * rc.ws.openFolder, and rc.ws.move as gateway WebSocket RPC methods.
+ * Registers rc.ws.tree, rc.ws.exists, rc.ws.read, rc.ws.save, rc.ws.history,
+ * rc.ws.diff, rc.ws.restore, rc.ws.delete, rc.ws.saveImage,
+ * rc.ws.openExternal, rc.ws.openFolder, rc.ws.mkdir, and rc.ws.move as
+ * gateway WebSocket RPC methods. (Recount `registerMethod('rc.ws.` when
+ * editing — stale totals in comments have caused real bugs.)
  *
  * rc.ws.upload is HTTP-only (POST /rc/upload) and is NOT registered here.
  * It should be registered as an HTTP route in the plugin entry point (index.ts).
@@ -83,7 +85,7 @@ function mapError(err: unknown): never {
 // ---------------------------------------------------------------------------
 
 /**
- * Register the 7 workspace WS RPC methods with the gateway.
+ * Register the 13 workspace WS RPC methods with the gateway.
  *
  * @param registerMethod - Function to register a gateway RPC method
  * @param service        - WorkspaceService instance to delegate operations to
@@ -257,9 +259,11 @@ export function registerWorkspaceRpc(
     const filePath = requireString(params, 'path');
     if (!wsRoot) throw new Error('Workspace root not configured');
 
-    // Resolve and validate path stays within workspace
-    const resolved = path.resolve(wsRoot, filePath);
-    if (!resolved.startsWith(path.resolve(wsRoot) + path.sep) && resolved !== path.resolve(wsRoot)) {
+    // Symlink-aware containment (path-guard via service), same error shape as before
+    let resolved: string;
+    try {
+      resolved = service.resolvePath(filePath);
+    } catch {
       throw Object.assign(new Error('Path escapes workspace root'), { code: -32001 });
     }
 
@@ -315,9 +319,11 @@ export function registerWorkspaceRpc(
     const filePath = requireString(params, 'path');
     if (!wsRoot) throw new Error('Workspace root not configured');
 
-    // Resolve and validate path stays within workspace
-    const resolved = path.resolve(wsRoot, filePath);
-    if (!resolved.startsWith(path.resolve(wsRoot) + path.sep) && resolved !== path.resolve(wsRoot)) {
+    // Symlink-aware containment (path-guard via service), same error shape as before
+    let resolved: string;
+    try {
+      resolved = service.resolvePath(filePath);
+    } catch {
       throw Object.assign(new Error('Path escapes workspace root'), { code: -32001 });
     }
 

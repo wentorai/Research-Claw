@@ -119,7 +119,7 @@ const LOG_DEFAULT_LIMIT = 20;
  */
 const COMMIT_REF_PATTERN = /^[0-9a-fA-F]{4,40}(~\d+|\^\d*)*$|^HEAD(~\d+|\^\d*)*$|^[a-zA-Z_][a-zA-Z0-9_.\-]*(~\d+|\^\d*)*$/;
 
-const DEFAULT_GITIGNORE = `# Research-Claw workspace — auto-generated
+export const DEFAULT_GITIGNORE = `# Research-Claw workspace — auto-generated
 # Large binary files (managed by size guard)
 *.zip
 *.tar.gz
@@ -189,8 +189,12 @@ node_modules/
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve a user-supplied path against the workspace root and ensure it does
- * not escape the workspace via `..` traversal or absolute-path tricks.
+ * Resolve a path against the workspace root and ensure it does not escape via
+ * `..` traversal or absolute-path tricks.
+ *
+ * Defense-in-depth only: inputs arrive pre-validated by WorkspaceService
+ * (path-guard.ts, symlink-aware). This inner belt deliberately keeps its own
+ * cheaper prefix check and accepts absolute-inside-root paths.
  */
 function safePath(workspaceRoot: string, rawPath: string): string {
   const normalizedRoot = resolve(workspaceRoot);

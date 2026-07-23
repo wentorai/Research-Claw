@@ -1037,7 +1037,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       }
 
       // Inject file references (workspace drag / `@` mention / external ingest)
-      // as a structured block so the sandboxed agent gets workspace-relative
+      // as a structured block so the workspace-scoped agent gets workspace-relative
       // paths it can read via workspace_read — no prompt-body pollution.
       if (fileRefPaths.length > 0) {
         finalMessage = appendReferenceBlock(finalMessage, fileRefPaths);

@@ -141,6 +141,23 @@ describe('mapWithConcurrency', () => {
   });
 });
 
+describe('entriesUnsupported fallback flag', () => {
+  it('marks the drop when webkitGetAsEntry is unavailable (folder contents lost)', async () => {
+    const dt = {
+      items: [{}] as unknown as DataTransferItemList, // items without webkitGetAsEntry
+      files: [new File(['x'], 'loose.txt')] as unknown as FileList,
+    } as unknown as DataTransfer;
+    const collected = await collectDroppedEntries(dt);
+    expect(collected.entriesUnsupported).toBe(true);
+    expect(collected.files.map((f) => f.relPath)).toEqual(['loose.txt']);
+  });
+
+  it('is not set when the entries API is available', async () => {
+    const collected = await collectDroppedEntries(makeDataTransfer([fileEntry('a.txt')]));
+    expect(collected.entriesUnsupported).toBeUndefined();
+  });
+});
+
 describe('applyDropPolicy', () => {
   const drop = (sizes: number[]): CollectedDrop => ({
     files: sizes.map((size, i) => ({

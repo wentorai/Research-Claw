@@ -12,12 +12,14 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import {
+  DEFAULT_GITIGNORE,
   type CommitEntry,
   type GitFileStatus,
   type GitTracker,
   type GitTrackerConfig,
   createGitTracker,
 } from './git-tracker.js';
+import { resolveWithinRoot, validateRelPath } from './path-guard.js';
 
 // ---------------------------------------------------------------------------
 // Error codes (JSON-RPC server error space)
@@ -284,70 +286,6 @@ const HIDDEN_ROOT_ENTRIES = new Set([
   '.uploads-tmp',
 ]);
 
-const DEFAULT_GITIGNORE = `# Research-Claw workspace — auto-generated
-# Large binary files (managed by size guard)
-*.zip
-*.tar.gz
-*.tgz
-*.rar
-*.7z
-*.iso
-*.dmg
-*.exe
-*.dll
-*.so
-*.dylib
-*.o
-*.obj
-
-# Temporary files
-*.tmp
-*.swp
-*.swo
-*~
-*.log
-*.pid
-*.seed
-.DS_Store
-Thumbs.db
-
-# Media (large)
-*.mp4
-*.avi
-*.mov
-*.mkv
-*.mp3
-*.wav
-*.flac
-
-# Python artifacts
-__pycache__/
-*.pyc
-.venv/
-.ipynb_checkpoints/
-
-# R artifacts
-.Rhistory
-.RData
-
-# Node
-node_modules/
-
-# Editor state
-.vscode/
-.idea/
-
-# Large data (user can remove lines to track specific files)
-*.h5
-*.hdf5
-*.parquet
-*.sqlite
-*.db
-
-# Environment / secrets
-.env
-.env.*
-`;
 
 // ---------------------------------------------------------------------------
 // WorkspaceService
@@ -372,97 +310,24 @@ export class WorkspaceService {
    * path contains `..`, starts with `/`, or contains null bytes.
    */
   private validatePath(p: string): void {
-    if (!p || typeof p !== 'string') {
-      throw new WorkspaceError(
-        'Invalid path: path must be a non-empty string.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
-    }
-
-    if (p.includes('\0')) {
-      throw new WorkspaceError(
-        'Invalid path: null bytes are not allowed.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
-    }
-
-    if (path.isAbsolute(p) || p.startsWith('/') || p.startsWith('\\')) {
-      throw new WorkspaceError(
-        'Invalid path: absolute paths are not allowed.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
-    }
-
-    // Normalize and check for traversal
-    const normalized = path.normalize(p);
-    if (normalized.startsWith('..') || normalized.includes(`${path.sep}..`)) {
-      throw new WorkspaceError(
-        'Invalid path: directory traversal is not allowed.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
-    }
-
-    // Also check the raw string for `..` segments (covers mixed separators)
-    const segments = p.replace(/\\/g, '/').split('/');
-    if (segments.some((s) => s === '..')) {
-      throw new WorkspaceError(
-        'Invalid path: directory traversal is not allowed.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
+    try {
+      validateRelPath(p);
+    } catch (e) {
+      throw new WorkspaceError((e as Error).message, WS_PATH_TRAVERSAL, { path: p });
     }
   }
 
   /**
    * Resolve a relative path to an absolute path within the workspace.
    * Also checks for symlink escapes on existing paths and their parent dirs.
+   * (Implementation lives in path-guard.ts — the single containment source.)
    */
   resolvePath(relativePath: string): string {
-    this.validatePath(relativePath);
-    const resolved = path.resolve(this.root, relativePath);
-
-    // Double-check the resolved path is still within workspace root
-    if (resolved !== this.root && !resolved.startsWith(this.root + path.sep)) {
-      throw new WorkspaceError(
-        'Invalid path: resolved path escapes workspace root.',
-        WS_PATH_TRAVERSAL,
-        { path: relativePath },
-      );
-    }
-
-    // Symlink escape guard: walk up from resolved path to workspace root,
-    // checking the first existing ancestor via fs.realpathSync(). This catches
-    // symlinks at any depth (e.g. workspace/a → /tmp/x/, write to a/b/c.txt).
     try {
-      const realRoot = fs.realpathSync(this.root);
-      let checkPath = resolved;
-      while (checkPath !== realRoot && checkPath !== path.dirname(checkPath)) {
-        try {
-          const real = fs.realpathSync(checkPath);
-          if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
-            throw new WorkspaceError(
-              'Invalid path: resolves outside workspace root via symlink.',
-              WS_PATH_TRAVERSAL,
-              { path: relativePath },
-            );
-          }
-          break; // Found existing path within bounds — safe
-        } catch (e) {
-          if (e instanceof WorkspaceError) throw e;
-          // ENOENT: path doesn't exist yet, check parent
-          checkPath = path.dirname(checkPath);
-        }
-      }
+      return resolveWithinRoot(this.root, relativePath);
     } catch (e) {
-      if (e instanceof WorkspaceError) throw e;
-      // If realpath on root fails, skip symlink check entirely
+      throw new WorkspaceError((e as Error).message, WS_PATH_TRAVERSAL, { path: relativePath });
     }
-
-    return resolved;
   }
 
   // -----------------------------------------------------------------------

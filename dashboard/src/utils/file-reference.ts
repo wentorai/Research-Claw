@@ -3,8 +3,9 @@
  * menu, and the chat send pipeline.
  *
  * A "reference" is always a WORKSPACE-RELATIVE path (e.g. "sources/chat/data.csv").
- * The agent is sandboxed to the workspace, so only relative paths it can reach
- * via workspace_read are ever injected into the prompt.
+ * Agent file tools are workspace-scoped (application-layer path enforcement;
+ * deployment-level isolation comes from running the whole product in Docker),
+ * so only relative paths reachable via workspace_read are injected into prompts.
  */
 
 /** Client-side soft cap for ingesting external files. The gateway streams

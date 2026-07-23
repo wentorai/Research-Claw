@@ -310,10 +310,12 @@ export default function MessageInput() {
           reader.readAsDataURL(file);
         }
       } catch (err) {
+        // Retain the File on the errored chip so retry can re-upload without a
+        // re-drop (released again once the retry succeeds).
         setReferences((prev) =>
           prev.map((r) =>
             r.id === id
-              ? { ...r, status: 'error', errorMsg: err instanceof Error ? err.message : String(err) }
+              ? { ...r, status: 'error', errorMsg: err instanceof Error ? err.message : String(err), file }
               : r,
           ),
         );
@@ -380,6 +382,13 @@ export default function MessageInput() {
    *  fan out: loose files → individual chips, folders → one folder chip each. */
   const ingestDroppedEntries = useCallback(
     async (collected: CollectedDrop) => {
+      if (collected.entriesUnsupported) {
+        message.warning(
+          t('chat.dropEntriesUnsupported', {
+            defaultValue: 'This browser cannot expand dropped folders — only loose files were picked up',
+          }),
+        );
+      }
       // Shared drop policy: skip oversized files, confirm very large batches.
       const kept = await applyDropPolicy(collected, {
         maxFileSize: MAX_REFERENCE_SIZE,
@@ -433,12 +442,43 @@ export default function MessageInput() {
   );
 
   const retryReference = useCallback(
-    (id: string) => {
-      // Errored chips carry no File handle; the simplest robust recovery is to
-      // drop the chip and ask the user to re-drop. Keep UX honest about that.
-      removeReference(id);
+    async (id: string) => {
+      const ref = references.find((r) => r.id === id);
+      // Folder chips (and legacy chips) carry no File handle — the honest
+      // recovery there is still remove-and-redrop.
+      if (!ref?.file) {
+        removeReference(id);
+        return;
+      }
+      const file = ref.file;
+      // Re-upload to the chip's existing provisional path (stable name).
+      const slash = ref.path.lastIndexOf('/');
+      const destination = slash > 0 ? ref.path.slice(0, slash) : 'sources';
+      const uploadName = slash > 0 ? ref.path.slice(slash + 1) : ref.path;
+      setReferences((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, status: 'uploading', errorMsg: undefined } : r)),
+      );
+      try {
+        const result = await uploadFileToWorkspace(file, destination, uploadName);
+        setReferences((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? { ...r, path: result.path, status: 'ready', size: result.size, mimeType: result.mime_type, file: undefined }
+              : r,
+          ),
+        );
+        wsPathsLoadedRef.current = false;
+      } catch (err) {
+        setReferences((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? { ...r, status: 'error', errorMsg: err instanceof Error ? err.message : String(err) }
+              : r,
+          ),
+        );
+      }
     },
-    [removeReference],
+    [references, removeReference],
   );
 
   // Lazily load the workspace file list for the `@` mention menu.

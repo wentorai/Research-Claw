@@ -1466,6 +1466,13 @@ export default function WorkspacePanel() {
   const uploadDroppedToWorkspace = useCallback(
     async (collected: CollectedDrop, destBase: string, opts?: { preserveRootName?: boolean }) => {
       if (uploadingRef.current) return;
+      if (collected.entriesUnsupported) {
+        message.warning(
+          t('workspace.dropEntriesUnsupported', {
+            defaultValue: 'This browser cannot expand dropped folders — only loose files were picked up',
+          }),
+        );
+      }
       const kept = await applyDropPolicy(collected, {
         maxFileSize: MAX_REFERENCE_SIZE,
         warnOversize: (count, limit) =>

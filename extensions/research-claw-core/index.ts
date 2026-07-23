@@ -1267,7 +1267,7 @@ const plugin: PluginDefinition = {
     };
     registerLiteratureRpc(registerMethod, litService);   // 33 methods
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
-    registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
+    registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 13 methods (recount rpc.ts when editing)
     registerMonitorRpc(registerMethod, monitorService);   // 12 methods
     registerJobRpc(registerMethod, jobService, {
       syncOpenClawSubagents: throttledJobSync,
@@ -1632,11 +1632,13 @@ const plugin: PluginDefinition = {
             return true;
           }
 
-          // Sanitize destination: resolve and verify it stays within workspace root.
-          // '.' selects the workspace root itself; absent still defaults to sources.
+          // Sanitize destination via the symlink-aware guard (path-guard through
+          // service). '.' selects the workspace root; absent defaults to sources.
           const destDir = destination === '.' ? '' : (destination || 'sources');
-          const resolvedDest = path.resolve(wsConfig.root, destDir || '.');
-          if (!resolvedDest.startsWith(path.resolve(wsConfig.root) + path.sep) && resolvedDest !== path.resolve(wsConfig.root)) {
+          let resolvedDest: string;
+          try {
+            resolvedDest = wsService.resolvePath(destDir || '.');
+          } catch {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: { code: 'UPLOAD_INVALID_PATH', message: 'Invalid destination path' } }));
             return true;
@@ -1738,8 +1740,13 @@ const plugin: PluginDefinition = {
             return true;
           }
 
-          const resolved = path.resolve(wsConfig.root, filePath);
-          if (!resolved.startsWith(path.resolve(wsConfig.root) + path.sep) && resolved !== path.resolve(wsConfig.root)) {
+          // Symlink-aware containment (path-guard via service) — this is a
+          // user-controlled READ path, so the prefix-only check was a real gap
+          // (workspace-internal `ln -s /etc evil` could read outside).
+          let resolved: string;
+          try {
+            resolved = wsService.resolvePath(filePath);
+          } catch {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: { code: 'PATH_ESCAPE', message: 'Path escapes workspace root' } }));
             return true;
