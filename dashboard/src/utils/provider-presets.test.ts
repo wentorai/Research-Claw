@@ -181,6 +181,35 @@ describe('DeepSeek provider preset', () => {
   });
 });
 
+describe('Moonshot Kimi K3 model', () => {
+  const cn = PROVIDER_PRESETS.find((p) => p.id === 'moonshot-cn')!;
+  const intl = PROVIDER_PRESETS.find((p) => p.id === 'moonshot')!;
+
+  it('exists in both moonshot presets', () => {
+    expect(cn.models.map((m) => m.id)).toContain('kimi-k3');
+    expect(intl.models.map((m) => m.id)).toContain('kimi-k3');
+  });
+
+  it('uses the documented 1M context and 131K output cap', () => {
+    for (const preset of [cn, intl]) {
+      const k3 = preset.models.find((m) => m.id === 'kimi-k3')!;
+      expect(k3.contextWindow).toBe(1_048_576);
+      expect(k3.maxTokens).toBe(131_072);
+    }
+  });
+
+  it('is marked as a reasoning model (thinking-only per Moonshot /v1/models)', () => {
+    // Without reasoning: true the idle watchdog kills K3 during its think phase.
+    for (const preset of [cn, intl]) {
+      expect(preset.models.find((m) => m.id === 'kimi-k3')!.reasoning).toBe(true);
+    }
+  });
+
+  it('accepts image input', () => {
+    expect(cn.models.find((m) => m.id === 'kimi-k3')!.input).toContain('image');
+  });
+});
+
 describe('inferApiFromUrl', () => {
   it('defaults to openai-completions for empty url', () => {
     expect(inferApiFromUrl('')).toBe('openai-completions');
