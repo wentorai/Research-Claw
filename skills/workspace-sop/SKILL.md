@@ -30,6 +30,7 @@ Two top-level user directories (system `.ResearchClaw/` is hidden from the dashb
 
 ```
 sources/       ← user uploads, imported PDFs, datasets, references
+sources/chat/  ← raw files the user dropped into the chat composer
 outputs/       ← agent-generated drafts, figures, exports, reports
 .ResearchClaw/ ← system prompt files (hidden)
 ```
@@ -39,6 +40,8 @@ Optional subdirs (created on demand, not required):
 `outputs/drafts/`, `outputs/figures/`, `outputs/exports/`, `outputs/reports/`
 
 `sources/` = user input. `outputs/` = agent-generated files.
+`sources/chat/` holds timestamped raw drops from the chat box — when the user
+asks you to organize files, file them from here into `sources/papers/` etc.
 
 ## Commit Message Prefixes
 

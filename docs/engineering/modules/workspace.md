@@ -59,7 +59,7 @@ researchers face when working with AI agents:
 | Principle | Rule |
 |-----------|------|
 | **Local-only by default** | Git repo lives in the workspace directory. No remote is configured automatically. The agent NEVER pushes. |
-| **Upload/output separation** | Dashboard-uploaded files go under `uploads/`. Agent-generated files go under `outputs/`. This boundary is enforced by convention (tool descriptions), not by hard filesystem locks. |
+| **Upload/output separation** | User files go under `sources/` (chat-composer drops land in `sources/chat/`). Agent-generated files go under `outputs/`. This boundary is enforced by convention (tool descriptions), not by hard filesystem locks. |
 | **Descriptive commits** | Every auto-commit includes a human-readable message that names the action and, where applicable, the related project or paper. |
 | **No data loss** | Overwriting a tracked file always produces a new commit first. The researcher can restore any prior version. |
 | **Large-file safety** | Files exceeding 10 MB are listed in `.gitignore` by default to prevent repository bloat. The user can override this. |
@@ -72,16 +72,23 @@ researchers face when working with AI agents:
 workspace/
 ├── .git/                 # Auto-initialized, local-only
 ├── .gitignore            # Generated on init (see template below)
-├── uploads/              # User uploads, reference materials
-│   ├── papers/           # Uploaded PDFs
-│   ├── data/             # Uploaded datasets (CSV, JSON, XLSX, etc.)
-│   └── references/       # Uploaded BibTeX, notes, annotations
+├── .ResearchClaw/        # System prompt files (hidden from the dashboard tree)
+├── sources/              # User uploads, reference materials
+│   ├── chat/             # Raw files dropped into the chat composer (timestamped)
+│   ├── papers/           # Uploaded PDFs (optional, created on demand)
+│   ├── data/             # Uploaded datasets (optional)
+│   └── references/       # Uploaded BibTeX, notes, annotations (optional)
 └── outputs/              # Agent-generated files
     ├── drafts/           # Writing drafts (Markdown, LaTeX, DOCX)
     ├── figures/          # Generated charts, plots, diagrams
     ├── exports/          # BibTeX exports, summaries, extracted data
     └── reports/          # Analysis reports, literature reviews
 ```
+
+> Historical note: before v0.7.0 user files lived under `uploads/`. Workspace
+> init still migrates any legacy `uploads/` content into `sources/` on startup
+> (`migrateUploadsToSources`), so `uploads/` must not be reintroduced as a
+> destination — references to it dangle after the next gateway restart.
 
 ### 2.1 Workspace Root Resolution
 
@@ -97,7 +104,7 @@ with all subdirectories and initializes a Git repository.
 ### 2.2 Auto-Init Sequence
 
 ```
-1. mkdir -p workspace/{uploads/{papers,data,references},outputs/{drafts,figures,exports,reports}}
+1. mkdir -p workspace/{.ResearchClaw,sources,outputs}   # scaffold (subdirs like sources/chat/ are created on demand)
 2. cd workspace && git init
 3. git config user.name "Research-Claw"
 4. git config user.email "research-claw@wentor.ai"
@@ -151,7 +158,7 @@ All auto-commits follow a prefix convention:
 | `Init:` | Workspace creation | `Init: workspace created` |
 | `Add:` | New file saved | `Add: literature review draft for [quantum computing]` |
 | `Update:` | Existing file modified | `Update: figure 3 — revised color scheme` |
-| `Upload:` | File uploaded via dashboard | `Upload: smith2024.pdf to uploads/papers` |
+| `Upload:` | File uploaded via dashboard | `Upload: smith2024.pdf to sources/papers` |
 | `Restore:` | File restored from history | `Restore: draft.md to version abc1234` |
 | `Delete:` | File removed | `Delete: outdated export results.csv` |
 
@@ -696,7 +703,7 @@ Multipart file upload for the dashboard drag-drop feature.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `file` | Binary | Yes | The file to upload |
-| `destination` | String | No | Relative path under workspace root. Default: `uploads/` |
+| `destination` | String | No | Relative path under workspace root. Default: `sources` |
 
 #### Response (200 OK)
 
@@ -705,7 +712,7 @@ Multipart file upload for the dashboard drag-drop feature.
   "ok": true,
   "file": {
     "name": "smith2024.pdf",
-    "path": "uploads/smith2024.pdf",
+    "path": "sources/smith2024.pdf",
     "type": "file",
     "size": 2458624,
     "mime_type": "application/pdf",
@@ -741,7 +748,7 @@ server.registerHttpRoute({
       return res.status(400).json({ error: 'UPLOAD_NO_FILE' });
     }
 
-    const destination = sanitizePath(fields.destination ?? 'uploads/');
+    const destination = sanitizePath(fields.destination ?? 'sources');
 
     // 2. Write to temp location
     const tmpPath = path.join(os.tmpdir(), `rc-upload-${Date.now()}`);
@@ -782,7 +789,7 @@ renders the git history as a vertical timeline grouped by date.
     │  │    2 files changed                         │
     │  │                                            │
     │  ●─── def5678  11:15                         │
-    │  │    Upload: smith2024.pdf to uploads/       │
+    │  │    Upload: smith2024.pdf to sources/       │
     │  │    1 file changed                          │
     │  │                                            │
     │  March 10, 2026                              │

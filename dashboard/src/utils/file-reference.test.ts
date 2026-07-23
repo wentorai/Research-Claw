@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CHAT_DROP_DIR,
   MAX_REFERENCE_SIZE,
   REFERENCE_BLOCK_HEADER,
   appendReferenceBlock,
   basenameOf,
   buildReferenceBlock,
+  composerDropDestination,
   dedupePaths,
   isImagePath,
   safeUploadName,
@@ -56,6 +58,25 @@ describe('file-reference helpers', () => {
   describe('timestampedUploadName', () => {
     it('prefixes a deterministic timestamp', () => {
       expect(timestampedUploadName('paper.pdf', 1717000000000)).toBe('1717000000000-paper.pdf');
+    });
+  });
+
+  describe('composerDropDestination', () => {
+    it('routes non-image drops into the chat inbox (never uploads/)', () => {
+      expect(CHAT_DROP_DIR).toBe('sources/chat');
+      for (const name of ['data.csv', 'paper.pdf', 'mac.dmg', 'notes.md']) {
+        expect(composerDropDestination(name, false)).toBe('sources/chat');
+      }
+    });
+    it('routes images (by extension or MIME) to sources/', () => {
+      expect(composerDropDestination('fig.png', false)).toBe('sources');
+      // MIME says image even though the name has no image extension.
+      expect(composerDropDestination('camera-roll', true)).toBe('sources');
+    });
+    it('provisional chip path for a non-image drop starts with sources/chat/', () => {
+      const dest = composerDropDestination('data.csv', false);
+      const chipPath = `${dest}/${timestampedUploadName('data.csv', 1717000000000)}`;
+      expect(chipPath).toBe('sources/chat/1717000000000-data.csv');
     });
   });
 

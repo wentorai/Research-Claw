@@ -2,7 +2,7 @@
  * File-reference helpers shared by the composer drag/drop, the `@` mention
  * menu, and the chat send pipeline.
  *
- * A "reference" is always a WORKSPACE-RELATIVE path (e.g. "uploads/data.csv").
+ * A "reference" is always a WORKSPACE-RELATIVE path (e.g. "sources/chat/data.csv").
  * The agent is sandboxed to the workspace, so only relative paths it can reach
  * via workspace_read are ever injected into the prompt.
  */
@@ -12,6 +12,17 @@
 export const MAX_REFERENCE_SIZE = 100 * 1024 * 1024; // 100MB
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|avif)$/i;
+
+/** Chat-composer inbox: raw non-image drops land here (timestamped), keeping
+ *  the sources/ root curated. Folder drops nest under a timestamped root. */
+export const CHAT_DROP_DIR = 'sources/chat';
+
+/** Destination for a loose file dropped into the chat composer: images go to
+ *  the sources/ root (they also ride inline as vision attachments); everything
+ *  else lands in the chat inbox. */
+export function composerDropDestination(name: string, isImageMime: boolean): 'sources' | typeof CHAT_DROP_DIR {
+  return isImagePath(name) || isImageMime ? 'sources' : CHAT_DROP_DIR;
+}
 
 /** True when a path/filename looks like an image by extension. */
 export function isImagePath(pathOrName: string): boolean {

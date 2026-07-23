@@ -17,8 +17,10 @@ import { useSessionsStore } from '../../stores/sessions';
 import { resizeComposerInput } from '../../utils/composer-input';
 import { uploadFileToWorkspace } from '../../gateway/upload';
 import {
+  CHAT_DROP_DIR,
   MAX_REFERENCE_SIZE,
   basenameOf,
+  composerDropDestination,
   isImagePath,
   safeUploadName,
   timestampedUploadName,
@@ -256,7 +258,7 @@ export default function MessageInput() {
   /** Ingest an external (host) file into the workspace, tracking its upload
    *  state as a chip. Always uses a timestamped name to avoid collisions. */
   const ingestExternalFile = useCallback(
-    async (file: File, destination: 'uploads' | 'sources') => {
+    async (file: File, destination: 'sources' | typeof CHAT_DROP_DIR) => {
       if (file.size > MAX_REFERENCE_SIZE) {
         message.warning(
           t('chat.refTooLarge', {
@@ -322,11 +324,11 @@ export default function MessageInput() {
   );
 
   /** Ingest a whole dropped folder as a SINGLE folder chip, preserving the
-   *  internal directory structure under a timestamped root in uploads/. */
+   *  internal directory structure under a timestamped root in sources/chat/. */
   const ingestFolder = useCallback(
     async (rootName: string, group: DroppedFile[]) => {
       const safeRoot = `${Date.now()}-${safeUploadName(rootName)}`;
-      const rootPath = `uploads/${safeRoot}/`;
+      const rootPath = `${CHAT_DROP_DIR}/${safeRoot}/`;
       const chipId = crypto.randomUUID();
       const totalSize = group.reduce((sum, d) => sum + d.file.size, 0);
       setReferences((prev) => [
@@ -340,7 +342,7 @@ export default function MessageInput() {
         // filename — the gateway strips slashes/control chars while preserving
         // non-ASCII (CJK) names, so folder contents stay human-readable.
         const { subDir, fileName } = splitRelPath(d.relPath, d.rootDir, safeUploadName);
-        const destDir = subDir ? `uploads/${safeRoot}/${subDir}` : `uploads/${safeRoot}`;
+        const destDir = subDir ? `${CHAT_DROP_DIR}/${safeRoot}/${subDir}` : `${CHAT_DROP_DIR}/${safeRoot}`;
         try {
           await uploadFileToWorkspace(d.file, destDir, fileName);
         } catch (err) {
@@ -420,7 +422,7 @@ export default function MessageInput() {
       // Loose files keep the existing per-file behavior (images → vision thumbnail).
       const looseFiles = kept.filter((d) => d.rootDir === null);
       for (const d of looseFiles) {
-        const dest = isImagePath(d.file.name) || ACCEPTED_TYPES.test(d.file.type) ? 'sources' : 'uploads';
+        const dest = composerDropDestination(d.file.name, ACCEPTED_TYPES.test(d.file.type));
         void ingestExternalFile(d.file, dest);
       }
 
