@@ -6,8 +6,8 @@
  *
  * Registration totals:
  *   - 53 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job)
- *   - 92 WS RPC methods + 2 HTTP routes = 94 interface methods
- *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* = 92 WS; POST /rc/upload + GET /rc/download = 2 HTTP)
+ *   - 93 WS RPC methods + 2 HTTP routes = 95 interface methods
+ *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* + rc.onboarding.* = 93 WS; POST /rc/upload + GET /rc/download = 2 HTTP)
  *   - 10 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×3, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  *   - 1 session monitoring service (automatic memory extraction)
@@ -67,6 +67,8 @@ import { JobService } from './src/jobs/service.js';
 import { createJobTools } from './src/jobs/tools.js';
 import { registerJobRpc } from './src/jobs/rpc.js';
 import { syncOpenClawSubagentJobs } from './src/jobs/openclaw-sync.js';
+import { registerOnboardingRpc } from './src/onboarding/rpc.js';
+import { bootstrapDoneExists } from './src/onboarding/bootstrap-done.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -1275,6 +1277,14 @@ const plugin: PluginDefinition = {
       setApiKey: (provider, apiKey) => setApiKeyProfile(provider, apiKey),
       clearApiKey: (provider) => clearApiKeyProfile(provider),
     });
+    // First-run detection for the dashboard welcome card. Getters read the
+    // module singletons so a pass where init has not happened fails safe
+    // (firstRun=false) instead of crashing.
+    registerOnboardingRpc(registerMethod, {
+      getWorkspaceRoot: () => _wsConfig?.root ?? null,
+      getLitService: () => _litService,
+      getTaskService: () => _taskService,
+    }); // 1 method
 
     if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
     const memoryService = _memoryService;
@@ -2508,8 +2518,20 @@ const plugin: PluginDefinition = {
         const rcDir = path.join(ctx.workspaceDir, '.ResearchClaw');
         if (!fs.existsSync(rcDir)) return;
 
+        // .done sentinel defense: the loading layer historically never checked
+        // BOOTSTRAP.md.done, so residual BOOTSTRAP.md (or its root symlink)
+        // re-ran onboarding for users who had already completed it.
+        const bootstrapDone = bootstrapDoneExists(ctx.workspaceDir);
+
         ctx.bootstrapFiles = ctx.bootstrapFiles.map((file) => {
           if (!RELOCATABLE_FILES.has(file.name)) return file;
+
+          // With the sentinel present, never inject BOOTSTRAP content — blank
+          // the entry using OC's missing-file shape ({name, path, missing:true},
+          // no content) so hasBootstrapFileContent() stays false.
+          if (file.name === 'BOOTSTRAP.md' && bootstrapDone) {
+            return { name: file.name, path: file.path, missing: true };
+          }
 
           const rcPath = path.join(rcDir, file.name);
           try {
@@ -2524,7 +2546,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (53 tools, 122 WS RPC + 2 HTTP = 124 interfaces, 9 hooks, 1 session monitoring service)');
+    api.logger.info('Research-Claw Core registered (53 tools, 123 WS RPC + 2 HTTP = 125 interfaces, 9 hooks, 1 session monitoring service)');
     _hooksRegistered = true;
     }
   },

@@ -538,7 +538,42 @@ export class WorkspaceService {
   private async migratePromptFiles(): Promise<void> {
     const rcDir = path.join(this.root, '.ResearchClaw');
 
+    // Consolidate the onboarding sentinel FIRST (the agent writes it at the
+    // root — see BOOTSTRAP.md.example completion) so the retirement check
+    // below sees a canonical .done regardless of where it was written.
+    const doneSrc = path.join(this.root, 'BOOTSTRAP.md.done');
+    const doneDest = path.join(rcDir, 'BOOTSTRAP.md.done');
+    try {
+      await fsp.access(doneDest, fs.constants.F_OK);
+    } catch {
+      try {
+        await fsp.access(doneSrc, fs.constants.F_OK);
+        await fsp.rename(doneSrc, doneDest);
+      } catch {
+        // Neither exists
+      }
+    }
+    // Positive-evidence check (NOT bootstrapDoneExists, whose fail-safe-true
+    // direction would be wrong for a deletion decision).
+    const bootstrapDone = fs.existsSync(doneDest) || fs.existsSync(doneSrc);
+
     for (const filename of RELOCATABLE_PROMPT_FILES) {
+      if (filename === 'BOOTSTRAP.md' && bootstrapDone) {
+        // Onboarding is complete — retire every BOOTSTRAP.md entry instead of
+        // relinking it. OC's workspaceBootstrapPending checks the ROOT file's
+        // existence (independently of the bootstrap hook's content blanking),
+        // so a residual script + rebuilt root symlink would re-trigger
+        // onboarding every session for users who completed via the old
+        // save-only flow. The script holds no user state; removal is safe.
+        for (const staleBootstrap of [path.join(this.root, filename), path.join(rcDir, filename)]) {
+          try {
+            await fsp.rm(staleBootstrap, { force: true });
+          } catch {
+            // ignore — the bootstrap hook still blanks the entry per-turn
+          }
+        }
+        continue;
+      }
       const rootPath = path.join(this.root, filename);
       const destPath = path.join(rcDir, filename);
 
@@ -576,20 +611,6 @@ export class WorkspaceService {
 
       // Canonical copy now lives in .ResearchClaw/ — point the root path at it.
       await this.linkRootToSubdir(filename);
-    }
-
-    // Also handle BOOTSTRAP.md.done (renamed after first-run onboarding)
-    const doneSrc = path.join(this.root, 'BOOTSTRAP.md.done');
-    const doneDest = path.join(rcDir, 'BOOTSTRAP.md.done');
-    try {
-      await fsp.access(doneDest, fs.constants.F_OK);
-    } catch {
-      try {
-        await fsp.access(doneSrc, fs.constants.F_OK);
-        await fsp.rename(doneSrc, doneDest);
-      } catch {
-        // Neither exists
-      }
     }
   }
 
@@ -958,11 +979,13 @@ export class WorkspaceService {
   // exists — rc.ws.exists
   // -----------------------------------------------------------------------
 
-  /** Lightweight existence check for polling (avoids noisy read errors in logs). */
-  async exists(filePath: string): Promise<{ exists: boolean }> {
+  /** Lightweight existence check for polling and upload pre-flight (avoids
+   *  noisy read errors in logs). `type` distinguishes file vs directory so
+   *  pre-flight checks can catch file-vs-directory collisions. */
+  async exists(filePath: string): Promise<{ exists: boolean; type?: 'file' | 'directory' }> {
     try {
       const stat = await fsp.stat(this.resolvePath(filePath));
-      return { exists: stat.isFile() };
+      return { exists: true, type: stat.isDirectory() ? 'directory' : 'file' };
     } catch {
       return { exists: false };
     }

@@ -72,6 +72,19 @@
     "placementBottom": "Dock panel on the bottom",
     "resizeHandle": "Resize panel"
   },
+  "welcome": {
+    "greeting": "Hi, I'm Research-Claw",
+    "subtitle": "Research-Claw · Locally deployed research agent",
+    "pillLibrary": "Literature search & library",
+    "pillWriting": "Writing assistance",
+    "pillMonitor": "Task & field monitoring",
+    "intro": "Tell me your research direction and I can run your first literature survey right now.",
+    "ctaStart": "Start setup (~2 min)",
+    "ctaCaption": "Set up how I address you and your literature tools, ending with a real search demo on your topic",
+    "tutorialLink": "Tutorial (Feishu)",
+    "browseFirst": "Just looking around",
+    "footerHint": "You can also start by typing any question"
+  },
   "chat": {
     "longTask": {
       "confirmTitle": "Run as a background job?",
@@ -98,6 +111,13 @@
     "failureSuggestion": "How to fix: ",
     "contextOverflow": "Context overflow — this conversation is too large for the model. Use /new to start a fresh session, or switch to a model with a larger context window.",
     "empty": "Start a conversation with your research assistant.",
+    "suggestions": {
+      "searchRecent": "Find highly cited papers from the past year on ___",
+      "readPdf": "Read this PDF and add it to my library",
+      "writeSurvey": "Write a short review based on my library",
+      "setupMonitor": "Set up a field monitor for me",
+      "whatCanYouDo": "What can you do?"
+    },
     "abort": "Stop",
     "abortWithShortcut": "Stop ({{shortcut}})",
     "connectionBanner": {

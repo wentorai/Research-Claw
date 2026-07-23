@@ -72,6 +72,19 @@
     "placementBottom": "配置栏停靠在下方",
     "resizeHandle": "拖拽调整配置栏大小"
   },
+  "welcome": {
+    "greeting": "你好，我是科研龙虾",
+    "subtitle": "Research-Claw · 本地部署的科研智能体",
+    "pillLibrary": "文献检索·管理",
+    "pillWriting": "写作辅助",
+    "pillMonitor": "任务·领域监控",
+    "intro": "告诉我你的研究方向，我现在就能帮你完成第一次文献调研。",
+    "ctaStart": "开始初始化（约 2 分钟）",
+    "ctaCaption": "配置称呼与文献工具，最后用你的方向做一次真实检索演示",
+    "tutorialLink": "使用教程（飞书）",
+    "browseFirst": "先自己看看",
+    "footerHint": "直接输入任何问题也可以开始"
+  },
   "chat": {
     "longTask": {
       "confirmTitle": "转为后台长任务？",
@@ -98,6 +111,13 @@
     "failureSuggestion": "修复建议：",
     "contextOverflow": "上下文溢出 — 当前对话对模型来说太长。请用 /new 开新会话，或切换到上下文更大的模型。",
     "empty": "开始与你的科研助手对话。",
+    "suggestions": {
+      "searchRecent": "帮我搜 ___ 方向近一年的高引论文",
+      "readPdf": "读读这篇 PDF 并加进文献库",
+      "writeSurvey": "基于我的文献库写一段综述",
+      "setupMonitor": "帮我设置一个领域监控",
+      "whatCanYouDo": "你能做什么？"
+    },
     "abort": "停止",
     "abortWithShortcut": "停止 ({{shortcut}})",
     "connectionBanner": {

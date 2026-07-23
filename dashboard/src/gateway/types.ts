@@ -103,6 +103,11 @@ export interface ChatMessage {
   stopReason?: string;
   /** Non-image workspace files referenced by this user turn (rendered as chips). */
   references?: string[];
+  /**
+   * Dashboard-local marker (e.g. 'welcome') — only set by appendLocalMessage,
+   * never sent by the gateway. Survives the localStorage JSON round-trip.
+   */
+  localKind?: string;
 }
 
 export interface ChatAttachment {
