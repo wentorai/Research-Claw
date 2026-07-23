@@ -20,11 +20,19 @@ const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|avif)$/i;
  *  the sources/ root curated. Folder drops nest under a timestamped root. */
 export const CHAT_DROP_DIR = 'sources/chat';
 
+/** Chat-originated images (drop / paste / attach button / vision attachments).
+ *  Separate subdir so screenshots don't mix with document drops. Only NEW
+ *  ingests land here — existing files are never moved. */
+export const CHAT_IMAGE_DIR = 'sources/chat/images';
+
 /** Destination for a loose file dropped into the chat composer: images go to
- *  the sources/ root (they also ride inline as vision attachments); everything
+ *  the chat image dir (they also ride inline as vision attachments); everything
  *  else lands in the chat inbox. */
-export function composerDropDestination(name: string, isImageMime: boolean): 'sources' | typeof CHAT_DROP_DIR {
-  return isImagePath(name) || isImageMime ? 'sources' : CHAT_DROP_DIR;
+export function composerDropDestination(
+  name: string,
+  isImageMime: boolean,
+): typeof CHAT_IMAGE_DIR | typeof CHAT_DROP_DIR {
+  return isImagePath(name) || isImageMime ? CHAT_IMAGE_DIR : CHAT_DROP_DIR;
 }
 
 /** True when a path/filename looks like an image by extension. */

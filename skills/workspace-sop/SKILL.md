@@ -40,8 +40,9 @@ Optional subdirs (created on demand, not required):
 `outputs/drafts/`, `outputs/figures/`, `outputs/exports/`, `outputs/reports/`
 
 `sources/` = user input. `outputs/` = agent-generated files.
-`sources/chat/` holds timestamped raw drops from the chat box — when the user
-asks you to organize files, file them from here into `sources/papers/` etc.
+`sources/chat/` holds timestamped raw drops from the chat box (images land in
+`sources/chat/images/`) — when the user asks you to organize files, file them
+from here into `sources/papers/` etc.
 
 ## Commit Message Prefixes
 

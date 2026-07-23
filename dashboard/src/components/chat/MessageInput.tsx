@@ -18,6 +18,7 @@ import { resizeComposerInput } from '../../utils/composer-input';
 import { uploadFileToWorkspace } from '../../gateway/upload';
 import {
   CHAT_DROP_DIR,
+  CHAT_IMAGE_DIR,
   MAX_REFERENCE_SIZE,
   basenameOf,
   composerDropDestination,
@@ -257,7 +258,7 @@ export default function MessageInput() {
   /** Ingest an external (host) file into the workspace, tracking its upload
    *  state as a chip. Always uses a timestamped name to avoid collisions. */
   const ingestExternalFile = useCallback(
-    async (file: File, destination: 'sources' | typeof CHAT_DROP_DIR) => {
+    async (file: File, destination: typeof CHAT_DROP_DIR | typeof CHAT_IMAGE_DIR) => {
       if (file.size > MAX_REFERENCE_SIZE) {
         message.warning(
           t('chat.refTooLarge', {
@@ -530,7 +531,7 @@ export default function MessageInput() {
         e.preventDefault();
         // Ingest into the workspace so pasted images get a chip + thumbnail,
         // matching the external-drop flow (consistency with R3).
-        for (const file of imageFiles) void ingestExternalFile(file, 'sources');
+        for (const file of imageFiles) void ingestExternalFile(file, CHAT_IMAGE_DIR);
       }
     },
     [ingestExternalFile],
@@ -850,7 +851,7 @@ export default function MessageInput() {
           hidden
           onChange={(e) => {
             if (e.target.files) {
-              for (const file of Array.from(e.target.files)) void ingestExternalFile(file, 'sources');
+              for (const file of Array.from(e.target.files)) void ingestExternalFile(file, CHAT_IMAGE_DIR);
             }
             e.target.value = '';
           }}

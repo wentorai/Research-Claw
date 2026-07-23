@@ -68,10 +68,10 @@ describe('file-reference helpers', () => {
         expect(composerDropDestination(name, false)).toBe('sources/chat');
       }
     });
-    it('routes images (by extension or MIME) to sources/', () => {
-      expect(composerDropDestination('fig.png', false)).toBe('sources');
+    it('routes images (by extension or MIME) to the chat image dir', () => {
+      expect(composerDropDestination('fig.png', false)).toBe('sources/chat/images');
       // MIME says image even though the name has no image extension.
-      expect(composerDropDestination('camera-roll', true)).toBe('sources');
+      expect(composerDropDestination('camera-roll', true)).toBe('sources/chat/images');
     });
     it('provisional chip path for a non-image drop starts with sources/chat/', () => {
       const dest = composerDropDestination('data.csv', false);

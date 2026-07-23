@@ -13,7 +13,7 @@ import { useUiStore } from './ui';
 import { useJobsStore } from './jobs';
 import { primaryModelSupportsVision, useConfigStore } from './config';
 import { syncSystemPromptAppendToGateway } from '../utils/sync-system-prompt-append';
-import { appendReferenceBlock, dedupePaths, isImagePath } from '../utils/file-reference';
+import { CHAT_IMAGE_DIR, appendReferenceBlock, dedupePaths, isImagePath } from '../utils/file-reference';
 import { buildAutoLongTaskPrompt, detectLongTaskIntent, shouldPromoteLongTaskWithoutConfirmation } from '../utils/long-task';
 import i18n from '../i18n';
 import { sanitizeUserMessage, CRON_REMINDER_RE } from '../utils/sanitize-message';
@@ -978,7 +978,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       //   - Vision primary: also send as attachments (inline to model)
       //   - Text-only primary: only send file paths (agent uses /image tool)
       //
-      // Workspace paths are embedded as [rc-image:sources/xxx.png] markers
+      // Workspace paths are embedded as [rc-image:sources/chat/images/xxx.png] markers
       // in the message text, which MessageBubble can detect and render
       // after history reload.
       // -----------------------------------------------------------------
@@ -1002,7 +1002,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           }
           const ts = Date.now();
           const safeName = att.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-          const wsPath = `sources/${ts}-${safeName}`;
+          const wsPath = `${CHAT_IMAGE_DIR}/${ts}-${safeName}`;
           try {
             await client.request('rc.ws.saveImage', {
               path: wsPath,
