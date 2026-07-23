@@ -322,6 +322,29 @@ CREATE TABLE IF NOT EXISTS rc_sessions (
   metadata            TEXT DEFAULT '{}'
 );`;
 
+// Final shape after v13 (add) + v14 (failed status + failure_reason).
+// applyFullSchema records SCHEMA_VERSION directly, so fresh installs never run
+// incremental migrations — this DDL must stay in sync with migrations.ts.
+const RC_PAPER_REVIEWS = `
+CREATE TABLE IF NOT EXISTS rc_paper_reviews (
+  id              TEXT PRIMARY KEY,
+  file_path       TEXT NOT NULL,
+  paper_id        TEXT REFERENCES rc_papers(id) ON DELETE SET NULL,
+  title           TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'draft'
+                    CHECK(status IN ('draft', 'in_progress', 'completed', 'failed')),
+  overall_score   INTEGER CHECK(overall_score IS NULL OR (overall_score BETWEEN 1 AND 10)),
+  summary         TEXT,
+  strengths       TEXT,
+  weaknesses      TEXT,
+  suggestions     TEXT,
+  report_markdown TEXT,
+  rubric          TEXT,
+  failure_reason  TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);`;
+
 const RC_SESSION_EVENTS = `
 CREATE TABLE IF NOT EXISTS rc_session_events (
   id          TEXT PRIMARY KEY,
@@ -358,6 +381,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   RC_MEMORY_LINKS,
   RC_SESSIONS,
   RC_SESSION_EVENTS,
+  RC_PAPER_REVIEWS,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -438,6 +462,11 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_rc_session_events_session  ON rc_session_events(session_id);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_session_events_type     ON rc_session_events(event_type);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_session_events_timestamp ON rc_session_events(timestamp);`,
+
+  // rc_paper_reviews indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_file    ON rc_paper_reviews(file_path);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_updated ON rc_paper_reviews(updated_at);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_paper_reviews_status  ON rc_paper_reviews(status);`,
 
   // rc_jobs indexes
   `CREATE INDEX IF NOT EXISTS idx_rc_jobs_status              ON rc_jobs(status);`,
