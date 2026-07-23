@@ -344,7 +344,12 @@ elif [ -d /host/zotero ]; then
 fi
 
 STOP=false
-trap 'STOP=true' INT TERM
+GW_PID=""
+# Docker delivers stop signals to PID1 ONLY — with the gateway in the
+# foreground, bash defers the trap until the child exits (which it never
+# does), and `docker stop` ends in SIGKILL after the grace period. Forward
+# the signal to the gateway ourselves so shutdown (and the farewell) run.
+trap 'STOP=true; [ -n "$GW_PID" ] && kill -TERM "$GW_PID" 2>/dev/null' INT TERM
 # Run start for the farewell usage overview (mirrors run.sh).
 export RC_RUN_START_EPOCH=$(date +%s)
 
@@ -355,8 +360,16 @@ while true; do
 
   OPENCLAW_CONFIG_PATH=$CONFIG_FILE \
     node /app/node_modules/openclaw/dist/entry.js \
-    gateway run --allow-unconfigured --auth token --port $PORT --bind lan --force
+    gateway run --allow-unconfigured --auth token --port $PORT --bind lan --force &
+  GW_PID=$!
+  wait "$GW_PID"
   CODE=$?
+  if [ "$STOP" = "true" ]; then
+    # First wait was interrupted by the trap (returns 128+sig) — wait again
+    # so the gateway finishes its graceful shutdown before we continue.
+    wait "$GW_PID" 2>/dev/null
+  fi
+  GW_PID=""
 
   kill "$PROXY_PID" >/dev/null 2>&1 || true
 
