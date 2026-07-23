@@ -125,8 +125,8 @@ export function registerWorkspaceRpc(
   });
 
   // -----------------------------------------------------------------------
-  // 2b. rc.ws.exists — Check whether a workspace file exists
-  //     params: { path: string }
+  // 2b. rc.ws.exists — Check whether a workspace path exists
+  //     params: { path: string } → { exists, type?: 'file' | 'directory' }
   // -----------------------------------------------------------------------
   registerMethod('rc.ws.exists', async (params: Record<string, unknown>) => {
     try {

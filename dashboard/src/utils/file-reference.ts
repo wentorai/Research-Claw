@@ -41,8 +41,9 @@ export function safeUploadName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+/, '') || 'file';
 }
 
-/** Timestamp-prefixed name to avoid collisions on ingest (gateway rejects
- *  overwrites). Mirrors the existing image naming `${ts}-${safeName}`. */
+/** Timestamp-prefixed name that makes composer ingests collision-free up
+ *  front (uploads default to onConflict:'fail', so a duplicate name would 409
+ *  rather than overwrite). Mirrors the existing image naming `${ts}-${safeName}`. */
 export function timestampedUploadName(name: string, now: number): string {
   return `${now}-${safeUploadName(name)}`;
 }

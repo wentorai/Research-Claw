@@ -15,7 +15,14 @@ export interface UploadedWorkspaceFile {
   mime_type: string;
   modified_at: string;
   git_status: string;
+  /** True when the file replaced nothing (older gateways omit this). */
+  is_new?: boolean;
+  /** True when onConflict:'rename' produced a "name (2).ext" final name. */
+  renamed?: boolean;
 }
+
+/** How the gateway resolves a name collision at the destination. */
+export type UploadConflictMode = 'fail' | 'overwrite' | 'rename';
 
 export interface UploadError extends Error {
   code?: string;
@@ -26,13 +33,17 @@ export interface UploadError extends Error {
  * Upload a single file into the workspace under `destination`.
  *
  * @param fileNameOverride optional new filename (e.g. timestamp-prefixed) used
- *        to avoid collisions — the gateway rejects overwrites of existing files.
+ *        to avoid collisions up front.
+ * @param onConflict how the gateway resolves a duplicate name at the target:
+ *        'fail' (default) → 409 UPLOAD_FILE_EXISTS, 'overwrite' → replace,
+ *        'rename' → save as "name (2).ext" (response carries the final name).
  * @throws UploadError on non-2xx / `{ ok: false }` responses (code/status set).
  */
 export async function uploadFileToWorkspace(
   file: File,
   destination: string,
   fileNameOverride?: string,
+  onConflict?: UploadConflictMode,
 ): Promise<UploadedWorkspaceFile> {
   const payload = fileNameOverride
     ? new File([file], fileNameOverride, { type: file.type })
@@ -41,6 +52,9 @@ export async function uploadFileToWorkspace(
   const formData = new FormData();
   formData.append('file', payload);
   formData.append('destination', destination);
+  if (onConflict) {
+    formData.append('onConflict', onConflict);
+  }
 
   const token = new URLSearchParams(window.location.search).get('token') || 'research-claw';
   const res = await fetch('/rc/upload', {

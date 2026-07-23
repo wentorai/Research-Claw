@@ -32,7 +32,12 @@ import { useConfigStore } from '../../stores/config';
 import FilePreviewModal from './FilePreviewModal';
 import DockerFileModal from './DockerFileModal';
 import type { DockerFileModalProps } from './DockerFileModal';
-import { uploadFileToWorkspace } from '../../gateway/upload';
+import { uploadFileToWorkspace, type UploadConflictMode, type UploadError } from '../../gateway/upload';
+import UploadConflictModal, {
+  conflictActionToMode,
+  type ConflictAction,
+  type UploadConflict,
+} from './UploadConflictModal';
 import { MAX_REFERENCE_SIZE, safeUploadName } from '../../utils/file-reference';
 import {
   collectDroppedEntries,
@@ -902,6 +907,15 @@ export default function WorkspacePanel() {
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [workspaceRoot, setWorkspaceRoot] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [conflictPrompt, setConflictPrompt] = useState<{
+    conflicts: UploadConflict[];
+    resolve: (decisions: Map<string, ConflictAction> | null) => void;
+  } | null>(null);
+  const conflictPromptRef = useRef<typeof conflictPrompt>(null);
+  conflictPromptRef.current = conflictPrompt;
+  // Resolve any pending conflict dialog on unmount so awaiting upload flows
+  // don't hang forever on a promise nobody can settle anymore.
+  useEffect(() => () => conflictPromptRef.current?.resolve(null), []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollRafRef = useRef<number | null>(null);
 
@@ -1192,12 +1206,78 @@ export default function WorkspacePanel() {
     }
   }, [pendingPreviewPath, clearPendingPreview]);
 
-  const uploadOneFile = useCallback(
-    async (file: File): Promise<boolean> => {
-      await uploadFileToWorkspace(file, 'sources');
-      return true;
+  /** Pre-flight duplicate check via rc.ws.exists (batched, best-effort).
+   *  The gateway's 409 UPLOAD_FILE_EXISTS remains the race backstop. */
+  const preflightConflicts = useCallback(
+    async (destPaths: string[]): Promise<Map<string, 'file' | 'directory'>> => {
+      const found = new Map<string, 'file' | 'directory'>();
+      if (!client) return found;
+      const unique = Array.from(new Set(destPaths));
+      await mapWithConcurrency(unique, UPLOAD_CONCURRENCY, async (p) => {
+        try {
+          const r = (await client.request('rc.ws.exists', { path: p })) as
+            | { exists?: boolean; type?: 'file' | 'directory' }
+            | undefined;
+          if (r?.exists) found.set(p, r.type ?? 'file');
+        } catch {
+          // Older gateway or transient failure — fall back to the server-side 409.
+        }
+      });
+      return found;
     },
+    [client],
+  );
+
+  /** Open the conflict dialog; resolves null when the user cancels. */
+  const askConflictDecisions = useCallback(
+    (conflicts: UploadConflict[]) =>
+      new Promise<Map<string, ConflictAction> | null>((resolve) => {
+        setConflictPrompt({ conflicts, resolve });
+      }),
     [],
+  );
+
+  const isConflictError = (err: unknown): boolean =>
+    (err as UploadError | undefined)?.code === 'UPLOAD_FILE_EXISTS';
+
+  /** Shared result toasts for both the button and drop upload paths. */
+  const reportUploadOutcome = useCallback(
+    (destLabel: string, counts: { success: number; skipped: number; conflict: number; failed: number }) => {
+      if (counts.success > 0) {
+        message.success(
+          t('workspace.uploadSuccessWithPath', {
+            count: counts.success,
+            path: destLabel,
+            defaultValue: `${counts.success} file(s) uploaded to ${destLabel}`,
+          }),
+        );
+      }
+      if (counts.skipped > 0) {
+        message.info(
+          t('workspace.uploadSkippedConflicts', {
+            count: counts.skipped,
+            defaultValue: `${counts.skipped} file(s) skipped (name already exists)`,
+          }),
+        );
+      }
+      if (counts.conflict > 0) {
+        message.warning(
+          t('workspace.uploadConflictRace', {
+            count: counts.conflict,
+            defaultValue: `${counts.conflict} file(s) not uploaded — name taken while uploading. Retry to resolve.`,
+          }),
+        );
+      }
+      if (counts.failed > 0) {
+        message.error(
+          t('workspace.uploadFailedMulti', {
+            count: counts.failed,
+            defaultValue: `${counts.failed} file(s) failed to upload`,
+          }),
+        );
+      }
+    },
+    [message, t],
   );
 
   const handleUpload = useCallback(
@@ -1205,33 +1285,41 @@ export default function WorkspacePanel() {
       if (uploading) return false;
       // Only trigger once for the first file in a multi-select batch
       if (file !== fileList[0]) return false;
+
+      const existing = await preflightConflicts(fileList.map((f) => `sources/${f.name}`));
+      let decisions: Map<string, ConflictAction> | null = null;
+      if (existing.size > 0) {
+        decisions = await askConflictDecisions(
+          Array.from(existing.entries()).map(([p, type]) => ({ path: p, existingType: type })),
+        );
+        if (!decisions) return false; // user cancelled
+      }
+
       setUploading(true);
-      let successCount = 0;
-      let failCount = 0;
+      const counts = { success: 0, skipped: 0, conflict: 0, failed: 0 };
+      const seen = new Set<string>();
       try {
         for (const f of fileList) {
+          const destPath = `sources/${f.name}`;
+          const action = decisions?.get(destPath);
+          if (action === 'skip') {
+            counts.skipped++;
+            continue;
+          }
+          // Duplicate names within one batch race past the pre-flight — rename the later ones.
+          const mode: UploadConflictMode | undefined =
+            conflictActionToMode(action) ?? (seen.has(destPath) ? 'rename' : undefined);
+          seen.add(destPath);
           try {
-            await uploadOneFile(f);
-            successCount++;
+            await uploadFileToWorkspace(f, 'sources', undefined, mode);
+            counts.success++;
           } catch (err) {
-            failCount++;
+            if (isConflictError(err)) counts.conflict++;
+            else counts.failed++;
             console.error(`[WorkspacePanel] upload failed for ${f.name}:`, err);
           }
         }
-        if (successCount > 0) {
-          message.success(
-            t('workspace.uploadSuccessWithPath', {
-              count: successCount,
-              path: 'sources/',
-              defaultValue: `${successCount} file(s) uploaded to sources/`,
-            }),
-          );
-        }
-        if (failCount > 0) {
-          message.error(
-            t('workspace.uploadFailedMulti', { count: failCount, defaultValue: `${failCount} file(s) failed to upload` }),
-          );
-        }
+        reportUploadOutcome('sources/', counts);
         await loadData();
         setTimeout(() => loadData(), 1000);
       } finally {
@@ -1239,7 +1327,7 @@ export default function WorkspacePanel() {
       }
       return false;
     },
-    [uploading, uploadOneFile, loadData, t, message],
+    [uploading, preflightConflicts, askConflictDecisions, reportUploadOutcome, loadData],
   );
 
   // --- External file drag-over detection (panel-level) ---
@@ -1310,42 +1398,56 @@ export default function WorkspacePanel() {
       }
 
       if (uploading) return;
+
+      // Resolve every file's target up front (also feeds the duplicate pre-flight).
+      const seenPaths = new Set<string>();
+      const targets = kept.map((d) => {
+        const { subDir, fileName } = splitRelPath(d.relPath, d.rootDir, safeUploadName);
+        const destDir = subDir ? `sources/${subDir}` : 'sources';
+        const destPath = `${destDir}/${fileName}`;
+        // Duplicate names within one batch race past the pre-flight — rename the later ones.
+        const inBatchDupe = seenPaths.has(destPath);
+        seenPaths.add(destPath);
+        return { d, destDir, fileName, destPath, inBatchDupe };
+      });
+
+      const existing = await preflightConflicts(targets.map((tg) => tg.destPath));
+      let decisions: Map<string, ConflictAction> | null = null;
+      if (existing.size > 0) {
+        decisions = await askConflictDecisions(
+          Array.from(existing.entries()).map(([p, type]) => ({ path: p, existingType: type })),
+        );
+        if (!decisions) return; // user cancelled
+      }
+
       setUploading(true);
-      let successCount = 0;
-      let failCount = 0;
+      const counts = { success: 0, skipped: 0, conflict: 0, failed: 0 };
       try {
-        await mapWithConcurrency(kept, UPLOAD_CONCURRENCY, async (d) => {
-          const { subDir, fileName } = splitRelPath(d.relPath, d.rootDir, safeUploadName);
-          const destDir = subDir ? `sources/${subDir}` : 'sources';
+        await mapWithConcurrency(targets, UPLOAD_CONCURRENCY, async (tg) => {
+          const action = decisions?.get(tg.destPath);
+          if (action === 'skip') {
+            counts.skipped++;
+            return;
+          }
+          const mode: UploadConflictMode | undefined =
+            conflictActionToMode(action) ?? (tg.inBatchDupe ? 'rename' : undefined);
           try {
-            await uploadFileToWorkspace(d.file, destDir, fileName);
-            successCount++;
+            await uploadFileToWorkspace(tg.d.file, tg.destDir, tg.fileName, mode);
+            counts.success++;
           } catch (err) {
-            failCount++;
-            console.error(`[WorkspacePanel] upload failed for ${d.relPath}:`, err);
+            if (isConflictError(err)) counts.conflict++;
+            else counts.failed++;
+            console.error(`[WorkspacePanel] upload failed for ${tg.d.relPath}:`, err);
           }
         });
-        if (successCount > 0) {
-          message.success(
-            t('workspace.uploadSuccessWithPath', {
-              count: successCount,
-              path: 'sources/',
-              defaultValue: `${successCount} file(s) uploaded to sources/`,
-            }),
-          );
-        }
-        if (failCount > 0) {
-          message.error(
-            t('workspace.uploadFailedMulti', { count: failCount, defaultValue: `${failCount} file(s) failed to upload` }),
-          );
-        }
+        reportUploadOutcome('sources/', counts);
         await loadData();
         setTimeout(() => loadData(), 1000);
       } finally {
         setUploading(false);
       }
     },
-    [uploading, loadData, t, message, modal],
+    [uploading, loadData, t, message, modal, preflightConflicts, askConflictDecisions, reportUploadOutcome],
   );
 
   const handlePanelDrop = useCallback((e: React.DragEvent) => {
@@ -1683,6 +1785,19 @@ export default function WorkspacePanel() {
         workspaceRoot={workspaceRoot}
         onClose={() => setPreviewPath(null)}
         onDeleted={loadData}
+      />
+
+      <UploadConflictModal
+        open={conflictPrompt !== null}
+        conflicts={conflictPrompt?.conflicts ?? []}
+        onResolve={(decisions) => {
+          conflictPrompt?.resolve(decisions);
+          setConflictPrompt(null);
+        }}
+        onCancel={() => {
+          conflictPrompt?.resolve(null);
+          setConflictPrompt(null);
+        }}
       />
     </div>
   );

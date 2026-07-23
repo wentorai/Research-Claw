@@ -32,6 +32,7 @@ import { HeartbeatService } from './src/tasks/heartbeat.js';
 import { WorkspaceService, type WorkspaceConfig } from './src/workspace/service.js';
 import { createWorkspaceTools } from './src/workspace/tools.js';
 import { registerWorkspaceRpc } from './src/workspace/rpc.js';
+import { normalizeConflictMode, resolveUploadConflict } from './src/workspace/upload-conflict.js';
 import { MonitorService } from './src/monitor/service.js';
 import { registerMonitorRpc } from './src/monitor/rpc.js';
 import { createMonitorTools } from './src/monitor/tools.js';
@@ -1614,7 +1615,7 @@ const plugin: PluginDefinition = {
         }
 
         try {
-          const { file, destination } = await parseMultipartUpload(req, wsConfig.maxUploadSize);
+          const { file, destination, onConflict } = await parseMultipartUpload(req, wsConfig.maxUploadSize);
 
           if (!file) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1642,20 +1643,42 @@ const plugin: PluginDefinition = {
             return true;
           }
 
-          const destPath = `${destDir}/${safeFilename}`;
-          const result = await wsService.save(destPath, file.data, `Upload: ${safeFilename} to ${destDir}`);
+          // Conflict policy (handler-level only — save() keeps overwrite-as-Update
+          // semantics for editor saves / image saves / agent tools). Default 'fail'
+          // returns 409 instead of silently replacing an existing file. Emitted
+          // inline, NOT thrown: the catch below would misclassify it as a 500.
+          const conflict = await resolveUploadConflict(resolvedDest, safeFilename, normalizeConflictMode(onConflict));
+          if (conflict.action === 'conflict') {
+            res.writeHead(409, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              ok: false,
+              error: {
+                code: 'UPLOAD_FILE_EXISTS',
+                message: `Already exists: ${destDir}/${safeFilename}`,
+                path: `${destDir}/${safeFilename}`,
+                existing: conflict.existing,
+              },
+            }));
+            return true;
+          }
+
+          const finalName = conflict.fileName;
+          const destPath = `${destDir}/${finalName}`;
+          const result = await wsService.save(destPath, file.data, `Upload: ${finalName} to ${destDir}`);
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             ok: true,
             file: {
-              name: safeFilename,
+              name: finalName,
               path: result.path,
               type: 'file',
               size: result.size,
               mime_type: file.mimeType,
               modified_at: new Date().toISOString(),
               git_status: result.committed ? 'committed' : 'untracked',
+              is_new: result.is_new,
+              renamed: conflict.renamed,
             },
           }));
           return true;
@@ -2562,10 +2585,10 @@ interface UploadedFile {
   mimeType: string;
 }
 
-async function parseMultipartUpload(
+export async function parseMultipartUpload(
   req: IncomingMessage,
   maxSize: number,
-): Promise<{ file: UploadedFile | null; destination: string }> {
+): Promise<{ file: UploadedFile | null; destination: string; onConflict: string }> {
   const contentType = req.headers['content-type'] ?? '';
   const boundaryMatch = contentType.match(/boundary=(.+?)(?:;|$)/);
   if (!boundaryMatch) {
@@ -2614,6 +2637,7 @@ async function parseMultipartUpload(
 
   let file: UploadedFile | null = null;
   let destination = '';
+  let onConflict = '';
 
   for (const partBuf of partBuffers) {
     // Find header/body separator (\r\n\r\n)
@@ -2647,8 +2671,10 @@ async function parseMultipartUpload(
       };
     } else if (nameMatch[1] === 'destination') {
       destination = bodyBuf.toString('utf-8').trim();
+    } else if (nameMatch[1] === 'onConflict') {
+      onConflict = bodyBuf.toString('utf-8').trim();
     }
   }
 
-  return { file, destination };
+  return { file, destination, onConflict };
 }
