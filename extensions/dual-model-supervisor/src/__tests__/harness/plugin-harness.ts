@@ -18,8 +18,9 @@ export interface Harness {
   rpc: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
   /** Captured logger output. */
   logs: { info: string[]; warn: string[]; error: string[] };
-  /** Await pending async work (fire-and-forget reviews/footer caching) to settle. */
-  settle(ms?: number): Promise<void>;
+  /** Await pending async work (fire-and-forget reviews/footer caching) to settle
+   *  by draining N event-loop cycles (micro + macro tasks), not a fixed sleep. */
+  settle(rounds?: number): Promise<void>;
   hookNames(): string[];
 }
 
@@ -98,8 +99,13 @@ export async function loadPluginFresh(
     },
     rpc,
     logs,
-    async settle(ms = 40) {
-      await new Promise((r) => setTimeout(r, ms));
+    async settle(rounds = 12) {
+      // Drain both microtasks and macrotasks repeatedly so fire-and-forget
+      // review/footer promises resolve regardless of machine speed (no fixed sleep).
+      for (let i = 0; i < rounds; i++) {
+        await new Promise((r) => setTimeout(r, 0));
+        await Promise.resolve();
+      }
     },
     hookNames: () => [...hooks.keys()],
   };

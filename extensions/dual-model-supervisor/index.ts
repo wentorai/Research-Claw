@@ -35,6 +35,7 @@ import { SummaryExtractor } from './src/hooks/summary-extractor.js';
 import { AuditLogService } from './src/core/audit-log.js';
 import { registerSupervisorRpc } from './src/rpc.js';
 import { snapshotMessageSendingCtx, SUPERVISOR_REVIEW_SUMMARY_MARKER } from './src/hooks/hook-context.js';
+import { hookSessionKey } from './src/oc/hook-types.js';
 
 // ── Module-level state (survives multiple register() calls) ──────────
 let _initialized = false;
@@ -175,36 +176,22 @@ function extractLlmInputMessages(ctx: unknown): Array<{ role: string; content: s
   return undefined;
 }
 
-function extractToolCallName(ctx: unknown): string | undefined {
-  const c = ctx as { tool?: string; toolName?: string };
-  if (typeof c.tool === 'string' && c.tool.length > 0) return c.tool;
-  if (typeof c.toolName === 'string' && c.toolName.length > 0) return c.toolName;
-  return undefined;
-}
-
 /**
- * Canonical session key for a hook, resolved from its OWN (event, ctx) — the
- * real OpenClaw contract puts the canonical key on `ctx.sessionKey`. NEVER falls
- * back to a process-global "last active session" (that leaked one session's
- * output to another). Fallback order is within this invocation only.
+ * Session key for a hook, resolved from its OWN (event, ctx) with a fallback
+ * chain — the real OpenClaw contract puts the canonical key on `ctx.sessionKey`.
+ * NEVER falls back to a process-global "last active session" (that leaked one
+ * session's output to another). Structural best-effort for hooks whose ctx also
+ * carries sessionId; the strict, type-checked path is `hookSessionKey(ctx)`,
+ * used where a session must not be guessed (message_sending).
  */
-function resolveSessionKey(ctx: unknown, event?: unknown): string | undefined {
-  const c = ctx as { sessionKey?: unknown; sessionId?: unknown } | undefined;
-  const e = event as { sessionKey?: unknown; sessionId?: unknown } | undefined;
-  for (const v of [c?.sessionKey, c?.sessionId, e?.sessionKey, e?.sessionId]) {
+function resolveSessionKey(
+  ctx: { sessionKey?: string; sessionId?: string } | undefined,
+  event?: { sessionKey?: string; sessionId?: string } | undefined,
+): string | undefined {
+  for (const v of [ctx?.sessionKey, ctx?.sessionId, event?.sessionKey, event?.sessionId]) {
     if (typeof v === 'string' && v.length > 0) return v;
   }
   return undefined;
-}
-
-/**
- * Strict canonical key — ONLY `ctx.sessionKey`. Used by `message_sending`, whose
- * event has no sessionId and which must NEVER guess a session (a wrong guess
- * delivers one user's review to another). Absent key → caller must no-op.
- */
-function strictSessionKey(ctx: unknown): string | undefined {
-  const k = (ctx as { sessionKey?: unknown } | undefined)?.sessionKey;
-  return typeof k === 'string' && k.length > 0 ? k : undefined;
 }
 
 const plugin: PluginDefinition = {
@@ -438,9 +425,9 @@ const plugin: PluginDefinition = {
 
       const sessionKey = resolveSessionKey(ctx, event);
       if (!sessionKey) return;
-      const text = (event as { content?: unknown }).content;
+      const text = event.content; // typed PluginHookMessageReceivedEvent.content
       const state = getOrCreateSession(sessionKey);
-      if (!state.researchGoal && typeof text === 'string' && text.length > 10) {
+      if (!state.researchGoal && text.length > 10) {
         goalParser.parseGoal(text, sessionKey, state);
       }
     });
@@ -522,10 +509,11 @@ const plugin: PluginDefinition = {
         return {};
       }
 
-      // Outgoing text is `event.content` (PluginHookMessageSendingEvent); the
-      // result field is `content` (PluginHookMessageSendingResult).
-      const text = (event as { content?: unknown }).content;
-      if (typeof text !== 'string' || text.length === 0) {
+      // Outgoing text is `event.content` (typed PluginHookMessageSendingEvent);
+      // the result field is `content` (PluginHookMessageSendingResult). Typed
+      // access — reading a phantom field (e.g. event.sessionId) fails tsc.
+      const text = event.content;
+      if (!text) {
         return {};
       }
 
@@ -537,7 +525,8 @@ const plugin: PluginDefinition = {
 
       // Canonical session key ONLY — message_sending has no sessionId anywhere and
       // must NEVER guess a session (that leaked one user's review to another).
-      const sessionKey = strictSessionKey(ctx);
+      // hookSessionKey is typed to the OC ctx, so a sessionKey rename fails tsc.
+      const sessionKey = hookSessionKey(ctx);
       if (!sessionKey) {
         return {};
       }
@@ -605,16 +594,14 @@ const plugin: PluginDefinition = {
         return {};
       }
 
-      const e = event as { toolName?: unknown; params?: Record<string, unknown> };
-      const tool = (typeof e.toolName === 'string' && e.toolName.length > 0)
-        ? e.toolName
-        : extractToolCallName(event);
+      // Typed PluginHookBeforeToolCallEvent: toolName + params are required fields.
+      const tool = event.toolName;
       if (!tool) {
         return {};
       }
 
-      const sessionKey = resolveSessionKey(ctx, event) ?? 'unknown-session';
-      const result = await toolReviewer.review(tool, e.params ?? {}, sessionKey);
+      const sessionKey = resolveSessionKey(ctx) ?? 'unknown-session';
+      const result = await toolReviewer.review(tool, event.params ?? {}, sessionKey);
 
       if (result.block) {
         return { block: true, blockReason: result.blockReason };
@@ -638,7 +625,7 @@ const plugin: PluginDefinition = {
         return;
       }
 
-      const sessionKey = resolveSessionKey(ctx, event);
+      const sessionKey = resolveSessionKey(ctx);
       if (!sessionKey) return;
       const state = getOrCreateSession(sessionKey);
 
@@ -650,27 +637,35 @@ const plugin: PluginDefinition = {
       await memoryGuardian.beforeCompaction(messages, sessionKey, state);
     });
 
-    // after_compaction — memory loss detection
-    api.on('after_compaction', async (event, ctx) => {
+    // after_compaction — memory-loss detection.
+    //
+    // CONTRACT-VERIFIED (OC 2026.6.1 PluginHookAfterCompactionEvent):
+    // the event carries ONLY { messageCount, tokenCount?, compactedCount,
+    // sessionFile? } — NOT the before/after message arrays. Content-based
+    // memory-loss detection is therefore IMPOSSIBLE from the event alone.
+    //
+    // The previous code read phantom `event.original` / `event.compacted` (via an
+    // `as` cast that invented the fields), so `MemoryGuardian.afterCompaction`
+    // NEVER ran — a SILENT dead path. It is disabled here and made OBSERVABLE:
+    // we record that compaction happened + why detection is unavailable. Wiring
+    // real detection requires parsing `event.sessionFile` — tracked for the
+    // memory-guard remediation (not P1). `void memoryGuardian` keeps the
+    // dependency wired for that follow-up.
+    api.on('after_compaction', (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
       if (!isSupervisorActive(activeCfg)) {
         return;
       }
-
-      const e = event as {
-        original?: Array<{ role: string; content: string }>;
-        compacted?: Array<{ role: string; content: string }>;
-      };
-
-      if (!e.original || !e.compacted) {
-        return;
-      }
-
-      const sessionKey = resolveSessionKey(ctx, event);
+      const sessionKey = resolveSessionKey(ctx);
       if (!sessionKey) return;
-      const state = getOrCreateSession(sessionKey);
-
-      await memoryGuardian.afterCompaction(e.original, e.compacted, sessionKey, state);
+      void memoryGuardian;
+      auditLog.record({
+        sessionId: sessionKey,
+        type: 'memory_guard',
+        action: 'info',
+        details: `compaction observed (messageCount=${event.messageCount}, compactedCount=${event.compactedCount}); content-diff memory-loss detection unavailable from event — needs sessionFile parsing`,
+        timestamp: Date.now(),
+      });
     });
 
     // session_end — output regeneration summary and cleanup session state
