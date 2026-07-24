@@ -26,6 +26,14 @@ export interface GroundingFinding {
   raw: string;                 // Raw citation token (DOI / arXiv id / title)
   verdict: GroundingVerdict;
   via?: string;                // Which registry confirmed existence (openalex_doi, etc.) or 'local-only'
+  /**
+   * Per-registry outcome tokens ONLY (e.g. { openalex_doi: 'hit', crossref_doi: 'miss' }
+   * or 'err:<code>'). NEVER the HTTP response body — just hit/miss/err so a persisted
+   * finding is auditable without leaking content. Empty object when networkPolicy='off'.
+   */
+  sources?: Record<string, string>;
+  /** Normalized identity of the citation (no response body) for dashboard/dedup. */
+  identity?: { doi?: string; arxivId?: string; normTitle?: string };
 }
 
 export interface GroundingConfig {

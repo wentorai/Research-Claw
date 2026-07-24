@@ -322,7 +322,16 @@ export class GroundingChecker {
       metadata: JSON.stringify({ raw: c.raw, doi: c.doi, arxivId: c.arxivId, verdict, via: result.via, sources: result.sources }),
       timestamp: Date.now(),
     });
-    return { raw: c.raw, verdict, via: result.via };
+    // Carry per-registry outcomes + normalized identity onto the finding itself, so a
+    // PERSISTED review record is auditable (hit/miss/err per registry) without leaking
+    // any response body. `sources` is always an object (empty when networkPolicy='off').
+    return {
+      raw: c.raw,
+      verdict,
+      via: result.via,
+      sources: result.sources ?? {},
+      identity: { doi: c.doi, arxivId: c.arxivId, normTitle: c.title ? normTitle(c.title) : undefined },
+    };
   }
 
   /** In 'info' mode never assert fabrication: soften not_found → unverifiable. */

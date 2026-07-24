@@ -25,7 +25,7 @@ function mockRegistries() {
   });
 }
 
-interface Review { reviewId: string; state: string; verdict: string; runId: string | null; findings: unknown[] }
+interface Review { reviewId: string; state: string; verdict: string; runId: string | null; findings: Array<{ raw: string; sources?: Record<string, string> }> }
 
 async function reviewsByRun(h: Harness, runId: string): Promise<Review[]> {
   const r = (await h.rpc.get('rc.supervisor.reviews.list')!({ runId })) as { reviews: Review[] };
@@ -66,6 +66,9 @@ describe('M6 review persistence integration', () => {
     expect(r.state).toBe('completed');
     expect(r.verdict).toBe('exists');
     expect(r.runId).toBe('run-1');
+    // The PERSISTED finding (produced by the real grounding checker, not hand-built)
+    // carries per-registry sources — proving production produces + persists them.
+    expect(r.findings[0].sources).toMatchObject({ openalex_doi: 'hit' });
   });
 
   it('two concurrent turns in one session persist as two distinct reviews', async () => {

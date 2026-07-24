@@ -10,7 +10,11 @@ import {
   titleMatches,
   checkExistence,
   inflightCount,
+  GroundingChecker,
 } from '../hooks/grounding-checker.js';
+import { parseConfig } from '../core/config.js';
+import type { AuditLogService } from '../core/audit-log.js';
+import type { SessionState } from '../core/types.js';
 
 // ── P2-B: Unicode / CJK title matching ───────────────────────────────
 describe('P2-B normTitle / titleMatches (Unicode-safe)', () => {
@@ -84,6 +88,33 @@ describe('P2-D checkExistence privacy networkPolicy', () => {
     expect(r.verdict).toBe('exists');
     expect(r.via).toBe('openalex_title');
     expect(fetchFn.mock.calls.some((c) => String(c[0]).includes('title.search'))).toBe(true);
+  });
+});
+
+// ── H4-c: findings must carry per-registry sources + normalized identity ──
+describe('P2 (reopened) grounding finding completeness', () => {
+  afterEach(() => { (globalThis as { fetch: unknown }).fetch = origFetch; vi.restoreAllMocks(); });
+  const logger = { info() {}, warn() {}, error() {} };
+  const auditLog = { record() {} } as unknown as AuditLogService;
+  function makeChecker(networkPolicy: 'off' | 'identifiers-only' | 'full') {
+    const cfg = parseConfig({ enabled: true, supervisorModel: 'x/y', reviewMode: 'correct', grounding: { networkPolicy, verdictMode: 'flag' } });
+    return new GroundingChecker(cfg, logger, auditLog);
+  }
+  const emptyState = () => ({ groundingFindings: [] } as unknown as SessionState);
+
+  it('a finding carries per-registry sources + normalized identity (token grammar only, no response body)', async () => {
+    mockFetch(() => ({ status: 404 })); // every registry cleanly misses
+    const findings = await makeChecker('identifiers-only').runCheck('builds on 10.5555/abc', 's', [], emptyState());
+    expect(findings).toHaveLength(1);
+    expect(findings[0].sources).toBeDefined();
+    expect(Object.keys(findings[0].sources!).length).toBeGreaterThan(0); // registries were consulted → recorded
+    for (const v of Object.values(findings[0].sources!)) expect(v).toMatch(/^(hit|miss|err)/); // never a leaked body
+    expect(findings[0].identity?.doi).toBe('10.5555/abc'); // normalized identity carried
+  });
+
+  it("networkPolicy 'off' yields a defined (empty) sources object, never undefined", async () => {
+    const findings = await makeChecker('off').runCheck('builds on 10.5555/abc', 's', [], emptyState());
+    expect(findings[0].sources).toBeDefined();
   });
 });
 
