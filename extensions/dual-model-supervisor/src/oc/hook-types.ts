@@ -36,6 +36,7 @@ export type {
   PluginHookBeforeMessageWriteEvent,
   PluginHookBeforeToolCallEvent,
   PluginHookBeforeToolCallResult,
+  PluginApprovalResolution,
   PluginHookSessionStartEvent,
   PluginHookSessionEndEvent,
 } from 'openclaw/plugin-sdk/types';

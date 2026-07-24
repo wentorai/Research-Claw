@@ -27,6 +27,13 @@ export interface SupervisorConfig {
   memoryGuard: MemoryGuardConfig;      // Memory protection settings
   courseCorrection: CourseCorrectionConfig;  // Course correction settings
   highRiskTools: string[];             // Tool names that require extra review
+  /**
+   * What to do with a confirmed-dangerous tool call:
+   *  - 'block'   : hard block (agent gets a tool error). Default — unchanged behavior.
+   *  - 'approve' : pause and ask the user (before_tool_call → requireApproval →
+   *                OC's native approval flow). The tool runs only if allowed.
+   */
+  dangerousToolPolicy: 'block' | 'approve';
 }
 
 export const DEFAULT_CONFIG: SupervisorConfig = {
@@ -45,6 +52,7 @@ export const DEFAULT_CONFIG: SupervisorConfig = {
     maxRegenerateAttempts: 3,
   },
   highRiskTools: ['exec', 'write', 'edit', 'send_notification', 'browser'],
+  dangerousToolPolicy: 'block',
 };
 
 // ── Review Results ─────────────────────────────────────────────────────
@@ -96,6 +104,7 @@ export type AuditLogType =
   | 'memory_guard'        // Memory protection actions
   | 'course_correction'   // Course correction interventions
   | 'force_regenerate'    // Force regeneration on deviation
+  | 'approval'            // Human-in-the-loop approval lifecycle (requested → allowed/denied/timeout/cancelled)
   | 'session_analysis';   // End-of-session analysis
 
 export interface AuditLogEntry {

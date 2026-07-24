@@ -9,6 +9,7 @@ const defaultConfig = {
   memoryGuard: { enabled: true, keyCategories: [] },
   courseCorrection: { enabled: true, deviationThreshold: 0.5, forceRegenerate: false, maxRegenerateAttempts: 3 },
   highRiskTools: ['exec', 'write', 'edit'],
+  dangerousToolPolicy: 'block' as const,
 };
 
 const logger = { info: () => {}, warn: () => {}, error: () => {} };

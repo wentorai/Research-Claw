@@ -23,6 +23,7 @@ export function parseConfig(raw: Record<string, unknown> | undefined): Superviso
     memoryGuard: parseMemoryGuard(raw.memoryGuard),
     courseCorrection: parseCourseCorrection(raw.courseCorrection),
     highRiskTools: parseStringArray(raw.highRiskTools, DEFAULT_CONFIG.highRiskTools),
+    dangerousToolPolicy: raw.dangerousToolPolicy === 'approve' ? 'approve' : DEFAULT_CONFIG.dangerousToolPolicy,
   };
 }
 

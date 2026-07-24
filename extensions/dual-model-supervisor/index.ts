@@ -589,6 +589,10 @@ const plugin: PluginDefinition = {
       if (result.block) {
         return { block: true, blockReason: result.blockReason };
       }
+      if (result.requireApproval) {
+        // dangerousToolPolicy:'approve' — hand OC the human-in-the-loop request.
+        return { requireApproval: result.requireApproval };
+      }
       if (result.params) {
         return { params: result.params };
       }
