@@ -96,6 +96,45 @@ export function extractCitations(text: string, references: string[] = []): Citat
   return out;
 }
 
+// Heading may be wrapped in markdown emphasis/heading markers: `## References`,
+// `**References**`, `__References__`, `References:`, `参考文献`.
+const REF_HEADING_RE = /^\s*[#*_]*\s*(references|bibliography|works cited|citations|参考文献|參考文獻)\s*[#*_]*\s*[:：]?\s*$/i;
+// A reference ENTRY must begin with a list marker ([1], 1., 1), -, *, •). Requiring a
+// marker avoids harvesting trailing prose (notes/disclaimers) that follows the section.
+const REF_ENTRY_RE = /^(?:[-*•]\s+|\[(\d+)\]\s*|(\d+)[.)]\s+)(.+)$/;
+
+/** True when the text carries a verifiable identifier (DOI / labeled arXiv). */
+export function hasCitationIdentifier(s: string): boolean {
+  return /\b10\.\d{4,9}\/[-._;()/:a-z0-9]+/i.test(s) || /\barxiv:\s*\d{4}\.\d{4,5}/i.test(s);
+}
+
+/**
+ * Deterministically harvest MARKED reference entries from a structured References /
+ * 参考文献 section of the CURRENT output. This lets grounding REPRESENT the current
+ * turn's title-only citations synchronously (the async summary extractor has not yet
+ * pushed them into `recentSummaries`), so a title-only-citing turn is not falsely
+ * recorded as a clean review.
+ *
+ * Returns the marker-stripped entry text. Callers must NOT title-search these raw
+ * bibliographic lines (author+year+journal noise makes real papers miss → a false
+ * `not_found` fabrication flag); they are represented as UNVERIFIABLE instead.
+ */
+export function extractReferenceLines(output: string): string[] {
+  const out: string[] = [];
+  let inRefs = false;
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (REF_HEADING_RE.test(line)) { inRefs = true; continue; }
+    if (!inRefs) continue;
+    if (/^#{1,6}\s+\S/.test(line)) break; // next ATX heading ends the section
+    const m = REF_ENTRY_RE.exec(line);
+    if (!m) continue; // no list marker → not a reference entry (skip trailing prose)
+    const entry = (m[3] ?? '').trim();
+    if (entry.length >= MIN_TITLE_LEN) out.push(entry);
+  }
+  return out;
+}
+
 // ── Title normalization (Unicode/CJK safe) ───────────────────────────
 
 /**
@@ -286,6 +325,20 @@ export class GroundingChecker {
   async runCheck(output: string, sessionId: string, references: string[], sessionState: SessionState): Promise<GroundingFinding[]> {
     try {
       const citations = extractCitations(output, references);
+      // Represent the CURRENT turn's title-only reference entries (no verifiable
+      // identifier) as UNVERIFIABLE-present, so a title-only-citing turn is honestly
+      // non-clean. Do NOT title-search these raw bibliographic lines — that would
+      // false-flag real papers. Identifiers (DOI/arXiv) in the output are already
+      // caught by extractCitations' text scan; here we only add TITLE-LESS markers
+      // (no doi/arxiv/title → checkExistence returns 'unverifiable', no network call).
+      const seen = new Set(citations.map((c) => c.raw.toLowerCase().trim()));
+      for (const entry of extractReferenceLines(output)) {
+        if (hasCitationIdentifier(entry)) continue; // identifier already handled by the text scan
+        const key = entry.toLowerCase().trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        citations.push({ raw: entry }); // title-LESS → unverifiable, never not_found
+      }
       if (!citations.length) return [];
 
       const already = new Set((sessionState.groundingFindings ?? []).map((f) => f.raw.toLowerCase()));

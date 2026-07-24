@@ -71,6 +71,19 @@ describe('M6 review persistence integration', () => {
     expect(r.findings[0].sources).toMatchObject({ openalex_doi: 'hit' });
   });
 
+  it('a current-turn title-only citation is represented in the persisted review (not silently clean)', async () => {
+    mockRegistries(); // DOI hits, everything else (incl. any title path) misses
+    const h = await loadPluginFresh(CONFIG); // networkPolicy: identifiers-only
+    await h.fire(
+      'llm_output',
+      { runId: 'run-t', sessionId: 's1', provider: 'p', model: 'm', assistantTexts: ['We extend prior work.\n\nReferences\n- Deep Residual Learning for Image Recognition'], lastAssistant: { role: 'assistant', content: 'x' } },
+      { sessionKey: 'agent:main:skT', sessionId: 's1', runId: 'run-t' },
+    );
+    const r = await waitForTerminal(h, 'run-t');
+    expect(r.findings.length).toBeGreaterThan(0); // the title-only citation WAS checked, not skipped
+    expect(r.verdict).not.toBe('none'); // NOT a vacuous "nothing to verify / clean" review
+  });
+
   it('two concurrent turns in one session persist as two distinct reviews', async () => {
     mockRegistries();
     const h = await loadPluginFresh(CONFIG);

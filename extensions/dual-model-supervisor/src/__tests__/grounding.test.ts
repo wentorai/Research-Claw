@@ -11,6 +11,7 @@ import {
   checkExistence,
   inflightCount,
   GroundingChecker,
+  extractReferenceLines,
 } from '../hooks/grounding-checker.js';
 import { parseConfig } from '../core/config.js';
 import type { AuditLogService } from '../core/audit-log.js';
@@ -115,6 +116,64 @@ describe('P2 (reopened) grounding finding completeness', () => {
   it("networkPolicy 'off' yields a defined (empty) sources object, never undefined", async () => {
     const findings = await makeChecker('off').runCheck('builds on 10.5555/abc', 's', [], emptyState());
     expect(findings[0].sources).toBeDefined();
+  });
+});
+
+// ── H3: the CURRENT turn's title-only citations (in a References section) must be
+// verified, not silently skipped as if the turn cited nothing. ──
+describe('P2 (reopened) current-turn title-only citations', () => {
+  afterEach(() => { (globalThis as { fetch: unknown }).fetch = origFetch; vi.restoreAllMocks(); });
+  const logger = { info() {}, warn() {}, error() {} };
+  const auditLog = { record() {} } as unknown as AuditLogService;
+  function makeChecker(networkPolicy: 'off' | 'identifiers-only' | 'full') {
+    const cfg = parseConfig({ enabled: true, supervisorModel: 'x/y', reviewMode: 'correct', grounding: { networkPolicy, verdictMode: 'flag' } });
+    return new GroundingChecker(cfg, logger, auditLog);
+  }
+  const emptyState = () => ({ groundingFindings: [] } as unknown as SessionState);
+
+  const OUTPUT = [
+    'Our method builds on prior work in representation learning.',
+    '',
+    'References',
+    '- Deep Residual Learning for Image Recognition',
+  ].join('\n');
+
+  it('extracts + checks a title-only citation from THIS turn (fresh session, no prior refs)', async () => {
+    mockFetch(() => ({ status: 404 })); // title-search misses
+    // priorRefs is EMPTY (async summary has not pushed the current turn yet).
+    const findings = await makeChecker('full').runCheck(OUTPUT, 's', [], emptyState());
+    expect(findings.length).toBeGreaterThan(0); // the current-turn title was verified, not skipped
+    expect(findings.some((f) => f.raw.includes('Deep Residual Learning'))).toBe(true);
+  });
+
+  it('extractReferenceLines pulls entries from a References section (stripping list markers)', () => {
+    const lines = extractReferenceLines('intro\n\nReferences\n1. Attention Is All You Need\n- Some Other Paper Title Here');
+    expect(lines).toContain('Attention Is All You Need');
+    expect(lines).toContain('Some Other Paper Title Here');
+    // free prose before the heading is NOT harvested
+    expect(lines.some((l) => l.includes('intro'))).toBe(false);
+  });
+
+  // SAFETY (core invariant): a real paper's bibliographic line must NEVER be flagged
+  // as fabricated. Raw biblio lines (author+year+journal) are too noisy to title-search,
+  // so they must be represented as UNVERIFIABLE, never not_found.
+  it('does NOT false-flag a real paper: a bibliographic reference line under full is unverifiable, never not_found', async () => {
+    mockFetch(() => ({ status: 404 })); // title-search (if it ran) would miss → not_found
+    const output = 'Our method.\n\nReferences\n- Smith, J., & LeCun, Y. (2020). Deep learning for science. Nature, 521, 436-444.';
+    const findings = await makeChecker('full').runCheck(output, 's', [], emptyState());
+    expect(findings.length).toBeGreaterThan(0);
+    for (const f of findings) expect(f.verdict).not.toBe('not_found'); // never accuse a real paper
+  });
+
+  it('detects a bold-markdown **References** heading', () => {
+    const lines = extractReferenceLines('**References**\n1. Deep Residual Learning for Image Recognition');
+    expect(lines.some((l) => l.includes('Deep Residual Learning'))).toBe(true);
+  });
+
+  it('does NOT harvest trailing non-reference prose after the section (marker required)', () => {
+    const lines = extractReferenceLines('References\n- Deep Residual Learning for Image Recognition\n\nNote: all papers were accessed in January 2024 via institutional access.');
+    expect(lines.some((l) => l.includes('Deep Residual Learning'))).toBe(true);
+    expect(lines.some((l) => l.includes('Note:'))).toBe(false); // trailing prose (no list marker) not harvested
   });
 });
 
