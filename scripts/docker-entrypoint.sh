@@ -354,6 +354,16 @@ trap 'STOP=true; [ -n "$GW_PID" ] && kill -TERM "$GW_PID" 2>/dev/null' INT TERM
 export RC_RUN_START_EPOCH=$(date +%s)
 
 while true; do
+  # A stop signal that lands while GW_PID is empty (crash-restart sleep or
+  # proxy-start window) sets STOP=true but has nothing to forward to — bail
+  # before starting a new gateway, else we'd spawn one that never sees the
+  # already-delivered signal and hangs until SIGKILL (the very failure this
+  # forwarding logic exists to prevent).
+  if [ "$STOP" = "true" ]; then
+    bash /app/scripts/farewell.sh || true
+    exit 0
+  fi
+
   # MiniMax OAuth (sk-cp-...) compatibility proxy (no-op unless configured).
   node /app/scripts/minimax-oauth-proxy.mjs >/tmp/research-claw-minimax-oauth-proxy.log 2>&1 &
   PROXY_PID=$!
@@ -380,6 +390,10 @@ while true; do
     exit 0
   fi
 
+  # Interruptible sleep: if a stop signal arrives during the restart backoff,
+  # kill the sleep so the top-of-loop STOP check fires immediately instead of
+  # waiting out the full 3s (and never restart into a doomed gateway).
   echo "[research-claw] Gateway exited (code $CODE) — restarting in 3s..."
-  sleep 3
+  sleep 3 &
+  wait "$!" 2>/dev/null
 done
