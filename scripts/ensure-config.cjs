@@ -332,7 +332,11 @@ function ensureConfig(filePath) {
   if (!isGlobal && !c.plugins?.entries) {
     if (!c.plugins) c.plugins = {};
     c.plugins.entries = {
-      'research-claw-core': { enabled: true, config: { dbPath: RC_DB_PATH, autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' } },
+      'research-claw-core': {
+        enabled: true,
+        hooks: { allowConversationAccess: true },
+        config: { dbPath: RC_DB_PATH, autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' },
+      },
       'openclaw-weixin': { enabled: true },
       'dual-model-supervisor': { enabled: true },
       'research-superpower': { enabled: true },
@@ -462,11 +466,16 @@ function ensureConfig(filePath) {
       changed = true;
     }
 
-    const dmsEntry = c.plugins?.entries?.['dual-model-supervisor'];
-    if (dmsEntry && dmsEntry.hooks?.allowConversationAccess !== true) {
-      if (!dmsEntry.hooks) dmsEntry.hooks = {};
-      dmsEntry.hooks.allowConversationAccess = true;
-      changed = true;
+    // Typed hooks that inspect agent_end conversation/run metadata are blocked
+    // for non-bundled plugins unless this permission is explicit. Core needs it
+    // for runtime tools/skills reconciliation; DMS needs it for supervision.
+    for (const pluginId of ['research-claw-core', 'dual-model-supervisor']) {
+      const entry = c.plugins?.entries?.[pluginId];
+      if (entry && entry.hooks?.allowConversationAccess !== true) {
+        if (!entry.hooks) entry.hooks = {};
+        entry.hooks.allowConversationAccess = true;
+        changed = true;
+      }
     }
 
     // OC 2026.6.1: channel.commands is not in schema (feishu/qqbot/etc.)

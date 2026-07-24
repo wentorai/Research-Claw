@@ -1229,6 +1229,24 @@ export class TaskService {
     return { id: row.id, type: row.type, title: row.title, body: row.body, created_at: row.created_at };
   }
 
+  /**
+   * Insert a notification only when no unread notification with the same title
+   * exists. Startup probes can run repeatedly during crash loops; title-based
+   * deduplication keeps one actionable card without suppressing a later event
+   * after the user has read the previous card.
+   */
+  sendNotificationOnce(type: string, title: string, body?: string): { id: string; type: string; title: string; body: string | null; created_at: string } {
+    const existing = this.db.prepare(
+      `SELECT id, type, title, body, created_at
+       FROM rc_agent_notifications
+       WHERE read = 0 AND title = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    ).get(title) as
+      { id: string; type: string; title: string; body: string | null; created_at: string } | undefined;
+    return existing ?? this.sendNotification(type, title, body);
+  }
+
   /** Get unread custom notifications (for dashboard polling). */
   getUnreadNotifications(limit = 20): Array<{ id: string; type: string; title: string; body: string | null; created_at: string }> {
     return this.db.prepare(

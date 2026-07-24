@@ -42,7 +42,19 @@ import { SessionNamingService } from './src/session-naming/service.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
 import { buildRpcErrorOutcome } from './src/rpc-error.js';
-import { auditPluginActivation, type ProbeInput } from './src/self-check/activation-probe.js';
+import {
+  auditPluginActivation,
+  discoverPluginInputs,
+  findRecentStartupFailures,
+  resolveOpenClawStateDir,
+  type ProbeInput,
+} from './src/self-check/activation-probe.js';
+import {
+  auditRuntimeMounts,
+  readSessionPromptReport,
+  readSkillsCliReport,
+  selectModelVisibleEligibleSkills,
+} from './src/self-check/runtime-probe.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
@@ -182,6 +194,8 @@ let _jobSyncTimer: ReturnType<typeof setInterval> | null = null;
 let _lastJobSyncAt = 0;
 const JOB_SYNC_THROTTLE_MS = 3_000;
 const JOB_SYNC_INTERVAL_MS = 20_000;
+const _runtimeProbeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const _lastRuntimeProbeReportAt = new Map<string, number>();
 
 // ── Tool call probe state ─────────────────────────────────────────────
 // Caches Ollama tool-calling probe results per model string (30-min TTL).
@@ -1746,6 +1760,156 @@ const plugin: PluginDefinition = {
     // Hooks MUST only be registered once — duplicate registration causes
     // handlers to fire multiple times per event.
     if (!_hooksRegistered) {
+    type SelfCheckConfig = {
+      plugins?: { load?: { paths?: unknown } };
+      session?: { store?: unknown };
+    };
+
+    const getSelfCheckContext = (): {
+      root: string;
+      stateDir: string;
+      config: SelfCheckConfig;
+      plugins: ProbeInput[];
+    } => {
+      const resolved = api.resolvePath('.');
+      const startDir = typeof resolved === 'string' && resolved ? resolved : process.cwd();
+      const root = findGitRoot(startDir);
+      const stateDir = resolveOpenClawStateDir();
+      const config = api.runtime.config.current() as SelfCheckConfig;
+      const rawLoadPaths = config.plugins?.load?.paths;
+      const loadPaths = Array.isArray(rawLoadPaths)
+        ? rawLoadPaths.filter((item): item is string => typeof item === 'string')
+        : [];
+      return {
+        root,
+        stateDir,
+        config,
+        plugins: discoverPluginInputs({ projectRoot: root, stateDir, loadPaths }),
+      };
+    };
+
+    const notifySelfCheck = (title: string, message: string): void => {
+      try {
+        taskService.sendNotificationOnce('error', title, message);
+      } catch {
+        // Dashboard notification is best-effort; the warning log remains.
+      }
+    };
+
+    /**
+     * agent_end fires before OpenClaw persists systemPromptReport. Poll the
+     * requested session store briefly, then reconcile the new report against
+     * an independently enumerated skills CLI result.
+     */
+    const scheduleRuntimeReconciliation = (
+      hookContext: { sessionKey?: string; agentId?: string } | undefined,
+    ): void => {
+      const sessionKey = hookContext?.sessionKey;
+      if (!sessionKey) return;
+      const agentId = hookContext?.agentId?.trim() || 'main';
+      const timerKey = `${agentId}:${sessionKey}`;
+      const priorTimer = _runtimeProbeTimers.get(timerKey);
+      if (priorTimer) clearTimeout(priorTimer);
+
+      let selfCheckContext: ReturnType<typeof getSelfCheckContext>;
+      try {
+        selfCheckContext = getSelfCheckContext();
+      } catch (error) {
+        api.logger.warn(
+          `[self-check] runtime probe setup failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
+      const configuredStore =
+        typeof selfCheckContext.config.session?.store === 'string'
+          ? selfCheckContext.config.session.store
+          : undefined;
+      const baseline = readSessionPromptReport({
+        stateDir: selfCheckContext.stateDir,
+        agentId,
+        sessionKey,
+        configuredStore,
+      })?.generatedAt ?? 0;
+      const alreadyAudited = _lastRuntimeProbeReportAt.get(timerKey) ?? 0;
+      let attemptsRemaining = 20;
+
+      const poll = (): void => {
+        const report = readSessionPromptReport({
+          stateDir: selfCheckContext.stateDir,
+          agentId,
+          sessionKey,
+          configuredStore,
+        });
+        if (
+          !report ||
+          report.source !== 'run' ||
+          report.generatedAt <= baseline ||
+          report.generatedAt <= alreadyAudited
+        ) {
+          attemptsRemaining -= 1;
+          if (attemptsRemaining <= 0) {
+            _runtimeProbeTimers.delete(timerKey);
+            api.logger.warn(
+              `[self-check] runtime report unavailable after agent_end for ${sessionKey}; reconciliation skipped without blocking the run.`,
+            );
+            return;
+          }
+          const timer = setTimeout(poll, 250);
+          timer.unref?.();
+          _runtimeProbeTimers.set(timerKey, timer);
+          return;
+        }
+
+        _runtimeProbeTimers.delete(timerKey);
+        _lastRuntimeProbeReportAt.set(timerKey, report.generatedAt);
+        const entryPath = process.argv[1];
+        if (!entryPath || !fs.existsSync(entryPath)) {
+          api.logger.warn(
+            '[self-check] OpenClaw CLI entry is unavailable; runtime skills reconciliation skipped.',
+          );
+          return;
+        }
+        void readSkillsCliReport({
+          entryPath,
+          cwd: selfCheckContext.root,
+          agentId,
+          env: process.env,
+        })
+          .then((skillsReport) => {
+            // §W6 scopes tool reconciliation to Research-Claw's two product
+            // plugins. Other OpenClaw channel plugins may intentionally expose
+            // tools only under channel-specific policy.
+            const productPlugins = selfCheckContext.plugins.filter(
+              (pluginInput) =>
+                pluginInput.id === 'research-claw-core' ||
+                pluginInput.id === 'research-plugins',
+            );
+            const findings = auditRuntimeMounts({
+              plugins: productPlugins,
+              systemPromptReport: report,
+              indexedSkillNames: selectModelVisibleEligibleSkills(skillsReport),
+            });
+            for (const finding of findings) {
+              api.logger.warn(`[self-check] ${finding.message}`);
+              notifySelfCheck(finding.title, finding.message);
+            }
+            if (findings.length === 0) {
+              api.logger.info(
+                `[self-check] runtime reconciliation passed (${report.tools.entries.length} mounted tools, ${report.skills.entries.length} injected skills)`,
+              );
+            }
+          })
+          .catch((error) => {
+            api.logger.warn(
+              `[self-check] runtime skills probe failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+      };
+
+      const timer = setTimeout(poll, 250);
+      timer.unref?.();
+      _runtimeProbeTimers.set(timerKey, timer);
+    };
 
     // Hook 1: Inject research context into agent prompt
     //
@@ -2262,6 +2426,15 @@ const plugin: PluginDefinition = {
     });
     } // MEMORY_MODULE_ENABLED
 
+    // Runtime reconciliation must run independently of the optional memory
+    // module. It reads OpenClaw's post-run persisted systemPromptReport rather
+    // than trusting plugin declarations as evidence of actual mounts.
+    api.on('agent_end', (_event: unknown, context: unknown) => {
+      scheduleRuntimeReconciliation(
+        context as { sessionKey?: string; agentId?: string } | undefined,
+      );
+    });
+
     // Hook 6: Sync native cron schedule changes back to rc_cron_state.
     //
     // The agent may use OpenClaw's built-in cron management tools (e.g.
@@ -2488,84 +2661,27 @@ const plugin: PluginDefinition = {
       // startup_failed crash snapshots that otherwise pile up unseen.
       // Fully guarded — a probe failure must never block gateway startup.
       try {
-        // api.resolvePath('.') can be undefined inside the gateway_start hook
-        // (it is reliable during register()); fall back to the gateway CWD,
-        // which run.sh/docker-entrypoint set to the repo root.
-        const resolved = api.resolvePath('.');
-        const startDir = typeof resolved === 'string' && resolved ? resolved : process.cwd();
-        const root = findGitRoot(startDir);
-        const discovered: ProbeInput[] = [];
-        const seen = new Set<string>();
-
-        // Collect candidate plugin dirs: the bundled extensions/* (CWD discovery,
-        // used even when config.plugins.load.paths is empty) + explicit load paths
-        // (research-plugins is wired in via load.paths on install).
-        const candidateDirs: string[] = [];
-        const extRoot = path.join(root, 'extensions');
-        if (fs.existsSync(extRoot)) {
-          for (const name of fs.readdirSync(extRoot)) {
-            candidateDirs.push(path.join(extRoot, name));
-          }
-        }
-        const cfg = api.runtime.config.current() as {
-          plugins?: { load?: { paths?: unknown } };
+        const selfCheckContext = getSelfCheckContext();
+        const { discovered, stateDir } = {
+          discovered: selfCheckContext.plugins,
+          stateDir: selfCheckContext.stateDir,
         };
-        const loadPaths = cfg.plugins?.load?.paths;
-        if (Array.isArray(loadPaths)) {
-          for (const p of loadPaths) {
-            if (typeof p === 'string') {
-              candidateDirs.push(path.isAbsolute(p) ? p : path.resolve(root, p));
-            }
-          }
-        }
-
-        for (const dir of candidateDirs) {
-          const manifestPath = path.join(dir, 'openclaw.plugin.json');
-          if (seen.has(dir) || !fs.existsSync(manifestPath)) continue;
-          seen.add(dir);
-          let manifest: ProbeInput['manifest'] = null;
-          try {
-            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-          } catch {
-            manifest = null;
-          }
-          const id =
-            (manifest && typeof manifest.id === 'string' && manifest.id) || path.basename(dir);
-          discovered.push({ id, dir, manifest });
-        }
 
         const findings = auditPluginActivation(discovered);
         for (const f of findings) {
           api.logger.warn(`[self-check] ${f.message}`);
-          try {
-            taskService.sendNotification(
-              'error',
-              `插件未正确加载:${f.id}`,
-              f.message,
-            );
-          } catch { /* notification is best-effort */ }
+          notifySelfCheck(`插件未正确加载:${f.id}`, f.message);
         }
 
         // Surface recent gateway startup_failed snapshots (last 24h) so crash
         // loops don't stay invisible (real machines had 20+ pile up unseen).
         try {
-          const stabilityDir = path.join(os.homedir(), '.openclaw', 'logs', 'stability');
-          if (fs.existsSync(stabilityDir)) {
-            const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-            const recent = fs
-              .readdirSync(stabilityDir)
-              .filter((n) => n.includes('startup_failed') && n.endsWith('.json'))
-              .filter((n) => {
-                try { return fs.statSync(path.join(stabilityDir, n)).mtimeMs >= cutoff; }
-                catch { return false; }
-              });
-            if (recent.length > 0) {
-              const msg = `Found ${recent.length} gateway startup_failed snapshot(s) in the last 24h at ${stabilityDir} — the gateway crashed on a recent start.`;
-              api.logger.warn(`[self-check] ${msg}`);
-              try {
-                taskService.sendNotification('error', '网关近期启动失败', msg);
-              } catch { /* best-effort */ }
-            }
+          const recent = findRecentStartupFailures(stateDir);
+          if (recent.length > 0) {
+            const stabilityDir = path.join(stateDir, 'logs', 'stability');
+            const msg = `Found ${recent.length} gateway startup_failed snapshot(s) in the last 24h at ${stabilityDir} — the gateway crashed on a recent start.`;
+            api.logger.warn(`[self-check] ${msg}`);
+            notifySelfCheck('网关近期启动失败', msg);
           }
         } catch { /* stability scan is best-effort */ }
 

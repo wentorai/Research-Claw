@@ -19,6 +19,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Timestamp is passed in when scripted; else derive one.
 TS="${RC_DIAG_TS:-$(date +%Y%m%d-%H%M%S)}"
 OUT_DIR="${RC_DIAG_OUT:-$HOME}"
+OPENCLAW_STATE="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
+case "$OPENCLAW_STATE" in
+  "~") OPENCLAW_STATE="$HOME" ;;
+  "~/"*) OPENCLAW_STATE="$HOME/${OPENCLAW_STATE#\~/}" ;;
+esac
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/rc-diag-XXXXXX")"
 BUNDLE="$OUT_DIR/rc-diag-$TS.tar.gz"
 
@@ -57,16 +62,16 @@ done
 
 # --- 4. OpenClaw stability crash snapshots (recent) + config-audit ---
 mkdir -p "$STAGE/stability"
-if [ -d "$HOME/.openclaw/logs/stability" ]; then
+if [ -d "$OPENCLAW_STATE/logs/stability" ]; then
   # Copy the 10 most recent startup_failed snapshots.
-  ls -t "$HOME/.openclaw/logs/stability"/*startup_failed*.json 2>/dev/null | head -10 | while read -r f; do
+  ls -t "$OPENCLAW_STATE/logs/stability"/*startup_failed*.json 2>/dev/null | head -10 | while read -r f; do
     [ -f "$f" ] && cp "$f" "$STAGE/stability/" 2>/dev/null
   done
   note "stability snapshots: $(ls "$STAGE"/stability/ 2>/dev/null | wc -l | tr -d ' ')"
 else
   note "stability snapshots: MISSING"
 fi
-_grab_tail "$HOME/.openclaw/logs/config-audit.jsonl" "$STAGE/config-audit.jsonl" 500
+_grab_tail "$OPENCLAW_STATE/logs/config-audit.jsonl" "$STAGE/config-audit.jsonl" 500
 
 # --- 5. Redacted configs (KEY-NAME driven redaction) ---
 mkdir -p "$STAGE/config"
@@ -87,7 +92,7 @@ _redact_config() { # <src> <dst>
   " 2>/dev/null && note "$(basename "$2"): redacted"
 }
 _redact_config "$ROOT/config/openclaw.json" "$STAGE/config/project-openclaw.json"
-_redact_config "$HOME/.openclaw/openclaw.json" "$STAGE/config/global-openclaw.json"
+_redact_config "$OPENCLAW_STATE/openclaw.json" "$STAGE/config/global-openclaw.json"
 # Docker path (present only in container).
 [ -f /app/config/openclaw.json ] && _redact_config /app/config/openclaw.json "$STAGE/config/docker-openclaw.json"
 

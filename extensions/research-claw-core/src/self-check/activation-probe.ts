@@ -13,6 +13,10 @@
  * surfaced (log warn + dashboard notification) instead of staying invisible.
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 export interface PluginManifestLike {
   id?: string;
   main?: unknown;
@@ -36,6 +40,105 @@ export interface ProbeFinding {
   kind: 'missing-activation' | 'missing-main' | 'unreadable-manifest';
   /** Human-facing message (already includes the plugin id + advice). */
   message: string;
+}
+
+export interface PluginDiscoveryOptions {
+  projectRoot: string;
+  stateDir: string;
+  loadPaths: string[];
+}
+
+/** Match OpenClaw's state-dir precedence without importing its unstable internals. */
+export function resolveOpenClawStateDir(
+  env: { OPENCLAW_STATE_DIR?: string } = process.env,
+  homeDir = os.homedir(),
+): string {
+  const configured = env.OPENCLAW_STATE_DIR?.trim();
+  if (!configured) return path.join(homeDir, '.openclaw');
+  if (configured === '~') return homeDir;
+  if (configured.startsWith('~/')) return path.join(homeDir, configured.slice(2));
+  return path.resolve(configured);
+}
+
+function candidatePluginDirs(options: PluginDiscoveryOptions): string[] {
+  const dirs: string[] = [];
+  for (const extensionsRoot of [
+    path.join(options.projectRoot, 'extensions'),
+    path.join(options.stateDir, 'extensions'),
+  ]) {
+    if (!fs.existsSync(extensionsRoot)) continue;
+    for (const name of fs.readdirSync(extensionsRoot)) {
+      dirs.push(path.join(extensionsRoot, name));
+    }
+  }
+  for (const configuredPath of options.loadPaths) {
+    const absolute = path.isAbsolute(configuredPath)
+      ? configuredPath
+      : path.resolve(options.projectRoot, configuredPath);
+    dirs.push(path.extname(absolute) ? path.dirname(absolute) : absolute);
+  }
+  return dirs;
+}
+
+/**
+ * Discover plugin manifests from every path OpenClaw uses in Research-Claw:
+ * bundled project extensions, native state-dir installs, and explicit paths.
+ */
+export function discoverPluginInputs(options: PluginDiscoveryOptions): ProbeInput[] {
+  const discovered: ProbeInput[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of candidatePluginDirs(options)) {
+    let dir = path.resolve(candidate);
+    try {
+      dir = fs.realpathSync(dir);
+    } catch {
+      // A missing explicit path has no manifest to audit; OpenClaw diagnoses it.
+    }
+    if (seen.has(dir)) continue;
+    const manifestPath = path.join(dir, 'openclaw.plugin.json');
+    if (!fs.existsSync(manifestPath)) continue;
+    seen.add(dir);
+
+    let manifest: PluginManifestLike | null = null;
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      manifest = parsed !== null && typeof parsed === 'object'
+        ? parsed as PluginManifestLike
+        : null;
+    } catch {
+      manifest = null;
+    }
+    const id =
+      manifest && typeof manifest.id === 'string' && manifest.id.trim()
+        ? manifest.id.trim()
+        : path.basename(dir);
+    discovered.push({ id, dir, manifest });
+  }
+
+  return discovered;
+}
+
+export function findRecentStartupFailures(
+  stateDir: string,
+  now = Date.now(),
+  windowMs = 24 * 60 * 60 * 1000,
+): string[] {
+  const stabilityDir = path.join(stateDir, 'logs', 'stability');
+  if (!fs.existsSync(stabilityDir)) return [];
+  const cutoff = now - windowMs;
+  return fs
+    .readdirSync(stabilityDir)
+    .filter((name) => name.includes('startup_failed') && name.endsWith('.json'))
+    .map((name) => path.join(stabilityDir, name))
+    .filter((filePath) => {
+      try {
+        return fs.statSync(filePath).mtimeMs >= cutoff;
+      } catch {
+        return false;
+      }
+    })
+    .sort();
 }
 
 function toolCount(manifest: PluginManifestLike): number {

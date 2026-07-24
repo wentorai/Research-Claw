@@ -490,6 +490,35 @@ describe('TaskService', () => {
     });
   });
 
+  describe('agent notifications', () => {
+    it('deduplicates repeated unread self-check notifications by title', () => {
+      const first = svc.sendNotificationOnce(
+        'error',
+        '网关近期启动失败',
+        'first startup_failed snapshot',
+      );
+      const second = svc.sendNotificationOnce(
+        'error',
+        '网关近期启动失败',
+        'second startup_failed snapshot',
+      );
+
+      expect(second.id).toBe(first.id);
+      expect(svc.getUnreadNotifications()).toHaveLength(1);
+      expect(svc.getUnreadNotifications()[0]?.body).toBe('first startup_failed snapshot');
+    });
+
+    it('allows the same self-check title again after the prior notification is read', () => {
+      const first = svc.sendNotificationOnce('error', '插件未正确加载:research-plugins', 'old');
+      svc.markNotificationRead(first.id);
+      const second = svc.sendNotificationOnce('error', '插件未正确加载:research-plugins', 'new');
+
+      expect(second.id).not.toBe(first.id);
+      expect(svc.getUnreadNotifications()).toHaveLength(1);
+      expect(svc.getUnreadNotifications()[0]?.body).toBe('new');
+    });
+  });
+
   // ── Cron Presets ────────────────────────────────────────────────────
 
   describe('cron presets', () => {
