@@ -8,6 +8,12 @@ CONFIG_VERSION_FILE=$CONFIG_DIR/.config-version
 IMAGE_VERSION="0.7.5"
 PORT=${PORT:-28789}
 
+# Entrypoint chatter discipline: the GATEWAY's own output stays full in
+# `docker logs` (that's the container's diagnostic channel — never filtered).
+# Only the entrypoint's OWN step detail is gated: dbg() lines show only with
+# RC_VERBOSE=1. Keeps a clean first screen without hiding gateway diagnostics.
+dbg() { [ -n "$RC_VERBOSE" ] && echo "$@" || true; }
+
 # --- One-time migration: v0.5.3 fixed volume mount from /root → /app ---
 # Earlier versions mounted rc-data at /root/.research-claw but the plugin
 # resolves dbPath to /app/.research-claw. Copy data to the correct path.
@@ -145,6 +151,16 @@ node -e "
   const c = JSON.parse(fs.readFileSync(f, 'utf8'));
   let changed = false;
 
+  // Logging: in Docker, 'docker logs' IS the diagnostic channel — it must NOT be
+  // quieted. ensure-config injects consoleLevel=warn (right for native terminals,
+  // wrong here), so force it back to info and point the file log at the persistent
+  // volume (/app/.research-claw), not /root which is not volume-backed.
+  if (!c.logging || typeof c.logging !== 'object' || Array.isArray(c.logging)) c.logging = {};
+  if (c.logging.consoleLevel !== 'info') { c.logging.consoleLevel = 'info'; changed = true; }
+  if (c.logging.level !== 'info') { c.logging.level = 'info'; changed = true; }
+  const DOCKER_LOG_FILE = '/app/.research-claw/logs/openclaw.log';
+  if (c.logging.file !== DOCKER_LOG_FILE) { c.logging.file = DOCKER_LOG_FILE; changed = true; }
+
   // Gateway: ensure Docker-compatible settings
   if (!c.gateway) c.gateway = {};
   if (c.gateway.bind !== 'lan') { c.gateway.bind = 'lan'; changed = true; }
@@ -239,7 +255,7 @@ node -e "
     cfg.plugins.load.paths.push(rp);
     const o = JSON.stringify(cfg, null, 2) + '\n', t = f + '.tmp.' + process.pid;
     fs.writeFileSync(t, o); fs.renameSync(t, f);
-    console.log('[research-claw] Added research-plugins to plugins.load.paths');
+    if (process.env.RC_VERBOSE) console.log('[research-claw] Added research-plugins to plugins.load.paths');
   }
 " 2>/dev/null || true
 
@@ -320,27 +336,21 @@ ART
 printf "${N}\n  ${B}科研龙虾 — AI-Powered Local Research Assistant${N}\n"
 printf "  ${D}https://wentor.ai${N}\n\n"
 
-echo "[research-claw] Starting gateway on port $PORT..."
-echo "[research-claw] Open dashboard: http://127.0.0.1:$PORT/?token=$OPENCLAW_GATEWAY_TOKEN"
-echo "[research-claw] Gateway token: $OPENCLAW_GATEWAY_TOKEN"
-echo "[research-claw] (Tip: set OPENCLAW_GATEWAY_TOKEN env var for a fixed token)"
+echo "[research-claw] Dashboard: http://127.0.0.1:$PORT/?token=$OPENCLAW_GATEWAY_TOKEN"
+dbg "[research-claw] Gateway token: $OPENCLAW_GATEWAY_TOKEN (override via -e OPENCLAW_GATEWAY_TOKEN=…)"
 
 # Ensure `openclaw` CLI and conda Python are available to agent's system.run commands.
 export PATH="/opt/miniforge3/bin:/app/node_modules/.bin:$PATH"
 
-# --- Detect scientific environment ---
-# Log what's available so users can verify in `docker logs`.
+# --- Detect scientific environment (verbose only; gateway log records the rest) ---
 if command -v python3 >/dev/null 2>&1; then
-  PY_VER="$(python3 --version 2>&1 | awk '{print $2}')"
-  echo "[research-claw] Python: $PY_VER (Miniforge3)"
+  dbg "[research-claw] Python: $(python3 --version 2>&1 | awk '{print $2}') (Miniforge3)"
 fi
-if [ -x /usr/bin/chromium ]; then
-  echo "[research-claw] Chromium: headless (OC browser tool)"
-fi
+[ -x /usr/bin/chromium ] && dbg "[research-claw] Chromium: headless (OC browser tool)"
 if [ -f /host/zotero/zotero.sqlite ]; then
-  echo "[research-claw] Zotero: detected at /host/zotero"
+  dbg "[research-claw] Zotero: detected at /host/zotero"
 elif [ -d /host/zotero ]; then
-  echo "[research-claw] Zotero: mount present but no database found (~/Zotero empty on host?)"
+  dbg "[research-claw] Zotero: mount present but no database found (~/Zotero empty on host?)"
 fi
 
 STOP=false
@@ -362,6 +372,11 @@ while true; do
     exit 0
   fi
 
-  echo "[research-claw] Gateway exited (code $CODE) — restarting in 3s..."
+  if [ "$CODE" -ne 0 ]; then
+    echo "[research-claw] ✗ Gateway exited (code $CODE). If it keeps failing, capture:"
+    echo "[research-claw]     docker logs <container>                          (this output)"
+    echo "[research-claw]     /app/.research-claw/logs/openclaw.log            (full gateway log, on rc-data volume)"
+  fi
+  echo "[research-claw] Restarting in 3s..."
   sleep 3
 done
