@@ -134,7 +134,7 @@ function takeStaticSupervisorRulesBlock(reviewMode: string, state: SessionState 
  * `lastAssistant` (typed `unknown` → runtime-guarded). No phantom `response`
  * fallback — reading a field not on the typed event would fail tsc.
  */
-function extractLlmOutputText(event: PluginHookLlmOutputEvent): string | undefined {
+export function extractLlmOutputText(event: PluginHookLlmOutputEvent): string | undefined {
   const { assistantTexts, lastAssistant } = event;
   if (Array.isArray(assistantTexts) && assistantTexts.length > 0) {
     const joined = assistantTexts.filter((t): t is string => typeof t === 'string').join('');
