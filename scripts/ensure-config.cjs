@@ -565,6 +565,28 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
+  // N. Logging — quiet terminal, full persistent file log (project config only).
+  // Rationale: gateway INFO chatter on the terminal only confuses users who
+  // can't act on P1/P2 noise; the full detail belongs in a file we can ask
+  // them to send. consoleLevel=warn quiets stdout; level=info keeps the file
+  // complete; file=<persistent path> survives reboots (unlike /tmp).
+  // 3-state: inject when absent, fill missing keys, NEVER override user values.
+  if (!isGlobal) {
+    const LOG_DEFAULTS = {
+      level: 'info',
+      consoleLevel: 'warn',
+      file: '~/.research-claw/logs/openclaw.log',
+    };
+    if (!c.logging || typeof c.logging !== 'object' || Array.isArray(c.logging)) {
+      c.logging = { ...LOG_DEFAULTS };
+      changed = true;
+    } else {
+      for (const [k, v] of Object.entries(LOG_DEFAULTS)) {
+        if (c.logging[k] === undefined) { c.logging[k] = v; changed = true; }
+      }
+    }
+  }
+
   // Write atomically (temp + rename) to prevent corruption on disk-full
   if (changed) {
     const out = JSON.stringify(c, null, 2) + '\n';

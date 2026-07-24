@@ -4,6 +4,11 @@
       "UNPAYWALL_EMAIL": "research@wentor.ai"
     }
   },
+  "logging": {
+    "level": "info",
+    "consoleLevel": "warn",
+    "file": "~/.research-claw/logs/openclaw.log"
+  },
   "discovery": {
     "mdns": {
       "mode": "off"

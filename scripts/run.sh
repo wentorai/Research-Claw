@@ -45,13 +45,32 @@ ART
 printf "${N}\n  ${B}科研龙虾 — AI-Powered Local Research Assistant${N}\n"
 printf "  ${D}https://wentor.ai${N}\n\n"
 
+# --- Output discipline (P1/P2 noise off by default; full detail lands in files) ---
+# Default terminal shows only what a user can act on. The gateway's own INFO
+# chatter is quieted via logging.consoleLevel=warn (set by ensure-config); its
+# full log lives in ~/.research-claw/logs/openclaw.log. run.sh's own step log
+# lands in run-latest.log (previous run kept as run-prev.log).
+# RC_VERBOSE=1 restores full terminal detail (gateway INFO + run.sh debug lines).
+RC_LOG_DIR="$HOME/.research-claw/logs"
+mkdir -p "$RC_LOG_DIR" 2>/dev/null || true
+RC_RUN_LOG="$RC_LOG_DIR/run-latest.log"
+[ -f "$RC_RUN_LOG" ] && mv -f "$RC_RUN_LOG" "$RC_LOG_DIR/run-prev.log" 2>/dev/null || true
+: > "$RC_RUN_LOG" 2>/dev/null || true
+rclog() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >>"$RC_RUN_LOG" 2>/dev/null || true; }
+say()   { printf "  %s\n" "$*"; rclog "$*"; }                                   # always shown
+dbg()   { rclog "$*"; [ -n "$RC_VERBOSE" ] && printf "  ${D}%s${N}\n" "$*" || true; }  # verbose only
+if [ -n "$RC_VERBOSE" ]; then
+  export OPENCLAW_LOG_LEVEL=info   # raise gateway console+file to info for this run
+  rclog "RC_VERBOSE=1 — gateway console raised to info"
+fi
+
 # --- Ensure project config exists ---
 # RC project config contains plugin paths, tool whitelist, dashboard root, port 28789.
 # Global ~/.openclaw/openclaw.json is vanilla OpenClaw and MUST NOT override these.
 if [ ! -f config/openclaw.json ]; then
   if [ -f config/openclaw.example.json ]; then
     cp config/openclaw.example.json config/openclaw.json
-    echo "[run] Config bootstrapped from template"
+    dbg "Config bootstrapped from template"
   else
     echo "[run] ERROR: config/openclaw.example.json not found" >&2
     exit 1
@@ -84,7 +103,7 @@ fi
 # MUST run BEFORE path resolution so that newly added relative paths
 # (e.g. ./extensions/openclaw-weixin) get converted to absolute below.
 GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
-node "$(dirname "$0")/ensure-config.cjs" "$OPENCLAW_CONFIG_PATH" ${GLOBAL_CFG:+"$GLOBAL_CFG"} 2>/dev/null || true
+node "$(dirname "$0")/ensure-config.cjs" "$OPENCLAW_CONFIG_PATH" ${GLOBAL_CFG:+"$GLOBAL_CFG"} >>"$RC_RUN_LOG" 2>&1 || true
 
 # --- Resolve relative paths in config to absolute ---
 # OpenClaw's agent runner calls process.chdir(workspace/) during runs (attempt.ts:774).
@@ -133,8 +152,8 @@ if (cfg.agents?.defaults?.workspace) {
   const fixed = reroot(cfg.agents.defaults.workspace);
   if (fixed !== cfg.agents.defaults.workspace) { cfg.agents.defaults.workspace = fixed; changed = true; }
 }
-if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); console.log('[run] Config paths resolved to absolute'); }
-"
+if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); console.error('[run] Config paths resolved to absolute'); }
+" 2>>"$RC_RUN_LOG"
 
 # --- Detect the correct Node for the gateway ---
 # Priority: conda openclaw env (has matching ABI for better-sqlite3) → system node
@@ -146,8 +165,8 @@ if command -v conda &>/dev/null; then
   fi
 fi
 
-echo "[run] Using Node: $GW_NODE ($("$GW_NODE" -v))"
-echo "[run] Config: $OPENCLAW_CONFIG_PATH"
+dbg "Using Node: $GW_NODE ($("$GW_NODE" -v))"
+dbg "Config: $OPENCLAW_CONFIG_PATH"
 
 # Stop macOS LaunchAgent gateway (installed by `openclaw doctor`) — it binds 28789 and
 # respawns on --force, causing "port still not bindable" when using pnpm serve.
@@ -155,10 +174,10 @@ LAUNCH_AGENT="$HOME/Library/LaunchAgents/ai.openclaw.gateway.plist"
 if [ -f "$LAUNCH_AGENT" ]; then
   launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT" 2>/dev/null \
     || launchctl unload "$LAUNCH_AGENT" 2>/dev/null || true
-  echo "[run] Stopped LaunchAgent ai.openclaw.gateway (use pnpm serve OR LaunchAgent, not both)"
+  dbg "Stopped LaunchAgent ai.openclaw.gateway (use pnpm serve OR LaunchAgent, not both)"
 fi
 if command -v lsof >/dev/null 2>&1 && lsof -ti :28789 >/dev/null 2>&1; then
-  echo "[run] Freeing port 28789..."
+  dbg "Freeing port 28789..."
   lsof -ti :28789 | xargs kill -9 2>/dev/null || true
   sleep 1
 fi
@@ -185,17 +204,17 @@ RC_DIR="workspace/.ResearchClaw"
 # L3 (SOUL, IDENTITY, TOOLS, USER) and L2 (BOOTSTRAP) are gitignored — only copy if missing.
 for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
   [ ! -f "$RC_DIR/$f" ] && [ -f "$RC_DIR/$f.example" ] && \
-    cp "$RC_DIR/$f.example" "$RC_DIR/$f" && echo "[run] $f initialized from template"
+    cp "$RC_DIR/$f.example" "$RC_DIR/$f" && dbg "$f initialized from template"
 done
 [ ! -f "workspace/MEMORY.md" ] && [ -f "workspace/MEMORY.md.example" ] && \
-  cp "workspace/MEMORY.md.example" "workspace/MEMORY.md" && echo "[run] MEMORY.md initialized from template"
+  cp "workspace/MEMORY.md.example" "workspace/MEMORY.md" && dbg "MEMORY.md initialized from template"
 # NOTE: do NOT seed a root workspace/USER.md here. USER.md is relocatable —
 # migratePromptFiles() seeds .ResearchClaw/USER.md (above) and leaves a root
 # symlink pointing to it. Seeding a real root file would only get renamed to
 # .bak by the migration, leaving a confusing remnant.
 # BOOTSTRAP.md: only create if onboarding not yet completed (.done doesn't exist)
 [ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ -f "$RC_DIR/BOOTSTRAP.md.example" ] && \
-  cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md" && echo "[run] BOOTSTRAP.md initialized (first run)"
+  cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md" && dbg "BOOTSTRAP.md initialized (first run)"
 
 # Ensure `openclaw` CLI is available to agent's system.run commands.
 # Without this, agent diagnostics (`openclaw doctor`, `openclaw plugins list`) fail
@@ -204,15 +223,31 @@ export PATH="$(pwd)/node_modules/.bin:$PATH"
 
 # Rebuild RC extensions so gateway loads latest RPC (rc.ws.exists, review failed status, etc.).
 if command -v pnpm >/dev/null 2>&1; then
-  echo "[run] Building extensions..."
-  pnpm build:extensions >/dev/null 2>&1 || pnpm build:extensions
+  _BUILD_LOG=$(mktemp 2>/dev/null || echo "$RC_LOG_DIR/build-extensions.log")
+  _T0=$(date +%s)
+  if pnpm build:extensions >"$_BUILD_LOG" 2>&1; then
+    say "✓ Extensions built ($(( $(date +%s) - _T0 ))s)"
+    cat "$_BUILD_LOG" >>"$RC_RUN_LOG" 2>/dev/null || true
+  else
+    say "✗ Extension build failed — last 20 lines (full log: $RC_RUN_LOG):"
+    cat "$_BUILD_LOG" >>"$RC_RUN_LOG" 2>/dev/null || true
+    tail -20 "$_BUILD_LOG"
+  fi
+  rm -f "$_BUILD_LOG" 2>/dev/null || true
 fi
 
 STOP=false
 trap 'STOP=true' INT TERM
 
+# Print access + log info ONCE up front. The gateway's own "ready / dashboard
+# URL" lines are INFO level and hidden by consoleLevel=warn, so surface them here.
+printf "\n  ${B}Dashboard:${N} http://127.0.0.1:28789/?token=%s\n" "$OPENCLAW_GATEWAY_TOKEN"
+say "Logs: terminal quiet by default · full gateway log ~/.research-claw/logs/openclaw.log · startup log $RC_RUN_LOG"
+[ -z "$RC_VERBOSE" ] && printf "  ${D}(set RC_VERBOSE=1 for full terminal output)${N}\n"
+printf "\n"
+
 while true; do
-  echo "[run] Starting Research-Claw gateway..."
+  dbg "Starting Research-Claw gateway..."
 
   # Export HTTP(S)_PROXY from OpenClaw config so child processes (minimax-oauth-proxy)
   # can tunnel through the user's proxy (typically Clash at :7890).
@@ -228,7 +263,7 @@ while true; do
   if [ -n "$_PROXY_VAL" ]; then
     export HTTP_PROXY="$_PROXY_VAL"
     export HTTPS_PROXY="$_PROXY_VAL"
-    echo "[run] Proxy: $HTTPS_PROXY"
+    dbg "Proxy: $HTTPS_PROXY"
   fi
 
   # MiniMax OAuth (sk-cp-...) compatibility:
@@ -249,6 +284,12 @@ while true; do
     exit 0
   fi
 
-  echo "[run] Gateway exited (code $CODE) — restarting in 3s..."
+  # Non-zero, non-signal exit is a crash — point the user at the logs to send us.
+  if [ "$CODE" -ne 0 ]; then
+    say "✗ Gateway exited (code $CODE). If it keeps failing, send us these two files:"
+    say "    ~/.research-claw/logs/openclaw.log   (full gateway log)"
+    say "    $RC_RUN_LOG   (this startup log)"
+  fi
+  say "Restarting in 3s..."
   sleep 3
 done
