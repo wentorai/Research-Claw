@@ -144,74 +144,11 @@ fi
 # Shared config cleanup: plugins.allow, discovery.mdns, stale entries, auth token
 node /app/scripts/ensure-config.cjs "$CONFIG_FILE" 2>/dev/null || true
 
-# Docker-specific config patches (not in ensure-config.cjs — Docker only)
-node -e "
-  const fs = require('fs');
-  const f = '$CONFIG_FILE';
-  const c = JSON.parse(fs.readFileSync(f, 'utf8'));
-  let changed = false;
-
-  // Logging: in Docker, 'docker logs' IS the diagnostic channel — it must NOT be
-  // quieted. ensure-config injects consoleLevel=warn (right for native terminals,
-  // wrong here), so force it back to info and point the file log at the persistent
-  // volume (/app/.research-claw), not /root which is not volume-backed.
-  if (!c.logging || typeof c.logging !== 'object' || Array.isArray(c.logging)) c.logging = {};
-  if (c.logging.consoleLevel !== 'info') { c.logging.consoleLevel = 'info'; changed = true; }
-  if (c.logging.level !== 'info') { c.logging.level = 'info'; changed = true; }
-  const DOCKER_LOG_FILE = '/app/.research-claw/logs/openclaw.log';
-  if (c.logging.file !== DOCKER_LOG_FILE) { c.logging.file = DOCKER_LOG_FILE; changed = true; }
-
-  // Gateway: ensure Docker-compatible settings
-  if (!c.gateway) c.gateway = {};
-  if (c.gateway.bind !== 'lan') { c.gateway.bind = 'lan'; changed = true; }
-  if (!c.gateway.controlUi) c.gateway.controlUi = {};
-  if (!c.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback) {
-    c.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true;
-    changed = true;
-  }
-  if (!c.gateway.controlUi.dangerouslyDisableDeviceAuth) {
-    c.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
-    changed = true;
-  }
-
-  // Set default gateway auth token if none exists.
-  // Never overwrite — respects user-customized tokens for remote deployments.
-  // Docker users override via: docker run -e OPENCLAW_GATEWAY_TOKEN=my-secret ...
-  if (!c.gateway.auth) c.gateway.auth = {};
-  if (!c.gateway.auth.token) {
-    c.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN || 'research-claw';
-    changed = true;
-  }
-  if (c.gateway.auth.mode && c.gateway.auth.mode !== 'token') {
-    c.gateway.auth.mode = 'token';
-    changed = true;
-  }
-
-  // Plugin dbPath: Docker volume rc-data mounts at /app/.research-claw.
-  // ensure-config.cjs normalizes dbPath to os.homedir() (/root in container),
-  // which is NOT on the volume — database would be lost on container recreation.
-  // Force the volume-backed path so data persists across upgrades.
-  const DOCKER_DB_PATH = '/app/.research-claw/library.db';
-  const DOCKER_SUPERVISOR_DB_PATH = '/app/.research-claw/supervisor.db';
-  const rcEntry = c.plugins?.entries?.['research-claw-core'];
-  if (rcEntry) {
-    if (!rcEntry.config) { rcEntry.config = {}; changed = true; }
-    if (rcEntry.config.dbPath !== DOCKER_DB_PATH) {
-      rcEntry.config.dbPath = DOCKER_DB_PATH;
-      changed = true;
-    }
-  }
-  const dmsEntry = c.plugins?.entries?.['dual-model-supervisor'];
-  if (dmsEntry) {
-    if (!dmsEntry.config) { dmsEntry.config = {}; changed = true; }
-    if (dmsEntry.config.dbPath !== DOCKER_SUPERVISOR_DB_PATH) {
-      dmsEntry.config.dbPath = DOCKER_SUPERVISOR_DB_PATH;
-      changed = true;
-    }
-  }
-
-  if (changed) { const o=JSON.stringify(c,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); }
-" 2>&1 || echo "[research-claw] WARNING: Config patch failed — gateway may not start correctly"
+# Docker-only config patch. File-log level is raised to info only when it is
+# missing/quieter; explicit debug/trace survives. Paths travel through argv,
+# never through interpolated JavaScript source.
+node /app/scripts/docker-config-patch.cjs "$CONFIG_FILE" 2>&1 || \
+  echo "[research-claw] WARNING: Config patch failed — gateway may not start correctly"
 
 # --- Resolve relative paths to absolute (prevents CWD drift during agent runs) ---
 # Agent process.chdir(workspace/) changes CWD; relative paths in config break.

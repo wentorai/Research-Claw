@@ -293,6 +293,7 @@ while true; do
   if [ "$CODE" -ne 0 ]; then
     say "✗ Gateway exited (code $CODE). If it keeps failing, run:"
     say "    bash scripts/diag.sh          # bundles logs + redacted config to send us"
+    say "    Direct logs: ~/.research-claw/logs/openclaw.log · Weixin legacy: /tmp/openclaw/openclaw-YYYY-MM-DD.log"
   fi
   say "Restarting in 3s..."
   sleep 3
