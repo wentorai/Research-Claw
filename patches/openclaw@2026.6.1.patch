@@ -10,6 +10,69 @@ index d19aba1a5e8a9fb58fa09789dc5c41884e44a0b5..c41419637a5016b77bb4126a640581e8
  	if (roleContent.role === "user" && isSubagentAnnounceInterSessionUserMessage(message)) return true;
  	if (roleContent.role === "user" && isEmptyTextOnlyContent(message.content ?? message.text) && !hasTranscriptMediaPaths(message)) return true;
  	if (roleContent.role === "assistant" && isEmptyTextOnlyContent(message.content ?? message.text)) return false;
+diff --git a/dist/embedded-agent-eUaVGd6D.js b/dist/embedded-agent-eUaVGd6D.js
+index 8b6e1342cdfd6f9539f1eada48fefdf658055936..9fd36d55fe9b5c6502a04a2a8066f8397b62d0b6 100644
+--- a/dist/embedded-agent-eUaVGd6D.js
++++ b/dist/embedded-agent-eUaVGd6D.js
+@@ -658,6 +658,10 @@ function assistantFallbackReason(params) {
+ 	if (params.failoverFailure && failoverReason && failoverReason !== "timeout") return failoverReason;
+ 	return isAssistantTimeoutFailure(params) ? "timeout" : failoverReason ?? "unknown";
+ }
++function isCronDeadlineAbort(reason) {
++	const message = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
++	return message.startsWith("cron: job execution timed out");
++}
+ function mergeRetryFailoverReason(params) {
+ 	return params.failoverReason ?? (params.timedOut ? "timeout" : null) ?? params.previous;
+ }
+@@ -670,7 +674,10 @@ function resolveRunFailoverDecision(params) {
+ 		return { action: "return_error_payload" };
+ 	}
+ 	if (params.stage === "prompt") {
+-		if (params.externalAbort) return {
++		if (params.externalAbort) return isCronDeadlineAbort(params.abortReason) && params.fallbackConfigured ? {
++			action: "fallback_model",
++			reason: "timeout"
++		} : {
+ 			action: "surface_error",
+ 			reason: params.failoverReason
+ 		};
+@@ -691,7 +698,10 @@ function resolveRunFailoverDecision(params) {
+ 			reason: params.failoverReason
+ 		};
+ 	}
+-	if (params.externalAbort) return {
++	if (params.externalAbort) return isCronDeadlineAbort(params.abortReason) && params.fallbackConfigured ? {
++		action: "fallback_model",
++		reason: "timeout"
++	} : {
+ 		action: "surface_error",
+ 		reason: params.failoverReason
+ 	};
+@@ -3448,6 +3458,7 @@ async function runEmbeddedAgent(paramsInput) {
+ 							stage: "prompt",
+ 							aborted,
+ 							externalAbort,
++							abortReason: params.abortSignal?.reason,
+ 							fallbackConfigured,
+ 							failoverFailure: promptFailoverFailure,
+ 							failoverReason: promptFailoverReason,
+@@ -3481,6 +3492,7 @@ async function runEmbeddedAgent(paramsInput) {
+ 							stage: "prompt",
+ 							aborted,
+ 							externalAbort,
++							abortReason: params.abortSignal?.reason,
+ 							fallbackConfigured,
+ 							failoverFailure: promptFailoverFailure,
+ 							failoverReason: promptFailoverReason,
+@@ -3592,6 +3604,7 @@ async function runEmbeddedAgent(paramsInput) {
+ 						allowFormatRetry: cloudCodeAssistFormatError,
+ 						aborted,
+ 						externalAbort,
++						abortReason: params.abortSignal?.reason,
+ 						fallbackConfigured,
+ 						failoverFailure,
+ 						failoverReason: assistantFailoverReason,
 diff --git a/dist/entry.js b/dist/entry.js
 index 0af4223574e7720e379eb075cbbc6e2fff0ed809..31b287f6f9876f544cdd1f2ae62fd3708073e3a6 100755
 --- a/dist/entry.js
@@ -134,6 +197,47 @@ index a2e13c59bb9803a88a80a6250d07455cee9cd706..e454d3c386eeb5d5375703a467ea2a74
  	if (providerRuntimeFailureKind === "proxy") return "LLM request failed: proxy or tunnel configuration blocked the provider request.";
  	if (isContextOverflowError(raw)) return "Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session, or use a larger-context model.";
  	if (isReasoningConstraintErrorMessage(raw)) return "Reasoning is required for this model endpoint. Use /think minimal (or any non-off level) and try again.";
+diff --git a/dist/isolated-agent-Cw8sZTVo.js b/dist/isolated-agent-Cw8sZTVo.js
+index b3cc0ca9032b3a93c42a28bf217082e204328538..03a41513a62b7f8238fc852d65898244d80a3649 100644
+--- a/dist/isolated-agent-Cw8sZTVo.js
++++ b/dist/isolated-agent-Cw8sZTVo.js
+@@ -915,7 +915,7 @@ async function finalizeCronRun(params) {
+ 		summary,
+ 		outputText,
+ 		telemetry,
+-		abortSignal: prepared.input.abortSignal ?? prepared.input.signal,
++		abortSignal: (prepared.input.abortSignal ?? prepared.input.signal)?.aborted && !params.isAborted() ? void 0 : prepared.input.abortSignal ?? prepared.input.signal,
+ 		isAborted: params.isAborted,
+ 		abortReason: params.abortReason,
+ 		withRunSession: prepared.withRunSession
+@@ -1024,6 +1024,8 @@ async function runCronIsolatedAgentTurn(params) {
+ 	let outcomeError;
+ 	try {
+ 		const { executeCronRun } = await loadCronExecutorRuntime();
++		const initialProvider = prepared.context.liveSelection.provider;
++		const initialModel = prepared.context.liveSelection.model;
+ 		const execution = await executeCronRun({
+ 			cfg: params.cfg,
+ 			cfgWithAgentDefaults: prepared.context.cfgWithAgentDefaults,
+@@ -1060,7 +1062,8 @@ async function runCronIsolatedAgentTurn(params) {
+ 			runTimeoutOverrideMs: prepared.context.runTimeoutOverrideMs,
+ 			suppressExecNotifyOnExit: prepared.context.suppressExecNotifyOnExit
+ 		});
+-		if (isAborted()) {
++		const recoveredFromDeadline = isAborted() && abortReason().startsWith("cron: job execution timed out") && (execution.fallbackProvider !== initialProvider || execution.fallbackModel !== initialModel);
++		if (isAborted() && !recoveredFromDeadline) {
+ 			outcome = "error";
+ 			outcomeError = abortReason();
+ 			return prepared.context.withRunSession({
+@@ -1073,7 +1076,7 @@ async function runCronIsolatedAgentTurn(params) {
+ 			prepared: prepared.context,
+ 			execution,
+ 			abortReason,
+-			isAborted
++			isAborted: () => isAborted() && !recoveredFromDeadline
+ 		});
+ 		if (finalized.status === "error") {
+ 			outcome = "error";
 diff --git a/dist/openai-transport-stream-BN2CKZjs.js b/dist/openai-transport-stream-BN2CKZjs.js
 index ead7d378ce86c31f483e84fff2dbb9dd40380ffc..779ec4ec59a6c05dfbe5e62ff5d3d8853d2d1e35 100644
 --- a/dist/openai-transport-stream-BN2CKZjs.js
@@ -146,6 +250,77 @@ index ead7d378ce86c31f483e84fff2dbb9dd40380ffc..779ec4ec59a6c05dfbe5e62ff5d3d885
  	const body = await readResponseTextLimited(params.response).catch(() => "");
  	await params.release().catch(() => void 0);
  	params.localServiceLease?.release();
+diff --git a/dist/run-executor.runtime-BRvg_sz_.js b/dist/run-executor.runtime-BRvg_sz_.js
+index 150d97b2a270d1b3c97fdbe56feab98779a7c86d..64c8f849ec8b8f146eec95988624863f52835f35 100644
+--- a/dist/run-executor.runtime-BRvg_sz_.js
++++ b/dist/run-executor.runtime-BRvg_sz_.js
+@@ -65,6 +65,7 @@ function createCronPromptExecutor(params) {
+ 	const bootstrapContextMode = resolveCronBootstrapContextMode(params.agentPayload);
+ 	const sourceReplyDeliveryMode = params.sourceDelivery.sourceReplyDeliveryMode;
+ 	const messageChannel = params.sourceDelivery.target.channel ?? params.resolvedDelivery.channel;
++	let attemptedModel = false;
+ 	const runPrompt = async (promptText) => {
+ 		const fallbackResult = await runWithModelFallback({
+ 			cfg: params.cfgWithAgentDefaults,
+@@ -89,7 +90,10 @@ function createCronPromptExecutor(params) {
+ 			},
+ 			fallbacksOverride: cronFallbacksOverride,
+ 			run: async (providerOverride, modelOverride, runOptions) => {
+-				if (params.abortSignal?.aborted) throw new Error(params.abortReason());
++				const deadlineFallback = attemptedModel && params.abortSignal?.aborted && params.abortReason().startsWith("cron: job execution timed out");
++				if (params.abortSignal?.aborted && !deadlineFallback) throw new Error(params.abortReason());
++				attemptedModel = true;
++				const attemptAbortSignal = deadlineFallback ? void 0 : params.abortSignal;
+ 				const executionProvider = resolveCliRuntimeExecutionProvider({
+ 					provider: providerOverride,
+ 					cfg: params.cfgWithAgentDefaults,
+@@ -120,7 +124,7 @@ function createCronPromptExecutor(params) {
+ 						skillsSnapshot: params.skillsSnapshot,
+ 						messageChannel,
+ 						sourceReplyDeliveryMode,
+-						abortSignal: params.abortSignal,
++						abortSignal: attemptAbortSignal,
+ 						onExecutionStarted: params.onExecutionStarted,
+ 						onExecutionPhase: params.onExecutionPhase,
+ 						bootstrapContextMode,
+@@ -194,7 +198,7 @@ function createCronPromptExecutor(params) {
+ 					disableMessageTool: !params.sourceDelivery.messageTool.enabled,
+ 					forceMessageTool: params.sourceDelivery.messageTool.force,
+ 					allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
+-					abortSignal: params.abortSignal,
++					abortSignal: attemptAbortSignal,
+ 					onExecutionStarted: params.onExecutionStarted,
+ 					onExecutionPhase: params.onExecutionPhase,
+ 					bootstrapPromptWarningSignaturesSeen,
+diff --git a/dist/server-cron-CJwAiILI.js b/dist/server-cron-CJwAiILI.js
+index 1a515ff1ef454274e7046d51bc29f561d843d004..b752bc58dc9b34df8cf8473e3d937f3bc46374ce 100644
+--- a/dist/server-cron-CJwAiILI.js
++++ b/dist/server-cron-CJwAiILI.js
+@@ -799,6 +799,15 @@ async function executeJobCoreWithTimeout(state, job) {
+ 		const first = await Promise.race([corePromise, timeoutPromise]);
+ 		if (first !== timeoutMarker) return first;
+ 		const activeExecution = watchdog.activeExecution();
++		let fallbackGraceTimer;
++		const afterDeadline = await Promise.race([
++			corePromise,
++			new Promise((resolve) => {
++				fallbackGraceTimer = setTimeout(() => resolve(timeoutMarker), Math.max(jobTimeoutMs, 2e4));
++			})
++		]);
++		if (fallbackGraceTimer) clearTimeout(fallbackGraceTimer);
++		if (afterDeadline !== timeoutMarker) return afterDeadline;
+ 		await cleanupTimedOutCronAgentRun(state, job, jobTimeoutMs, activeExecution);
+ 		const error = timeoutReason ?? timeoutErrorMessage(activeExecution);
+ 		return {
+@@ -1713,7 +1722,7 @@ async function executeDetachedCronJob(state, job, abortSignal, resolveAbortError
+ 		onExecutionStarted: options?.onExecutionStarted,
+ 		onExecutionPhase: options?.onExecutionPhase
+ 	});
+-	if (abortSignal?.aborted) {
++	if (abortSignal?.aborted && res.status !== "ok") {
+ 		const error = abortErrorMessage(abortSignal);
+ 		return {
+ 			status: "error",
 diff --git a/dist/service-yYn6i75I.js b/dist/service-yYn6i75I.js
 index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c66b20b40 100644
 --- a/dist/service-yYn6i75I.js
