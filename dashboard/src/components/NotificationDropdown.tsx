@@ -27,6 +27,21 @@ const { Text } = Typography;
 
 const MAX_VISIBLE = 50;
 
+export function navigateNotificationTarget(
+  item: Pick<AppNotification, 'targetPanel' | 'targetSessionKey'>,
+): void {
+  if (item.targetPanel) {
+    useUiStore.getState().setRightPanelTab(item.targetPanel);
+  }
+  if (item.targetSessionKey) {
+    const bare = normalizeSessionKey(item.targetSessionKey);
+    if (bare.toLowerCase().startsWith('cron:')) {
+      useUiStore.getState().setCronSessionsFolded(false);
+    }
+    useSessionsStore.getState().switchSession(item.targetSessionKey);
+  }
+}
+
 function getNotificationIcon(type: AppNotification['type'], tokens: ReturnType<typeof getThemeTokens>): ReactNode {
   switch (type) {
     case 'deadline':
@@ -111,27 +126,13 @@ function NotificationItem({
       onMouseLeave={() => setHovered(false)}
       onClick={() => {
         if (!item.read) onMarkRead(item.id);
-        // Layer 2 (#33): navigate to target session when notification has targetSessionKey
-        if (item.targetSessionKey) {
-          // Auto-expand cron fold group if navigating to a cron session
-          const bare = normalizeSessionKey(item.targetSessionKey);
-          if (bare.toLowerCase().startsWith('cron:')) {
-            useUiStore.getState().setCronSessionsFolded(false);
-          }
-          useSessionsStore.getState().switchSession(item.targetSessionKey);
-        }
+        navigateNotificationTarget(item);
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (!item.read) onMarkRead(item.id);
-          if (item.targetSessionKey) {
-            const bare = normalizeSessionKey(item.targetSessionKey);
-            if (bare.toLowerCase().startsWith('cron:')) {
-              useUiStore.getState().setCronSessionsFolded(false);
-            }
-            useSessionsStore.getState().switchSession(item.targetSessionKey);
-          }
+          navigateNotificationTarget(item);
         }
       }}
       style={{
@@ -140,7 +141,7 @@ function NotificationItem({
         gap: 10,
         alignItems: 'flex-start',
         background: item.read ? 'transparent' : tokens.bg.surfaceHover,
-        cursor: item.read ? 'default' : 'pointer',
+        cursor: item.read && !item.targetPanel && !item.targetSessionKey ? 'default' : 'pointer',
         borderBottom: `1px solid ${tokens.border.default}`,
         transition: 'background 0.15s ease',
       }}

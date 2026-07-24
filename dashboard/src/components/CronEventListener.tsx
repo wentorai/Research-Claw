@@ -18,6 +18,7 @@ import { useUiStore } from '../stores/ui';
 import { useCronStore } from '../stores/cron';
 import { useMonitorStore } from '../stores/monitor';
 import { normalizeSessionKey } from '../utils/session-key';
+import { classifyCronCompletion } from '../utils/cron-failure-notification';
 
 export default function CronEventListener() {
   const { notification } = App.useApp();
@@ -27,22 +28,94 @@ export default function CronEventListener() {
   useEffect(() => {
     if (!client) return;
 
-    // Gateway broadcasts "cron" events globally (server-cron.ts:359), not filtered by session.
-    // CronEvent payload contains jobId, action, summary, sessionKey but NOT the job name —
-    // we resolve the name from useCronStore/useMonitorStore via gateway_job_id.
+    // Gateway broadcasts "cron" events globally, not filtered by session.
+    // OpenClaw 2026.6.1 includes a post-run job snapshot; RC stores remain the
+    // preferred source for the user-facing preset/monitor name.
     const unsub = client.subscribe('cron', (payload) => {
       const evt = payload as {
         action?: string;
         jobId?: string;
+        status?: string;
+        error?: string;
         summary?: string;
         sessionKey?: string;
+        job?: {
+          name?: string;
+          state?: {
+            consecutiveErrors?: number;
+            lastError?: string;
+            lastErrorReason?: string;
+          };
+        };
       };
       if (evt.action !== 'finished' || !evt.jobId) return;
 
       // Resolve display name by matching gateway_job_id
       const cronPreset = useCronStore.getState().presets.find((p) => p.gateway_job_id === evt.jobId);
       const monitor = useMonitorStore.getState().monitors.find((m) => m.gateway_job_id === evt.jobId);
-      const jobName = cronPreset?.name ?? monitor?.name ?? t('cron.taskCompleted');
+      const jobName = cronPreset?.name ?? monitor?.name ?? evt.job?.name ?? t('cron.taskCompleted');
+      const decision = classifyCronCompletion(payload);
+
+      if (decision.action === 'silent') return;
+
+      if (decision.action !== 'success') {
+        const configFailure = decision.action === 'notify-config';
+        const title = configFailure
+          ? t('cron.configFailureTitle', { name: jobName })
+          : t('cron.transientFailureTitle', {
+              name: jobName,
+              count: decision.consecutiveCount,
+            });
+        const body = configFailure
+          ? t('cron.configFailureBody', { error: decision.rawError })
+          : t('cron.transientFailureBody', { error: decision.rawError });
+        const toastKey = decision.dedupKey;
+        const targetSessionKey = decision.targetSessionKey
+          ? normalizeSessionKey(decision.targetSessionKey)
+          : undefined;
+
+        notification.error({
+          key: toastKey,
+          message: title,
+          description: body,
+          duration: 0,
+          placement: 'topRight',
+          btn: configFailure ? (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                useUiStore.getState().setRightPanelTab('settings');
+                notification.destroy(toastKey);
+              }}
+            >
+              {t('cron.openSettings')}
+            </Button>
+          ) : targetSessionKey ? (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                useUiStore.getState().setCronSessionsFolded(false);
+                useSessionsStore.getState().switchSession(targetSessionKey);
+                notification.destroy(toastKey);
+              }}
+            >
+              {t('cron.viewFailure')}
+            </Button>
+          ) : undefined,
+        });
+
+        useUiStore.getState().addNotification({
+          type: 'error',
+          title,
+          body,
+          dedupKey: toastKey,
+          targetSessionKey,
+          targetPanel: decision.targetPanel,
+        });
+        return;
+      }
 
       // Resolve target session key for click-to-navigate
       const targetSessionKey = evt.sessionKey ? normalizeSessionKey(evt.sessionKey) : undefined;

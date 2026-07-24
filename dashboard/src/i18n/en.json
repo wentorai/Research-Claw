@@ -1053,6 +1053,12 @@
   "cron": {
     "taskCompleted": "Scheduled task completed",
     "viewResult": "View Result",
+    "viewFailure": "View failure",
+    "openSettings": "Open settings",
+    "configFailureTitle": "{{name}} needs configuration",
+    "configFailureBody": "{{error}} Check the model/provider settings. Retrying cannot recover this failure.",
+    "transientFailureTitle": "{{name}} failed {{count}} times in a row",
+    "transientFailureBody": "{{error}} OpenClaw will keep the job scheduled; inspect the isolated run for details.",
     "cronSessions": "Scheduled Tasks",
     "deleteSessionConfirm": "Remove this scheduled task? The gateway cron job will be stopped (when matched) and the chat session will be deleted."
   },

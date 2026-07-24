@@ -1053,6 +1053,12 @@
   "cron": {
     "taskCompleted": "定时任务已完成",
     "viewResult": "查看结果",
+    "viewFailure": "查看失败",
+    "openSettings": "打开设置",
+    "configFailureTitle": "“{{name}}”需要修改配置",
+    "configFailureBody": "{{error}} 请检查模型与服务商配置；重试无法恢复此类失败。",
+    "transientFailureTitle": "“{{name}}”已连续失败 {{count}} 次",
+    "transientFailureBody": "{{error}} OpenClaw 会保留该任务并继续调度；可打开隔离运行查看详情。",
     "cronSessions": "定时任务",
     "deleteSessionConfirm": "删除该定时任务，并删除该会话的聊天记录？"
   },

@@ -34,6 +34,8 @@ export interface Notification {
   dedupKey?: string;
   /** Session key to navigate to when the notification is clicked (Layer 2, #33). */
   targetSessionKey?: string;
+  /** Right-panel destination for actionable system/configuration notifications. */
+  targetPanel?: PanelTab;
   /** When type is `update` — persisted for actions in the notification dropdown. */
   updateMeta?: {
     current: string;
@@ -104,11 +106,14 @@ function saveReadKeys(keys: Set<string>): void {
 
 function normalizeLoadedNotification(n: Notification): Notification {
   const type = NOTIFICATION_TYPES.has(n.type) ? n.type : 'system';
+  const targetPanel = n.targetPanel && VALID_TABS.has(n.targetPanel)
+    ? n.targetPanel
+    : undefined;
   if (type !== 'update') {
     const { updateMeta: _u, ...rest } = n;
-    return { ...rest, type };
+    return { ...rest, type, targetPanel };
   }
-  return { ...n, type };
+  return { ...n, type, targetPanel };
 }
 
 function loadNotifications(): Notification[] {
