@@ -1,0 +1,45 @@
+{
+  "taskId": "lit-002",
+  "domain": "literature",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-002-rc-0-1782092340163",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 7,
+    "toolCalls": 7,
+    "wallMs": 31635,
+    "tokens": {
+      "input": 6552,
+      "output": 1847,
+      "cacheRead": 230656,
+      "cacheWrite": 0,
+      "total": 239055,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "web_fetch",
+    "web_search",
+    "web_fetch",
+    "rp_search",
+    "rp_abstracts",
+    "web_fetch",
+    "web_fetch"
+  ],
+  "finalText": "论文《Attention Is All You Need》的第一作者是 **Ashish Vaswani**，发表于 **2017 年**。\n\n---\n\n### 可核验的出处\n\n| 来源 | 链接 | 核验内容 |\n|:---|:---|:---|\n| **arXiv** | <https://arxiv.org/abs/1706.03762> | 论文 v1 于 2017 年 6 月 12 日提交；第一作者 Ashish Vaswani (Google Brain, avaswani@google.com) |\n| **NeurIPS 2017 正式出版** | <https://papers.neurips.cc/paper/7181-attention-is-all-you-need.pdf> | 论文被 NeurIPS (当时的 NIPS) 2017 收录，PDF 首页标注作者列表，Vaswani 为首位 |\n| **Wikipedia** | <https://en.wikipedia.org/wiki/Attention_Is_All_You_Need> | 明确记载：\"a 2017 research paper... authored by eight scientists\" |\n| **arXiv DOI** | `10.48550/arXiv.1706.03762` | DataCite 注册的持久标识符 |\n\n---\n\n### 完整作者列表（按顺序）\n\n1. **Ashish Vaswani** (第一作者)\n2. Noam Shazeer\n3. Niki Parmar\n4. Jakob Uszkoreit\n5. Llion Jones\n6. Aidan N. Gomez\n7. Łukasz Kaiser\n8. Illia Polosukhin\n\n所属机构均为 Google Brain / Google Research。\n\n---\n\n### 引用格式 (APA 7th)\n\n> Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, Ł., & Polosukhin, I. (2017). Attention is all you need. *Advances in Neural Information Processing Systems*, *30* (pp. 5998–6008). <https://doi.org/10.48550/arXiv.1706.03762>\n\n以上信息均可通过上述链接在 arXiv 和 NeurIPS 官网直接核验。",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 15
+}

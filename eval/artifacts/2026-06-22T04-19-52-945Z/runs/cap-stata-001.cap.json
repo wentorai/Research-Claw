@@ -1,0 +1,7 @@
+{
+  "taskId": "cap-stata-001",
+  "side": "rc",
+  "suite": "stata",
+  "skipped": true,
+  "reason": "stata not installed"
+}

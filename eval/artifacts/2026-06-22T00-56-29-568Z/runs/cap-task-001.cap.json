@@ -1,0 +1,42 @@
+{
+  "taskId": "cap-task-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-task-001-rc-0-1782093084754",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 3,
+    "wallMs": 26781,
+    "tokens": {
+      "input": 2561,
+      "output": 2359,
+      "cacheRead": 59392,
+      "cacheWrite": 0,
+      "total": 64312,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "tasks/文献综述初稿.md"
+  ],
+  "toolNames": [
+    "write",
+    "cron",
+    "cron"
+  ],
+  "finalText": "好的，我来帮你创建一个为期两周的文献综述初稿任务，同时设置进度提醒。任务已创建完成！以下是总结：\n\n```task_card\n{\"type\":\"task_card\",\"id\":\"文献综述初稿\",\"title\":\"完成文献综述初稿\",\"task_type\":\"mixed\",\"status\":\"todo\",\"priority\":\"high\",\"deadline\":\"2026-07-06T09:00:00+08:00\",\"description\":\"两周内完成文献综述初稿，涵盖：确定范围→系统检索→筛选评估→深度阅读→撰写初稿→自查修订\"}\n```\n\n```progress_card\n{\"type\":\"progress_card\",\"period\":\"2026-06-22\",\"papers_read\":0,\"papers_added\":0,\"tasks_completed\":0,\"tasks_created\":1,\"highlights\":[\"创建任务「完成文献综述初稿」，截止 2026-07-06（14天）\",\"设置中期提醒（6/29）与截止提醒（7/6）\",\"任务拆分为6阶段：确定范围→检索→筛选→精读→撰写→修订\"]}\n```\n\n**已设置：**\n\n| 项目 | 详情 |\n|:------|:------|\n| 任务文件 | `tasks/文献综述初稿.md` — 含6阶段详细计划 |\n| 中期提醒 | **6月29日（下周一）9:00** — 检查是否进入深度阅读阶段 |\n| 截止提醒 | **7月6日 9:00** — 最终提交提醒 |\n| 当前状态 | ▢ 待开始，第一阶段：确定范围与关键词 |\n\n需要我现在就开始第一阶段（帮你确定综述主题、关键词和检索策略）吗？",
+  "objective": null,
+  "historyLen": 6,
+  "capabilityProbes": [
+    {
+      "type": "task_created",
+      "observed": true,
+      "evidence": "effect:taskΔ=0 | toolset(task/cron/schedule):true | path=tool"
+    }
+  ],
+  "suite": "task"
+}

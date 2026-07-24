@@ -1,0 +1,50 @@
+{
+  "taskId": "write-004",
+  "domain": "review-writing",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-004-rc-0-1782105580434",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 6,
+    "toolCalls": 5,
+    "wallMs": 119339,
+    "tokens": {
+      "input": 9897,
+      "output": 3608,
+      "cacheRead": 204288,
+      "cacheWrite": 0,
+      "total": 217793,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "rq.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "现在基于文献检索结果，撰写研究问题与研究假设。文件已写入工作区。\n\n```file_card\n{\"type\":\"file_card\",\"path\":\"rq.md\",\"size_bytes\":3604,\"description\":\"社交媒体使用与青少年焦虑：研究问题与研究假设\",\"preview\":\"# 社交媒体使用与青少年焦虑：研究问题与研究假设\\n\\n## 一、研究问题\\n- RQ1 主效应：使用强度与焦虑的关系（含非线性）\\n- RQ2 使用模式差异化：主动/被动、外貌相关、公开/私密\\n- RQ3 中介机制：睡眠、上行比较、自尊、FoMO\\n- RQ4 调节因素：性别、父母干预、身体活动、网络欺凌\\n- RQ5 纵向/因果方向\\n\\n## 二、研究假设\\n5 组共 16 条假设（H1-H5），涵盖主效应、使用模式差异化、中介机制、调节效应、纵向关系，均标注文献依据。附假设汇总表与理论框架。\"}\n```\n\n---\n\n**文件概要：** `rq.md` 已生成，包含两个核心小节：\n\n### 研究问题（5个）\n\n| 编号 | 焦点 | 核心关切 |\n|:---|:---|:---|\n| RQ1 | 主效应 | 使用强度与焦虑的关系是否非线性？ |\n| RQ2 | 使用模式 | 主动/被动、外貌相关、公开/私密是否差异化影响？ |\n| RQ3 | 中介机制 | 睡眠、上行比较、自尊、FoMO 的中介路径 |\n| RQ4 | 调节因素 | 性别、父母干预、身体活动、网络欺凌 |\n| RQ5 | 因果方向 | 单向还是双向互惠？ |\n\n### 研究假设（16条，5组）\n\n- **H1（主效应）：** 正相关 + 非线性（倒U/J型）\n- **H2（使用模式）：** 被动使用 > 主动使用；外貌相关 > 一般使用；公开账号 > 私密\n- **H3（中介路径）：** 睡眠、上行比较、自尊、FoMO 的间接效应\n- **H4（调节效应）：** 女性更易感；父母引导/身体活动缓冲；网络欺凌加剧\n- **H5（纵向）：** 使用→焦虑、焦虑→使用、外貌比较↔焦虑双向\n\n所有假设均标注了文献依据（来源包括 JMIR、J. Affect. Disord.、New Media & Society、Sleep Medicine、J. Sports Sciences 等期刊），并附有理论框架（社会比较理论、使用与满足、多维社交媒体使用模型、媒体效应差异易感性模型）。\n\n如需对某条假设进行细化、增减研究方向，或需要进一步检索特定子话题（如特定平台的差异效应、文化比较等），随时告诉我。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "rq.md exists"
+      },
+      {
+        "type": "file_content_match",
+        "pass": true,
+        "evidence": "all present"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 12
+}

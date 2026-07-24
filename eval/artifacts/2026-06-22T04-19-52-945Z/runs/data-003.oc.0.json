@@ -1,0 +1,44 @@
+{
+  "taskId": "data-003",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-003-oc-0-1782102294043",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 5,
+    "toolCalls": 4,
+    "wallMs": 26887,
+    "tokens": {
+      "input": 596,
+      "output": 1325,
+      "cacheRead": 151680,
+      "cacheWrite": 0,
+      "total": 153601,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "exec",
+    "exec",
+    "exec"
+  ],
+  "finalText": "数据共 20 行，结构为 `id, group, x, y`。现在对 y ~ x 做 OLS 回归。---\n\n**一元线性回归结果 (y ~ x, OLS)**\n\n| 指标 | 值 |\n|:---|---:|\n| **斜率** | **2.3256** |\n| 截距 | −1.5241 |\n| R² | 0.6228 |\n| 斜率标准误 | 0.4266 |\n| p 值 | 3.5 × 10⁻⁵ |\n| n | 20 |\n\n斜率 **2.3256**，即 x 每增加 1 个单位，y 平均增加约 2.33 个单位。模型整体显著 (p < 0.001)，解释约 62.3% 的变异。",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 2.3256±0.01 (OLS slope of y on x); nums=[20,2.3256,1.5241,0.6228,0.4266,3.5,10,20,2.3256,1,2.33,0.001]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 10
+}

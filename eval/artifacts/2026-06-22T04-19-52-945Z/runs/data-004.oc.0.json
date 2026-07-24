@@ -1,0 +1,60 @@
+{
+  "taskId": "data-004",
+  "domain": "data-analysis",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-004-oc-0-1782102320998",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 14,
+    "toolCalls": 13,
+    "wallMs": 98184,
+    "tokens": {
+      "input": 3836,
+      "output": 7390,
+      "cacheRead": 472960,
+      "cacheWrite": 0,
+      "total": 484186,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "eda.md",
+    "eda_fig1_x_dist.png",
+    "eda_fig2_y_dist.png",
+    "eda_fig3_scatter.png",
+    "eda_fig4_boxplot.png",
+    "eda_fig5_corr.png",
+    "eda_summary.json",
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "update_plan",
+    "read",
+    "update_plan",
+    "exec",
+    "exec",
+    "exec",
+    "process",
+    "process",
+    "exec",
+    "exec",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "EDA 完成。报告已写入工作区，摘要如下：\n---\n## EDA 结果速览 (`measurements.csv`)\n| 指标 | 值 |\n|:---|:---|\n| 样本量 | 20 (A: 10, B: 10) |\n| `y` 均值 | 46.15 ± 17.43 |\n| A 组均值 vs B 组均值 | 46.70 vs 45.60 |\n| **组间差异检验** | t = 0.14, p = 0.89 (不显著) |\n| **x-y 相关性** | Pearson r = 0.79, p < 0.0001 (强正相关) |\n| 正态性 | 通过 (Shapiro-Wilk p > 0.05) |\n| 异常值 | 无 |\n### 核心结论\n- **无组间差异** — Group A 与 Group B 在 `y` 上无统计显著差异\n- **x 是 y 的强预测因子** — r ≈ 0.79，R² ≈ 62%\n- 数据干净，无缺失、无异常值\n### 产出文件\n- `eda.md` — 完整分析报告（含统计表 + 解读 + 建议）\n- `eda_fig1_x_dist.png` ~ `eda_fig5_corr.png` — 5 张可视化图表",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "eda.md exists"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 28
+}

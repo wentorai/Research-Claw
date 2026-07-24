@@ -1,0 +1,42 @@
+{
+  "taskId": "lit-002",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-002-oc-0-1782102880359",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 5,
+    "toolCalls": 4,
+    "wallMs": 26404,
+    "tokens": {
+      "input": 5338,
+      "output": 1404,
+      "cacheRead": 157312,
+      "cacheWrite": 0,
+      "total": 164054,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch"
+  ],
+  "finalText": "Scopus 没有直接命中，让我通过更精确的渠道确认。arXiv API 已确认。让我再查一下 NeurIPS 官方会议收录信息以补充出处。以下是从可核验来源确认的信息：\n\n---\n\n## 论文基本信息\n\n| 项目 | 内容 |\n|:-----|:-----|\n| **论文标题** | Attention Is All You Need |\n| **第一作者** | **Ashish Vaswani** |\n| **发表年份** | **2017** |\n| **会议/发表场所** | Advances in Neural Information Processing Systems 30 (**NeurIPS 2017**) |\n| **作者列表（共8人）** | Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, Illia Polosukhin |\n\n---\n\n## 可核验的出处\n\n### 来源 1 — arXiv 原始预印本\n- **URL**: <https://arxiv.org/abs/1706.03762>\n- arXiv 元数据中明确列出第一位 `<author>` 为 **Ashish Vaswani**，提交日期为 **2017-06-12**。\n\n### 来源 2 — NeurIPS 官方会议论文集\n- **URL**: <https://papers.nips.cc/paper_files/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html>\n- NeurIPS 2017 官方收录，论文编号 #7181。\n\n### 建议引用格式 (APA 7th)\n\n> Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, Ł., & Polosukhin, I. (2017). Attention is all you need. *Advances in Neural Information Processing Systems*, *30*.\n\n---\n\n**结论**：第一作者为 **Ashish Vaswani**，发表于 **2017 年** NeurIPS，两个出处（arXiv 预印本 + NeurIPS 官方会议网站）均可直接访问核验。",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 10
+}

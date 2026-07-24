@@ -1,0 +1,40 @@
+{
+  "taskId": "cap-library-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-library-001-rc-0-1782106002519",
+  "errored": "turn timeout",
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 3,
+    "wallMs": 620001,
+    "tokens": {
+      "input": 78,
+      "output": 408,
+      "cacheRead": 29696,
+      "cacheWrite": 0,
+      "total": 30182,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_search",
+    "rp_search",
+    "rp_search"
+  ],
+  "finalText": "",
+  "objective": null,
+  "historyLen": 6,
+  "capabilityProbes": [
+    {
+      "type": "library_write",
+      "observed": true,
+      "evidence": "effect:libraryΔ=0 | toolset:true | bibFile:false | path=tool"
+    }
+  ],
+  "suite": "library"
+}

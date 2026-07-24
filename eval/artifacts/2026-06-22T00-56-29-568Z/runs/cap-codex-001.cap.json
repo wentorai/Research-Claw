@@ -1,0 +1,50 @@
+{
+  "taskId": "cap-codex-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-codex-001-rc-0-1782092924518",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 7,
+    "toolCalls": 6,
+    "wallMs": 51071,
+    "tokens": {
+      "input": 2387,
+      "output": 1333,
+      "cacheRead": 216448,
+      "cacheWrite": 0,
+      "total": 220168,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "fib.py"
+  ],
+  "toolNames": [
+    "read",
+    "exec",
+    "exec",
+    "process",
+    "process",
+    "read"
+  ],
+  "finalText": "先检查一下 Codex CLI 是否已安装：Codex CLI 已就绪 (v0.131.0)，开始执行任务：Codex 正在工作中，稍等片刻查看进度：Codex 已完成任务。让我确认结果：Codex 已完成编写和验证。`fib.py` 已创建在工作区，内容如下：\n\n**`fib.py`** — 迭代法实现，O(n) 时间，O(1) 空间：\n\n```python\ndef fibonacci(n):\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n\n\nif __name__ == \"__main__\":\n    print(fibonacci(10))\n```\n\n**验证结果：`fibonacci(10) = 55`**\n\n斐波那契数列（0-indexed）验证：\n\n| n | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n| F(n) | 0 | 1 | 1 | 2 | 3 | 5 | 8 | 13 | 21 | 34 | **55** |\n\n结果正确。",
+  "objective": null,
+  "historyLen": 14,
+  "capabilityProbes": [
+    {
+      "type": "external_software_invoked",
+      "observed": true,
+      "evidence": "software=codex, execTool=true, mention=true"
+    },
+    {
+      "type": "skill_invoked",
+      "observed": true,
+      "evidence": "matched=[codex-cli], skillSearchTool=false"
+    }
+  ],
+  "suite": "codex"
+}

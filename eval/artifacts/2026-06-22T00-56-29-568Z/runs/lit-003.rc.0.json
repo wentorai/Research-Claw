@@ -1,0 +1,57 @@
+{
+  "taskId": "lit-003",
+  "domain": "literature",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-003-rc-0-1782092371846",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 2,
+    "wallMs": 21984,
+    "tokens": {
+      "input": 3081,
+      "output": 1739,
+      "cacheRead": 59776,
+      "cacheWrite": 0,
+      "total": 64596,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_search",
+    "web_search"
+  ],
+  "finalText": "以下是近五年关于 **CRISPR 基因编辑脱靶效应** 的 3 篇代表性研究论文：\n\n---\n\n### 1. 综述：CRISPR/Cas9 脱靶效应方法学总览\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Off-target effects in CRISPR/Cas9 gene editing\",\"authors\":[\"Guo C\",\"Ma X\",\"Gao F\",\"Guo Y\"],\"venue\":\"Frontiers in Bioengineering and Biotechnology\",\"year\":2023,\"doi\":\"10.3389/fbioe.2023.1143157\",\"url\":\"https://www.frontiersin.org/articles/10.3389/fbioe.2023.1143157\",\"abstract_preview\":\"系统总结了 CRISPR/Cas9 脱靶效应的检测方法和提高编辑精度的技术改进。涵盖多种脱靶检测策略（GUIDE-seq、CIRCLE-seq 等）和高保真 Cas9 变体的设计，讨论当前基因治疗中脱靶管理的挑战。\",\"tags\":[\"CRISPR\",\"off-target\",\"review\",\"detection methods\"]}\n```\n\n- **DOI:** `10.3389/fbioe.2023.1143157`\n- 高被引综述（Scopus 被引 510 次），系统梳理脱靶检测技术和精度优化策略。\n\n---\n\n### 2. 前沿方法：染色质环境对脱靶效应的影响（EGOLD）\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Decoding the role of chromatin context in the off-target effects of CRISPR gene editing with EGOLD\",\"authors\":[\"Wang et al.\"],\"venue\":\"Cell Discovery\",\"year\":2026,\"doi\":\"10.1038/s41421-026-00889-2\",\"url\":\"https://www.nature.com/articles/s41421-026-00889-2\",\"abstract_preview\":\"开发 EGOLD (Endogenous Genome-wide Off-target Library Detection) 方法，高通量检测 17 种碱基编辑工具的脱靶效应，共检测到 2,145,592 个脱靶位点。发现染色质开放区域的脱靶频率显著更高，将 EGOLD-Seq 染色质数据整合到机器学习模型中大幅提升脱靶预测精度。\",\"tags\":[\"CRISPR\",\"off-target\",\"chromatin\",\"machine learning\",\"base editing\"]}\n```\n\n- **DOI:** `10.1038/s41421-026-00889-2`\n- 2026 年新发，发表在 _Cell Discovery_（Nature 子刊），揭示染色质开放性对脱靶的显著影响，并结合机器学习提升预测能力。\n\n---\n\n### 3. 技术进展：降低 CRISPR-Cas9 脱靶效应的最新策略\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Recent Advancements in Reducing the Off-Target Effect of CRISPR-Cas9 Genome Editing\",\"authors\":[\"Asmamaw M\",\"Zawdie B\"],\"venue\":\"Biologics: Targets and Therapy\",\"year\":2024,\"doi\":\"10.2147/btt.s429411\",\"url\":\"https://www.dovepress.com/getfile.php?fileID=96071\",\"abstract_preview\":\"综述近年降低 CRISPR-Cas9 脱靶效应的技术进展，包括 sgRNA 设计优化、高保真 Cas9 变体（eSpCas9、SpCas9-HF1、HypaCas9 等）、碱基编辑器和先导编辑器的精度提升策略。\",\"tags\":[\"CRISPR\",\"off-target\",\"high-fidelity Cas9\",\"base editing\",\"prime editing\"]}\n```\n\n- **DOI:** `10.2147/btt.s429411`\n- 2024 年发表（Scopus 被引 94 次），聚焦脱靶效应缓解技术，涵盖新型高保真酶和编辑工具。\n\n---\n\n| # | 论文 | 期刊 | 年份 | 被引 | 侧重方向 |\n|---|------|------|------|------|----------|\n| 1 | Guo et al. | _Frontiers in Bioengineering and Biotechnology_ | 2023 | ~510 | **综述：检测方法+改进策略** |\n| 2 | Wang et al. | _Cell Discovery_ | 2026 | 新发 | **前沿：染色质环境+ML预测** |\n| 3 | Asmamaw & Zawdie | _Biologics: Targets and Therapy_ | 2024 | ~94 | **综述：降低脱靶的酶学策略** |\n\n三篇论文涵盖了脱靶效应的**检测技术基础**（Guo 2023）、**染色质层面新机制**（Wang 2026）和**缓解与优化方案**（Asmamaw 2024），形成从\"发现→理解→解决\"的完整视角。如需进一步获取全文或查找更多论文，请告诉我。",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_count",
+        "pass": true,
+        "evidence": "counted 6 (need >= 3)"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 5/3; 10.3389/fbioe.2023.1143157:real; 10.1038/s41421-026-00889-2:real; 10.2147/btt.s429411:real; \"paper_card\":NO; \"Off-target effects in CRISPR/Cas9 gene e\":real; \"Frontiers in Bioengineering and Biotechn\":real; \"10.3389/fbioe.2023.1143157\":NO; \"https://www.frontiersin.org/articles/10.\":NO"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": true,
+        "evidence": "10.3389/fbioe.2023.1143157:ok; 10.1038/s41421-026-00889-2:ok; 10.2147/btt.s429411:ok"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 5,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

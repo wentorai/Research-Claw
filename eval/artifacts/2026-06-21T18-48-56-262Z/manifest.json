@@ -1,0 +1,18 @@
+{
+  "runId": "2026-06-21T18-48-56-262Z",
+  "args": {
+    "capability": "cap-library-001,cap-endnote-001,cap-zotero-001,cap-task-001",
+    "sides": "rc"
+  },
+  "headTasks": [],
+  "capTasks": [
+    "cap-endnote-001",
+    "cap-library-001",
+    "cap-task-001",
+    "cap-zotero-001"
+  ],
+  "sides": [
+    "rc"
+  ],
+  "at": "2026-06-21T18:53:30.437Z"
+}

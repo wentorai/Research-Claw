@@ -1,0 +1,46 @@
+{
+  "taskId": "cap-endnote-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-endnote-001-rc-0-1782105912543",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 9,
+    "toolCalls": 9,
+    "wallMs": 89827,
+    "tokens": {
+      "input": 2352,
+      "output": 2353,
+      "cacheRead": 279808,
+      "cacheWrite": 0,
+      "total": 284513,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "process",
+    "exec",
+    "exec",
+    "exec",
+    "exec"
+  ],
+  "finalText": "检测完成。以下是 EndNote 文献库的详细报告：\n\n---\n\n## EndNote 文献库检测结果\n\n| 项目 | 详情 |\n|:-----|:-----|\n| **文件位置** | `~/Documents/My EndNote Library.enl` |\n| **格式** | SQLite（EndNote X9+ 格式） |\n| **记录总数** | **1 条** |\n| **PDF 附件目录** | `My EndNote Library.Data/PDF/` |\n| **最后更新** | 2026-03-19 |\n\n### 唯一记录内容\n\n| 字段 | 值 |\n|:-----|:---|\n| ID | 1 |\n| 作者 | test |\n| 年份 | test |\n| 标题 | test |\n| 期刊 | test |\n| 卷/期 | test |\n| 类型 | Generic (0) |\n\n---\n\n这似乎是一条测试记录（所有字段均为 \"test\"），并非真实文献。当前您的 EndNote 文献库中实际有效文献为 **0 条**。\n\n需要我将这条记录导入 Research-Claw 的 Library 吗？还是您希望在 EndNote 中先添加一些真实文献后再进行导入？",
+  "objective": null,
+  "historyLen": 19,
+  "capabilityProbes": [
+    {
+      "type": "endnote_touched",
+      "observed": true,
+      "evidence": "tools=[exec,exec,exec,exec,process,exec,exec,exec,exec], mentionsEndNote=true"
+    }
+  ],
+  "suite": "endnote"
+}

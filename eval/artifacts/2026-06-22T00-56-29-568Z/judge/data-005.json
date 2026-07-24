@@ -1,0 +1,20 @@
+{
+  "rcScores": {
+    "任务达成度": 5
+  },
+  "ocScores": {
+    "任务达成度": 5
+  },
+  "rcTotal": 5,
+  "ocTotal": 5,
+  "preferences": [
+    "tie",
+    "tie"
+  ],
+  "rcWins": 0,
+  "ocWins": 0,
+  "rationales": [
+    "两者均给出了 group 为 A 的 y 列平均值 46.70，且保留两位小数，满足任务要求。",
+    "两者均给出 group 为 A 的 y 列行数、总和及保留两位小数的平均值 46.70，满足任务要求。"
+  ]
+}

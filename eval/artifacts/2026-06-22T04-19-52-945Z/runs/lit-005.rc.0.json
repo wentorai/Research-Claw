@@ -1,0 +1,44 @@
+{
+  "taskId": "lit-005",
+  "domain": "literature",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-005-rc-0-1782105223867",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 7409,
+    "tokens": {
+      "input": 672,
+      "output": 459,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 60651,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_abstracts"
+  ],
+  "finalText": "根据查询结果，该论文信息如下：\n\n| 项目 | 内容 |\n|:-----|:-----|\n| **标题** | *Deep learning* |\n| **发表期刊** | *Nature* |\n| **发表年份** | 2015 |\n| **DOI** | 10.1038/nature14539 |\n\n这就是 Yann LeCun、Yoshua Bengio 和 Geoffrey Hinton 三位图灵奖得主在 *Nature* 上发表的经典深度学习综述文章。截至 OpenAlex 数据，该文已被引用超过 81,000 次，是深度学习领域最具影响力的论文之一。\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Deep learning\",\"authors\":[\"Yann LeCun\",\"Yoshua Bengio\",\"Geoffrey Hinton\"],\"venue\":\"Nature\",\"year\":2015,\"doi\":\"10.1038/nature14539\",\"abstract_preview\":\"Deep learning allows computational models that are composed of multiple processing layers to learn representations of data with multiple levels of abstraction.\",\"oa_status\":\"green\",\"oa_landing\":\"https://hal.science/hal-04206682\"}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": true,
+        "evidence": "10.1038/nature14539:ok"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4
+}

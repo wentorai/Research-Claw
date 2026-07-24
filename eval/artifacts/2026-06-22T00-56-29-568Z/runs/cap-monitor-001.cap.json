@@ -1,0 +1,42 @@
+{
+  "taskId": "cap-monitor-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-monitor-001-rc-0-1782093053902",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 5,
+    "toolCalls": 5,
+    "wallMs": 30772,
+    "tokens": {
+      "input": 7873,
+      "output": 2266,
+      "cacheRead": 135552,
+      "cacheWrite": 0,
+      "total": 145691,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "web_fetch",
+    "cron",
+    "cron",
+    "cron",
+    "sessions_yield"
+  ],
+  "finalText": "好的，我来帮你设置 arXiv cs.AI 每日新论文追踪。我先验证一下 arXiv API 是否可用，然后创建定时任务。arXiv API 运行正常，现在创建每日监控任务。监控已创建。为了验证效果，我立即触发一次试运行：已触发试运行，等待子代理执行完成...",
+  "objective": null,
+  "historyLen": 11,
+  "capabilityProbes": [
+    {
+      "type": "monitor_registered",
+      "observed": true,
+      "evidence": "effect:monitorΔ=0 | toolset:true | path=tool"
+    }
+  ],
+  "suite": "monitor"
+}

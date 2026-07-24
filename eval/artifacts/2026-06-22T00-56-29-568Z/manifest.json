@@ -1,0 +1,54 @@
+{
+  "runId": "2026-06-22T00-56-29-568Z",
+  "args": {
+    "all": true,
+    "repeats": "1"
+  },
+  "headTasks": [
+    "cw-001",
+    "cw-002",
+    "data-001",
+    "data-002",
+    "data-003",
+    "data-004",
+    "data-005",
+    "if-001",
+    "if-002",
+    "if-003",
+    "lh-001",
+    "lh-002",
+    "lh-003",
+    "lit-001",
+    "lit-002",
+    "lit-003",
+    "lit-004",
+    "lit-005",
+    "screen-001",
+    "screen-002",
+    "screen-003",
+    "screen-004",
+    "screen-005",
+    "write-001",
+    "write-002",
+    "write-003",
+    "write-004",
+    "write-005"
+  ],
+  "capTasks": [
+    "cap-browser-001",
+    "cap-claudecode-001",
+    "cap-codex-001",
+    "cap-endnote-001",
+    "cap-library-001",
+    "cap-matlab-001",
+    "cap-monitor-001",
+    "cap-stata-001",
+    "cap-task-001",
+    "cap-zotero-001"
+  ],
+  "sides": [
+    "rc",
+    "oc"
+  ],
+  "at": "2026-06-22T02:04:45.425Z"
+}

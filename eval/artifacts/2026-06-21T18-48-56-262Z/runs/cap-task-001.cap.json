@@ -1,0 +1,43 @@
+{
+  "taskId": "cap-task-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-task-001-rc-0-1782067917840",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 3,
+    "toolCalls": 4,
+    "wallMs": 23583,
+    "tokens": {
+      "input": 1665,
+      "output": 2309,
+      "cacheRead": 91136,
+      "cacheWrite": 0,
+      "total": 95110,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "tasks/literature-review-draft.md"
+  ],
+  "toolNames": [
+    "exec",
+    "write",
+    "cron",
+    "cron"
+  ],
+  "finalText": "好的，我来为你创建这个任务。两周后是 **2026年7月6日（周一）**。目前 research-claw-core 的任务管理工具未在当前会话加载。我将用 **workspace 文件 + cron 提醒** 的组合来管理这个任务。任务已创建，以下是安排：\n\n```task_card\n{\"type\":\"task_card\",\"title\":\"完成文献综述初稿\",\"task_type\":\"mixed\",\"status\":\"todo\",\"priority\":\"high\",\"description\":\"两周内（截止2026-07-06）完成文献综述初稿\",\"deadline\":\"2026-07-06T23:59:59+08:00\",\"related_file_path\":\"workspace/tasks/literature-review-draft.md\"}\n```\n\n**已配置的提醒：**\n\n| 提醒 | 时间 | 说明 |\n|:-----|:-----|:-----|\n| 每日进度提醒 | 每天早上 9:00 | 检查任务进度 |\n| 中期检查 | 6月29日（周一）9:00 | 一周节点，确认文献检索是否完成 |\n\n**任务文件**已保存至 `workspace/tasks/literature-review-draft.md`，包含5个里程碑：\n\n1. 确定主题与研究问题 — 6/23\n2. 文献检索完成 — 6/26\n3. 文献筛选与精读 — 6/30\n4. 撰写初稿 — 7/4\n5. 初稿修订 — 7/6\n\n---\n\n需要我现在就开始帮你做文献检索吗？如果需要，请告诉我综述的主题/关键词和研究方向。",
+  "objective": null,
+  "historyLen": 8,
+  "capabilityProbes": [
+    {
+      "type": "task_created",
+      "observed": false,
+      "evidence": "task delta=0 (before=0, after=0)"
+    }
+  ],
+  "suite": "task"
+}

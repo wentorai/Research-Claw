@@ -1,0 +1,28 @@
+{
+  "taskId": "write-005",
+  "domain": "review-writing",
+  "track": "B",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-005-rc-0-1782092850294",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 1,
+    "toolCalls": 0,
+    "wallMs": 8726,
+    "tokens": {
+      "input": 67,
+      "output": 600,
+      "cacheRead": 29696,
+      "cacheWrite": 0,
+      "total": 30363,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [],
+  "finalText": "以下是润色后的几个版本，供您根据目标期刊风格选择：\n\n**版本一（简洁版，适合 Letter / Short Communication）：**\n> This paper investigates the effect of temperature on battery performance. The results indicate that elevated temperature significantly degrades battery performance.\n\n**版本二（标准版，适合大多数期刊）：**\n> This study examines the impact of temperature on battery performance. Our findings demonstrate that high-temperature conditions adversely affect battery operation, leading to notable performance degradation.\n\n**版本三（扩展版，适合需要完整摘要结构的研究论文）：**\n> This study investigates the influence of temperature on battery performance. Through systematic experimental evaluation, we found that exposure to elevated temperatures results in substantial performance deterioration, manifesting as reduced capacity and accelerated aging.\n\n---\n\n**主要修改说明：**\n\n| 原文问题 | 修改 | 说明 |\n|:---|:---|:---|\n| *study* | *studies / investigates / examines* | 主谓一致；*examine/investigate* 更学术化 |\n| *affect* | *effect / impact / influence* | *affect* 是动词，此处需要名词 *effect*；*impact/influence* 更正式 |\n| *to* | *on / upon* | *effect on...* 是固定搭配 |\n| *make battery worse* | *degrades / adversely affects / deteriorates* | 原文过于口语化，学术写作需用精确动词 |\n| *we found* | *Our findings demonstrate / The results indicate* | 被动/客观表达更符合期刊规范（部分期刊仍接受 *we*） |\n| *high temperature* | *elevated temperature(s) / high-temperature conditions* | 更正式的表达 |\n\n如果您的实验中涉及具体的温度范围或性能指标（如容量衰减率、内阻变化等），建议在摘要中补充具体数据以增强说服力。需要我帮您进一步扩展吗？",
+  "objective": null,
+  "historyLen": 2
+}

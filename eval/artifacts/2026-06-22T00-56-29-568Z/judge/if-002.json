@@ -1,0 +1,20 @@
+{
+  "rcScores": {
+    "任务达成度": 4.5
+  },
+  "ocScores": {
+    "任务达成度": 4.5
+  },
+  "rcTotal": 4.5,
+  "ocTotal": 4.5,
+  "preferences": [
+    "tie",
+    "tie"
+  ],
+  "rcWins": 0,
+  "ocWins": 0,
+  "rationales": [
+    "两者均严格输出了符合 schema 的 JSON 对象，字段、类型与论文信息均正确，且无额外文字。",
+    "两者的 JSON 内容均准确符合所需字段与事实，但都以 Markdown 代码块形式呈现，不满足“只输出一个 JSON 对象、不要额外文字”的严格格式要求。"
+  ]
+}

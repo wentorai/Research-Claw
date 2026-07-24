@@ -1,0 +1,64 @@
+{
+  "taskId": "lh-003",
+  "domain": "long-horizon",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lh-003-oc-0-1782102611787",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 13,
+    "toolCalls": 24,
+    "wallMs": 163017,
+    "tokens": {
+      "input": 55014,
+      "output": 10361,
+      "cacheRead": 750848,
+      "cacheWrite": 0,
+      "total": 816223,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "qec-landscape.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "web_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_search",
+    "web_search",
+    "update_plan",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_search",
+    "update_plan",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_search",
+    "web_search",
+    "web_fetch",
+    "web_search",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "`qec-landscape.md` 已完成并保存至工作区 (~15KB)。以下是文档结构概览：\n\n---\n\n## 文档架构\n\n| 章节 | 内容 |\n|:------|:-----|\n| **§1 历史脉络** | Shor (1995) → Willow (2024) 的 30 年关键里程碑时间线 |\n| **§2 编码族** | Stabilizer / 表面码 & 颜色码 / qLDPC / Bosonic (cat, binomial, GKP) / 4D 几何码 (Microsoft 2025) |\n| **§3 硬件平台对比** | 超导、离子阱、中性原子、光子、硅自旋 — 含各平台阈值突破实验详表 |\n| **§4 解码器** | MWPM → Union-Find → BP+OSD; 神经网络解码器 (GNN/Transformer/RL); 延迟与带宽瓶颈 |\n| **§5 容错协议** | 魔术态蒸馏、Transversal 门、Code Switching、Lattice Surgery、开销分析 |\n| **§6 产业格局** | 10 家关键公司对比 (Google/IBM/Quantinuum/QuEra/Microsoft/Riverlane...) |\n| **§7 开放挑战** | 15 项挑战, 分 5 个维度: 编码理论、解码器、硬件实现、系统工程、产业人才 |\n| **§8-9 参考与展望** | 分级阅读路径 (入门→进阶→前沿) + 2026 转折点展望 |\n\n文档全部依据真实来源撰写 (Scopus, arXiv, Nature, Riverlane Report, Post-Quantum 等), 所有里程碑均标注了可追踪的 DOI/arXiv ID。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "qec-landscape.md exists"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 38
+}

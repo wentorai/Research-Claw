@@ -1,0 +1,42 @@
+{
+  "taskId": "if-002",
+  "domain": "instruction-following",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-if-002-oc-0-1782090312897",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 1,
+    "toolCalls": 0,
+    "wallMs": 2685,
+    "tokens": {
+      "input": 68,
+      "output": 72,
+      "cacheRead": 29696,
+      "cacheWrite": 0,
+      "total": 29836,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [],
+  "finalText": "```json\n{\"title\": \"Attention Is All You Need\", \"year\": 2017, \"is_real\": true}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "format_constraint",
+        "pass": false,
+        "evidence": "not pure JSON"
+      },
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 2
+}

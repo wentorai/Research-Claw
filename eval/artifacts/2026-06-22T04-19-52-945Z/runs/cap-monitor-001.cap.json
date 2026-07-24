@@ -1,0 +1,38 @@
+{
+  "taskId": "cap-monitor-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-monitor-001-rc-0-1782106622585",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 21658,
+    "tokens": {
+      "input": 1562,
+      "output": 1715,
+      "cacheRead": 59392,
+      "cacheWrite": 0,
+      "total": 62669,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "cron"
+  ],
+  "finalText": "好的，我来帮你设置一个每日追踪 arXiv cs.AI 新论文的定时监控任务。监控任务已创建成功，以下是配置详情：\n\n---\n\n**arXiv cs.AI Daily Tracker**\n\n| 配置项 | 值 |\n|:---|---|\n| **名称** | arXiv cs.AI Daily Tracker |\n| **Job ID** | `7ead953d` |\n| **调度** | 每日 09:00 (Asia/Shanghai) |\n| **数据源** | arXiv API (`export.arxiv.org`) + RSS 备用 |\n| **范围** | `cat:cs.AI`，按投稿日期排序，每次最多 20 篇 |\n| **状态** | ✅ 已启用 |\n| **首次执行** | 2026-06-23 (明天) 09:00 |\n| **通知方式** | 自动推送至当前会话 |\n\n---\n\n**工作流程**：每天早 9 点自动拉取 arXiv cs.AI 分类最新论文，通过 API 获取标题、作者、arXiv ID 和摘要，RSS 作为补充来源。结果会推送至本会话。\n\n需要我现在手动触发一次试运行，看看今天的 cs.AI 有什么新论文吗？",
+  "objective": null,
+  "historyLen": 4,
+  "capabilityProbes": [
+    {
+      "type": "monitor_registered",
+      "observed": true,
+      "evidence": "effect:monitorΔ=0 | toolset:true | path=tool"
+    }
+  ],
+  "suite": "monitor"
+}

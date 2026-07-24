@@ -1,0 +1,49 @@
+{
+  "taskId": "data-002",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-002-rc-0-1782103859402",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 3,
+    "toolCalls": 2,
+    "wallMs": 10754,
+    "tokens": {
+      "input": 356,
+      "output": 638,
+      "cacheRead": 89856,
+      "cacheWrite": 0,
+      "total": 90850,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "exec"
+  ],
+  "finalText": "数据已读取，共 20 条记录。现在用 Python 计算 Pearson 相关系数。计算结果如下：\n\n| 指标 | 值 |\n|:---|---|\n| 样本量 \\(n\\) | 20 |\n| \\(\\bar{x}\\) | 20.5 |\n| \\(\\bar{y}\\) | 48.1 |\n| **Pearson \\(r\\)** | **0.7892** |\n\n\\(x\\) 与 \\(y\\) 的 Pearson 相关系数为 **0.7892**，表明两者呈较强的正线性相关关系。",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 0.7892±0.01 (pearson r between x and y); nums=[20,20,20.5,48.1,0.7892,0.7892]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 6,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

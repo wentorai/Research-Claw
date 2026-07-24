@@ -1,0 +1,41 @@
+{
+  "taskId": "screen-005",
+  "domain": "screening",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-screen-005-rc-0-1782105276478",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 6751,
+    "tokens": {
+      "input": 1017,
+      "output": 342,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 60879,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "screening-abstracts.json"
+  ],
+  "toolNames": [
+    "read"
+  ],
+  "finalText": "7",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "expected 7±0; nums=[7]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4
+}

@@ -1,0 +1,28 @@
+{
+  "taskId": "write-005",
+  "domain": "review-writing",
+  "track": "B",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-005-rc-0-1782105699868",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 1,
+    "toolCalls": 0,
+    "wallMs": 8564,
+    "tokens": {
+      "input": 67,
+      "output": 452,
+      "cacheRead": 29696,
+      "cacheWrite": 0,
+      "total": 30215,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [],
+  "finalText": "原文存在若干语法和表达问题：`affect` 应为名词 `effect`，`study` 主谓不一致，`to` 介词不当，`make battery worse` 过于口语化。以下是改写建议：\n\n---\n\n**Polished Version:**\n\n> This paper investigates the effect of temperature on battery performance. The results indicate that elevated temperatures significantly degrade battery performance.\n\n---\n\n**也可更简洁的单一长句版本：**\n\n> This study examines the detrimental effect of elevated temperature on battery performance, demonstrating that high-temperature conditions lead to significant performance degradation.\n\n---\n\n**改写要点说明：**\n\n| 原文问题 | 修改 |\n|:---|:---|\n| `study` → 主谓不一致 | 改为 `investigates` / `examines`（学术写作常用动词） |\n| `affect` 误用为名词 | 改为 `effect`（名词） |\n| `to battery performance` | 改为 `on battery performance`（correct collocation） |\n| `make battery worse` 口语化 | 改为 `degrade battery performance` / `performance degradation` |\n| 缺少研究发现的正式表述 | 加入 `The results indicate / demonstrate that...` |",
+  "objective": null,
+  "historyLen": 2
+}

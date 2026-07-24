@@ -1,0 +1,64 @@
+{
+  "taskId": "write-001",
+  "domain": "review-writing",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-001-rc-0-1782105283301",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 8,
+    "toolCalls": 7,
+    "wallMs": 65892,
+    "tokens": {
+      "input": 13777,
+      "output": 3948,
+      "cacheRead": 294016,
+      "cacheWrite": 0,
+      "total": 311741,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "review-na-cathode.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "rp_search",
+    "rp_abstracts",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "小综述已完成，文件已写入工作区 `review-na-cathode.md`。\n\n```file_card\n{\"type\":\"file_card\",\"path\":\"review-na-cathode.md\",\"size_bytes\":1993,\"action\":\"created\",\"description\":\"钠离子电池正极材料约500字结构化小综述\"}\n```\n\n---\n\n**文件结构概览：**\n\n| 小节 | 内容要点 |\n|:---|:---|\n| **引言** | 钠离子电池背景、正极材料核心地位、三大主流体系 |\n| **研究现状** | 层状氧化物 (P2/O3) — 高容量但相变/空气稳定性问题；聚阴离子 (NASICON) — 结构稳定但导电性差；普鲁士蓝类似物 (PBAs) — 低成本但容量衰减 |\n| **结论** | 三类材料优劣对比，未来方向（高熵化、多相复合、界面工程） |\n\n**引用的 5 篇真实文献（均经 OpenAlex + Scopus 交叉验证）：**\n\n1. Liu et al., *Adv. Funct. Mater.*, **2020** (545 次引用) — 层状氧化物 vs. PBAs 商业化对比\n2. Liu et al., *Renew. Sustain. Energy Rev.*, **2024** (114 次引用) — P2/O3 层状氧化物最新进展\n3. Shaik et al., *ACS Omega*, **2024** (48 次引用) — 聚阴离子正极性能提升策略\n4. Xiao et al., *Small*, **2024** (152 次引用) — 普鲁士蓝类似物正极综述\n5. Lu et al., *Nat. Commun.*, **2025** (81 次引用) — PBAs 容量衰减机理与宽温域圆柱电池\n\n正文约 500 字，三个小节完整，五篇文献均含 DOI 及完整出处。如需扩展或调整引用格式，随时告知。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "review-na-cathode.md exists"
+      },
+      {
+        "type": "file_content_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 5/3; 10.1002/adfm.201909530:real; 10.1016/j.rser.2023.114167:real; 10.1021/acsomega.4c02709:real; 10.1002/smll.202401957:real; 10.1038/s41467-025-57663-3:real"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 16,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

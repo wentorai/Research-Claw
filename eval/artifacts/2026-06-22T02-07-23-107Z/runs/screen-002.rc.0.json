@@ -1,0 +1,48 @@
+{
+  "taskId": "screen-002",
+  "domain": "screening",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-screen-002-rc-0-1782094085841",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 13451,
+    "tokens": {
+      "input": 1122,
+      "output": 1116,
+      "cacheRead": 59648,
+      "cacheWrite": 0,
+      "total": 61886,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "screening-abstracts.json"
+  ],
+  "toolNames": [
+    "read"
+  ],
+  "finalText": "## C2 筛选结果：PICO（二甲双胍 · T2DM 成人 · HbA1c · 原始研究）\n\n逐条审查如下：\n\n| ID | 设计 | 干预/暴露 | 人群 | 含 HbA1c | 判定 |\n|:---|:-----|:----------|:-----|:---------|:-----|\n| **S1** | RCT ✓ | metformin ✓ | T2DM adults ✓ | ✓ | ✅ 符合 |\n| S2 | RCT ✓ | lifestyle ✗ | T2DM adults ✓ | ✗ (空腹血糖) | ❌ 不含 metformin |\n| **S3** | cohort ✓ | metformin ✓ | T2DM adults ✓ | ✓ | ✅ 符合 |\n| S4 | RCT ✓ | SGLT2 inhibitor ✗ | T2DM adults ✓ | ✓ | ❌ 不含 metformin |\n| **S5** | RCT ✓ | metformin ER ✓ | T2DM adults ✓ | ✓ | ✅ 符合 |\n| S6 | systematic review ✗ | — | — | — | ❌ 非原始研究 |\n| S7 | RCT ✓ | digital coaching ✗ | T2DM adults ✓ | ✓ | ❌ 不含 metformin |\n| S8 | case report ✗ | — | — | — | ❌ 非原始研究 |\n| **S9** | RCT ✓ | metformin + GLP-1 ✓ | T2DM adults ✓ | ✓ | ✅ 符合 |\n| **S10** | RCT ✓ | metformin ✓ | T2DM adults ✓ | ✓ | ✅ 符合 |\n\n**排除原因汇总：**\n- S2, S4, S7：不含 metformin 干预\n- S6：系统综述（非原始研究）\n- S8：病例报告（非 RCT/队列）\n\n答案: S1, S3, S5, S9, S10",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "got [S1,S10,S3,S5,S9] want [S1,S3,S5,S9,S10]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

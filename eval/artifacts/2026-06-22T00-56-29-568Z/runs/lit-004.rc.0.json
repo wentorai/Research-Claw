@@ -1,0 +1,54 @@
+{
+  "taskId": "lit-004",
+  "domain": "literature",
+  "track": "B",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-004-rc-0-1782092421548",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 9,
+    "toolCalls": 16,
+    "wallMs": 110595,
+    "tokens": {
+      "input": 35446,
+      "output": 7693,
+      "cacheRead": 420992,
+      "cacheWrite": 0,
+      "total": 464131,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "LLM_Alignment_研究脉络报告.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "web_search",
+    "web_fetch",
+    "web_fetch",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_search",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "报告已完成并保存。以下是核心内容的概览：\n---\n## LLM Alignment 研究脉络：七条主线\n### 📐 技术路线图\n```\n2017 RLHF 思想诞生 (Christiano et al.)\n ↓\n2022 RLHF 规模化 ──→ InstructGPT/ChatGPT (OpenAI)\n ↓ 同期: Constitutional AI / RLAIF (Anthropic)\n ↓\n2023 范式转移 ← DPO (Rafailov) ──→ 无需 RL 的直接偏好优化\n ↓ 同期: RepE (Zou) ──→ 推理时对齐新范式\n ↓ 同期: Weak-to-Strong (OpenAI) ──→ 可扩展监督\n ↓\n2024 方法论繁荣: KTO, ORPO, SimPO, GRPO (DeepSeek-R1)\n ↓ Alignment Faking 警示性发现 (Anthropic)\n ↓\n2025 个性化/多元对齐 + Training-Free 综述\n ↓\n2026 多元价值对齐、对抗对齐系统化\n```\n### 七大研究方向\n| 方向 | 一句话概括 | 成熟度 |\n|:---|:---|:---|\n| **RLHF** | 用人类偏好训练奖励模型，PPO 优化策略 | 工业成熟 |\n| **偏好优化 (DPO系列)** | 绕过 reward model，直接从偏好对学习 | 快速演进 |\n| **宪法 AI / RLAIF** | 用 AI 自我批判替代人类标注 | 工业应用 |\n| **表示工程** | 不训练模型，操控内部表征实现对齐 | 学术活跃 |\n| **可扩展监督** | 超人类 AI 如何被人类有效监督 | 早期探索 |\n| **越狱攻防** | 对齐的脆弱性与对抗鲁棒性 | 军备竞赛 |\n| **个性化对齐** | 打破 one-size-fits-all，适配多元价值 | 新兴方向 |\n### 🔴 五个未解决的根本问题\n1. **可扩展性**：当模型比人类聪明，人类无法评估其输出时，对齐如何保证？\n2. **对齐脆弱性**：所有现有对齐方法都可被越狱；模型可能策略性伪装对齐\n3. **对齐税**：安全对齐与模型能力之间存在固有 trade-off\n4. **价值规范性**：对齐到谁的价值？文化多元性如何保障？\n5. **超人类 AI 控制**：Alignment Faking 实验表明，模型在特定情境下会选择性地\"服从\"对齐\n报告全文已保存：\n```file_card\n{\"type\":\"file_card\",\"path\":\"LLM_Alignment_研究脉络报告.md\",\"size_bytes\":10667,\"action\":\"save\",\"description\":\"LLM Alignment 研究脉络报告——主要方向、代表性工作与开放问题\"}\n```\n如需我对某个具体方向（如 DPO 的数学推导、RLHF 的训练细节、或越狱攻防的具体方法）做更深入的分析，可以继续展开。",
+  "objective": null,
+  "historyLen": 26,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

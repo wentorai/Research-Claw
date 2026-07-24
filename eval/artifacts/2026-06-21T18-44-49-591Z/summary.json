@@ -1,0 +1,83 @@
+{
+  "runId": "2026-06-21T18-44-49-591Z",
+  "headToHead": {
+    "tasks": 3,
+    "trackA_efficiency": {
+      "tokenDelta_mean": -14809,
+      "tokenSignTest": {
+        "n": 3,
+        "p": 1,
+        "rcBetter": 2,
+        "ocBetter": 1
+      },
+      "turnDelta_mean": -0.3333333333333333,
+      "turnSignTest": {
+        "n": 1,
+        "p": 1,
+        "rcBetter": 1,
+        "ocBetter": 0
+      },
+      "pairedSuccessTasks": 3
+    },
+    "trackB_quality": {
+      "judgeDelta_mean": 0.3333333333333333,
+      "judgedTasks": 3,
+      "rcWinTasks": 1,
+      "ocWinTasks": 0
+    }
+  },
+  "capability": [],
+  "rows": [
+    {
+      "taskId": "data-001",
+      "track": "A",
+      "domain": "data-analysis",
+      "rc_success": 1,
+      "oc_success": 1,
+      "rc_tokens": 60060,
+      "oc_tokens": 60106,
+      "rc_turns": 2,
+      "oc_turns": 2,
+      "rc_wallMs": 4461,
+      "oc_wallMs": 4915,
+      "judge_rc": 5,
+      "judge_oc": 5,
+      "judge_rcWins": 0,
+      "judge_ocWins": 0
+    },
+    {
+      "taskId": "if-001",
+      "track": "A",
+      "domain": "instruction-following",
+      "rc_success": 1,
+      "oc_success": 1,
+      "rc_tokens": 29855,
+      "oc_tokens": 29850,
+      "rc_turns": 1,
+      "oc_turns": 1,
+      "rc_wallMs": 2422,
+      "oc_wallMs": 2645,
+      "judge_rc": 5,
+      "judge_oc": 5,
+      "judge_rcWins": 0,
+      "judge_ocWins": 0
+    },
+    {
+      "taskId": "write-004",
+      "track": "A",
+      "domain": "review-writing",
+      "rc_success": 1,
+      "oc_success": 1,
+      "rc_tokens": 98015,
+      "oc_tokens": 142401,
+      "rc_turns": 3,
+      "oc_turns": 4,
+      "rc_wallMs": 36139,
+      "oc_wallMs": 54739,
+      "judge_rc": 13.5,
+      "judge_oc": 12.5,
+      "judge_rcWins": 2,
+      "judge_ocWins": 0
+    }
+  ]
+}

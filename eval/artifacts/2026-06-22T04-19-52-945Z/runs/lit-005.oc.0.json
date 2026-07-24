@@ -1,0 +1,44 @@
+{
+  "taskId": "lit-005",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-005-oc-0-1782103112418",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 7424,
+    "tokens": {
+      "input": 686,
+      "output": 367,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 60573,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_abstracts"
+  ],
+  "finalText": "该 DOI 对应的论文信息如下：\n\n| 项目 | 内容 |\n|:---|:---|\n| **标题** | *Deep learning* |\n| **发表期刊** | Nature |\n| **年份** | 2015 |\n| **被引次数** | 81,470+ |\n\n这就是 Yann LeCun、Yoshua Bengio 和 Geoffrey Hinton 三位深度学习先驱发表在 *Nature* 上的那篇经典综述。OpenAlex 显示其 OA 状态为绿色开放获取（green OA），可通过 HAL 归档库获取公开版本：https://hal.science/hal-04206682",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": false,
+        "evidence": "no DOI found"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 4
+}

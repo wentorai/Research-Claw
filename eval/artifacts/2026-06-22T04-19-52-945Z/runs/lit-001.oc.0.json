@@ -1,0 +1,60 @@
+{
+  "taskId": "lit-001",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-001-oc-0-1782102774885",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 6,
+    "toolCalls": 12,
+    "wallMs": 93485,
+    "tokens": {
+      "input": 41189,
+      "output": 7264,
+      "cacheRead": 282624,
+      "cacheWrite": 0,
+      "total": 331077,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_search",
+    "web_search",
+    "rp_search",
+    "web_fetch",
+    "rp_abstracts",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch"
+  ],
+  "finalText": "以下是根据 Scopus + OpenAlex 检索到的 **2020 年以来石墨烯电池领域引用量最高的 5 篇综述论文**：\n\n---\n\n## 石墨烯电池高引用综述 Top 5 (2020+)\n\n| # | 标题 | 第一作者 | 年份 | 引用 | DOI |\n|:--|:-----|:--------|:----|:-----|:----|\n| 1 | **Graphene-based composites for electrochemical energy storage** | Bo Wang (Harbin Institute of Technology) | 2020 | ~521 | `10.1016/j.ensm.2019.08.004` |\n| 2 | **On the Road to the Frontiers of Lithium‐Ion Batteries: A Review and Outlook of Graphene Anodes** | Jingxuan Bi (西北工业大学) | 2023 | 239 | `10.1002/adma.202210734` |\n| 3 | **Recent progress in graphene-based electrodes for flexible batteries** | Chunlong Dai (北京理工大学) | 2020 | ~170 | `10.1002/inf2.12039` |\n| 4 | **Graphene-based lithium-ion battery anode materials manufactured by mechanochemical ball milling process: A review and perspective** | Shixiang Yu (HKUST / 南方科大) | 2022 | 126 | `10.1016/j.compositesb.2022.110232` |\n| 5 | **Recent advancement made in the field of reduced graphene oxide-based nanocomposites used in the energy storage devices: A review** | Harish Kumar (Central Univ. of Haryana) | 2021 | 109 | `10.1016/j.est.2020.102032` |\n\n---\n\n### 各篇简介\n\n**1. Graphene-based composites for electrochemical energy storage**\n*Energy Storage Materials*, 2020 — 全面综述石墨烯基复合材料在电化学储能（锂电、钠电、超级电容器等）中的应用，涵盖结构设计、合成策略与电化学性能关系，是该方向引用量最高的综述之一（~521 次）。\n\n**2. On the Road to the Frontiers of Lithium-Ion Batteries: A Review and Outlook of Graphene Anodes**\n*Advanced Materials*, 2023 — 发表于顶级材料期刊，系统梳理石墨烯作为锂离子电池负极的研究路线图，涵盖形貌工程、表面修饰、杂原子掺杂、自支撑电极等策略，引用 239 次。\n\n**3. Recent progress in graphene-based electrodes for flexible batteries**\n*InfoMat*, 2020 — 聚焦柔性电池中石墨烯基电极的最新进展，覆盖金属离子电池（Li/Na/Zn/Al）、锂硫电池、金属空气电池，引用 ~170 次。\n\n**4. Graphene-based lithium-ion battery anode materials manufactured by mechanochemical ball milling process**\n*Composites Part B: Engineering*, 2022 — 系统总结了机械化学球磨法制备石墨烯基锂离子电池负极材料的研究进展，涵盖 Sn、Sb、Si、P 等合金型负极与石墨烯的复合策略，引用 126 次。\n\n**5. Recent advancement in reduced graphene oxide-based nanocomposites for energy storage devices**\n*Journal of Energy Storage*, 2021 — 综述还原氧化石墨烯（rGO）基纳米复合材料在超级电容器和电池等储能器件中的应用进展，引用 109 次。\n\n---\n\n> **检索说明**：通过 `rp_search`（Scopus + OpenAlex 双源）交叉检索，筛选类型为综述（review）、2020 年后发表、按引用量降序排列。第 1 篇 DOI 含 2019（在线首发），Scopus 标注为 2020 年正式出版。\n\n如需某篇的全文摘要或进一步筛选（如限定更广义的 \"graphene battery\" 主题），请告知。",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_count",
+        "pass": false,
+        "evidence": "counted 0 (need >= 5)"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 5/3; 10.1016/j.ensm.2019.08.004:real; 10.1002/adma.202210734:real; 10.1002/inf2.12039:real; 10.1016/j.compositesb.2022.110232:real; 10.1016/j.est.2020.102032:real"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": true,
+        "evidence": "10.1016/j.ensm.2019.08.004:ok; 10.1002/adma.202210734:ok; 10.1002/inf2.12039:ok; 10.1016/j.compositesb.2022.110232:ok; 10.1016/j.est.2020.102032:ok"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 19
+}

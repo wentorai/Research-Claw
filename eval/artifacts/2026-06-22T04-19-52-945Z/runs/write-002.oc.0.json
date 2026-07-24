@@ -1,0 +1,44 @@
+{
+  "taskId": "write-002",
+  "domain": "review-writing",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-002-oc-0-1782103268141",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 9,
+    "toolCalls": 13,
+    "wallMs": 167519,
+    "tokens": {
+      "input": 31985,
+      "output": 7693,
+      "cacheRead": 430464,
+      "cacheWrite": 0,
+      "total": 470142,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "扩散模型图像生成综述.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "web_search",
+    "rp_abstracts",
+    "web_search",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "web_fetch",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "综述已完成并保存。以下是对全文的概览：\n\n---\n\n## 扩散模型在图像生成中的应用 —— 学术小综述\n\n**文件已保存至**：`扩散模型图像生成综述.md`\n\n```file_card\n{\"type\":\"file_card\",\"path\":\"/Users/liusiyuan/Downloads/wentor/research-claw/workspace/扩散模型图像生成综述.md\",\"size_bytes\":10624,\"action\":\"saved\"}\n```\n\n### 综述结构（七章，约 34 篇核心文献）\n\n| 章节 | 内容 |\n|:---|:---|\n| **§1 引言** | 扩散模型的兴起背景，从 GAN 到扩散模型的范式迁移 |\n| **§2 理论基础** | DDPM (Ho et al., 2020) 的数学框架、Score-based SDE 统一理论、DDIM 非马尔可夫推广 |\n| **§3 方法演进** | 潜在扩散 (Stable Diffusion)、无分类器引导 (CFG)、扩散变换器 (DiT/MMDiT)、六大 T2I 系统对比表 |\n| **§4 效率优化** | 逐步蒸馏、一致性模型、TDD、Flash Diffusion (AAAI 2025)、遥感应用 40 倍加速 |\n| **§5 可控生成** | ControlNet、SDEdit、DreamBooth、Imagen Editor、偏好对齐 (RLHF/DPO 引入扩散模型) |\n| **§6 挑战与展望** | 推理效率、安全与伦理、可控性、评估体系、多模态与 3D 扩展五大方向 |\n| **§7 结论** | \"更快、更可控、更安全\"三大核心目标 |\n\n### 覆盖的核心里程碑论文\n\n- **DDPM** (Ho et al., NeurIPS 2020) — 奠基性工作\n- **Stable Diffusion** (Rombach et al., CVPR 2022) — 开源生态标杆\n- **DiT** (Peebles & Xie, ICCV 2023) — Transformer 架构革命\n- **PixArt-α** (Chen et al., ICLR 2024, 118 引) — 高效训练范式\n- **Flash Diffusion** (AAAI 2025, 11 引) — 通用加速蒸馏\n- **TDD** (AAAI 2025) — 精细化一致性蒸馏\n- **偏好对齐综述** (CS Review, 2026) — RLHF/DPO 前沿方向\n- **可控生成综述** (IEEE TPAMI, 2026) — 可控生成全景\n\n所有引用均基于真实文献检索（rp_search + web_search），DOI 均可验证。如需对某个子方向（如 DiT 架构细节、安全性、3D 生成等）进行深入扩展，随时告诉我。",
+  "objective": null,
+  "historyLen": 23
+}

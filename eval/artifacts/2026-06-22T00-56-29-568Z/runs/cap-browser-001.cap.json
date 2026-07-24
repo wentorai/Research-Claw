@@ -1,0 +1,46 @@
+{
+  "taskId": "cap-browser-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-browser-001-rc-0-1782092859073",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 5,
+    "toolCalls": 4,
+    "wallMs": 27937,
+    "tokens": {
+      "input": 9160,
+      "output": 2532,
+      "cacheRead": 156928,
+      "cacheWrite": 0,
+      "total": 168620,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "read",
+    "browser",
+    "browser",
+    "browser"
+  ],
+  "finalText": "开始执行 CNKI 检索。先导航到知网搜索页面。页面已打开，现在执行搜索并提取结果。CNKI 检索完成。关键词「机器学习」，共找到 **164,699** 条结果。按默认排序（最新优先），前 3 条结果如下：\n\n---\n\n**1. 从相邻到相富：新型城镇化建设何以推动农民县域邻里共富？**\n- 作者：蒋文杰; 杨红\n- 期刊：华东经济管理 | 日期：2026-06-22（网络首发）\n- 数据库：期刊 | 引用/下载：--\n\n**2. 面向实时监测的星地降水信息融合方法**\n- 作者：李伶杰; 高锐; 云兆得; 王银堂; 崔婷婷; 胡剑\n- 期刊：水科学进展 | 日期：2026-06-22（网络首发）\n- 数据库：期刊 | 引用/下载：--\n\n**3. 基于可解释机器学习的科技人才流动宏观影响因素研究**\n- 作者：徐倪妮; 孟涵; 朱淑婉\n- 期刊：南京师大学报(自然科学版) | 日期：2026-06-20\n- 数据库：期刊 | 引用/下载：--\n\n---\n\n> **说明**：CNKI 默认按日期倒序排列，前两条虽标题未含「机器学习」，但摘要或关键词中匹配到了该词。第 3 条为标题直接匹配「机器学习」的最新冠刊论文。如需按相关度排序或缩小检索范围，可以进一步调整。",
+  "objective": null,
+  "historyLen": 10,
+  "capabilityProbes": [
+    {
+      "type": "browser_invoked",
+      "observed": true,
+      "evidence": "tools=[read,browser,browser,browser]"
+    },
+    {
+      "type": "skill_invoked",
+      "observed": true,
+      "evidence": "matched=[cnki-search], skillSearchTool=false"
+    }
+  ],
+  "suite": "browser"
+}

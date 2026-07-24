@@ -1,0 +1,43 @@
+{
+  "taskId": "cap-library-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-library-001-rc-0-1782093009255",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 5,
+    "toolCalls": 4,
+    "wallMs": 44573,
+    "tokens": {
+      "input": 6921,
+      "output": 3937,
+      "cacheRead": 169856,
+      "cacheWrite": 0,
+      "total": 180714,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "sources/references/classic_papers_2025-06-22.bib"
+  ],
+  "toolNames": [
+    "rp_abstracts",
+    "rp_search",
+    "web_fetch",
+    "write"
+  ],
+  "finalText": "已将 3 篇论文的元数据保存至 `sources/references/classic_papers_2025-06-22.bib`。以下是入库详情：\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Attention Is All You Need\",\"authors\":[\"Ashish Vaswani\",\"Noam Shazeer\",\"Niki Parmar\",\"Jakob Uszkoreit\",\"Llion Jones\",\"Aidan N. Gomez\",\"Lukasz Kaiser\",\"Illia Polosukhin\"],\"year\":2017,\"venue\":\"NeurIPS\",\"arxiv_id\":\"1706.03762\",\"url\":\"https://arxiv.org/abs/1706.03762\",\"abstract_preview\":\"The dominant sequence transduction models are based on complex recurrent or convolutional neural networks... We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.\",\"tags\":[\"transformer\",\"attention\",\"NLP\",\"deep learning\"],\"read_status\":\"unread\"}\n```\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Deep Learning\",\"authors\":[\"Yann LeCun\",\"Yoshua Bengio\",\"Geoffrey Hinton\"],\"year\":2015,\"venue\":\"Nature\",\"doi\":\"10.1038/nature14539\",\"url\":\"https://doi.org/10.1038/nature14539\",\"abstract_preview\":\"Deep learning allows computational models that are composed of multiple processing layers to learn representations of data with multiple levels of abstraction.\",\"tags\":[\"deep learning\",\"review\",\"neural networks\"],\"read_status\":\"unread\"}\n```\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Denoising Diffusion Probabilistic Models\",\"authors\":[\"Jonathan Ho\",\"Ajay Jain\",\"Pieter Abbeel\"],\"year\":2020,\"venue\":\"NeurIPS\",\"arxiv_id\":\"2006.11239\",\"doi\":\"10.48550/arXiv.2006.11239\",\"url\":\"https://arxiv.org/abs/2006.11239\",\"abstract_preview\":\"We present high quality image synthesis results using diffusion probabilistic models, a class of latent variable models inspired by considerations from nonequilibrium thermodynamics.\",\"tags\":[\"diffusion models\",\"generative models\",\"image synthesis\"],\"read_status\":\"unread\"}\n```\n\n**入库摘要：**\n\n| # | 论文 | 作者 | 年份 | 期刊/会议 | 引用量 |\n|---|------|------|------|-----------|--------|\n| 1 | Attention Is All You Need | Vaswani et al. (8人) | 2017 | NeurIPS | — |\n| 2 | Deep Learning | LeCun, Bengio, Hinton | 2015 | Nature | ~81,540 |\n| 3 | Denoising Diffusion Probabilistic Models | Ho, Jain, Abbeel | 2020 | NeurIPS | ~5,637 |\n\nBibTeX 已写入 `sources/references/classic_papers_2025-06-22.bib`。3 篇论文目前均为 **unread** 状态。需要我开始阅读某一篇或做进一步分析吗？",
+  "objective": null,
+  "historyLen": 10,
+  "capabilityProbes": [
+    {
+      "type": "library_write",
+      "observed": true,
+      "evidence": "effect:libraryΔ=0 | toolset:true | bibFile:true | path=tool"
+    }
+  ],
+  "suite": "library"
+}

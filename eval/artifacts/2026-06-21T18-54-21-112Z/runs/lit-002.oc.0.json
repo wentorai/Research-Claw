@@ -1,0 +1,47 @@
+{
+  "taskId": "lit-002",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-002-oc-0-1782068062783",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 4,
+    "toolCalls": 4,
+    "wallMs": 20234,
+    "tokens": {
+      "input": 4954,
+      "output": 1334,
+      "cacheRead": 127744,
+      "cacheWrite": 0,
+      "total": 134032,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch"
+  ],
+  "finalText": "## 结果\n\n**论文标题:** Attention Is All You Need  \n**第一作者:** **Ashish Vaswani**  \n**发表年份:** **2017年**（arXiv 首次提交于 2017-06-12；同年发表于 NeurIPS 2017）\n\n---\n\n### 可核验出处\n\n**arXiv（一手来源）:**\n- arXiv ID: [1706.03762](https://arxiv.org/abs/1706.03762)\n- 作者列表（按顺序）：Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin\n- 提交日期：2017年6月12日\n- 所属领域：cs.CL（计算语言学）、cs.LG（机器学习）\n\n**会议发表:**\n- NeurIPS 2017（第31届 Conference on Neural Information Processing Systems），Long Beach, CA, USA\n\n---\n\n### 数据来源\n\n以上信息直接从 arXiv API（`export.arxiv.org/api/query`）实时查询获取，作者顺序以 arXiv 官方元数据中的 `<author>` 标签列出顺序为准，Ashish Vaswani 位列第一，确认为第一作者。该论文提出了 Transformer 架构，是当代大语言模型的理论基石。\n\n```paper_card\n{\n  \"type\": \"paper_card\",\n  \"title\": \"Attention Is All You Need\",\n  \"authors\": [\"Ashish Vaswani\", \"Noam Shazeer\", \"Niki Parmar\", \"Jakob Uszkoreit\", \"Llion Jones\", \"Aidan N. Gomez\", \"Lukasz Kaiser\", \"Illia Polosukhin\"],\n  \"year\": 2017,\n  \"venue\": \"NeurIPS 2017\",\n  \"arxiv_id\": \"1706.03762\",\n  \"url\": \"https://arxiv.org/abs/1706.03762\"\n}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 3/3; \"paper_card\":NO; \"Attention Is All You Need\":real; \"Ashish Vaswani\":NO; \"Noam Shazeer\":real; \"Niki Parmar\":real; \"Jakob Uszkoreit\":NO"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 9
+}

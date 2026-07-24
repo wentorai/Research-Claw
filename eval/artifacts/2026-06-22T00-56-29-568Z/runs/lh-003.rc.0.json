@@ -1,0 +1,60 @@
+{
+  "taskId": "lh-003",
+  "domain": "long-horizon",
+  "track": "B",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lh-003-rc-0-1782092120229",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 8,
+    "toolCalls": 13,
+    "wallMs": 149587,
+    "tokens": {
+      "input": 44879,
+      "output": 11312,
+      "cacheRead": 453504,
+      "cacheWrite": 0,
+      "total": 509695,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "qec-landscape.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "rp_search",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "Now I have sufficient material from multiple databases. Let me synthesize everything into the landscape document.`qec-landscape.md` 已完成，共 ~16.6KB，覆盖以下内容：\n\n---\n\n**八大研究方向：**\n\n| 方向 | 核心要点 |\n|:--|:--|\n| **拓扑稳定子码** | Surface code 最成熟（Google d=7 超越阈值），XZZX/rotated/heavy-hex 变体适配不同硬件 |\n| **量子 LDPC 码** | 2022 年 Panteleev-Kalachev/Leverrier-Zémor 突破——常数编码率+线性码距，中性原子实现路径已提出 |\n| **玻色子编码** | Cat/GKP/Binomial 三大族，超导平台上已实现 break-even，GKP 工程综述 (2024) 总结了路径 |\n| **Floquet 码** | Hastings-Haah (2022) 范式转变，仅需 2-body 测量；半双曲 Floquet 码可将开销降至表面码的 1/5.6 |\n| **解码器** | MWPM(精确但慢) vs Union-Find/BP(快但粗) vs 神经网络(有潜力)，实时解码延迟是瓶颈 |\n| **容错逻辑门** | Magic state distillation 占 50-90% 开销，混合 QEM+QEC 方案和动态码上的逻辑门是缓解路径 |\n| **错误缓解 (QEM)** | PEC/ZNE/MPO 等技术，但无偏 QEM 的测量成本随深度指数增长，根本受限 |\n| **硬件平台** | 超导/离子阱已演示纠错增益，中性原子在 qLDPC 部署上独特优势 |\n\n**九个开放挑战：** Magic state 开销、解码速度、LDPC 局域性博弈、Leakage 错误、关联噪声、控制电子学/制冷、异构码设计、QEM 理论极限、实验 scale-up。\n\n**文献索引：** 包含 30+ 核心文献的 DOI 和主题标注。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "qec-landscape.md exists"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 22,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

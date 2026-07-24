@@ -1,0 +1,42 @@
+{
+  "taskId": "data-005",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-005-rc-0-1782091878907",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 3,
+    "toolCalls": 2,
+    "wallMs": 8975,
+    "tokens": {
+      "input": 354,
+      "output": 602,
+      "cacheRead": 89856,
+      "cacheWrite": 0,
+      "total": 90812,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "exec"
+  ],
+  "finalText": "Group A 的 y 列平均值为 **46.70**。\n\n| 指标 | 值 |\n|------|-----|\n| Group A 行数 | 10 |\n| y 列总和 | 467 |\n| 平均值 | 46.70 |",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 46.7±0.1 (mean of y where group==A); nums=[46.7,10,467,46.7]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 6
+}

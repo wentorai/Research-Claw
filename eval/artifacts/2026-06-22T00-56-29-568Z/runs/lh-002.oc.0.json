@@ -1,0 +1,57 @@
+{
+  "taskId": "lh-002",
+  "domain": "long-horizon",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lh-002-oc-0-1782090499199",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 4,
+    "toolCalls": 7,
+    "wallMs": 48408,
+    "tokens": {
+      "input": 5907,
+      "output": 3913,
+      "cacheRead": 129664,
+      "cacheWrite": 0,
+      "total": 139484,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "gnn-compare.md"
+  ],
+  "toolNames": [
+    "rp_search",
+    "web_search",
+    "rp_abstracts",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "write"
+  ],
+  "finalText": "三篇代表性论文均已核实，信息齐全。现在生成对比表写入工作区。文件已写入工作区。以下是三篇 GNN 代表性论文的对比要点：\n\n---\n\n## 选定的三篇论文\n\n| # | 论文 | 会议 | 核心贡献 |\n|:--|:-----|:-----|:---------|\n| 1 | **GCN** (Kipf & Welling, 2017) | ICLR 2017 | 将谱域图卷积简化为一阶邻居聚合，奠定了空间域 GNN 的基础范式 |\n| 2 | **GraphSAGE** (Hamilton et al., 2017) | NeurIPS 2017 | 提出归纳式框架，学习「生成嵌入的函数」而非嵌入本身，支持未见节点 |\n| 3 | **GAT** (Veličković et al., 2018) | ICLR 2018 | 引入自注意力机制，让模型自动学习邻居的重要性权重 |\n\n## 方法维度对比速览\n\n- **聚合权重**：GCN 固定（度归一化）→ GraphSAGE 可配置（Mean/LSTM/Pooling）→ GAT 完全可学习（注意力）\n- **归纳能力**：GCN 仅直推式 → GraphSAGE 天然归纳 → GAT 二者兼有\n- **计算图**：GCN 全邻域 → GraphSAGE 邻居采样 → GAT 全邻域 + 多头\n- **关系**：GCN 是基础底座，GraphSAGE 解决了大规模归纳问题，GAT 解决了邻居权重差异化问题\n\n完整对比表（含公式、复杂度、实验数据、真实出处）已写入：\n\n```file_card\n{\"type\":\"file_card\",\"path\":\"gnn-compare.md\",\"size_bytes\":4429,\"action\":\"created\",\"description\":\"GNN 三篇代表性论文（GCN / GraphSAGE / GAT）方法对比表，含核心公式、聚合方式、归纳能力、实验基准、真实出处\"}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "gnn-compare.md exists"
+      },
+      {
+        "type": "file_content_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "citation_real",
+        "pass": false,
+        "evidence": "resolved 1/3; \"file_card\":NO; \"gnn-compare.md\":NO; \"size_bytes\":NO; \"description\":real; \"GNN 三篇代表性论文（GCN / GraphSAGE / GAT）方法对比表，\":NO"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 12
+}

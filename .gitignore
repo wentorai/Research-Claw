@@ -112,3 +112,6 @@ workspace/helloworld.md
 workspace/test-scenarios.md
 workspace/*_report*.md
 workspace/ml-project/
+
+# eval 本地密钥(绝不提交)
+eval/.secrets.local.json

@@ -1,0 +1,37 @@
+{
+  "taskId": "if-003",
+  "domain": "instruction-following",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-if-003-oc-0-1782090315616",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 1,
+    "toolCalls": 0,
+    "wallMs": 3778,
+    "tokens": {
+      "input": 52,
+      "output": 153,
+      "cacheRead": 29696,
+      "cacheWrite": 0,
+      "total": 29901,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [],
+  "finalText": "Overfitting occurs when a machine learning model learns to capture noise and spurious patterns in the training data rather than the genuine underlying relationships. This typically happens when the model is overly complex relative to the amount of training data available, causing it to memorize specific examples instead of generalizing from them. As a result, an overfit model performs exceptionally well on data it has seen before but poorly on new, unseen data.",
+  "objective": {
+    "results": [
+      {
+        "type": "format_constraint",
+        "pass": true,
+        "evidence": "all constraints met"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 2
+}

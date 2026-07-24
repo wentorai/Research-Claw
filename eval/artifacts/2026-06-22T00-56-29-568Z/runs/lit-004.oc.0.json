@@ -1,0 +1,53 @@
+{
+  "taskId": "lit-004",
+  "domain": "literature",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-004-oc-0-1782090983260",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 11,
+    "toolCalls": 22,
+    "wallMs": 157122,
+    "tokens": {
+      "input": 71964,
+      "output": 9810,
+      "cacheRead": 738304,
+      "cacheWrite": 0,
+      "total": 820078,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "outputs/drafts/literature-review-llm-alignment.md"
+  ],
+  "toolNames": [
+    "read",
+    "read",
+    "update_plan",
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "报告已保存至 `outputs/drafts/literature-review-llm-alignment.md`。以下是核心脉络速览：\n\n---\n\n## LLM 对齐研究：六大方向 + 七个开放问题\n\n### 六大研究方向\n\n| 方向 | 核心命题 | 里程碑工作 |\n|:-----|:---------|:----------|\n| **① RLHF** | 用人类偏好信号做强化学习 | InstructGPT (2022), Llama 2-Chat (2023) |\n| **② DPO 系列** | 绕过 RL，直接用偏好做分类 | DPO (2023) → KTO/ORPO/SimPO/β-DPO |\n| **③ RLAIF / 宪法 AI** | 用 AI 替代人类做反馈 | Constitutional AI (2022), RLAIF (2023) |\n| **④ 安全对齐与红队** | 防御越狱 + 拒绝有害请求 | BeaverTails, HarmBench, Safe RLHF |\n| **⑤ 可扩展监督** | 超人类 AI 的对齐保障 | Weak-to-Strong (2023), Debate, Easy-to-Hard |\n| **⑥ 机制可解释性** | 理解对齐在神经网络内部的实现 | SAE, Representation Engineering, Activation Steering |\n| **⑦ 多元对齐** | 从单一价值到多元价值的对齐 | Pluralistic Alignment (2024), Modular Pluralism |\n\n### 七个核心开放问题\n\n1. **奖励过度优化（Goodhart's Law）** — 代理奖励的优化极限\n2. **超人类监督** — 如何监督比人更强的 AI\n3. **对齐税** — 安全 vs. 能力的权衡\n4. **价值多元性** — \"对齐到谁的价值观？\"\n5. **鲁棒性与持久性** — 对抗攻击与分布偏移\n6. **欺骗性对齐** — 模型是否会假装对齐？\n7. **效率瓶颈** — 偏好标注成本、解码时对齐\n\n### 关键趋势\n\n- 从 RLHF 到 DPO 的简化浪潮\n- 解码时（Decoding-Time）对齐兴起\n- 从单模型对齐 → Agent 系统对齐\n- 形式化与理论化的加速\n- 开源生态成熟（UltraFeedback, BeaverTails, HarmBench）\n\n---\n\n如需深入某个方向（如 DPO 系列方法的详细对比、安全对齐的技术路线、或某个具体开放问题的研究现状），随时告诉我。",
+  "objective": null,
+  "historyLen": 34
+}

@@ -1,0 +1,41 @@
+{
+  "taskId": "data-005",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-005-oc-0-1782101766703",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 19084,
+    "tokens": {
+      "input": 243,
+      "output": 456,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 60219,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read"
+  ],
+  "finalText": "CSV 数据中 group 为 A 的行共 10 行，其 y 值为：\n\n| id | y |\n|---|----|\n| 2 | 27 |\n| 4 | 31 |\n| 6 | 26 |\n| 8 | 39 |\n| 10 | 65 |\n| 12 | 38 |\n| 14 | 51 |\n| 16 | 55 |\n| 18 | 50 |\n| 20 | 85 |\n\n- 求和：27 + 31 + 26 + 39 + 65 + 38 + 51 + 55 + 50 + 85 = **467**\n- 平均值：467 ÷ 10 = **46.70**（保留两位小数）",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 46.7±0.1 (mean of y where group==A); nums=[10,2,27,4,31,6,26,8,39,10,65,12]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4
+}

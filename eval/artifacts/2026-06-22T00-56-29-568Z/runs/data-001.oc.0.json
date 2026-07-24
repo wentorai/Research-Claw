@@ -1,0 +1,42 @@
+{
+  "taskId": "data-001",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-001-oc-0-1782089963582",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 3,
+    "toolCalls": 2,
+    "wallMs": 7530,
+    "tokens": {
+      "input": 373,
+      "output": 550,
+      "cacheRead": 89856,
+      "cacheWrite": 0,
+      "total": 90779,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "exec"
+  ],
+  "finalText": "46.15",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 46.15±0.1 (mean of y); nums=[46.15]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 6
+}

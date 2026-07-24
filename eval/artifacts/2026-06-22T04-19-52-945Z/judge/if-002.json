@@ -1,0 +1,20 @@
+{
+  "rcScores": {
+    "任务达成度": 5
+  },
+  "ocScores": {
+    "任务达成度": 3.5
+  },
+  "rcTotal": 5,
+  "ocTotal": 3.5,
+  "preferences": [
+    "rc",
+    "rc"
+  ],
+  "rcWins": 2,
+  "ocWins": 0,
+  "rationales": [
+    "A 严格输出了符合 schema 的 JSON 对象，字段与值均正确；B 内容正确，但包含 Markdown 代码块标记，违反了“只输出一个 JSON 对象、不要额外文字”的要求。",
+    "两者内容均正确，但A包含Markdown代码块标记，不符合“只输出一个JSON对象、不要额外文字”的要求；B严格输出JSON对象，完全符合任务要求。"
+  ]
+}
