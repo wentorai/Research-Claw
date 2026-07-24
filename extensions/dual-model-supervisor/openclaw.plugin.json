@@ -62,6 +62,30 @@
         "items": { "type": "string" },
         "description": "Tools whose calls will be reviewed before execution",
         "default": ["exec", "write", "edit", "send_notification", "browser"]
+      },
+      "dangerousToolPolicy": {
+        "type": "string",
+        "enum": ["block", "approve"],
+        "description": "Confirmed-dangerous tool call: block=hard block; approve=pause for human approval. Default block.",
+        "default": "block"
+      },
+      "grounding": {
+        "type": "object",
+        "description": "Citation existence checking (privacy-gated, best-effort).",
+        "properties": {
+          "networkPolicy": {
+            "type": "string",
+            "enum": ["off", "identifiers-only", "full"],
+            "description": "off=zero external requests (default, privacy); identifiers-only=send DOI/arXiv ids only; full=also title search",
+            "default": "off"
+          },
+          "verdictMode": {
+            "type": "string",
+            "enum": ["flag", "info"],
+            "description": "flag=emit not_found (suspected fabrication); info=soften not_found to unverifiable",
+            "default": "flag"
+          }
+        }
       }
     }
   }

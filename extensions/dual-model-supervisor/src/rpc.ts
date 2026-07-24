@@ -60,6 +60,8 @@ export function registerSupervisorRpc(
       forceRegenerate: cfg.courseCorrection.forceRegenerate,
       maxRegenerateAttempts: cfg.courseCorrection.maxRegenerateAttempts,
       highRiskTools: cfg.highRiskTools,
+      dangerousToolPolicy: cfg.dangerousToolPolicy,
+      grounding: cfg.grounding,
       stats,
       activeSessions,
       sessionsInfo,
@@ -74,6 +76,7 @@ export function registerSupervisorRpc(
         'enabled', 'supervisorModel', 'reviewMode',
         'appendReviewToChannelOutput', 'memoryGuard',
         'courseCorrection', 'highRiskTools',
+        'dangerousToolPolicy', 'grounding',
       ] as const;
       const filtered: Record<string, unknown> = {};
       for (const key of ALLOWED_KEYS) {
@@ -91,6 +94,9 @@ export function registerSupervisorRpc(
       }
       if (filtered.courseCorrection && typeof filtered.courseCorrection === 'object' && current.courseCorrection) {
         merged.courseCorrection = { ...current.courseCorrection, ...(filtered.courseCorrection as Record<string, unknown>) };
+      }
+      if (filtered.grounding && typeof filtered.grounding === 'object' && current.grounding) {
+        merged.grounding = { ...current.grounding, ...(filtered.grounding as Record<string, unknown>) };
       }
       const updated = parseConfig(merged);
       setActiveConfig(updated);

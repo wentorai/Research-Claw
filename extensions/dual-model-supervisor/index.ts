@@ -334,6 +334,8 @@ const plugin: PluginDefinition = {
           memoryGuard: newCfg.memoryGuard,
           courseCorrection: newCfg.courseCorrection,
           highRiskTools: newCfg.highRiskTools,
+          dangerousToolPolicy: newCfg.dangerousToolPolicy,
+          grounding: newCfg.grounding,
         };
         const tmpPath = configPath + '.tmp';
         fs.writeFileSync(tmpPath, JSON.stringify(ocConfig, null, 2) + '\n', 'utf8');
