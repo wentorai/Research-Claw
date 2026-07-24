@@ -63,15 +63,48 @@ describe('saveFromTempFile', () => {
     await expect(fsp.access(tmp)).rejects.toThrow(); // consumed
   });
 
-  it('creates missing destination parents and reports is_new false on overwrite', async () => {
+  it('DEFAULT (exclusive) throws WS_FILE_EXISTS on an existing dest and keeps the tmp for retry', async () => {
     const service = new WorkspaceService(makeConfig(root));
     await service.init();
     await service.save('sources/deep/a.txt', 'OLD');
 
     const tmp = await writeTmp(root, 'NEW');
-    const result = await service.saveFromTempFile(tmp, 'sources/deep/a.txt');
+    await expect(service.saveFromTempFile(tmp, 'sources/deep/a.txt')).rejects.toMatchObject({ code: -32009 });
+    // Original untouched, tmp left in place so the handler can retry a new name.
+    expect(await fsp.readFile(path.join(root, 'sources/deep/a.txt'), 'utf-8')).toBe('OLD');
+    await expect(fsp.access(tmp)).resolves.toBeUndefined();
+  });
+
+  it('overwrite:true clobbers the existing dest and reports is_new false', async () => {
+    const service = new WorkspaceService(makeConfig(root));
+    await service.init();
+    await service.save('sources/deep/a.txt', 'OLD');
+
+    const tmp = await writeTmp(root, 'NEW');
+    const result = await service.saveFromTempFile(tmp, 'sources/deep/a.txt', undefined, { overwrite: true });
     expect(result.is_new).toBe(false);
     expect(await fsp.readFile(path.join(root, 'sources/deep/a.txt'), 'utf-8')).toBe('NEW');
+    await expect(fsp.access(tmp)).rejects.toThrow(); // consumed
+  });
+
+  it('concurrent exclusive writes to the SAME dest: exactly one wins, no silent clobber', async () => {
+    const service = new WorkspaceService(makeConfig(root));
+    await service.init();
+    const tmpA = await writeTmp(root, 'AAA');
+    const tmpB = await writeTmp(root, 'BBB');
+
+    const results = await Promise.allSettled([
+      service.saveFromTempFile(tmpA, 'sources/race.txt'),
+      service.saveFromTempFile(tmpB, 'sources/race.txt'),
+    ]);
+    const wins = results.filter((r) => r.status === 'fulfilled');
+    const losses = results.filter((r) => r.status === 'rejected');
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(1);
+    expect((losses[0] as PromiseRejectedResult).reason).toMatchObject({ code: -32009 });
+    // The winner's content is intact — never a half-clobber.
+    const onDisk = await fsp.readFile(path.join(root, 'sources/race.txt'), 'utf-8');
+    expect(['AAA', 'BBB']).toContain(onDisk);
   });
 
   it('git-commits with the provided message (real git)', async () => {

@@ -29,10 +29,10 @@ import { TaskService } from './src/tasks/service.js';
 import { createTaskTools } from './src/tasks/tools.js';
 import { registerTaskRpc } from './src/tasks/rpc.js';
 import { HeartbeatService } from './src/tasks/heartbeat.js';
-import { WorkspaceService, type WorkspaceConfig } from './src/workspace/service.js';
+import { WorkspaceService, WorkspaceError, WS_FILE_EXISTS, type WorkspaceConfig } from './src/workspace/service.js';
 import { createWorkspaceTools } from './src/workspace/tools.js';
 import { registerWorkspaceRpc } from './src/workspace/rpc.js';
-import { normalizeConflictMode, resolveUploadConflict } from './src/workspace/upload-conflict.js';
+import { finderStyleName, normalizeConflictMode, resolveUploadConflict } from './src/workspace/upload-conflict.js';
 import { parseMultipartToTemp, type StreamedUpload } from './src/workspace/multipart.js';
 import { MonitorService } from './src/monitor/service.js';
 import { registerMonitorRpc } from './src/monitor/rpc.js';
@@ -1684,7 +1684,8 @@ const plugin: PluginDefinition = {
           // semantics for editor saves / image saves / agent tools). Default 'fail'
           // returns 409 instead of silently replacing an existing file. Emitted
           // inline, NOT thrown: the catch below would misclassify it as a 500.
-          const conflict = await resolveUploadConflict(resolvedDest, safeFilename, normalizeConflictMode(onConflict));
+          const mode = normalizeConflictMode(onConflict);
+          const conflict = await resolveUploadConflict(resolvedDest, safeFilename, mode);
           if (conflict.action === 'conflict') {
             res.writeHead(409, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
@@ -1699,10 +1700,46 @@ const plugin: PluginDefinition = {
             return true;
           }
 
-          const finalName = conflict.fileName;
-          const destPath = destDir ? `${destDir}/${finalName}` : finalName;
-          // Atomic rename out of the staging dir + the same git tracking as save().
-          const result = await wsService.saveFromTempFile(file.tmpPath, destPath, `Upload: ${finalName} to ${destDir || '/'}`);
+          // The write below is atomic-exclusive (unless overwrite), so a
+          // concurrent upload racing for the same name cannot silently clobber:
+          // the loser gets WS_FILE_EXISTS and we either re-pick a slot (rename)
+          // or 409 (fail). resolveUploadConflict's stat is only the fast path.
+          let finalName = conflict.fileName;
+          let renamed = conflict.renamed;
+          let result: Awaited<ReturnType<typeof wsService.saveFromTempFile>> | null = null;
+          for (let attempt = 2; ; attempt++) {
+            const destPath = destDir ? `${destDir}/${finalName}` : finalName;
+            try {
+              result = await wsService.saveFromTempFile(
+                file.tmpPath,
+                destPath,
+                `Upload: ${finalName} to ${destDir || '/'}`,
+                { overwrite: mode === 'overwrite' },
+              );
+              break;
+            } catch (e) {
+              if (e instanceof WorkspaceError && e.code === WS_FILE_EXISTS) {
+                if (mode === 'rename' && attempt < 1002) {
+                  finalName = finderStyleName(safeFilename, attempt);
+                  renamed = true;
+                  continue;
+                }
+                // fail mode (or exhausted rename slots) lost the race
+                res.writeHead(409, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  ok: false,
+                  error: {
+                    code: 'UPLOAD_FILE_EXISTS',
+                    message: `Already exists: ${destDir ? `${destDir}/` : ''}${finalName}`,
+                    path: `${destDir ? `${destDir}/` : ''}${finalName}`,
+                    existing: 'file',
+                  },
+                }));
+                return true;
+              }
+              throw e;
+            }
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
@@ -1716,7 +1753,7 @@ const plugin: PluginDefinition = {
               modified_at: new Date().toISOString(),
               git_status: result.committed ? 'committed' : 'untracked',
               is_new: result.is_new,
-              renamed: conflict.renamed,
+              renamed,
             },
           }));
           return true;

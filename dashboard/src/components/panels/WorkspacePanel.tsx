@@ -1406,10 +1406,13 @@ export default function WorkspacePanel() {
             counts.skipped++;
             continue;
           }
-          // Duplicate names within one batch race past the pre-flight — rename the later ones.
-          const mode: UploadConflictMode | undefined =
-            conflictActionToMode(action) ?? (seen.has(destPath) ? 'rename' : undefined);
+          // In-batch duplicate names MUST rename regardless of the disk-conflict
+          // decision — otherwise an 'overwrite' choice makes two distinct files
+          // collapse onto one path and silently lose one (they race the fan-out).
+          const isDupe = seen.has(destPath);
           seen.add(destPath);
+          const mode: UploadConflictMode | undefined =
+            isDupe ? 'rename' : (conflictActionToMode(action) ?? undefined);
           try {
             // '' = workspace root, sent as '.' on the wire.
             await uploadFileToWorkspace(f, destBase || '.', undefined, mode);
@@ -1535,8 +1538,10 @@ export default function WorkspacePanel() {
             counts.skipped++;
             return;
           }
+          // In-batch dupe MUST rename even if the disk decision is 'overwrite',
+          // else two distinct files collapse to one destPath and one is lost.
           const mode: UploadConflictMode | undefined =
-            conflictActionToMode(action) ?? (tg.inBatchDupe ? 'rename' : undefined);
+            tg.inBatchDupe ? 'rename' : (conflictActionToMode(action) ?? undefined);
           try {
             // '' = workspace root, sent as '.' on the wire.
             await uploadFileToWorkspace(tg.d.file, tg.destDir || '.', tg.fileName, mode);

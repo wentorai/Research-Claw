@@ -90,17 +90,37 @@ export async function parseMultipartToTemp(
   let fileBytes = 0;
 
   const result: StreamedUpload = { file: null, destination: '', onConflict: '' };
+  // Path of the temp file for the part currently being streamed. Held
+  // independently of `fileStream`/`result.file` so cleanup() can ALWAYS reclaim
+  // it — even if finishPart throws after nulling fileStream but before moving
+  // the path into result.file. Cleared only once the path is safely in result.file.
+  let inFlightTmpPath: string | null = null;
 
   const cleanup = async () => {
     if (fileStream) {
       const s = fileStream;
       fileStream = null;
-      s.destroy();
+      if (!s.destroyed) s.destroy();
+      // Wait for the stream to fully close so the underlying open()/create has
+      // settled — otherwise unlink races an in-flight open and leaves an orphan.
+      // Guard on `closed`: a stream that already auto-destroyed on a write-time
+      // error (autoDestroy) may have emitted 'close' to no listeners; once()
+      // would then hang forever, so only await when it has not closed yet.
+      if (!s.closed) {
+        try {
+          await once(s, 'close');
+        } catch {
+          // destroy() surfaces as an error/close — either way the fd is done.
+        }
+      }
+    }
+    if (inFlightTmpPath) {
       try {
-        await fsp.unlink(s.path as string);
+        await fsp.unlink(inFlightTmpPath);
       } catch {
         // Already gone — fine.
       }
+      inFlightTmpPath = null;
     }
     if (result.file) {
       try {
@@ -114,13 +134,16 @@ export async function parseMultipartToTemp(
 
   const writeToFile = async (buf: Buffer) => {
     if (!fileStream || buf.length === 0) return;
-    if (fileStreamError) throw fileStreamError;
+    // Null the stream ref BEFORE throwing on the sentinel (mirrors finishPart)
+    // so cleanup() reclaims via inFlightTmpPath and never re-awaits a stream
+    // that already closed on a write-time error.
+    if (fileStreamError) { fileStream = null; throw fileStreamError; }
     fileBytes += buf.length;
     if (!fileStream.write(buf)) {
       // once() rejects if 'error' fires before 'drain'.
       await once(fileStream, 'drain');
     }
-    if (fileStreamError) throw fileStreamError;
+    if (fileStreamError) { fileStream = null; throw fileStreamError; }
   };
 
   /** Close out the part we were reading when its trailing delimiter arrives. */
@@ -128,6 +151,8 @@ export async function parseMultipartToTemp(
     if (state === 'fileBody' && fileStream) {
       const s = fileStream;
       fileStream = null;
+      // NOTE: inFlightTmpPath still points at s.path across these throws, so the
+      // outer cleanup() reclaims the temp file if end()/close surfaces an error.
       // A destroyed stream (prior async error) emits 'close' without re-emitting
       // 'error' — the sentinel is the only reliable signal that data was lost.
       if (fileStreamError) throw fileStreamError;
@@ -148,6 +173,8 @@ export async function parseMultipartToTemp(
         tmpPath: s.path as string,
         size: fileBytes,
       };
+      // Path now lives in result.file; cleanup() reclaims it from there.
+      inFlightTmpPath = null;
     } else if (state === 'fieldBody') {
       const value = fieldValue.toString('utf-8').trim();
       if (partName === 'destination') result.destination = value;
@@ -200,7 +227,8 @@ export async function parseMultipartToTemp(
         if (partName === 'file' && partFilename) {
           await fsp.mkdir(opts.tmpDir, { recursive: true });
           fileStreamError = null;
-          fileStream = fs.createWriteStream(path.join(opts.tmpDir, `.${randomUUID()}.tmp`));
+          inFlightTmpPath = path.join(opts.tmpDir, `.${randomUUID()}.tmp`);
+          fileStream = fs.createWriteStream(inFlightTmpPath);
           fileStream.on('error', (err) => {
             fileStreamError = err;
           });

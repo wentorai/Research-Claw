@@ -43,6 +43,10 @@ const WS_FILE_TOO_LARGE = -32003;
 const WS_COMMIT_NOT_FOUND = -32004;
 const WS_FILE_NOT_IN_COMMIT = -32005;
 const WS_WRITE_FAILED = -32008;
+/** Destination already exists and the caller demanded exclusive creation
+ *  (non-overwrite upload). Distinct code so the /rc/upload handler can retry
+ *  (rename mode) or return 409 (fail mode) without a fragile message match. */
+export const WS_FILE_EXISTS = -32009;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1060,14 +1064,22 @@ export class WorkspaceService {
 
   /**
    * Move an already-written temp file (from the streaming upload parser) into
-   * the workspace: save() minus the write — atomic rename from the staging dir
-   * (same filesystem), then the identical git-tracking path. The temp file is
-   * consumed on success and removed on failure.
+   * the workspace, then run the identical git-tracking path as save().
+   *
+   * `opts.overwrite` controls the collision behaviour:
+   * - false (default): EXCLUSIVE create via fsp.link — if the destination
+   *   already exists the link throws EEXIST, surfaced as WS_FILE_EXISTS. This
+   *   is atomic, so two concurrent uploads racing for the same name cannot both
+   *   "win" a stat-then-rename (the previous fsp.rename silently clobbered).
+   *   On EEXIST the tmp file is LEFT in place so the caller can retry a new name.
+   * - true: fsp.rename clobber (the caller explicitly chose overwrite).
+   * The tmp file is consumed on success and removed on non-EEXIST failure.
    */
   async saveFromTempFile(
     tmpAbsPath: string,
     filePath: string,
     commitMessage?: string,
+    opts?: { overwrite?: boolean },
   ): Promise<{
     path: string;
     size: number;
@@ -1089,19 +1101,47 @@ export class WorkspaceService {
       // File does not exist — it is new
     }
 
-    try {
-      await fsp.rename(tmpAbsPath, fullPath);
-    } catch (err) {
+    if (opts?.overwrite) {
+      try {
+        await fsp.rename(tmpAbsPath, fullPath);
+      } catch (err) {
+        try {
+          await fsp.unlink(tmpAbsPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+        throw new WorkspaceError(
+          `Failed to write file: ${(err as Error).message}`,
+          WS_WRITE_FAILED,
+          { path: filePath },
+        );
+      }
+    } else {
+      // Exclusive create: link fails atomically if the dest already exists.
+      try {
+        await fsp.link(tmpAbsPath, fullPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+          // Leave tmp in place so the handler can retry another name.
+          throw new WorkspaceError(`Destination already exists: ${filePath}`, WS_FILE_EXISTS, { path: filePath });
+        }
+        try {
+          await fsp.unlink(tmpAbsPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+        throw new WorkspaceError(
+          `Failed to write file: ${(err as Error).message}`,
+          WS_WRITE_FAILED,
+          { path: filePath },
+        );
+      }
+      // dest and tmp now share an inode — drop the tmp name.
       try {
         await fsp.unlink(tmpAbsPath);
       } catch {
         // Ignore cleanup errors
       }
-      throw new WorkspaceError(
-        `Failed to write file: ${(err as Error).message}`,
-        WS_WRITE_FAILED,
-        { path: filePath },
-      );
     }
 
     const fileStat = await fsp.stat(fullPath);

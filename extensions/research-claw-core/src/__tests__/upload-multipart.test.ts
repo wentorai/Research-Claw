@@ -189,6 +189,40 @@ describe('parseMultipartToTemp', () => {
     expect(await tmpDirEntries()).toEqual([]);
   });
 
+  it('first-chunk abort/truncation leaves ZERO residue deterministically (open-vs-unlink race)', async () => {
+    // The leak the integration review found: cleanup unlinked while the
+    // WriteStream open() was still in flight, orphaning the .tmp once open
+    // completed. Loop many times over the exact single-chunk cadence that
+    // exposed the race; every run must clean up.
+    for (let i = 0; i < 30; i++) {
+      const body = buildMultipartBody([{ name: 'file', filename: 'x.bin', value: Buffer.alloc(2048, 0x61) }]);
+      // Emit only the header + first byte of the body, then reset the connection.
+      const cut = body.indexOf(Buffer.from('\r\n\r\n')) + 5;
+      const head = body.subarray(0, cut);
+      const req = new Readable({
+        read() {
+          this.push(head);
+          this.destroy(new Error('ECONNRESET'));
+        },
+      }) as unknown as IncomingMessage;
+      (req as { headers: Record<string, string> }).headers = {
+        'content-type': `multipart/form-data; boundary=${BOUNDARY}`,
+      };
+      await expect(parseMultipartToTemp(req, { maxSize: 0, tmpDir })).rejects.toThrow();
+    }
+    expect(await tmpDirEntries()).toEqual([]);
+  });
+
+  it('abort AFTER several successful writes cleans up without hanging (live-stream cleanup path)', async () => {
+    // maxSize trips only after many chunks have already been written to the open
+    // stream — cleanup() must destroy the live (non-closed) stream, await close,
+    // and unlink, all without hanging. Bounded by the test runner timeout.
+    const big = Buffer.alloc(1024 * 1024, 0x61);
+    const req = makeRequest(buildMultipartBody([{ name: 'file', filename: 'big.bin', value: big }]), 32 * 1024);
+    await expect(parseMultipartToTemp(req, { maxSize: 512 * 1024, tmpDir })).rejects.toThrow(/TOO_LARGE/);
+    expect(await tmpDirEntries()).toEqual([]);
+  });
+
   it('two file parts: last one wins and the first temp file is removed', async () => {
     const req = makeRequest(
       buildMultipartBody([
