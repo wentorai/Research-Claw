@@ -22,6 +22,16 @@ export interface Session {
   lastInteractionAt?: number;
   sessionId?: string;
   kind?: string;
+  /**
+   * Runtime-merged model provider for this session (OC session-utils.ts:2186-2187).
+   * Present when the session has an active model override; null/undefined otherwise.
+   */
+  modelProvider?: string | null;
+  /**
+   * Runtime-merged model id for this session (OC session-utils.ts:2186-2187).
+   * Present when the session has an active model override; null/undefined otherwise.
+   */
+  model?: string | null;
 }
 
 /** Fields supported by OC sessions.patch RPC (aligned with OC controllers/sessions.ts). */

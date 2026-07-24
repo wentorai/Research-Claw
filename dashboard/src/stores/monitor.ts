@@ -34,12 +34,25 @@ export interface Monitor {
   updated_at: string;
 }
 
+export interface MonitorCreateInput {
+  name: string;
+  source_type: string;
+  target?: string;
+  filters?: Record<string, unknown>;
+  schedule?: string;
+  enabled?: boolean;
+  notify?: boolean;
+  /** Leave empty to let the plugin call defaultAgentPrompt(source_type, filters). */
+  agent_prompt?: string;
+}
+
 interface MonitorState {
   monitors: Monitor[];
   loading: boolean;
   loaded: boolean;
 
   loadMonitors: () => Promise<void>;
+  createMonitor: (input: MonitorCreateInput) => Promise<Monitor | null>;
   toggleMonitor: (id: string, enabled: boolean) => Promise<void>;
   deleteMonitor: (id: string) => Promise<void>;
   updateMonitor: (id: string, patch: Partial<Monitor>) => Promise<void>;
@@ -137,13 +150,35 @@ function formatCronRunError(job: CronJobSnapshot): string {
 }
 
 function buildMonitorCronMessage(monitor: Monitor): string {
-  return [
+  const header = [
     `[Research-Claw Monitor Scheduled Run]`,
     `MONITOR_ID: ${monitor.id}`,
     `MONITOR_NAME: ${monitor.name}`,
     `SOURCE_TYPE: ${monitor.source_type}`,
     `TARGET: ${monitor.target || '(none)'}`,
     '',
+  ].join('\n');
+
+  if (monitor.source_type === 'device') {
+    // Device monitors: no EXECUTION PROTOCOL collector header.
+    // The agent_prompt already contains the periph_camera_snap vision protocol
+    // (stored via defaultAgentPrompt('device') in the plugin).
+    // Dashboard replaces two classes of placeholders:
+    //   {target}               → monitor.target (device id)
+    //   {check_prompt ...}     → filters.check_prompt (non-empty) or template default
+    const checkPrompt =
+      typeof monitor.filters?.check_prompt === 'string' && monitor.filters.check_prompt.trim()
+        ? monitor.filters.check_prompt.trim()
+        : '描述画面中正在发生什么,判断是否存在异常。';
+
+    const body = monitor.agent_prompt
+      .replaceAll('{target}', monitor.target)
+      .replace(/\{check_prompt[^}]*\}/, checkPrompt);
+
+    return header + body;
+  }
+
+  return header + [
     'You are executing a scheduled monitor. Follow this exact protocol:',
     'Tool boundary: use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only. Do not call read, task_flow_stage, workspace_* or other task/workspace tools for this scheduled monitor.',
     `1. CONTEXT: call monitor_get_context with {"monitor_id":"${monitor.id}"}.`,
@@ -352,6 +387,24 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
     }
   },
 
+  createMonitor: async (input: MonitorCreateInput): Promise<Monitor | null> => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) return null;
+
+    try {
+      // agent_prompt left empty → plugin calls defaultAgentPrompt(source_type, filters)
+      const monitor = await client.request<Monitor>('rc.monitor.create', {
+        ...input,
+        enabled: input.enabled ?? false,
+      });
+      set((s) => ({ monitors: [...s.monitors, monitor] }));
+      return monitor;
+    } catch (err) {
+      console.error('[MonitorStore] createMonitor failed:', err);
+      return null;
+    }
+  },
+
   toggleMonitor: async (id: string, enabled: boolean) => {
     if (_inflightOps.has(id)) return; // Prevent rapid double-toggle
     const client = useGatewayStore.getState().client;
@@ -474,3 +527,10 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
 export function resetMonitorReconciled(): void {
   _reconciled = false;
 }
+
+/**
+ * Test-only export: exposes buildMonitorCronMessage for parity tests without
+ * the need to restructure the module. Not intended for production use.
+ * @internal
+ */
+export { buildMonitorCronMessage as testBuildMonitorCronMessage };

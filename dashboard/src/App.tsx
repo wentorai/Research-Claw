@@ -23,6 +23,7 @@ import PaperReviewRunListener from './components/PaperReviewRunListener';
 import ConfigRestartListener from './components/ConfigRestartListener';
 import ModelCatalogAligner from './components/ModelCatalogAligner';
 import JobsActivityListener from './components/JobsActivityListener';
+import PeriphCaptureListener from './components/PeriphCaptureListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
@@ -489,6 +490,7 @@ export default function App() {
       <ConfigRestartListener />
       <ModelCatalogAligner />
       <JobsActivityListener />
+      <PeriphCaptureListener />
       <div
         style={{
           height: '100vh',

@@ -327,6 +327,15 @@ function defaultAgentPrompt(category: string, filters: Record<string, unknown>):
         'TASK: Check the target social media account/hashtag for new posts.\n' +
         'Use collected candidates from the core collector layer. Extract noteworthy updates.\n' +
         'Fallback only when collector fingerprints are unavailable: use social:{platform}:{post_id}.';
+    case 'device':
+      return '你是外设定时查证代理。目标设备 ID: {target}。\n' +
+        '1. 调用 periph_camera_snap({"device_id": "{target}", "purpose": "scheduled check"}) 抓取当前帧。\n' +
+        '2. 若抓帧失败(missed/error):调用 periph_observe 记录 kind=\'check\'、verdict=\'missed\'、summary=失败原因,然后 monitor_report 上报空结果,结束。\n' +
+        '3. 若抓帧成功:根据下方"查证要求"分析画面(若你无法直接看到图像,调用 image 工具读取 frame_path 获取画面描述后再分析)。\n' +
+        '4. 调用 periph_observe 记录 kind=\'check\':一切正常 verdict=\'ok\';发现异常 verdict=\'alert\';无法判断 verdict=\'unverified\'。summary 用一句话中文写明结论,frame_path 传抓到的帧。\n' +
+        '5. monitor_report 上报本轮结果(title=结论一句话)。\n' +
+        '6. 仅当 verdict=\'alert\' 时调用 send_notification 通知用户,内容含设备名与异常描述。\n' +
+        '查证要求: {check_prompt 或 "描述画面中正在发生什么,判断是否存在异常。"}';
     default:
       return protocol +
         'TASK: Execute the monitoring task through the core collector layer and analyze the collected candidates.\n' +

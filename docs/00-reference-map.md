@@ -34,7 +34,9 @@ research-claw/docs/
 │   │   └── memory.md            记忆系统(后端完整 / 面板未接入)
 │   └── design-backlog/          未实现/部分实现的设计储备
 │       ├── knowledge-graph.md   ⛔ 未实现
-│       └── memory-dashboard-ui.md 🟡 部分实现
+│       ├── memory-dashboard-ui.md 🟡 部分实现
+│       ├── physical-lab.md      ⛔ 未实现(仪器接入,nodeInvokePolicies 路线)
+│       └── embodied-research.md ⛔ 未实现(具身设备,OC nodes 体系 role:node + node.invoke)
 └── self/                        ← RC 自述 canonical 镜像(identity/capabilities/behaviors)
 ```
 

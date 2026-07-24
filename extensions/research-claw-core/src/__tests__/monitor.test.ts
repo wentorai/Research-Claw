@@ -304,6 +304,75 @@ describe('MonitorService', () => {
       expect(m.agent_prompt).toContain('collector fingerprints');
     });
 
+    it('generates device prompt for device source_type (periph_camera_snap + periph_observe)', () => {
+      const m = svc.create({ name: 'Device', source_type: 'device' });
+      expect(m.agent_prompt).toContain('periph_camera_snap');
+      expect(m.agent_prompt).toContain('periph_observe');
+      expect(m.agent_prompt).toContain('monitor_report');
+      // Must contain literal placeholders (target is not passed to defaultAgentPrompt)
+      expect(m.agent_prompt).toContain('{target}');
+      expect(m.agent_prompt).toContain('{check_prompt');
+      // Device prompt is standalone — does NOT use the standard EXECUTION PROTOCOL header
+      expect(m.agent_prompt).not.toContain('monitor_collect_candidates');
+      expect(m.agent_prompt).not.toContain('monitor_get_context');
+      // Verify notification gate semantics
+      expect(m.agent_prompt).toContain('send_notification');
+      expect(m.agent_prompt).toContain('仅当');
+    });
+
+    it('feed prompt is unchanged after device branch added', () => {
+      const FEED_SNAPSHOT =
+        'EXECUTION PROTOCOL (mandatory, follow every step):\n' +
+        'Tool boundary: Use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only. Do not call read, task_flow_stage, workspace_* or other task/workspace tools for scheduled monitor runs.\n' +
+        '1. CONTEXT: Call monitor_get_context with this monitor\'s ID to load memory.\n' +
+        '2. COLLECT: Call monitor_collect_candidates to collect source candidates.\n' +
+        '3. ANALYZE: Filter and summarize the collected candidates; only use browser/search if collector errors or misses required context.\n' +
+        '4. REPORT: Call monitor_report with final results array and the exact fingerprint values returned by monitor_collect_candidates for accepted candidates. Do not invent date-based or summary-based fingerprints.\n' +
+        '5. OBSERVE: If anything notable happened (source errors, patterns), call monitor_note.\n' +
+        '6. NOTIFY: If new findings > 0 and notify is enabled, call send_notification.\n\n' +
+        'TASK: Fetch the RSS/Atom feed at the target URL.\n' +
+        'Parse entries, filter by configured keywords if any.\n' +
+        'Fallback only when collector fingerprints are unavailable: use rss:{entry_url} or rss:guid:{guid} for each entry.';
+
+      const m = svc.create({ name: 'Feed regression', source_type: 'feed' });
+      expect(m.agent_prompt).toBe(FEED_SNAPSHOT);
+    });
+
+    it('code prompt is unchanged after device branch added', () => {
+      const CODE_SNAPSHOT =
+        'EXECUTION PROTOCOL (mandatory, follow every step):\n' +
+        'Tool boundary: Use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only. Do not call read, task_flow_stage, workspace_* or other task/workspace tools for scheduled monitor runs.\n' +
+        '1. CONTEXT: Call monitor_get_context with this monitor\'s ID to load memory.\n' +
+        '2. COLLECT: Call monitor_collect_candidates to collect source candidates.\n' +
+        '3. ANALYZE: Filter and summarize the collected candidates; only use browser/search if collector errors or misses required context.\n' +
+        '4. REPORT: Call monitor_report with final results array and the exact fingerprint values returned by monitor_collect_candidates for accepted candidates. Do not invent date-based or summary-based fingerprints.\n' +
+        '5. OBSERVE: If anything notable happened (source errors, patterns), call monitor_note.\n' +
+        '6. NOTIFY: If new findings > 0 and notify is enabled, call send_notification.\n\n' +
+        'TASK: Check the target repository for new releases, tags, or significant updates.\n' +
+        'Use collected candidates from the core collector layer. Summarize releases, tags, commits, or trending repositories from the candidate data.\n' +
+        'Fallback only when collector fingerprints are unavailable: use gh:{repo}:release:{tag} or gh:{repo}:commit:{sha}.';
+
+      const m = svc.create({ name: 'Code regression', source_type: 'code' });
+      expect(m.agent_prompt).toBe(CODE_SNAPSHOT);
+    });
+
+    it('api/default prompt is unchanged (switch default branch)', () => {
+      const API_DEFAULT_SNAPSHOT =
+        'EXECUTION PROTOCOL (mandatory, follow every step):\n' +
+        'Tool boundary: Use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only. Do not call read, task_flow_stage, workspace_* or other task/workspace tools for scheduled monitor runs.\n' +
+        '1. CONTEXT: Call monitor_get_context with this monitor\'s ID to load memory.\n' +
+        '2. COLLECT: Call monitor_collect_candidates to collect source candidates.\n' +
+        '3. ANALYZE: Filter and summarize the collected candidates; only use browser/search if collector errors or misses required context.\n' +
+        '4. REPORT: Call monitor_report with final results array and the exact fingerprint values returned by monitor_collect_candidates for accepted candidates. Do not invent date-based or summary-based fingerprints.\n' +
+        '5. OBSERVE: If anything notable happened (source errors, patterns), call monitor_note.\n' +
+        '6. NOTIFY: If new findings > 0 and notify is enabled, call send_notification.\n\n' +
+        'TASK: Execute the monitoring task through the core collector layer and analyze the collected candidates.\n' +
+        'Use collector fingerprints for each distinct finding whenever available.';
+
+      const m = svc.create({ name: 'API Test', source_type: 'api' });
+      expect(m.agent_prompt).toBe(API_DEFAULT_SNAPSHOT);
+    });
+
     it('uses user-provided agent_prompt instead of default', () => {
       const m = svc.create(makeInput({ agent_prompt: 'Custom prompt here' }));
       expect(m.agent_prompt).toBe('Custom prompt here');

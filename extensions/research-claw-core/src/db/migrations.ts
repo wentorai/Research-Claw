@@ -20,6 +20,8 @@ import {
   CREATE_INDEXES_SQL,
   CREATE_FTS_SQL,
   CREATE_TRIGGERS_SQL,
+  CREATE_RC_PERIPH_DEVICES_SQL,
+  CREATE_RC_PERIPH_OBSERVATIONS_SQL,
 } from './schema.js';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -362,6 +364,16 @@ const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_rc_jobs_session ON rc_jobs(session_key);`,
       `CREATE INDEX IF NOT EXISTS idx_rc_jobs_updated ON rc_jobs(updated_at);`,
       `CREATE INDEX IF NOT EXISTS idx_rc_job_steps_status ON rc_job_steps(status);`,
+    ].join('\n'),
+  },
+  {
+    version: 16,
+    name: 'add_peripherals',
+    sql: [
+      CREATE_RC_PERIPH_DEVICES_SQL,
+      CREATE_RC_PERIPH_OBSERVATIONS_SQL,
+      `CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_device   ON rc_periph_observations(device_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_captured ON rc_periph_observations(captured_at);`,
     ].join('\n'),
   },
 ];

@@ -184,10 +184,11 @@ function ensureConfig(filePath) {
     }
   }
 
-  // 4b. Remove top-level "mcp" — not in OC 2026.3.13 schema.
-  //     Was erroneously added to example config in fca3d3b (MarkItDown integration).
-  if (c.mcp) {
-    delete c.mcp;
+  // 4b. Clean up legacy markitdown MCP entry (added by fca3d3b, binary absent
+  //     on native installs). OC 2026.6.1 supports top-level "mcp" natively —
+  //     user-configured servers (e.g. plaud) must survive restarts.
+  if (c.mcp && c.mcp.servers && c.mcp.servers.markitdown) {
+    delete c.mcp.servers.markitdown;
     changed = true;
   }
 

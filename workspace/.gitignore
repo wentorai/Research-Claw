@@ -61,3 +61,11 @@ node_modules/
 # Environment / secrets
 .env
 .env.*
+# Research-Claw peripherals frames (auto)
+periph/
+
+# Auto-added: file exceeds size limit
+sources/rc-1g.bin
+
+# Auto-added: file exceeds size limit
+sources/papers/111/rc-1g.bin

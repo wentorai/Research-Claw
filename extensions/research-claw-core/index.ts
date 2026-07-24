@@ -5,9 +5,9 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 53 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job)
- *   - 93 WS RPC methods + 2 HTTP routes = 95 interface methods
- *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* + rc.onboarding.* = 93 WS; POST /rc/upload + GET /rc/download = 2 HTTP)
+ *   - 56 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job + 3 periph)
+ *   - 102 WS RPC methods + 2 HTTP routes = 104 interface methods
+ *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* + rc.onboarding.* + rc.periph.* = 102 WS; POST /rc/upload + GET /rc/download = 2 HTTP)
  *   - 10 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×3, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  *   - 1 session monitoring service (automatic memory extraction)
@@ -71,6 +71,11 @@ import { registerJobRpc } from './src/jobs/rpc.js';
 import { syncOpenClawSubagentJobs } from './src/jobs/openclaw-sync.js';
 import { registerOnboardingRpc } from './src/onboarding/rpc.js';
 import { bootstrapDoneExists } from './src/onboarding/bootstrap-done.js';
+import { PeriphService } from './src/periph/service.js';
+import { periphBridge } from './src/periph/bridge.js';
+import { registerPeriphRpc } from './src/periph/rpc.js';
+import { createPeriphTools } from './src/periph/tools.js';
+import { PlaudManager } from './src/periph/plaud.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -176,6 +181,14 @@ let _memoryService: InstanceType<typeof MemoryService> | null = null;
 let _claudeMemSyncService: ClaudeMemSyncService | null = null;
 let _reviewService: PaperReviewService | null = null;
 let _jobService: JobService | null = null;
+let _periphService: PeriphService | null = null;
+
+// ── Plaud MCP manager ──────────────────────────────────────────────────────
+// Real mini stdio MCP client. Construction is pure (no process spawns until a
+// tool call), so a module-level singleton is safe; it is instantiated in the
+// init block below to keep all periph wiring together.
+let _plaudManager: PlaudManager | null = null;
+
 // Server-side jobs sync loop: keeps OpenClaw subagent jobs and stale-detection
 // fresh even when no dashboard is polling, and coalesces all sync triggers
 // (RPC + timer) behind one throttle so the synchronous transcript sweep never
@@ -968,6 +981,13 @@ const plugin: PluginDefinition = {
         gitAuthorName: cfg.workspace?.gitAuthorName ?? 'Research-Claw',
         gitAuthorEmail: cfg.workspace?.gitAuthorEmail ?? 'research-claw@wentor.ai',
       };
+      _periphService = new PeriphService(_dbManager.db, { workspaceRoot: _wsConfig.root });
+      _plaudManager = new PlaudManager();
+      try {
+        _periphService.ensurePeriphGitignore();
+      } catch (err) {
+        console.warn('[periph] ensurePeriphGitignore failed (non-fatal):', err instanceof Error ? err.message : String(err));
+      }
       _wsService = new WorkspaceService(_wsConfig);
       _reviewService = new PaperReviewService(_dbManager.db, _wsService);
       _pptService = new PptService({
@@ -1092,7 +1112,7 @@ const plugin: PluginDefinition = {
       },
     });
 
-    // ── 4. Register tools (53 total) ─────────────────────────────────
+    // ── 4. Register tools (56 total) ─────────────────────────────────
     // Tool registration is runtime-scoped in OpenClaw. The same plugin module
     // may be reused across discovery, gateway, hot-reload, and agent-runtime
     // passes, but each pass receives a fresh api/registry. Keep stateful
@@ -1114,6 +1134,9 @@ const plugin: PluginDefinition = {
       api.registerTool(tool);
     }
     for (const tool of createJobTools(jobService)) {
+      api.registerTool(tool);
+    }
+    for (const tool of createPeriphTools(_periphService!, periphBridge)) {
       api.registerTool(tool);
     }
 
@@ -1250,6 +1273,7 @@ const plugin: PluginDefinition = {
         params: Record<string, unknown>;
         respond: (ok: boolean, payload?: unknown, error?: { code: string; message: string }) => void;
       }) => {
+        if ((opts as any)?.context) periphBridge.adoptContext((opts as any).context);
         try {
           const result = await handler(opts.params);
           opts.respond(true, result);
@@ -1289,6 +1313,7 @@ const plugin: PluginDefinition = {
       getLitService: () => _litService,
       getTaskService: () => _taskService,
     }); // 1 method
+    registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!); // 9 methods
 
     if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
     const memoryService = _memoryService;

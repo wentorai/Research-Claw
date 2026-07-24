@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — SQLite Schema DDL
  *
- * 13 tables + FTS5 virtual table + triggers + indexes.
+ * 27 tables + FTS5 virtual table + triggers + indexes.
  * All table names prefixed with `rc_` to avoid collision with OpenClaw internals.
  *
  * Tables:
@@ -18,12 +18,26 @@
  *  11. rc_tasks            — Task items (deadline-sorted)
  *  12. rc_activity_log     — Event tracking / audit log
  *  13. rc_heartbeat_log    — Adaptive deadline escalation tracking
+ *  14. rc_agent_notifications — Agent-generated user notifications
+ *  15. rc_jobs             — Long-running background jobs
+ *  16. rc_job_steps        — Job step tracking
+ *  17. rc_cron_state       — Cron preset enable/disable state
+ *  18. rc_monitors         — Recurring content monitors
+ *  19. rc_memories         — User/agent memory store
+ *  20. rc_memory_tags      — Memory tag definitions
+ *  21. rc_memory_tag_links — Memory–tag junction
+ *  22. rc_memory_links     — Memory–memory associations
+ *  23. rc_sessions         — Conversation sessions
+ *  24. rc_session_events   — Per-session event log
+ *  25. rc_paper_reviews    — AI paper review results
+ *  26. rc_periph_devices   — External peripheral devices (camera/audio/lab/embodied)
+ *  27. rc_periph_observations — Peripheral observation records (snapshot/check/note)
  *
  * FTS5: rc_papers_fts (title, authors, abstract, notes, keywords)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -354,6 +368,34 @@ CREATE TABLE IF NOT EXISTS rc_session_events (
   data        TEXT NOT NULL DEFAULT '{}'
 );`;
 
+export const CREATE_RC_PERIPH_DEVICES_SQL = `
+CREATE TABLE IF NOT EXISTS rc_periph_devices (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  kind          TEXT NOT NULL CHECK(kind IN ('camera','audio-recorder','lab-instrument','embodied')),
+  driver        TEXT NOT NULL CHECK(driver IN ('browser-camera','mcp-plaud','rtsp','oc-node')),
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  config        TEXT NOT NULL DEFAULT '{}',
+  check_prompt  TEXT NOT NULL DEFAULT '',
+  last_seen_at  TEXT,
+  last_error    TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);`;
+
+export const CREATE_RC_PERIPH_OBSERVATIONS_SQL = `
+CREATE TABLE IF NOT EXISTS rc_periph_observations (
+  id           TEXT PRIMARY KEY,
+  device_id    TEXT NOT NULL REFERENCES rc_periph_devices(id) ON DELETE CASCADE,
+  monitor_id   TEXT,
+  kind         TEXT NOT NULL CHECK(kind IN ('snapshot','check','note')),
+  verdict      TEXT NOT NULL DEFAULT 'info' CHECK(verdict IN ('ok','alert','info','unverified','missed','error')),
+  summary      TEXT NOT NULL DEFAULT '',
+  frame_path   TEXT,
+  result_json  TEXT NOT NULL DEFAULT '{}',
+  captured_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -382,6 +424,8 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   RC_SESSIONS,
   RC_SESSION_EVENTS,
   RC_PAPER_REVIEWS,
+  CREATE_RC_PERIPH_DEVICES_SQL,
+  CREATE_RC_PERIPH_OBSERVATIONS_SQL,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -473,6 +517,10 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_rc_jobs_session             ON rc_jobs(session_key);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_jobs_updated             ON rc_jobs(updated_at);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_job_steps_status         ON rc_job_steps(status);`,
+
+  // rc_periph_observations indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_device   ON rc_periph_observations(device_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_captured ON rc_periph_observations(captured_at);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────

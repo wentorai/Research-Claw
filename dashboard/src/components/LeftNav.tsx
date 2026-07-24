@@ -21,6 +21,7 @@ import {
   RightOutlined,
   DownOutlined,
   QuestionCircleOutlined,
+  UsbOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUiStore, type PanelTab } from '../stores/ui';
@@ -48,6 +49,7 @@ const NAV_ITEMS: NavItem[] = [
   // surfaced natively via the StatusBar activity indicator + OS notifications.
   // The panel is still reachable by clicking that indicator (setRightPanelTab).
   { key: 'monitor', icon: <EyeOutlined />, labelKey: 'nav.monitor' },
+  { key: 'peripherals', icon: <UsbOutlined />, labelKey: 'nav.peripherals' },
   { key: 'supervisor', icon: <SafetyCertificateOutlined />, labelKey: 'nav.supervisor' },
   { key: 'extensions', icon: <ApiOutlined />, labelKey: 'nav.extensions' },
   { key: 'settings', icon: <SettingOutlined />, labelKey: 'nav.settings' },

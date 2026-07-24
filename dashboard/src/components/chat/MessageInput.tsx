@@ -77,6 +77,8 @@ export default function MessageInput() {
   const connState = useGatewayStore((s) => s.state);
   const chatInputPrefill = useUiStore((s) => s.chatInputPrefill);
   const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
+  const chatAttachmentPrefill = useUiStore((s) => s.chatAttachmentPrefill);
+  const setChatAttachmentPrefill = useUiStore((s) => s.setChatAttachmentPrefill);
 
   const inputHistory = useInputHistory();
   const [historyPopupOpen, setHistoryPopupOpen] = useState(false);
@@ -167,6 +169,17 @@ export default function MessageInput() {
       el.selectionStart = el.selectionEnd = el.value.length;
     });
   }, [chatInputPrefill, setChatInputPrefill]);
+
+  // Peripherals panel / other panels can push attachments into the composer (append semantics)
+  useEffect(() => {
+    if (!chatAttachmentPrefill) return;
+    const prefill = chatAttachmentPrefill;
+    setAttachments((prev) => [...prev, ...prefill]);
+    setChatAttachmentPrefill(null);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  }, [chatAttachmentPrefill, setChatAttachmentPrefill]);
 
   const handleRefresh = useCallback(async () => {
     const beforeCount = useChatStore.getState().messages.length;

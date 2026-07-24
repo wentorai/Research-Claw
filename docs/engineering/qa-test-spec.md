@@ -3,7 +3,7 @@ doc: engineering/qa-test-spec.md
 audience: 开发者 / QA — 渠道 B(仓库按需阅读,不注入运行时)
 status: 现行 · 全量功能清单与验收用例(唯一 QA 清单)
 source-of-truth: 代码 + 飞书使用指南;功能以当前代码实现为准
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 ---
 
 # Research-Claw 功能清单与测试用例
@@ -639,6 +639,70 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
 | TC-M-03 | P2 | 确认 `browser-automation` 技能存在 | skills 目录可加载 |
 | TC-M-04 | P2 | CDP 端口 | 配置为 18800（默认 profile） |
 
+### 模块 Q：外设子系统（Peripherals，§2.7）
+
+> 手动验收用例；依赖 Dashboard 打开 + 摄像头物理可用（TC-Q-02/Q-03 需真实浏览器环境）。  
+> 所有 TC-Q-* 均待 T19 真机验收，当前处于静态代码审查阶段。
+
+#### Q-1：面板可达 & 基础 UI
+
+| 用例 ID | 优先级 | 步骤 | 预期结果 |
+|---------|--------|------|----------|
+| TC-Q-01 | P1 | 打开 Dashboard → 左导航点击「外设」 | PeripheralsPanel 加载，显示摄像头/Plaud/定时查证/置灰双卡四区块 |
+| TC-Q-02 | P1 | 外设面板 → 点击「启用摄像头桥」开关 | 浏览器请求摄像头权限，桥在线状态变绿，顶栏出现摄像头图标 |
+| TC-Q-03 | P2 | 禁用摄像头桥 | 状态变灰，`rc.periph.bridge.announce` 停止上报 |
+| TC-Q-04 | P2 | Plaud 卡显示「未配置」 | Plaud 状态区显示 `tokenPresent: false` 提示，连接按钮可点 |
+| TC-Q-05 | P2 | 置灰双卡（实体卡/嵌入式）渲染 | 卡片显示「即将推出」或对应占位文案，不可点击 |
+
+#### Q-2：摄像头预览 & 拍照注入
+
+| 用例 ID | 优先级 | 前置条件 | 步骤 | 预期结果 |
+|---------|--------|----------|------|----------|
+| TC-Q-06 | P1 | 桥已在线，已注册摄像头设备 | Chat：`periph_camera_snap` | 1–5s 内返回 frame_path；观测时间线新增 snapshot 记录 |
+| TC-Q-07 | P1 | 同上 | Chat：`periph_camera_snap { device_id: "..." }` | 指定设备抓帧成功 |
+| TC-Q-08 | P2 | 无启用摄像头设备 | Chat：`periph_camera_snap` | 返回 `no-enabled-camera` 结构化错误 |
+| TC-Q-09 | P2 | 同上，有 2 个启用摄像头 | Chat：`periph_camera_snap`（不带 device_id） | 返回 `multiple-cameras` 错误，列出可用 ID |
+| TC-Q-10 | P1 | 抓帧成功 | 查看工作区 `.ResearchClaw/periph/` | JPEG 文件落盘，路径与 frame_path 一致 |
+| TC-Q-11 | P2 | Dashboard 未打开 | Chat：`periph_camera_snap` | 返回 `bridge-offline` 或 `bridge-timeout`，观测 verdict=missed |
+
+#### Q-3：Plaud 状态与连接
+
+| 用例 ID | 优先级 | 步骤 | 预期结果 |
+|---------|--------|------|----------|
+| TC-Q-12 | P1 | `mcp.servers.plaud` 未配置 | 面板 Plaud 区 → 刷新状态 | `configured: false`，显示配置引导 |
+| TC-Q-13 | P1 | MCP 路径已配置但 token 缺失 | 面板 → 刷新状态 | `configured: true, tokenPresent: false` |
+| TC-Q-14 | P2 | 完整配置 + 有效 token | 面板 → 登录 | `tokenPresent: true, toolsReady: true`，按钮变为「已连接」 |
+| TC-Q-15 | P2 | Plaud MCP 服务未启动 | 面板 → 刷新状态 | `lastError` 含 spawn/connect 错误，不崩溃 |
+
+#### Q-4：定时查证创建 / 启停 / 立即运行
+
+| 用例 ID | 优先级 | 步骤 | 预期结果 |
+|---------|--------|------|----------|
+| TC-Q-16 | P1 | Chat：`monitor_create { source_type: 'device', name: '实验室摄像头-每小时', ... }` | monitor 创建成功，`source_type='device'` |
+| TC-Q-17 | P1 | 外设面板定时查证区 → 启用该 monitor | cron job 绑定，状态 enabled=true |
+| TC-Q-18 | P1 | 点「立即运行」 | `rc.monitor.run` 触发，Agent 收到扫描请求，执行 `periph_camera_snap` 并 `monitor_report` |
+| TC-Q-19 | P2 | 停用 monitor | cron job 清除，enabled=false |
+| TC-Q-20 | P2 | 删除 monitor | DB + 面板同步移除，cron 清除 |
+
+#### Q-5：观测时间线
+
+| 用例 ID | 优先级 | 步骤 | 预期结果 |
+|---------|--------|------|----------|
+| TC-Q-21 | P1 | 完成一次 `periph_camera_snap` 后打开外设面板 | 时间线显示 snapshot 记录（verdict/summary/captured_at） |
+| TC-Q-22 | P1 | Chat：`periph_observe { kind: 'check', verdict: 'ok', summary: '设备正常' }` | 时间线新增 check 记录 |
+| TC-Q-23 | P2 | `periph_list` | 返回设备列表，含 `latest_observation` 字段 |
+| TC-Q-24 | P2 | `rc.periph.observations.list { limit: 5 }` via Dashboard | 面板观测时间线分页正确 |
+
+#### Q-6：降级矩阵
+
+| 用例 ID | 优先级 | 降级场景 | 预期行为 |
+|---------|--------|----------|----------|
+| TC-Q-25 | P1 | **Dashboard 关闭**（桥离线）→ `periph_camera_snap` | 返回 `bridge-offline`；观测 verdict=missed；不崩溃；网关稳定 |
+| TC-Q-26 | P1 | **Docker 部署**（摄像头权限受限）→ 启用桥 | 浏览器提示权限拒绝；失败错误可读；无 crash |
+| TC-Q-27 | P2 | **无权限** `getUserMedia` 拒绝 → `periph_camera_snap` | 返回 capture-failed 结构化错误，verdict=error |
+| TC-Q-28 | P2 | **Plaud MCP 插件过旧 / 不兼容** → `plaud.status` | 返回 `lastError` 含版本或协议错误，不崩溃 |
+| TC-Q-29 | P2 | **LAN HTTP 模式**（非 HTTPS，secureContext=false）→ 摄像头桥 announce | `secureContext: false` 记录到桥状态；面板显示 HTTPS 提示 |
+
 ---
 
 ## 三、测试组织建议
@@ -668,11 +732,11 @@ TC-A-01, TC-A-03, TC-A-04, TC-B-01, TC-C-01, TC-C-02, TC-C-14, TC-E-01, TC-E-02,
 
 ### 已有自动化
 
-- Dashboard：**1334** unit tests（`dashboard/src/__tests__/`，含 task-flow / intraview / paper-review / api-profiles / session-freshness 等）
-- 插件：`extensions/research-claw-core`（556 tests）
-- 质量管控：`extensions/dual-model-supervisor`（50 tests）
+- Dashboard：**1880** unit tests（`dashboard/src/__tests__/`，含 task-flow / intraview / paper-review / api-profiles / session-freshness / periph-store / periph-camera / periph-capture 等）
+- 插件：`extensions/research-claw-core`（963 tests，含 periph-bridge / periph-rpc / periph-service / periph-tools / fresh-install-peripherals 等）
+- 质量管控：`extensions/dual-model-supervisor`（多测试）
 
-**尚无组件级自动化：** `PaperReviewPanel.tsx`、`TaskFlowTimeline.tsx`（依赖手动 TC-P / TC-C-14）
+**尚无组件级自动化：** `PaperReviewPanel.tsx`、`TaskFlowTimeline.tsx`（依赖手动 TC-P / TC-C-14）；`PeripheralsPanel.tsx` 真机行为依赖手动 TC-Q-*
 
 ---
 
@@ -691,4 +755,4 @@ TC-A-01, TC-A-03, TC-A-04, TC-B-01, TC-C-01, TC-C-02, TC-C-14, TC-E-01, TC-E-02,
 
 ---
 
-*功能以当前代码实现为准（版本号见根 `package.json`）· OpenClaw 2026.6.1 · 不含 RC 记忆模块清单*
+*功能以当前代码实现为准（版本号见根 `package.json`）· OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16 · 不含 RC 记忆模块清单 · 外设 TC-Q-* 待 T19 真机复核*
