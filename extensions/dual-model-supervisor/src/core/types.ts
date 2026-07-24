@@ -18,6 +18,34 @@ export interface CourseCorrectionConfig {
   maxRegenerateAttempts: number; // Max regeneration attempts per session (default: 3)
 }
 
+/** Deterministic existence verdict for one extracted citation. */
+export type GroundingVerdict = 'exists' | 'not_found' | 'unverifiable';
+
+/** A cached grounding result for one citation. */
+export interface GroundingFinding {
+  raw: string;                 // Raw citation token (DOI / arXiv id / title)
+  verdict: GroundingVerdict;
+  via?: string;                // Which registry confirmed existence (openalex_doi, etc.) or 'local-only'
+}
+
+export interface GroundingConfig {
+  /**
+   * Privacy switch for citation existence checking. Controls what (if anything)
+   * is sent to external registries (OpenAlex / CrossRef / arXiv).
+   *  - 'off'              : DEFAULT. Zero external requests; no automatic grounding.
+   *                         Manual checks return `unverifiable` (local-only).
+   *  - 'identifiers-only' : send only public identifiers (DOI / arXiv id). NEVER titles/text.
+   *  - 'full'             : additionally allow title-search lookups (may reveal unpublished titles).
+   */
+  networkPolicy: 'off' | 'identifiers-only' | 'full';
+  /**
+   * How to report a citation no registry can find.
+   *  - 'flag' : emit `not_found` (suspected fabrication) — default.
+   *  - 'info' : soften `not_found` → `unverifiable` (never assert fabrication).
+   */
+  verdictMode: 'flag' | 'info';
+}
+
 export interface SupervisorConfig {
   enabled: boolean;                    // Whether supervisor is active
   supervisorModel: string;             // "provider/model" e.g. "openai/gpt-4o-mini"
@@ -34,6 +62,8 @@ export interface SupervisorConfig {
    *                OC's native approval flow). The tool runs only if allowed.
    */
   dangerousToolPolicy: 'block' | 'approve';
+  /** Citation existence checking (grounding) — privacy-gated, best-effort, never-block. */
+  grounding: GroundingConfig;
 }
 
 export const DEFAULT_CONFIG: SupervisorConfig = {
@@ -53,6 +83,10 @@ export const DEFAULT_CONFIG: SupervisorConfig = {
   },
   highRiskTools: ['exec', 'write', 'edit', 'send_notification', 'browser'],
   dangerousToolPolicy: 'block',
+  grounding: {
+    networkPolicy: 'off',   // zero external requests by default (privacy)
+    verdictMode: 'flag',
+  },
 };
 
 // ── Review Results ─────────────────────────────────────────────────────
@@ -105,6 +139,7 @@ export type AuditLogType =
   | 'course_correction'   // Course correction interventions
   | 'force_regenerate'    // Force regeneration on deviation
   | 'approval'            // Human-in-the-loop approval lifecycle (requested → allowed/denied/timeout/cancelled)
+  | 'grounding'           // Citation existence check (exists / not_found / unverifiable)
   | 'session_analysis';   // End-of-session analysis
 
 export interface AuditLogEntry {
@@ -171,6 +206,7 @@ export interface SessionState {
   pendingChannelReviewFooter?: string; // Cached channel-only review footer, waiting to be attached in message_sending when delivering to external channel
   lastReviewReport?: string;       // Most recent review report text (for Dashboard panel display)
   lastStaticSupervisorInjectAt?: number;  // Per-session debounce for static rules injection
+  groundingFindings?: GroundingFinding[]; // Cached citation existence results (deduped by raw)
 }
 
 // ── models.providers.* (aligned with Dashboard GatewayModelDef / openclaw.json) ──

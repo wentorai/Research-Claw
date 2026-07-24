@@ -24,6 +24,21 @@ export function parseConfig(raw: Record<string, unknown> | undefined): Superviso
     courseCorrection: parseCourseCorrection(raw.courseCorrection),
     highRiskTools: parseStringArray(raw.highRiskTools, DEFAULT_CONFIG.highRiskTools),
     dangerousToolPolicy: raw.dangerousToolPolicy === 'approve' ? 'approve' : DEFAULT_CONFIG.dangerousToolPolicy,
+    grounding: parseGrounding(raw.grounding),
+  };
+}
+
+/** Parse grounding sub-config. networkPolicy defaults to 'off' (zero external requests). */
+function parseGrounding(raw: unknown): SupervisorConfig['grounding'] {
+  if (typeof raw !== 'object' || raw === null) return { ...DEFAULT_CONFIG.grounding };
+  const obj = raw as Record<string, unknown>;
+  const networkPolicy: SupervisorConfig['grounding']['networkPolicy'] =
+    obj.networkPolicy === 'identifiers-only' || obj.networkPolicy === 'full'
+      ? obj.networkPolicy
+      : 'off';
+  return {
+    networkPolicy,
+    verdictMode: obj.verdictMode === 'info' ? 'info' : 'flag',
   };
 }
 

@@ -32,6 +32,7 @@ import { CourseCorrector } from './src/hooks/course-corrector.js';
 import { ConsistencyChecker } from './src/hooks/consistency-checker.js';
 import { GoalParser } from './src/hooks/goal-parser.js';
 import { SummaryExtractor } from './src/hooks/summary-extractor.js';
+import { GroundingChecker } from './src/hooks/grounding-checker.js';
 import { AuditLogService } from './src/core/audit-log.js';
 import { registerSupervisorRpc } from './src/rpc.js';
 import { snapshotMessageSendingCtx, SUPERVISOR_REVIEW_SUMMARY_MARKER } from './src/hooks/hook-context.js';
@@ -51,6 +52,7 @@ let _courseCorrector: CourseCorrector | null = null;
 let _consistencyChecker: ConsistencyChecker | null = null;
 let _goalParser: GoalParser | null = null;
 let _summaryExtractor: SummaryExtractor | null = null;
+let _groundingChecker: GroundingChecker | null = null;
 let _activeConfig: SupervisorConfig | null = null;
 
 const _sessionStates = new Map<string, SessionState>();
@@ -234,6 +236,7 @@ const plugin: PluginDefinition = {
       _consistencyChecker = new ConsistencyChecker(cfg, api.logger, _reviewerClient, _auditLog);
       _goalParser = new GoalParser(cfg, api.logger, _reviewerClient, _auditLog);
       _summaryExtractor = new SummaryExtractor(cfg, api.logger, _reviewerClient, _auditLog);
+      _groundingChecker = new GroundingChecker(cfg, api.logger, _auditLog);
 
       process.once('exit', () => {
         try {
@@ -260,6 +263,7 @@ const plugin: PluginDefinition = {
     const consistencyChecker = _consistencyChecker!;
     const goalParser = _goalParser!;
     const summaryExtractor = _summaryExtractor!;
+    const groundingChecker = _groundingChecker!;
 
     // ── Register database lifecycle service ───────────────────────
     api.registerService({
@@ -345,6 +349,7 @@ const plugin: PluginDefinition = {
         consistencyChecker.updateConfig(newCfg);
         goalParser.updateConfig(newCfg);
         summaryExtractor.updateConfig(newCfg);
+        groundingChecker.updateConfig(newCfg);
       },
       api.logger,
       () => _sessionStates,
@@ -465,6 +470,10 @@ const plugin: PluginDefinition = {
         const state = getOrCreateSession(sessionKey);
         state.lastLlmOutput = outputText;
         summaryExtractor.extractSummary(outputText, sessionKey, state);
+        // Grounding: verify cited papers exist (fire-and-forget, never-block).
+        // No-ops unless the operator opted into a network policy (default 'off').
+        const priorRefs = state.recentSummaries.flatMap((s) => s.references ?? []);
+        groundingChecker.check(outputText, sessionKey, priorRefs, state);
         if (isCourseCorrectionActive(activeCfg)) {
           courseCorrector.analyzeSession(sessionKey, state);
         }
