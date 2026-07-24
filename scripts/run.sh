@@ -263,7 +263,12 @@ while true; do
   if [ -n "$_PROXY_VAL" ]; then
     export HTTP_PROXY="$_PROXY_VAL"
     export HTTPS_PROXY="$_PROXY_VAL"
-    dbg "Proxy: $HTTPS_PROXY"
+    # Never persist proxy userinfo in run-latest.log. Keep only scheme+host+port;
+    # invalid/non-URL proxy forms are represented as "[configured]".
+    _PROXY_SAFE=$(printf '%s' "$_PROXY_VAL" | \
+      "$GW_NODE" ./scripts/diag-redact.mjs proxy - - 2>/dev/null)
+    [ -n "$_PROXY_SAFE" ] || _PROXY_SAFE="[configured]"
+    dbg "Proxy: $_PROXY_SAFE"
   fi
 
   # MiniMax OAuth (sk-cp-...) compatibility:
