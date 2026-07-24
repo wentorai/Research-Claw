@@ -42,12 +42,15 @@ export function validateReviewResult(raw: unknown): ReviewResult | null {
   // the consumer records a degrade (never coerce a malformed body into a pass).
   if (!isBoolean(r.blocked)) return null;
   const blocked = r.blocked;
-  const corrected = isBoolean(r.corrected) ? r.corrected : false;
+  const correctedVersion = isString(r.correctedVersion) && r.correctedVersion.trim() ? r.correctedVersion : undefined;
+  // Cross-field coherence: `corrected: true` is meaningless without corrected text —
+  // never report a correction that carries no correctedVersion.
+  const corrected = (isBoolean(r.corrected) ? r.corrected : false) && correctedVersion !== undefined;
 
   return {
     blocked,
     corrected,
-    correctedVersion: isString(r.correctedVersion) ? r.correctedVersion : undefined,
+    correctedVersion,
     correctionNote: isString(r.correctionNote) ? r.correctionNote : undefined,
     warnings: asStringArray(r.warnings),
     memoryAlerts: asStringArray(r.memoryAlerts),

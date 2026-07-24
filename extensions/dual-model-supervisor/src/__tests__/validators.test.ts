@@ -47,6 +47,19 @@ describe('validateReviewResult', () => {
     const r = validateReviewResult({ blocked: false, warnings: ['valid', 42, null, 'also valid'] });
     expect(r!.warnings).toEqual(['valid', 'also valid']);
   });
+
+  it('never reports corrected:true without a correctedVersion (cross-field coherence)', () => {
+    const r = validateReviewResult({ blocked: false, corrected: true }); // claims a correction but provides none
+    expect(r!.corrected).toBe(false); // incoherent claim demoted
+    expect(r!.correctedVersion).toBeUndefined();
+    // a blank correctedVersion is likewise not a real correction
+    const r2 = validateReviewResult({ blocked: false, corrected: true, correctedVersion: '   ' });
+    expect(r2!.corrected).toBe(false);
+    // a genuine correction is preserved
+    const r3 = validateReviewResult({ blocked: false, corrected: true, correctedVersion: 'fixed text' });
+    expect(r3!.corrected).toBe(true);
+    expect(r3!.correctedVersion).toBe('fixed text');
+  });
 });
 
 describe('validateToolReviewResult', () => {

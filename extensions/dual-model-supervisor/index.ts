@@ -1,7 +1,7 @@
 /**
  * Dual Model Supervisor — Plugin Entry Point
  *
- * Registers 7 hooks + 6 RPC methods for dual-model supervision:
+ * Registers 10 hooks + 10 RPC methods for dual-model supervision:
  *   - Safety filtering (message_sending, before_tool_call)
  *   - Course correction (llm_output → session analysis, before_prompt_build, llm_input)
  *   - Memory guarding (before_compaction, after_compaction)
@@ -882,7 +882,7 @@ const plugin: PluginDefinition = {
     _hooksDone = true;
     } // end _hooksDone guard
 
-    api.logger.info('Dual Model Supervisor registered (10 hooks + 6 RPC methods)');
+    api.logger.info('Dual Model Supervisor registered (10 hooks + 10 RPC methods)');
   },
 };
 

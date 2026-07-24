@@ -1,14 +1,17 @@
 /**
- * P1-C — strict reviewer schema; malformed → degrade, never a silent pass.
+ * P1-C — the SAFETY-CRITICAL `blocked` field is strictly gated; malformed → degrade,
+ * never a silent pass. (Advisory fields — warnings/scores — are intentionally coerced,
+ * NOT a full strict schema; only the block/pass decision is hard-validated.)
  *
  * The reviewer returns JSON. The consumers (tool-reviewer / output-reviewer) key
  * their block/pass decision on `blocked`. A coercing validator that turns any
  * malformed object into `{ blocked: false }` makes schema drift / missing fields
- * read as "not blocked" — a silent fail-open with no observable degrade. Strict
- * validation returns null for such input so the consumer records a degrade audit
+ * read as "not blocked" — a silent fail-open with no observable degrade. So a missing
+ * or wrong-typed `blocked` returns null and the consumer records a degrade audit
  * (distinguishing reviewer-unavailable from schema-invalid) and fails open only
- * with visibility. A reviewer BLOCK must never be silently dropped, so
- * `blocked:true` without a reason is still honored as a block (synthesized reason).
+ * with visibility. A reviewer BLOCK must never be silently dropped, so `blocked:true`
+ * without a reason is still honored as a block (synthesized reason). Cross-field
+ * coherence: `corrected:true` is demoted to false unless a `correctedVersion` is present.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

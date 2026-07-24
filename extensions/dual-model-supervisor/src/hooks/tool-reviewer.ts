@@ -29,8 +29,11 @@ export class ToolReviewer {
   private auditLog: AuditLogService;
   /** Monotonic per-process approval id source (stable, non-colliding, not time-based). */
   private approvalSeq = 0;
-  /** Approval ids that have already reached a terminal state (idempotent resolution). */
+  /** Approval ids that have already reached a terminal state (idempotent resolution).
+   *  Bounded (oldest evicted past the cap) so it cannot grow without limit over a long
+   *  process; approvals are rare human-in-loop events, so the cap is never realistically hit. */
   private readonly resolvedApprovals = new Set<string>();
+  private static readonly MAX_RESOLVED_APPROVALS = 1000;
 
   constructor(
     config: SupervisorConfig,
@@ -207,6 +210,10 @@ export class ToolReviewer {
         return;
       }
       this.resolvedApprovals.add(approvalId);
+      if (this.resolvedApprovals.size > ToolReviewer.MAX_RESOLVED_APPROVALS) {
+        const oldest = this.resolvedApprovals.values().next().value; // Set preserves insertion order
+        if (oldest !== undefined) this.resolvedApprovals.delete(oldest);
+      }
 
       const terminal: Record<PluginApprovalResolution, { action: 'info' | 'block' | 'warn'; label: string }> = {
         'allow-once': { action: 'info', label: 'allowed:allow-once' },
