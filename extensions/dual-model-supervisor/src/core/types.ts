@@ -2,6 +2,8 @@
  * Dual Model Supervisor — Core Type Definitions
  */
 
+import type { PluginHookHandlerMap } from '../oc/hook-types.js';
+
 // ── Configuration ──────────────────────────────────────────────────────
 
 export interface MemoryGuardConfig {
@@ -239,7 +241,18 @@ export interface PluginApi {
     start: (ctx: { stateDir: string; logger: PluginLogger }) => void | Promise<void>;
     stop?: (ctx: { stateDir: string; logger: PluginLogger }) => void | Promise<void>;
   }) => void;
-  on: (hookName: string, handler: (...args: unknown[]) => unknown, opts?: { priority?: number }) => void;
+  /**
+   * Register a hook handler. Typed by the REAL OpenClaw PluginHookHandlerMap so
+   * that each handler's (event, ctx) and return type are inferred per hook name —
+   * an OC contract change (renamed field, changed arg count) breaks compilation
+   * here instead of silently degrading at runtime. This is the compile-time gate
+   * the single-arg / wrong-field bug slipped through when `on` was untyped.
+   */
+  on: <K extends keyof PluginHookHandlerMap>(
+    hookName: K,
+    handler: PluginHookHandlerMap[K],
+    opts?: { priority?: number },
+  ) => void;
 }
 
 export interface PluginDefinition {

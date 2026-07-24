@@ -51,13 +51,6 @@ let _goalParser: GoalParser | null = null;
 let _summaryExtractor: SummaryExtractor | null = null;
 let _activeConfig: SupervisorConfig | null = null;
 
-/**
- * Best-effort session ID tracker for hooks that don't receive sessionId (e.g., before_prompt_build).
- * WARNING: In multi-session scenarios, this tracks only the LAST active session.
- * Hooks should prefer context.sessionId when available.
- */
-let _hookActiveSessionId: string | null = null;
-
 const _sessionStates = new Map<string, SessionState>();
 let _hooksDone = false;
 
@@ -187,6 +180,31 @@ function extractToolCallName(ctx: unknown): string | undefined {
   if (typeof c.tool === 'string' && c.tool.length > 0) return c.tool;
   if (typeof c.toolName === 'string' && c.toolName.length > 0) return c.toolName;
   return undefined;
+}
+
+/**
+ * Canonical session key for a hook, resolved from its OWN (event, ctx) — the
+ * real OpenClaw contract puts the canonical key on `ctx.sessionKey`. NEVER falls
+ * back to a process-global "last active session" (that leaked one session's
+ * output to another). Fallback order is within this invocation only.
+ */
+function resolveSessionKey(ctx: unknown, event?: unknown): string | undefined {
+  const c = ctx as { sessionKey?: unknown; sessionId?: unknown } | undefined;
+  const e = event as { sessionKey?: unknown; sessionId?: unknown } | undefined;
+  for (const v of [c?.sessionKey, c?.sessionId, e?.sessionKey, e?.sessionId]) {
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Strict canonical key — ONLY `ctx.sessionKey`. Used by `message_sending`, whose
+ * event has no sessionId and which must NEVER guess a session (a wrong guess
+ * delivers one user's review to another). Absent key → caller must no-op.
+ */
+function strictSessionKey(ctx: unknown): string | undefined {
+  const k = (ctx as { sessionKey?: unknown } | undefined)?.sessionKey;
+  return typeof k === 'string' && k.length > 0 ? k : undefined;
 }
 
 const plugin: PluginDefinition = {
@@ -360,29 +378,16 @@ const plugin: PluginDefinition = {
 
     if (!_hooksDone) {
 
-    api.on('session_start', (ctx: unknown) => {
-      const c = ctx as { sessionId?: string };
-      if (typeof c.sessionId === 'string' && c.sessionId.length > 0) {
-        _hookActiveSessionId = c.sessionId;
-      }
-    });
-
-    api.on('session_end', (ctx: unknown) => {
-      const c = ctx as { sessionId?: string };
-      if (typeof c.sessionId === 'string' && c.sessionId === _hookActiveSessionId) {
-        _hookActiveSessionId = null;
-      }
-    });
-
-    // before_prompt_build — inject supervisor rules + corrections + lost memory + research goal
-    api.on('before_prompt_build', () => {
+    // before_prompt_build — inject supervisor rules + corrections + lost memory + research goal.
+    // ctx (PluginHookAgentContext) carries the canonical sessionKey; no global fallback.
+    api.on('before_prompt_build', (_event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
       if (!isSupervisorActive(activeCfg)) {
         return {};
       }
 
-      const activeId = _hookActiveSessionId;
-      const lastSession = activeId ? _sessionStates.get(activeId) ?? null : null;
+      const sessionKey = resolveSessionKey(ctx);
+      const lastSession = sessionKey ? _sessionStates.get(sessionKey) ?? null : null;
 
       const staticBlock = takeStaticSupervisorRulesBlock(activeCfg.reviewMode, lastSession);
 
@@ -423,75 +428,74 @@ const plugin: PluginDefinition = {
       return {};
     });
 
-    // message_received — track session and parse research goal via reviewer model
-    api.on('message_received', (ctx: unknown) => {
+    // message_received — parse research goal. Inbound text is `event.content`;
+    // canonical session key is on ctx (or the event), never a global fallback.
+    api.on('message_received', (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
       if (!isSupervisorActive(activeCfg)) {
-        return {};
+        return;
       }
 
-      const context = ctx as { sessionId?: string; message?: string };
-      const sessionId = context.sessionId ?? _hookActiveSessionId ?? undefined;
-      if (sessionId) {
-        const state = getOrCreateSession(sessionId);
-        // P0: Use GoalParser instead of naive truncation
-        if (!state.researchGoal && context.message && context.message.length > 10) {
-          goalParser.parseGoal(context.message, sessionId, state);
-        }
+      const sessionKey = resolveSessionKey(ctx, event);
+      if (!sessionKey) return;
+      const text = (event as { content?: unknown }).content;
+      const state = getOrCreateSession(sessionKey);
+      if (!state.researchGoal && typeof text === 'string' && text.length > 10) {
+        goalParser.parseGoal(text, sessionKey, state);
       }
-
-      return {};
     });
 
-    // llm_input — consistency check + inject corrective system message
-    api.on('llm_input', async (ctx: unknown) => {
+    // llm_input — llm_input is a void hook (its return is discarded by OC), so the
+    // consistency injection cannot take effect here; retained best-effort for
+    // detection only, resolving the session from ctx.
+    api.on('llm_input', (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
       if (!isSupervisorActive(activeCfg)) {
-        return {};
+        return;
       }
 
-      const context = ctx as { sessionId?: string };
-      const messages = extractLlmInputMessages(ctx);
+      const messages = extractLlmInputMessages(event);
       if (!messages || messages.length === 0) {
-        return {};
+        return;
       }
 
-      const sessionId = context.sessionId ?? _hookActiveSessionId ?? 'default';
-      const state = getOrCreateSession(sessionId);
-
-      return consistencyChecker.checkConsistency(messages, sessionId, state);
+      const sessionKey = resolveSessionKey(ctx, event);
+      if (!sessionKey) return;
+      const state = getOrCreateSession(sessionKey);
+      void consistencyChecker.checkConsistency(messages, sessionKey, state);
     });
 
     // llm_output — record raw output, extract structured summary, run course correction.
     // Also triggers output review and caches the result in session state,
     // so `before_message_write` / `message_sending` can attach the review footer.
-    api.on('llm_output', (ctx: unknown) => {
+    api.on('llm_output', (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
       if (!isSupervisorActive(activeCfg)) {
         return;
       }
 
-      const context = ctx as Record<string, unknown>;
-      const outputText = extractLlmOutputText(context);
-      const sessionId = (context.sessionId as string | undefined) ?? _hookActiveSessionId ?? undefined;
+      const outputText = extractLlmOutputText(event as Record<string, unknown>);
+      // Key by the canonical sessionKey so the footer cached here is found by
+      // message_sending (which resolves the SAME ctx.sessionKey).
+      const sessionKey = resolveSessionKey(ctx, event);
 
-      if (!sessionId || !outputText) {
+      if (!sessionKey || !outputText) {
         return;
       }
 
       try {
-        const state = getOrCreateSession(sessionId);
+        const state = getOrCreateSession(sessionKey);
         state.lastLlmOutput = outputText;
-        summaryExtractor.extractSummary(outputText, sessionId, state);
+        summaryExtractor.extractSummary(outputText, sessionKey, state);
         if (isCourseCorrectionActive(activeCfg)) {
-          courseCorrector.analyzeSession(sessionId, state);
+          courseCorrector.analyzeSession(sessionKey, state);
         }
 
         // Trigger output review and cache the channel footer for message_sending
         // Review always runs (to record results for Dashboard panel), footer only when channel delivery is enabled
         if (!outputText.includes(SUPERVISOR_REVIEW_SUMMARY_MARKER)) {
           const shouldAttachToChannel = activeCfg.appendReviewToChannelOutput;
-          outputReviewer.reviewMessageSending(outputText, sessionId, state, {
+          outputReviewer.reviewMessageSending(outputText, sessionKey, state, {
             attachSummary: shouldAttachToChannel,
           }).then((modified) => {
             if (modified !== null) {
@@ -511,58 +515,61 @@ const plugin: PluginDefinition = {
     // Dashboard users see review results in the Supervisor panel instead.
     // When delivering to Telegram/WeChat/Discord, the review footer is appended so
     // users who interact through IM channels receive the audit report directly.
-    api.on('message_sending', async (ctx: unknown) => {
+    api.on('message_sending', async (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
-      const context = ctx as { sessionId?: string; message?: string };
 
       if (!isSupervisorActive(activeCfg)) {
         return {};
       }
 
-      if (!context.message) {
+      // Outgoing text is `event.content` (PluginHookMessageSendingEvent); the
+      // result field is `content` (PluginHookMessageSendingResult).
+      const text = (event as { content?: unknown }).content;
+      if (typeof text !== 'string' || text.length === 0) {
         return {};
       }
 
-      const snap = snapshotMessageSendingCtx(ctx);
-
-      // Check if this is a channel delivery (Telegram/WeChat/Discord etc.)
-      // Only append review footer when delivering through external channels
-      const isChannelDelivery = snap.isChannelDelivery;
-
+      // Channel-delivery + streaming detection reads the EVENT (metadata lives there).
+      const snap = snapshotMessageSendingCtx(event);
       if (snap.deferReview) {
         return {};
       }
 
-      const sessionId = context.sessionId ?? _hookActiveSessionId ?? 'default';
-      const state = getOrCreateSession(sessionId);
+      // Canonical session key ONLY — message_sending has no sessionId anywhere and
+      // must NEVER guess a session (that leaked one user's review to another).
+      const sessionKey = strictSessionKey(ctx);
+      if (!sessionKey) {
+        return {};
+      }
+      const state = _sessionStates.get(sessionKey);
 
       // Only attach review footer when delivering through external channels
-      if (!isChannelDelivery) {
-        // Clear any cached footer to prevent stale data
-        if (state.pendingChannelReviewFooter) {
+      if (!snap.isChannelDelivery) {
+        if (state?.pendingChannelReviewFooter) {
           state.pendingChannelReviewFooter = undefined;
         }
         return {};
       }
 
-      // Channel delivery — check for cached footer first
-      if (state.pendingChannelReviewFooter) {
+      // Channel delivery — prefer the footer cached by llm_output (consume once).
+      if (state?.pendingChannelReviewFooter) {
         const footer = state.pendingChannelReviewFooter;
         state.pendingChannelReviewFooter = undefined;
-        return { message: footer };
+        return { content: footer };
       }
 
-      // No cached footer — perform live review with footer for channel
+      // No cached footer — perform live review with footer for channel.
       if (!activeCfg.appendReviewToChannelOutput) {
         return {};
       }
 
-      const modified = await outputReviewer.reviewMessageSending(context.message, sessionId, state, {
+      const liveState = getOrCreateSession(sessionKey);
+      const modified = await outputReviewer.reviewMessageSending(text, sessionKey, liveState, {
         attachSummary: true,
       });
 
       if (modified !== null) {
-        return { message: modified };
+        return { content: modified };
       }
 
       return {};
@@ -573,49 +580,41 @@ const plugin: PluginDefinition = {
     // NOTE: The gateway treats this hook as SYNCHRONOUS — returning a Promise
     // (via `async`) causes the result to be silently ignored. All actual review
     // logic lives in `llm_output` which correctly supports async handlers.
-    api.on('before_message_write', (ctx: unknown) => {
+    api.on('before_message_write', (_event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
-      const context = ctx as { sessionId?: string; message?: unknown };
-
-      const msg = context.message;
-
-      // Resolve sessionId: context.sessionId → _hookActiveSessionId → extract from message
-      let sessionId = context.sessionId ?? _hookActiveSessionId;
-      if (!sessionId && msg && typeof msg === 'object') {
-        const msgObj = msg as Record<string, unknown>;
-        if (typeof msgObj.sessionId === 'string') {
-          sessionId = msgObj.sessionId;
-        }
-      }
-
-      if (!sessionId) sessionId = 'default';
-
       if (!isSupervisorActive(activeCfg)) {
         return {};
       }
 
-      // Ensure session state exists so llm_output's async callback can populate it
-      getOrCreateSession(sessionId);
+      // ctx is { agentId?, sessionKey? }. Ensure session state exists so
+      // llm_output's async callback can populate it; no global fallback.
+      const sessionKey = resolveSessionKey(ctx, _event);
+      if (sessionKey) {
+        getOrCreateSession(sessionKey);
+      }
 
-      // Always return empty — we don't modify the message content in before_message_write
       return {};
     });
 
-    // before_tool_call — tool call review
-    api.on('before_tool_call', async (ctx: unknown) => {
+    // before_tool_call — safety gate. tool name + params are on the EVENT. The
+    // review runs regardless of session (safety is never skipped); the session
+    // key is used only for the audit record.
+    api.on('before_tool_call', async (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
       if (!isSupervisorActive(activeCfg)) {
         return {};
       }
 
-      const context = ctx as { sessionId?: string; params?: Record<string, unknown> };
-      const tool = extractToolCallName(ctx);
+      const e = event as { toolName?: unknown; params?: Record<string, unknown> };
+      const tool = (typeof e.toolName === 'string' && e.toolName.length > 0)
+        ? e.toolName
+        : extractToolCallName(event);
       if (!tool) {
         return {};
       }
 
-      const sessionId = context.sessionId ?? _hookActiveSessionId ?? 'default';
-      const result = await toolReviewer.review(tool, context.params ?? {}, sessionId);
+      const sessionKey = resolveSessionKey(ctx, event) ?? 'unknown-session';
+      const result = await toolReviewer.review(tool, e.params ?? {}, sessionKey);
 
       if (result.block) {
         return { block: true, blockReason: result.blockReason };
@@ -628,72 +627,77 @@ const plugin: PluginDefinition = {
     });
 
     // before_compaction — memory anchor injection
-    api.on('before_compaction', async (ctx: unknown) => {
-      const activeCfg = _activeConfig ?? cfg;
-      if (!isSupervisorActive(activeCfg)) {
-        return {};
-      }
-
-      const context = ctx as { sessionId?: string; messages?: Array<{ role: string; content: string }> };
-      if (!context.messages) {
-        return {};
-      }
-
-      const sessionId = context.sessionId ?? 'default';
-      const state = getOrCreateSession(sessionId);
-
-      return memoryGuardian.beforeCompaction(context.messages, sessionId, state);
-    });
-
-    // after_compaction — memory loss detection
-    api.on('after_compaction', async (ctx: unknown) => {
+    api.on('before_compaction', async (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
       if (!isSupervisorActive(activeCfg)) {
         return;
       }
 
-      const context = ctx as {
-        sessionId?: string;
+      const messages = (event as { messages?: Array<{ role: string; content: string }> }).messages;
+      if (!messages) {
+        return;
+      }
+
+      const sessionKey = resolveSessionKey(ctx, event);
+      if (!sessionKey) return;
+      const state = getOrCreateSession(sessionKey);
+
+      // NOTE (dead-path, surfaced by the typed hook gate): OC types before_compaction
+      // as a VOID hook — a modifying return is discarded. The memory-guard anchor
+      // injection here cannot take effect via the return value; retained for its
+      // state side-effects only. Real injection must move to a live channel
+      // (before_prompt_build) — tracked for the memory-guard remediation.
+      await memoryGuardian.beforeCompaction(messages, sessionKey, state);
+    });
+
+    // after_compaction — memory loss detection
+    api.on('after_compaction', async (event, ctx) => {
+      const activeCfg = _activeConfig ?? cfg;
+      if (!isSupervisorActive(activeCfg)) {
+        return;
+      }
+
+      const e = event as {
         original?: Array<{ role: string; content: string }>;
         compacted?: Array<{ role: string; content: string }>;
       };
 
-      if (!context.original || !context.compacted) {
+      if (!e.original || !e.compacted) {
         return;
       }
 
-      const sessionId = context.sessionId ?? 'default';
-      const state = getOrCreateSession(sessionId);
+      const sessionKey = resolveSessionKey(ctx, event);
+      if (!sessionKey) return;
+      const state = getOrCreateSession(sessionKey);
 
-      await memoryGuardian.afterCompaction(context.original, context.compacted, sessionId, state);
+      await memoryGuardian.afterCompaction(e.original, e.compacted, sessionKey, state);
     });
 
     // session_end — output regeneration summary and cleanup session state
-    api.on('session_end', (ctx: unknown) => {
-      const context = ctx as { sessionId?: string };
-      if (context.sessionId) {
-        const state = _sessionStates.get(context.sessionId);
-        if (state && state.regenerateHistory.length > 0) {
-          const summary = courseCorrector.buildRegenerationSummary(state);
-          if (summary) {
-            auditLog.record({
-              sessionId: context.sessionId,
-              type: 'force_regenerate',
-              action: 'info',
-              details: summary,
-              timestamp: Date.now(),
-            });
-            api.logger.info(`[Supervisor] Session ${context.sessionId} regeneration summary: ${state.regenerateAttempts} attempt(s)`);
-          }
+    api.on('session_end', (event, ctx) => {
+      const sessionKey = resolveSessionKey(ctx, event);
+      if (!sessionKey) return;
+      const state = _sessionStates.get(sessionKey);
+      if (state && state.regenerateHistory.length > 0) {
+        const summary = courseCorrector.buildRegenerationSummary(state);
+        if (summary) {
+          auditLog.record({
+            sessionId: sessionKey,
+            type: 'force_regenerate',
+            action: 'info',
+            details: summary,
+            timestamp: Date.now(),
+          });
+          api.logger.info(`[Supervisor] Session ${sessionKey} regeneration summary: ${state.regenerateAttempts} attempt(s)`);
         }
-        _sessionStates.delete(context.sessionId);
       }
+      _sessionStates.delete(sessionKey);
     });
 
     _hooksDone = true;
     } // end _hooksDone guard
 
-    api.logger.info('Dual Model Supervisor registered (7 hooks + 6 RPC methods)');
+    api.logger.info('Dual Model Supervisor registered (10 hooks + 6 RPC methods)');
   },
 };
 

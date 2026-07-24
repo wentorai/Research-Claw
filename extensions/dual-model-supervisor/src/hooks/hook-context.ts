@@ -80,14 +80,24 @@ export function snapshotMessageSendingCtx(ctx: unknown): MessageSendingCtxSnapsh
  * Dashboard-initiated messages do NOT have channel context.
  */
 function detectChannelDelivery(ctx: Record<string, unknown>): boolean {
+  if (hasChannelSignals(ctx)) return true;
+  // OC 2026.6.1 PluginHookMessageSendingEvent carries channel info in `metadata`
+  // (event = { to, content, metadata }), so channel signals live there too.
+  const metadata = ctx.metadata as Record<string, unknown> | undefined;
+  if (metadata && typeof metadata === 'object' && hasChannelSignals(metadata)) return true;
+  return false;
+}
+
+/** Channel-delivery signals, checked both at the top level and inside `metadata`. */
+function hasChannelSignals(o: Record<string, unknown>): boolean {
   // Check for explicit channel field
-  if (typeof ctx.channel === 'string' && ctx.channel.length > 0) return true;
+  if (typeof o.channel === 'string' && o.channel.length > 0) return true;
   // Check for delivery mode indicating external delivery
-  if (ctx.deliveryMode === 'direct' || ctx.deliveryMode === 'announce') return true;
+  if (o.deliveryMode === 'direct' || o.deliveryMode === 'announce') return true;
   // Check for source indicating channel-originated message
-  if (typeof ctx.source === 'string' && /^(telegram|discord|weixin|wechat|feishu|slack|imessage)/i.test(ctx.source)) return true;
+  if (typeof o.source === 'string' && /^(telegram|discord|weixin|wechat|feishu|slack|imessage)/i.test(o.source)) return true;
   // Check for nested channel info (some gateway versions)
-  const delivery = ctx.delivery as Record<string, unknown> | undefined;
+  const delivery = o.delivery as Record<string, unknown> | undefined;
   if (delivery && typeof delivery === 'object') {
     if (typeof delivery.channel === 'string' && delivery.channel.length > 0) return true;
     if (delivery.mode === 'direct' || delivery.mode === 'announce') return true;
