@@ -51,4 +51,32 @@ describe('P1-A after_compaction real-event contract', () => {
     };
     expect(log.entries.length).toBe(0);
   });
+
+  // Invariant §7.7: "降级可见" must not override the feature switch — when the
+  // memory guard is OFF, no memory_guard business audit may be written.
+  it('records NO memory_guard audit when memoryGuard is disabled', async () => {
+    const h = await loadPluginFresh({ ...CONFIG, memoryGuard: { enabled: false } });
+    await h.fire(
+      'after_compaction',
+      { messageCount: 40, compactedCount: 12 },
+      { sessionKey: 'agent:main:skA', sessionId: 'skA' },
+    );
+    const log = (await h.rpc.get('rc.supervisor.log')!({ type: 'memory_guard', limit: 10 })) as {
+      entries: LogEntry[];
+    };
+    expect(log.entries.length).toBe(0);
+  });
+
+  it('records NO memory_guard audit when reviewMode is not full', async () => {
+    const h = await loadPluginFresh({ ...CONFIG, reviewMode: 'correct' });
+    await h.fire(
+      'after_compaction',
+      { messageCount: 40, compactedCount: 12 },
+      { sessionKey: 'agent:main:skA', sessionId: 'skA' },
+    );
+    const log = (await h.rpc.get('rc.supervisor.log')!({ type: 'memory_guard', limit: 10 })) as {
+      entries: LogEntry[];
+    };
+    expect(log.entries.length).toBe(0);
+  });
 });

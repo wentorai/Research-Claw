@@ -18,9 +18,14 @@ export interface Harness {
   rpc: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
   /** Captured logger output. */
   logs: { info: string[]; warn: string[]; error: string[] };
-  /** Await pending async work (fire-and-forget reviews/footer caching) to settle
-   *  by draining N event-loop cycles (micro + macro tasks), not a fixed sleep. */
-  settle(rounds?: number): Promise<void>;
+  /**
+   * Wait until `predicate()` is truthy (polling real state), or reject after
+   * `timeoutMs`. This is a state-based completion condition — NOT a fixed sleep —
+   * so it is correct regardless of machine speed or how long the async work takes.
+   */
+  waitUntil(predicate: () => boolean, opts?: { timeoutMs?: number; intervalMs?: number }): Promise<void>;
+  /** Read-only: the channel footer cached for a session by the async llm_output review. */
+  peekFooter(sessionKey: string): string | undefined;
   hookNames(): string[];
 }
 
@@ -83,9 +88,11 @@ export async function loadPluginFresh(
     },
   };
 
-  const mod = await import('../../../index.js');
-  const plugin = (mod as { default: { register: (api: unknown) => void } }).default;
-  plugin.register(api);
+  const mod = (await import('../../../index.js')) as {
+    default: { register: (api: unknown) => void };
+    __peekSessionChannelFooter: (sessionKey: string) => string | undefined;
+  };
+  mod.default.register(api);
 
   return {
     async fire(hookName, event, ctx) {
@@ -99,14 +106,20 @@ export async function loadPluginFresh(
     },
     rpc,
     logs,
-    async settle(rounds = 12) {
-      // Drain both microtasks and macrotasks repeatedly so fire-and-forget
-      // review/footer promises resolve regardless of machine speed (no fixed sleep).
-      for (let i = 0; i < rounds; i++) {
-        await new Promise((r) => setTimeout(r, 0));
-        await Promise.resolve();
+    async waitUntil(predicate, opts) {
+      const timeoutMs = opts?.timeoutMs ?? 2000;
+      const intervalMs = opts?.intervalMs ?? 5;
+      const start = Date.now();
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (predicate()) return;
+        if (Date.now() - start > timeoutMs) {
+          throw new Error(`waitUntil: predicate not satisfied within ${timeoutMs}ms`);
+        }
+        await new Promise((r) => setTimeout(r, intervalMs));
       }
     },
+    peekFooter: (sessionKey: string) => mod.__peekSessionChannelFooter(sessionKey),
     hookNames: () => [...hooks.keys()],
   };
 }

@@ -22,7 +22,7 @@ import type {
   ModelsProviderEntry,
   ConfiguredProvider,
 } from './src/core/types.js';
-import { parseConfig, isSupervisorActive, isCourseCorrectionActive } from './src/core/config.js';
+import { parseConfig, isSupervisorActive, isCourseCorrectionActive, isMemoryGuardActive } from './src/core/config.js';
 import { ReviewerClient } from './src/client/reviewer.js';
 import { QuickChecker } from './src/hooks/quick-checker.js';
 import { OutputReviewer } from './src/hooks/output-reviewer.js';
@@ -36,6 +36,7 @@ import { AuditLogService } from './src/core/audit-log.js';
 import { registerSupervisorRpc } from './src/rpc.js';
 import { snapshotMessageSendingCtx, SUPERVISOR_REVIEW_SUMMARY_MARKER } from './src/hooks/hook-context.js';
 import { hookSessionKey } from './src/oc/hook-types.js';
+import type { PluginHookLlmOutputEvent, PluginHookLlmInputEvent } from './src/oc/hook-types.js';
 
 // ── Module-level state (survives multiple register() calls) ──────────
 let _initialized = false;
@@ -116,27 +117,21 @@ function takeStaticSupervisorRulesBlock(reviewMode: string, state: SessionState 
 }
 
 /**
- * OpenClaw `llm_output` passes `assistantTexts` + `lastAssistant` (see gateway embedded run);
- * some paths may still set `response`.
+ * Extract the main model's text output from the REAL `llm_output` event
+ * (PluginHookLlmOutputEvent). Reads only fields that exist on the current OC
+ * 2026.6.1 contract: `assistantTexts: string[]` (authoritative) and
+ * `lastAssistant` (typed `unknown` → runtime-guarded). No phantom `response`
+ * fallback — reading a field not on the typed event would fail tsc.
  */
-/**
- * Extract the main model's text output from an `llm_output` hook context.
- * Handles multiple context shapes across gateway versions: `response`, `assistantTexts`,
- * and `lastAssistant.content` (string or content block array).
- */
-function extractLlmOutputText(raw: Record<string, unknown>): string | undefined {
-  const direct = raw.response;
-  if (typeof direct === 'string' && direct.trim().length > 0) return direct;
-
-  const assistantTexts = raw.assistantTexts;
+function extractLlmOutputText(event: PluginHookLlmOutputEvent): string | undefined {
+  const { assistantTexts, lastAssistant } = event;
   if (Array.isArray(assistantTexts) && assistantTexts.length > 0) {
     const joined = assistantTexts.filter((t): t is string => typeof t === 'string').join('');
     if (joined.trim().length > 0) return joined;
   }
 
-  const last = raw.lastAssistant;
-  if (last && typeof last === 'object') {
-    const c = (last as { content?: unknown }).content;
+  if (lastAssistant && typeof lastAssistant === 'object') {
+    const c = (lastAssistant as { content?: unknown }).content;
     if (typeof c === 'string' && c.trim().length > 0) return c;
     if (Array.isArray(c)) {
       const parts: string[] = [];
@@ -153,27 +148,23 @@ function extractLlmOutputText(raw: Record<string, unknown>): string | undefined 
   return undefined;
 }
 
-function extractLlmInputMessages(ctx: unknown): Array<{ role: string; content: string }> | undefined {
-  const c = ctx as Record<string, unknown>;
-  const asMsgs = (v: unknown): Array<{ role: string; content: string }> | undefined => {
-    if (!Array.isArray(v) || v.length === 0) return undefined;
-    return v as Array<{ role: string; content: string }>;
-  };
-  let m = asMsgs(c.messages);
-  if (m) return m;
-  m = asMsgs(c.historyMessages);
-  if (m) return m;
-  const body = c.body as Record<string, unknown> | undefined;
-  if (body) {
-    m = asMsgs(body.messages);
-    if (m) return m;
-  }
-  const req = c.request as Record<string, unknown> | undefined;
-  if (req) {
-    m = asMsgs(req.messages);
-    if (m) return m;
-  }
-  return undefined;
+/**
+ * Extract prior-turn messages from the REAL `llm_input` event
+ * (PluginHookLlmInputEvent). The messages live in `historyMessages: unknown[]`
+ * (NOT `messages`/`body`/`request` — those are phantom on the current contract).
+ * Elements are runtime-guarded to the {role, content} shape the consumer needs.
+ */
+function extractLlmInputMessages(event: PluginHookLlmInputEvent): Array<{ role: string; content: string }> | undefined {
+  const raw = event.historyMessages;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const msgs = raw.filter(
+    (m): m is { role: string; content: string } =>
+      !!m &&
+      typeof m === 'object' &&
+      typeof (m as { role?: unknown }).role === 'string' &&
+      typeof (m as { content?: unknown }).content === 'string',
+  );
+  return msgs.length > 0 ? msgs : undefined;
 }
 
 /**
@@ -461,7 +452,7 @@ const plugin: PluginDefinition = {
         return;
       }
 
-      const outputText = extractLlmOutputText(event as Record<string, unknown>);
+      const outputText = extractLlmOutputText(event);
       // Key by the canonical sessionKey so the footer cached here is found by
       // message_sending (which resolves the SAME ctx.sessionKey).
       const sessionKey = resolveSessionKey(ctx, event);
@@ -613,15 +604,28 @@ const plugin: PluginDefinition = {
       return {};
     });
 
-    // before_compaction — memory anchor injection
+    // before_compaction — memory anchor injection (memory-guard business →
+    // gated by the memory-guard switch, per invariant: no memory work when off).
     api.on('before_compaction', async (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
-      if (!isSupervisorActive(activeCfg)) {
+      if (!isMemoryGuardActive(activeCfg)) {
         return;
       }
 
-      const messages = (event as { messages?: Array<{ role: string; content: string }> }).messages;
-      if (!messages) {
+      // Typed PluginHookBeforeCompactionEvent.messages is `unknown[]` — read the
+      // real field and runtime-guard elements to the {role, content} shape.
+      const raw = event.messages;
+      if (!Array.isArray(raw) || raw.length === 0) {
+        return;
+      }
+      const messages = raw.filter(
+        (m): m is { role: string; content: string } =>
+          !!m &&
+          typeof m === 'object' &&
+          typeof (m as { role?: unknown }).role === 'string' &&
+          typeof (m as { content?: unknown }).content === 'string',
+      );
+      if (messages.length === 0) {
         return;
       }
 
@@ -653,7 +657,9 @@ const plugin: PluginDefinition = {
     // dependency wired for that follow-up.
     api.on('after_compaction', (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
-      if (!isSupervisorActive(activeCfg)) {
+      // Feature switch first: no memory_guard business audit when the guard is
+      // OFF (invariant: observability must not override the feature switch).
+      if (!isMemoryGuardActive(activeCfg)) {
         return;
       }
       const sessionKey = resolveSessionKey(ctx);
@@ -749,6 +755,16 @@ function _extractConfiguredProviders(
   }
 
   return result;
+}
+
+/**
+ * TEST-ONLY, read-only accessor for deterministic test synchronization — lets a
+ * harness poll whether a session's channel footer has been cached by the async
+ * `llm_output` review (a real state condition, not a fixed sleep). Never called
+ * in production; performs no mutation.
+ */
+export function __peekSessionChannelFooter(sessionKey: string): string | undefined {
+  return _sessionStates.get(sessionKey)?.pendingChannelReviewFooter;
 }
 
 export default plugin;

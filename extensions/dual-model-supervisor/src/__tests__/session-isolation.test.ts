@@ -39,12 +39,11 @@ function sendCtx(sk: string | undefined) {
   return { channelId: 'telegram', sessionKey: sk };
 }
 
-/** session_start → llm_output(text) → settle so the async footer caches. */
+/** llm_output(text) → wait (state-based) until the async footer is actually cached. */
 async function seedSession(h: Harness, sk: string, text: string) {
-  await h.fire('session_start', { sessionId: sk, sessionKey: sk }, { sessionId: sk, sessionKey: sk });
   const s = seedEvent(sk, text);
   await h.fire('llm_output', s.event, s.ctx);
-  await h.settle();
+  await h.waitUntil(() => h.peekFooter(sk) !== undefined);
 }
 
 /** Normalize a hook result to the delivered footer text (or a readable marker). */
