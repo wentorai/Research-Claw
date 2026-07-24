@@ -42,6 +42,7 @@ import { SessionNamingService } from './src/session-naming/service.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
 import { buildRpcErrorOutcome } from './src/rpc-error.js';
+import { auditPluginActivation, type ProbeInput } from './src/self-check/activation-probe.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
@@ -2479,6 +2480,100 @@ const plugin: PluginDefinition = {
         }
       } catch (err) {
         api.logger.warn(`[Heartbeat] Bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Startup self-check: silent-failure audit. Detects the v1.4.7-class gap
+      // where a plugin advertises tools but lacks the activation contract, so
+      // its tools silently never register. Also surfaces recent gateway
+      // startup_failed crash snapshots that otherwise pile up unseen.
+      // Fully guarded — a probe failure must never block gateway startup.
+      try {
+        // api.resolvePath('.') can be undefined inside the gateway_start hook
+        // (it is reliable during register()); fall back to the gateway CWD,
+        // which run.sh/docker-entrypoint set to the repo root.
+        const resolved = api.resolvePath('.');
+        const startDir = typeof resolved === 'string' && resolved ? resolved : process.cwd();
+        const root = findGitRoot(startDir);
+        const discovered: ProbeInput[] = [];
+        const seen = new Set<string>();
+
+        // Collect candidate plugin dirs: the bundled extensions/* (CWD discovery,
+        // used even when config.plugins.load.paths is empty) + explicit load paths
+        // (research-plugins is wired in via load.paths on install).
+        const candidateDirs: string[] = [];
+        const extRoot = path.join(root, 'extensions');
+        if (fs.existsSync(extRoot)) {
+          for (const name of fs.readdirSync(extRoot)) {
+            candidateDirs.push(path.join(extRoot, name));
+          }
+        }
+        const cfg = api.runtime.config.current() as {
+          plugins?: { load?: { paths?: unknown } };
+        };
+        const loadPaths = cfg.plugins?.load?.paths;
+        if (Array.isArray(loadPaths)) {
+          for (const p of loadPaths) {
+            if (typeof p === 'string') {
+              candidateDirs.push(path.isAbsolute(p) ? p : path.resolve(root, p));
+            }
+          }
+        }
+
+        for (const dir of candidateDirs) {
+          const manifestPath = path.join(dir, 'openclaw.plugin.json');
+          if (seen.has(dir) || !fs.existsSync(manifestPath)) continue;
+          seen.add(dir);
+          let manifest: ProbeInput['manifest'] = null;
+          try {
+            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          } catch {
+            manifest = null;
+          }
+          const id =
+            (manifest && typeof manifest.id === 'string' && manifest.id) || path.basename(dir);
+          discovered.push({ id, dir, manifest });
+        }
+
+        const findings = auditPluginActivation(discovered);
+        for (const f of findings) {
+          api.logger.warn(`[self-check] ${f.message}`);
+          try {
+            taskService.sendNotification(
+              'error',
+              `插件未正确加载:${f.id}`,
+              f.message,
+            );
+          } catch { /* notification is best-effort */ }
+        }
+
+        // Surface recent gateway startup_failed snapshots (last 24h) so crash
+        // loops don't stay invisible (real machines had 20+ pile up unseen).
+        try {
+          const stabilityDir = path.join(os.homedir(), '.openclaw', 'logs', 'stability');
+          if (fs.existsSync(stabilityDir)) {
+            const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+            const recent = fs
+              .readdirSync(stabilityDir)
+              .filter((n) => n.includes('startup_failed') && n.endsWith('.json'))
+              .filter((n) => {
+                try { return fs.statSync(path.join(stabilityDir, n)).mtimeMs >= cutoff; }
+                catch { return false; }
+              });
+            if (recent.length > 0) {
+              const msg = `Found ${recent.length} gateway startup_failed snapshot(s) in the last 24h at ${stabilityDir} — the gateway crashed on a recent start.`;
+              api.logger.warn(`[self-check] ${msg}`);
+              try {
+                taskService.sendNotification('error', '网关近期启动失败', msg);
+              } catch { /* best-effort */ }
+            }
+          }
+        } catch { /* stability scan is best-effort */ }
+
+        if (findings.length === 0) {
+          api.logger.info(`[self-check] plugin activation audit passed (${discovered.length} plugin(s))`);
+        }
+      } catch (err) {
+        api.logger.warn(`[self-check] probe error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
       }
     });
 
