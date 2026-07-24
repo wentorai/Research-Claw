@@ -24,6 +24,9 @@ export function parseConfig(raw: Record<string, unknown> | undefined): Superviso
     courseCorrection: parseCourseCorrection(raw.courseCorrection),
     highRiskTools: parseStringArray(raw.highRiskTools, DEFAULT_CONFIG.highRiskTools),
     dangerousToolPolicy: raw.dangerousToolPolicy === 'approve' ? 'approve' : DEFAULT_CONFIG.dangerousToolPolicy,
+    toolReviewGateMs: typeof raw.toolReviewGateMs === 'number' && raw.toolReviewGateMs > 0
+      ? Math.round(raw.toolReviewGateMs)
+      : DEFAULT_CONFIG.toolReviewGateMs,
     grounding: parseGrounding(raw.grounding),
   };
 }

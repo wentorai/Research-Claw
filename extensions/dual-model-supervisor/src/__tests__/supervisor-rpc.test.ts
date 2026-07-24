@@ -55,4 +55,16 @@ describe('P2-F rc.supervisor.config production RPC', () => {
     expect(s.dangerousToolPolicy).toBe('approve');
     expect(s.grounding?.networkPolicy).toBe('full');
   });
+
+  it('applies toolReviewGateMs via the allowlist (not silently dropped on RPC write)', async () => {
+    const h = await loadPluginFresh(CONFIG);
+    const res = await setConfig(h, { toolReviewGateMs: 25000 });
+    expect(res.config.toolReviewGateMs).toBe(25000); // survives the allowlist filter → persisted
+  });
+
+  it('rc.supervisor.status exposes toolReviewGateMs', async () => {
+    const h = await loadPluginFresh({ ...CONFIG, toolReviewGateMs: 25000 });
+    const s = (await h.rpc.get('rc.supervisor.status')!({})) as { toolReviewGateMs?: number };
+    expect(s.toolReviewGateMs).toBe(25000);
+  });
 });

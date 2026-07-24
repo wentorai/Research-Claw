@@ -83,9 +83,14 @@ export class ToolReviewer {
     }
 
     const userContent = `<user_content>\n## Tool Call\nTool: ${tool}\nParameters: ${JSON.stringify(params, null, 2)}\n</user_content>`;
+    // Never-over-block: the deep review runs with a bounded gate and bypasses the
+    // shared reviewer queue. Determined danger is already handled by the quick check
+    // above; this deep pass may still block within the gate, but a slow/unavailable
+    // reviewer must NOT stall a benign high-risk tool — it fails OPEN on timeout.
     const raw = await this.reviewerClient.review<Record<string, unknown>>(
       TOOL_REVIEW_SYSTEM_PROMPT,
       userContent,
+      { bypassQueue: true, timeoutMs: this.config.toolReviewGateMs },
     );
 
     // Distinguish "reviewer unavailable" (null raw: timeout/network/no adapter)
@@ -99,7 +104,7 @@ export class ToolReviewer {
         sessionId,
         type: 'tool_review',
         action: 'warn',
-        details: `Tool ${tool} deep review degraded: reviewer unavailable (timeout/network) — failed open`,
+        details: `Tool ${tool} deep review degraded: reviewer unavailable or gate timeout — failed open`,
         timestamp: Date.now(),
       });
       return { block: false };

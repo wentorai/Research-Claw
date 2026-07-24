@@ -61,6 +61,7 @@ export function registerSupervisorRpc(
       maxRegenerateAttempts: cfg.courseCorrection.maxRegenerateAttempts,
       highRiskTools: cfg.highRiskTools,
       dangerousToolPolicy: cfg.dangerousToolPolicy,
+      toolReviewGateMs: cfg.toolReviewGateMs,
       grounding: cfg.grounding,
       stats,
       activeSessions,
@@ -76,7 +77,7 @@ export function registerSupervisorRpc(
         'enabled', 'supervisorModel', 'reviewMode',
         'appendReviewToChannelOutput', 'memoryGuard',
         'courseCorrection', 'highRiskTools',
-        'dangerousToolPolicy', 'grounding',
+        'dangerousToolPolicy', 'toolReviewGateMs', 'grounding',
       ] as const;
       const filtered: Record<string, unknown> = {};
       for (const key of ALLOWED_KEYS) {

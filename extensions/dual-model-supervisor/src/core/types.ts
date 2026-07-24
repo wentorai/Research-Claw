@@ -62,6 +62,14 @@ export interface SupervisorConfig {
    *                OC's native approval flow). The tool runs only if allowed.
    */
   dangerousToolPolicy: 'block' | 'approve';
+  /**
+   * Max time (ms) the before_tool_call security gate waits for the deep reviewer on
+   * a high-risk-but-not-determined-danger tool before failing OPEN. Bounds the wait
+   * so a slow/queued reviewer never stalls tool execution (never-over-block). The
+   * deep review still runs (and can block within this window); on timeout the tool
+   * is allowed and an observable degrade is recorded. Default 10s.
+   */
+  toolReviewGateMs: number;
   /** Citation existence checking (grounding) — privacy-gated, best-effort, never-block. */
   grounding: GroundingConfig;
 }
@@ -83,6 +91,7 @@ export const DEFAULT_CONFIG: SupervisorConfig = {
   },
   highRiskTools: ['exec', 'write', 'edit', 'send_notification', 'browser'],
   dangerousToolPolicy: 'block',
+  toolReviewGateMs: 10000,
   grounding: {
     networkPolicy: 'off',   // zero external requests by default (privacy)
     verdictMode: 'flag',

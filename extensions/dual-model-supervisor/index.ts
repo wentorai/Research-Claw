@@ -387,6 +387,7 @@ const plugin: PluginDefinition = {
           courseCorrection: newCfg.courseCorrection,
           highRiskTools: newCfg.highRiskTools,
           dangerousToolPolicy: newCfg.dangerousToolPolicy,
+          toolReviewGateMs: newCfg.toolReviewGateMs,
           grounding: newCfg.grounding,
         };
         const tmpPath = configPath + '.tmp';

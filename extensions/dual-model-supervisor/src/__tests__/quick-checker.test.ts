@@ -10,6 +10,7 @@ const defaultConfig = {
   courseCorrection: { enabled: true, deviationThreshold: 0.5, forceRegenerate: false, maxRegenerateAttempts: 3 },
   highRiskTools: ['exec', 'write', 'edit'],
   dangerousToolPolicy: 'block' as const,
+  toolReviewGateMs: 10000,
   grounding: { networkPolicy: 'off' as const, verdictMode: 'flag' as const },
 };
 

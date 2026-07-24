@@ -165,22 +165,59 @@ export class ReviewerClient {
 
   /**
    * Call the reviewer model. Returns parsed JSON or null on failure.
+   *
+   * Options for the before_tool_call SECURITY GATE (never-over-block):
+   *  - `bypassQueue`: skip the shared serial `_reviewQueue` so a benign high-risk
+   *    tool's gate is not stalled behind unrelated summary/output reviews.
+   *  - `timeoutMs`: fail OPEN (resolve `null`) if the review does not complete in
+   *    time. The underlying call keeps running (its result is still cached); only
+   *    the CALLER's wait is bounded, so the tool is never stalled on a slow round-trip.
    */
-  async review<T>(systemPrompt: string, userContent: string): Promise<T | null> {
+  async review<T>(
+    systemPrompt: string,
+    userContent: string,
+    opts?: { bypassQueue?: boolean; timeoutMs?: number },
+  ): Promise<T | null> {
     const key = cacheKey(systemPrompt, userContent);
     const cached = getCached<T>(key);
     if (cached !== null) {
       return cached;
     }
 
-    const run = this._reviewQueue
-      .catch(() => undefined)
-      .then(() => this._reviewAfterQueue<T>(systemPrompt, userContent, key));
-    this._reviewQueue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    let core: Promise<T | null>;
+    if (opts?.bypassQueue) {
+      // Do NOT chain onto (or advance) the shared queue — run immediately.
+      core = this._reviewAfterQueue<T>(systemPrompt, userContent, key);
+    } else {
+      const run = this._reviewQueue
+        .catch(() => undefined)
+        .then(() => this._reviewAfterQueue<T>(systemPrompt, userContent, key));
+      this._reviewQueue = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      core = run;
+    }
+
+    // No gate requested (undefined/0/negative) → return the raw call. Callers that
+    // need the never-over-block bound (the before_tool_call security gate) MUST pass
+    // a positive timeoutMs; parseConfig guarantees toolReviewGateMs > 0.
+    if (opts?.timeoutMs == null || opts.timeoutMs <= 0) {
+      return core;
+    }
+
+    // Gate: whichever settles first. `core` never rejects (_reviewAfterQueue catches
+    // and returns null), so on timeout we fail open with null and let `core` finish
+    // in the background (its result is cached, harmless).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const gate = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), opts.timeoutMs);
+    });
+    try {
+      return await Promise.race([core, gate]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private async _reviewAfterQueue<T>(
