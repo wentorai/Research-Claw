@@ -33,6 +33,7 @@ import { ConsistencyChecker } from './src/hooks/consistency-checker.js';
 import { GoalParser } from './src/hooks/goal-parser.js';
 import { SummaryExtractor } from './src/hooks/summary-extractor.js';
 import { GroundingChecker } from './src/hooks/grounding-checker.js';
+import { ReviewStore, aggregateReview } from './src/core/review-store.js';
 import { AuditLogService } from './src/core/audit-log.js';
 import { registerSupervisorRpc } from './src/rpc.js';
 import { snapshotMessageSendingCtx, SUPERVISOR_REVIEW_SUMMARY_MARKER } from './src/hooks/hook-context.js';
@@ -53,6 +54,7 @@ let _consistencyChecker: ConsistencyChecker | null = null;
 let _goalParser: GoalParser | null = null;
 let _summaryExtractor: SummaryExtractor | null = null;
 let _groundingChecker: GroundingChecker | null = null;
+let _reviewStore: ReviewStore | null = null;
 let _activeConfig: SupervisorConfig | null = null;
 
 const _sessionStates = new Map<string, SessionState>();
@@ -246,6 +248,7 @@ const plugin: PluginDefinition = {
       _goalParser = new GoalParser(cfg, api.logger, _reviewerClient, _auditLog);
       _summaryExtractor = new SummaryExtractor(cfg, api.logger, _reviewerClient, _auditLog);
       _groundingChecker = new GroundingChecker(cfg, api.logger, _auditLog);
+      _reviewStore = new ReviewStore(_db, api.logger);
 
       process.once('exit', () => {
         try {
@@ -273,6 +276,7 @@ const plugin: PluginDefinition = {
     const goalParser = _goalParser!;
     const summaryExtractor = _summaryExtractor!;
     const groundingChecker = _groundingChecker!;
+    const reviewStore = _reviewStore!;
 
     // ── Register database lifecycle service ───────────────────────
     api.registerService({
@@ -384,9 +388,31 @@ const plugin: PluginDefinition = {
         return { ok: false, error: 'unsupported target: only { inlineText } is supported in this version' };
       }
       const reviewId = `manual-${++_manualReviewSeq}`;
+      reviewStore.begin(reviewId, { sessionKey: reviewId, runId: null, kind: 'manual' }, Date.now());
       const ephemeral = newSessionState(reviewId); // NOT stored in _sessionStates
-      const findings = await groundingChecker.runCheck(inlineText, reviewId, [], ephemeral);
-      return { ok: true, reviewId, findings };
+      try {
+        const findings = await groundingChecker.runCheck(inlineText, reviewId, [], ephemeral);
+        const agg = aggregateReview(findings);
+        reviewStore.finalize(reviewId, agg.state, { sessionKey: reviewId, runId: null, kind: 'manual', verdict: agg.verdict, findings }, Date.now());
+        return { ok: true, reviewId, verdict: agg.verdict, findings };
+      } catch (err) {
+        // Guarantee terminalization (no dangling `started`), symmetric with the
+        // auto path's .catch — independent of runCheck's internal error handling.
+        reviewStore.finalize(reviewId, 'failed', { sessionKey: reviewId, runId: null, kind: 'manual', verdict: 'none', findings: [] }, Date.now());
+        throw err;
+      }
+    });
+
+    // rc.supervisor.reviews.* — persisted review recovery (snapshot / replay).
+    // The DB is the truth source; these let a dashboard recover state after being
+    // offline or reconnecting, independent of any broadcast notification.
+    registerMethod('rc.supervisor.reviews.list', async (params) => {
+      const p = params as { sessionKey?: string; runId?: string; sinceUpdatedAt?: number; limit?: number; offset?: number };
+      return reviewStore.list(p);
+    });
+    registerMethod('rc.supervisor.reviews.get', async (params) => {
+      const id = (params as { reviewId?: unknown }).reviewId;
+      return { review: typeof id === 'string' ? reviewStore.get(id) : null };
     });
 
     // ── Register hooks (guarded: only once across discovery + gateway passes) ──
@@ -504,8 +530,25 @@ const plugin: PluginDefinition = {
         summaryExtractor.extractSummary(outputText, sessionKey, state);
         // Grounding: verify cited papers exist (fire-and-forget, never-block).
         // No-ops unless the operator opted into a network policy (default 'off').
-        const priorRefs = state.recentSummaries.flatMap((s) => s.references ?? []);
-        groundingChecker.check(outputText, sessionKey, priorRefs, state);
+        // The review lifecycle is PERSISTED (started → terminal) keyed by the
+        // per-turn runId, so a dashboard can recover it later via RPC even if it
+        // was offline — broadcast is only a notification, not the truth source.
+        if (activeCfg.grounding.networkPolicy !== 'off') {
+          const priorRefs = state.recentSummaries.flatMap((s) => s.references ?? []);
+          const runId = event.runId;
+          const reviewId = `auto:${sessionKey}:${runId}`;
+          reviewStore.begin(reviewId, { sessionKey, runId, kind: 'auto' }, Date.now());
+          groundingChecker
+            .runCheck(outputText, sessionKey, priorRefs, state)
+            .then((findings) => {
+              const agg = aggregateReview(findings);
+              reviewStore.finalize(reviewId, agg.state, { sessionKey, runId, kind: 'auto', verdict: agg.verdict, findings }, Date.now());
+            })
+            .catch((err) => {
+              reviewStore.finalize(reviewId, 'failed', { sessionKey, runId, kind: 'auto', verdict: 'none', findings: [] }, Date.now());
+              api.logger.error(`[Supervisor] grounding review failed: ${err instanceof Error ? err.message : String(err)}`);
+            });
+        }
         if (isCourseCorrectionActive(activeCfg)) {
           courseCorrector.analyzeSession(sessionKey, state);
         }
