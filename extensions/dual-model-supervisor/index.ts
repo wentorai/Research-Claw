@@ -129,8 +129,11 @@ function pushPendingFooter(state: SessionState, footer: PendingFooter, logger?: 
   }
 }
 
-/** Monotonic id for ephemeral manual reviews (stable, non-colliding, not time-based). */
+/** Monotonic id for ephemeral manual reviews within this process. Namespaced by the
+ *  persisted boot epoch so a per-process counter cannot collide across restarts. */
 let _manualReviewSeq = 0;
+/** Persisted, restart-monotonic epoch — namespaces reviewIds so restarts don't collide. */
+let _bootEpoch = 0;
 
 function getOrCreateSession(sessionId: string): SessionState {
   let state = _sessionStates.get(sessionId);
@@ -297,6 +300,14 @@ const plugin: PluginDefinition = {
       _summaryExtractor = new SummaryExtractor(cfg, api.logger, _reviewerClient, _auditLog);
       _groundingChecker = new GroundingChecker(cfg, api.logger, _auditLog);
       _reviewStore = new ReviewStore(_db, api.logger);
+      // Restart-stable identity + orphan recovery: bump a PERSISTED epoch (so a
+      // per-process manual counter cannot collide across restarts) and reclaim any
+      // 'started' review left behind by a prior crash (→ 'timedout').
+      _bootEpoch = _reviewStore.allocateBootEpoch();
+      // Only sweep reviews older than well beyond the max review duration (grounding
+      // timeout ~20s), so a restart overlapping an in-flight review never nukes a live one.
+      const sweptOrphans = _reviewStore.sweepOrphans(Date.now(), { olderThanMs: 60_000 });
+      if (sweptOrphans > 0) api.logger.warn(`[Supervisor] recovered ${sweptOrphans} orphaned 'started' review(s) → timedout`);
 
       process.once('exit', () => {
         try {
@@ -419,6 +430,7 @@ const plugin: PluginDefinition = {
       () => _sessionStates,
       () => _extractConfiguredProviders(api.pluginConfig as Record<string, unknown> | undefined, globalCfg),
       persistConfig,
+      () => reviewStore.isAvailable(),
     );
 
     // rc.supervisor.review — manual grounding check for arbitrary inline text.
@@ -436,14 +448,24 @@ const plugin: PluginDefinition = {
       if (inlineText === null) {
         return { ok: false, error: 'unsupported target: only { inlineText } is supported in this version' };
       }
-      const reviewId = `manual-${++_manualReviewSeq}`;
-      reviewStore.begin(reviewId, { sessionKey: reviewId, runId: null, kind: 'manual' }, Date.now());
+      // Epoch-namespaced id: `manual:e<epoch>:<seq>` cannot collide across restarts.
+      const reviewId = `manual:e${_bootEpoch}:${++_manualReviewSeq}`;
+      const beginRes = reviewStore.begin(reviewId, { sessionKey: reviewId, runId: null, kind: 'manual' }, Date.now());
       const ephemeral = newSessionState(reviewId); // NOT stored in _sessionStates
       try {
         const findings = await groundingChecker.runCheck(inlineText, reviewId, [], ephemeral);
         const agg = aggregateReview(findings);
-        reviewStore.finalize(reviewId, agg.state, { sessionKey: reviewId, runId: null, kind: 'manual', verdict: agg.verdict, findings }, Date.now());
-        return { ok: true, reviewId, verdict: agg.verdict, findings };
+        const finRes = reviewStore.finalize(reviewId, agg.state, { sessionKey: reviewId, runId: null, kind: 'manual', verdict: agg.verdict, findings }, Date.now());
+        // `ok` reflects that the CHECK ran (findings are real + returned inline).
+        // `persisted` tells the caller whether reviews.get(reviewId) will succeed later —
+        // so a DB-unavailable run cannot be mistaken for durable.
+        const persisted = beginRes.ok && finRes.ok;
+        // Distinguish "no DB" from a transient write error: dbUnavailable is TRUE only
+        // when a persistence step actually reported db_unavailable (not merely !isAvailable).
+        const dbUnavailable =
+          (!beginRes.ok && beginRes.reason === 'db_unavailable') ||
+          (!finRes.ok && finRes.reason === 'db_unavailable');
+        return { ok: true, reviewId, verdict: agg.verdict, findings, persisted, dbUnavailable };
       } catch (err) {
         // Guarantee terminalization (no dangling `started`), symmetric with the
         // auto path's .catch — independent of runCheck's internal error handling.
@@ -456,7 +478,7 @@ const plugin: PluginDefinition = {
     // The DB is the truth source; these let a dashboard recover state after being
     // offline or reconnecting, independent of any broadcast notification.
     registerMethod('rc.supervisor.reviews.list', async (params) => {
-      const p = params as { sessionKey?: string; runId?: string; sinceUpdatedAt?: number; limit?: number; offset?: number };
+      const p = params as { sessionKey?: string; runId?: string; since?: { updatedAt: number; reviewId: string }; sinceUpdatedAt?: number; limit?: number; offset?: number };
       return reviewStore.list(p);
     });
     registerMethod('rc.supervisor.reviews.get', async (params) => {
@@ -585,7 +607,7 @@ const plugin: PluginDefinition = {
         if (activeCfg.grounding.networkPolicy !== 'off') {
           const priorRefs = state.recentSummaries.flatMap((s) => s.references ?? []);
           const runId = event.runId;
-          const reviewId = `auto:${sessionKey}:${runId}`;
+          const reviewId = `auto:e${_bootEpoch}:${sessionKey}:${runId}`;
           reviewStore.begin(reviewId, { sessionKey, runId, kind: 'auto' }, Date.now());
           groundingChecker
             .runCheck(outputText, sessionKey, priorRefs, state)

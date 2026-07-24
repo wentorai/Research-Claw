@@ -28,6 +28,7 @@ export function registerSupervisorRpc(
   getSessionStates?: () => Map<string, import('./core/types.js').SessionState>,
   getConfiguredProviders?: () => ConfiguredProvider[],
   persistConfig?: (cfg: SupervisorConfig) => void,
+  getReviewStoreAvailable?: () => boolean,
 ): void {
   registerMethod('rc.supervisor.status', async () => {
     const cfg = getActiveConfig();
@@ -63,6 +64,7 @@ export function registerSupervisorRpc(
       dangerousToolPolicy: cfg.dangerousToolPolicy,
       toolReviewGateMs: cfg.toolReviewGateMs,
       grounding: cfg.grounding,
+      reviewStoreAvailable: getReviewStoreAvailable ? getReviewStoreAvailable() : undefined,
       stats,
       activeSessions,
       sessionsInfo,

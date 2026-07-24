@@ -23,13 +23,26 @@ import Database from 'better-sqlite3';
 import type { PluginLogger } from './types.js';
 
 /** Bump when the persisted shape or aggregation rules change. */
-export const REVIEW_SCHEMA_VERSION = 1;
+export const REVIEW_SCHEMA_VERSION = 2;
 
-export type ReviewState = 'started' | 'completed' | 'degraded' | 'failed';
-const TERMINAL: ReadonlySet<ReviewState> = new Set(['completed', 'degraded', 'failed']);
+// 'timedout' is a terminal DISTINCT from 'failed': failed = the check ran and threw;
+// timedout = the process died / never completed (orphan 'started' recovered on boot).
+export type ReviewState = 'started' | 'completed' | 'degraded' | 'failed' | 'timedout';
+const TERMINAL: ReadonlySet<ReviewState> = new Set(['completed', 'degraded', 'failed', 'timedout']);
 export function isTerminalReviewState(s: ReviewState): boolean {
   return TERMINAL.has(s);
 }
+
+/** Outcome of a persistence attempt — lets callers detect DB-unavailable rather
+ *  than silently no-op'ing (which made a manual review falsely report ok). */
+export type PersistOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'db_unavailable' }
+  | { ok: false; reason: 'error'; message: string };
+
+/** A composite replay cursor: strictly greater than (updatedAt, reviewId) is a TOTAL
+ *  order, so two records sharing a millisecond are never skipped on incremental replay. */
+export interface ReviewCursor { updatedAt: number; reviewId: string }
 
 export interface ReviewFinding {
   raw: string;
@@ -71,7 +84,12 @@ export class ReviewStore {
   constructor(db: Database.Database | null, logger: PluginLogger) {
     this.db = db;
     this.logger = logger;
-    if (db) this.migrate();
+    if (db) {
+      // Retry (don't immediately fail) if another connection holds a write lock —
+      // makes the boot-epoch allocation robust if two processes ever share the DB.
+      try { db.pragma('busy_timeout = 5000'); } catch { /* best-effort */ }
+      this.migrate();
+    }
   }
 
   private migrate(): void {
@@ -88,9 +106,14 @@ export class ReviewStore {
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS supervisor_review_meta (
+        k TEXT PRIMARY KEY,
+        v INTEGER NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS idx_reviews_session ON supervisor_reviews(sessionKey);
       CREATE INDEX IF NOT EXISTS idx_reviews_run ON supervisor_reviews(runId);
       CREATE INDEX IF NOT EXISTS idx_reviews_updated ON supervisor_reviews(updatedAt);
+      CREATE INDEX IF NOT EXISTS idx_reviews_cursor ON supervisor_reviews(updatedAt, reviewId);
     `);
   }
 
@@ -98,20 +121,74 @@ export class ReviewStore {
     return this.db?.open ? this.db : null;
   }
 
+  /** True when a real, open DB backs this store (persistence + recovery available). */
+  isAvailable(): boolean {
+    return this.getDb() !== null;
+  }
+
+  /**
+   * Allocate a process-global, restart-monotonic epoch. Persisted (read-modify-write)
+   * so it survives restarts: each process start bumps it. Used to namespace reviewIds
+   * so a per-process counter (manual-N) can never collide across restarts. Returns 0
+   * when there is no DB (caller must add its own uniqueness salt in that case).
+   */
+  allocateBootEpoch(): number {
+    const db = this.getDb();
+    if (!db) return 0;
+    try {
+      const tx = db.transaction(() => {
+        const row = db.prepare("SELECT v FROM supervisor_review_meta WHERE k = 'boot_epoch'").get() as { v: number } | undefined;
+        const next = (row?.v ?? 0) + 1;
+        db.prepare("INSERT INTO supervisor_review_meta (k, v) VALUES ('boot_epoch', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(next);
+        return next;
+      });
+      // BEGIN IMMEDIATE: take the write lock upfront so a concurrent process cannot
+      // read the same v and produce a duplicate epoch (deferred would deadlock/BUSY).
+      return tx.immediate();
+    } catch (err) {
+      this.logger.error(`[ReviewStore] allocateBootEpoch failed: ${err instanceof Error ? err.message : String(err)}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Recover orphaned 'started' reviews (a crash between begin and finalize). Transitions
+   * every 'started' whose updatedAt <= now - olderThanMs to the 'timedout' terminal, so a
+   * review never hangs in 'started' forever. Deterministic: caller injects `now`. Returns
+   * the number swept.
+   */
+  sweepOrphans(now: number, opts?: { olderThanMs?: number }): number {
+    const db = this.getDb();
+    if (!db) return 0;
+    try {
+      const cutoff = now - (opts?.olderThanMs ?? 0);
+      const res = db
+        .prepare("UPDATE supervisor_reviews SET state = 'timedout', verdict = 'unverifiable', updatedAt = ? WHERE state = 'started' AND updatedAt <= ?")
+        .run(now, cutoff);
+      return res.changes;
+    } catch (err) {
+      this.logger.error(`[ReviewStore] sweepOrphans failed: ${err instanceof Error ? err.message : String(err)}`);
+      return 0;
+    }
+  }
+
   /** Persist that a review has STARTED. No-op if the review already exists
    *  (idempotent; never downgrades an already-terminal review). */
-  begin(reviewId: string, meta: { sessionKey: string; runId?: string | null; kind: 'auto' | 'manual' }, now: number): void {
+  begin(reviewId: string, meta: { sessionKey: string; runId?: string | null; kind: 'auto' | 'manual' }, now: number): PersistOutcome {
     const db = this.getDb();
-    if (!db) return;
+    if (!db) return { ok: false, reason: 'db_unavailable' };
     try {
       const existing = db.prepare('SELECT state FROM supervisor_reviews WHERE reviewId = ?').get(reviewId) as { state: string } | undefined;
-      if (existing) return; // already started or already terminal → do not overwrite
+      if (existing) return { ok: true }; // already started or already terminal → do not overwrite
       db.prepare(
         `INSERT INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt)
          VALUES (?, ?, ?, ?, ?, 'started', 'none', '[]', ?, ?)`,
       ).run(reviewId, REVIEW_SCHEMA_VERSION, meta.sessionKey, meta.runId ?? null, meta.kind, now, now);
+      return { ok: true };
     } catch (err) {
-      this.logger.error(`[ReviewStore] begin failed: ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[ReviewStore] begin failed: ${message}`);
+      return { ok: false, reason: 'error', message };
     }
   }
 
@@ -123,9 +200,9 @@ export class ReviewStore {
     state: Exclude<ReviewState, 'started'>,
     data: { sessionKey: string; runId?: string | null; kind: 'auto' | 'manual'; verdict: string; findings: ReviewFinding[] },
     now: number,
-  ): void {
+  ): PersistOutcome {
     const db = this.getDb();
-    if (!db) return;
+    if (!db) return { ok: false, reason: 'db_unavailable' };
     try {
       const existing = db.prepare('SELECT state FROM supervisor_reviews WHERE reviewId = ?').get(reviewId) as { state: string } | undefined;
       const findingsJson = JSON.stringify(data.findings);
@@ -134,13 +211,16 @@ export class ReviewStore {
           `INSERT INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(reviewId, REVIEW_SCHEMA_VERSION, data.sessionKey, data.runId ?? null, data.kind, state, data.verdict, findingsJson, now, now);
-        return;
+        return { ok: true };
       }
-      if (isTerminalReviewState(existing.state as ReviewState)) return; // first terminal wins — idempotent
+      if (isTerminalReviewState(existing.state as ReviewState)) return { ok: true }; // first terminal wins — idempotent
       db.prepare('UPDATE supervisor_reviews SET state = ?, verdict = ?, findings = ?, updatedAt = ? WHERE reviewId = ?')
         .run(state, data.verdict, findingsJson, now, reviewId);
+      return { ok: true };
     } catch (err) {
-      this.logger.error(`[ReviewStore] finalize failed: ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[ReviewStore] finalize failed: ${message}`);
+      return { ok: false, reason: 'error', message };
     }
   }
 
@@ -151,22 +231,41 @@ export class ReviewStore {
     return row ? this.toRecord(row) : null;
   }
 
-  /** List reviews (snapshot / replay). Filter by session or run; paginated;
-   *  ordered by updatedAt DESC. `sinceUpdatedAt` supports incremental replay. */
-  list(params: { sessionKey?: string; runId?: string; sinceUpdatedAt?: number; limit?: number; offset?: number }): { reviews: ReviewRecord[]; total: number } {
+  /**
+   * List reviews (snapshot / replay). Filter by session or run; paginated.
+   *  - Snapshot (no `since`): latest-first (updatedAt DESC, reviewId DESC).
+   *  - Replay (`since` composite cursor): walks FORWARD by the total order
+   *    (updatedAt, reviewId), so two records sharing a millisecond are never
+   *    skipped; `nextCursor` is the last row's cursor — feed it back verbatim.
+   *  - `sinceUpdatedAt` (legacy, strict `> ms`) is kept for back-compat.
+   */
+  list(params: { sessionKey?: string; runId?: string; since?: ReviewCursor; sinceUpdatedAt?: number; limit?: number; offset?: number }): { reviews: ReviewRecord[]; total: number; nextCursor?: ReviewCursor } {
     const db = this.getDb();
     if (!db) return { reviews: [], total: 0 };
     const conditions: string[] = [];
     const values: unknown[] = [];
     if (params.sessionKey) { conditions.push('sessionKey = ?'); values.push(params.sessionKey); }
     if (params.runId) { conditions.push('runId = ?'); values.push(params.runId); }
-    if (typeof params.sinceUpdatedAt === 'number') { conditions.push('updatedAt > ?'); values.push(params.sinceUpdatedAt); }
+    const replay = !!params.since;
+    if (params.since) {
+      conditions.push('(updatedAt > ? OR (updatedAt = ? AND reviewId > ?))');
+      values.push(params.since.updatedAt, params.since.updatedAt, params.since.reviewId);
+    } else if (typeof params.sinceUpdatedAt === 'number') {
+      conditions.push('updatedAt > ?');
+      values.push(params.sinceUpdatedAt);
+    }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const total = (db.prepare(`SELECT COUNT(*) as n FROM supervisor_reviews ${where}`).get(...values) as { n: number }).n;
     const limit = Math.min(params.limit ?? 50, 200);
     const offset = params.offset ?? 0;
-    const rows = db.prepare(`SELECT * FROM supervisor_reviews ${where} ORDER BY updatedAt DESC LIMIT ? OFFSET ?`).all(...values, limit, offset) as Row[];
-    return { reviews: rows.map((r) => this.toRecord(r)), total };
+    const order = replay ? 'updatedAt ASC, reviewId ASC' : 'updatedAt DESC, reviewId DESC';
+    const rows = db.prepare(`SELECT * FROM supervisor_reviews ${where} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...values, limit, offset) as Row[];
+    const reviews = rows.map((r) => this.toRecord(r));
+    if (replay && reviews.length) {
+      const last = reviews[reviews.length - 1];
+      return { reviews, total, nextCursor: { updatedAt: last.updatedAt, reviewId: last.reviewId } };
+    }
+    return { reviews, total };
   }
 
   private toRecord(row: Row): ReviewRecord {

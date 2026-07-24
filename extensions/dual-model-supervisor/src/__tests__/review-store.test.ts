@@ -8,7 +8,7 @@
 
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ReviewStore, aggregateReview, REVIEW_SCHEMA_VERSION, type ReviewFinding } from '../core/review-store.js';
+import { ReviewStore, aggregateReview, REVIEW_SCHEMA_VERSION, isTerminalReviewState, type ReviewFinding } from '../core/review-store.js';
 
 const LOGGER = { info() {}, warn() {}, error() {} };
 let db: Database.Database;
@@ -87,5 +87,67 @@ describe('M6 review persistence / replay (no broadcast involved)', () => {
     const page = store.list({ sessionKey: 'sk', limit: 2, offset: 0 });
     expect(page.total).toBe(5);
     expect(page.reviews.length).toBe(2);
+  });
+
+  // H4-d: composite (updatedAt, reviewId) cursor — same-millisecond records are never skipped.
+  it('same-millisecond records are NOT skipped on replay (composite cursor)', () => {
+    store.finalize('a', 'completed', { sessionKey: 'sk', kind: 'auto', verdict: 'exists', findings: [] }, 200);
+    store.finalize('b', 'completed', { sessionKey: 'sk', kind: 'auto', verdict: 'exists', findings: [] }, 200); // SAME ms
+    const p1 = store.list({ sessionKey: 'sk', since: { updatedAt: 0, reviewId: '' }, limit: 1 });
+    expect(p1.reviews.map((r) => r.reviewId)).toEqual(['a']);
+    const p2 = store.list({ sessionKey: 'sk', since: p1.nextCursor, limit: 1 });
+    expect(p2.reviews.map((r) => r.reviewId)).toEqual(['b']); // co-ms record reachable, not skipped
+    const p3 = store.list({ sessionKey: 'sk', since: p2.nextCursor, limit: 1 });
+    expect(p3.reviews).toEqual([]); // clean end, no infinite loop
+  });
+});
+
+describe('M6 (reopened) restart identity, orphan recovery, DB availability', () => {
+  // H4-a: boot epoch is PERSISTED, so a per-process counter can't collide across restarts.
+  it('allocateBootEpoch is persisted + monotonic across store re-instantiation on the same DB', () => {
+    const db2 = new Database(':memory:');
+    const e1 = new ReviewStore(db2, LOGGER).allocateBootEpoch();
+    const e2 = new ReviewStore(db2, LOGGER).allocateBootEpoch(); // simulate restart on the SAME db
+    expect(e2).toBe(e1 + 1); // proves DB persistence, not an in-memory counter
+    db2.close();
+  });
+
+  // H4-b: orphan 'started' recovery.
+  it('sweepOrphans transitions crash-orphaned started → timedout and never touches a terminal', () => {
+    store.begin('auto:orphan', { sessionKey: 'sk', runId: 'r', kind: 'auto' }, 1000); // never finalized (crash)
+    store.finalize('done', 'completed', { sessionKey: 'sk', kind: 'auto', verdict: 'exists', findings: [] }, 1000);
+    expect(store.sweepOrphans(5000)).toBe(1);
+    expect(store.get('auto:orphan')!.state).toBe('timedout');
+    expect(isTerminalReviewState('timedout')).toBe(true);
+    expect(store.get('done')!.state).toBe('completed'); // terminal untouched
+  });
+
+  it('sweepOrphans respects olderThanMs deterministically (injected now, no real timer)', () => {
+    store.begin('r', { sessionKey: 'sk', kind: 'auto' }, 1000);
+    expect(store.sweepOrphans(1000 + 25_000, { olderThanMs: 30_000 })).toBe(0); // not yet expired
+    expect(store.get('r')!.state).toBe('started');
+    expect(store.sweepOrphans(1000 + 40_000, { olderThanMs: 30_000 })).toBe(1); // expired
+    expect(store.get('r')!.state).toBe('timedout');
+  });
+
+  it('a swept timedout review is terminal — a late begin cannot resurrect it', () => {
+    store.begin('r', { sessionKey: 'sk', kind: 'auto' }, 1000);
+    store.sweepOrphans(5000);
+    store.begin('r', { sessionKey: 'sk', kind: 'auto' }, 6000); // late begin
+    expect(store.get('r')!.state).toBe('timedout');
+  });
+
+  // H4-e: DB-unavailable is observable, not a silent no-op.
+  it('begin/finalize report db_unavailable and isAvailable=false with no DB', () => {
+    const s = new ReviewStore(null, LOGGER);
+    expect(s.isAvailable()).toBe(false);
+    expect(s.begin('r', { sessionKey: 'r', kind: 'manual' }, 1)).toEqual({ ok: false, reason: 'db_unavailable' });
+    expect(s.finalize('r', 'completed', { sessionKey: 'r', kind: 'manual', verdict: 'none', findings: [] }, 2)).toEqual({ ok: false, reason: 'db_unavailable' });
+  });
+
+  it('begin/finalize report ok with a real DB', () => {
+    expect(store.begin('r', { sessionKey: 'sk', kind: 'auto' }, 1).ok).toBe(true);
+    expect(store.finalize('r', 'completed', { sessionKey: 'sk', kind: 'auto', verdict: 'exists', findings: [] }, 2).ok).toBe(true);
+    expect(store.isAvailable()).toBe(true);
   });
 });
