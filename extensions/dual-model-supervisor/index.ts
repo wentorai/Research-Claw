@@ -493,7 +493,7 @@ const plugin: PluginDefinition = {
     // Dashboard users see review results in the Supervisor panel instead.
     // When delivering to Telegram/WeChat/Discord, the review footer is appended so
     // users who interact through IM channels receive the audit report directly.
-    api.on('message_sending', async (event, ctx) => {
+    api.on('message_sending', (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
 
       if (!isSupervisorActive(activeCfg)) {
@@ -531,27 +531,19 @@ const plugin: PluginDefinition = {
         return {};
       }
 
-      // Channel delivery — prefer the footer cached by llm_output (consume once).
+      // Channel delivery — deliver the footer cached by llm_output (consume once).
       if (state?.pendingChannelReviewFooter) {
         const footer = state.pendingChannelReviewFooter;
         state.pendingChannelReviewFooter = undefined;
         return { content: footer };
       }
 
-      // No cached footer — perform live review with footer for channel.
-      if (!activeCfg.appendReviewToChannelOutput) {
-        return {};
-      }
-
-      const liveState = getOrCreateSession(sessionKey);
-      const modified = await outputReviewer.reviewMessageSending(text, sessionKey, liveState, {
-        attachSummary: true,
-      });
-
-      if (modified !== null) {
-        return { content: modified };
-      }
-
+      // No cached footer: the async llm_output review has not produced one for
+      // this turn. NEVER run a live reviewer on the delivery path — that would
+      // block outbound delivery on reviewer/network latency (never-block
+      // invariant) and would create a permanent session just to review. The
+      // review result reaches the Dashboard via the audit path regardless;
+      // here we best-effort pass the message through unchanged.
       return {};
     });
 
