@@ -58,25 +58,34 @@ let _activeConfig: SupervisorConfig | null = null;
 const _sessionStates = new Map<string, SessionState>();
 let _hooksDone = false;
 
+/** Fresh SessionState value (not stored). Used for both tracked sessions and
+ *  ephemeral manual-review runs (which must NOT enter the session map). */
+function newSessionState(sessionId: string): SessionState {
+  return {
+    sessionId,
+    targetConclusions: [],
+    goalConfirmed: false,
+    keyConclusions: [],
+    userPreferences: [],
+    methodologyDecisions: [],
+    recentOutputs: [],
+    recentSummaries: [],
+    preCompactionMemory: [],
+    regenerateAttempts: 0,
+    regenerateHistory: [],
+    pendingReviewFooter: undefined,
+    pendingChannelReviewFooter: undefined,
+    lastReviewReport: undefined,
+  };
+}
+
+/** Monotonic id for ephemeral manual reviews (stable, non-colliding, not time-based). */
+let _manualReviewSeq = 0;
+
 function getOrCreateSession(sessionId: string): SessionState {
   let state = _sessionStates.get(sessionId);
   if (!state) {
-    state = {
-      sessionId,
-      targetConclusions: [],
-      goalConfirmed: false,
-      keyConclusions: [],
-      userPreferences: [],
-      methodologyDecisions: [],
-      recentOutputs: [],
-      recentSummaries: [],
-      preCompactionMemory: [],
-      regenerateAttempts: 0,
-      regenerateHistory: [],
-      pendingReviewFooter: undefined,
-      pendingChannelReviewFooter: undefined,
-      lastReviewReport: undefined,
-    };
+    state = newSessionState(sessionId);
     _sessionStates.set(sessionId, state);
   }
   return state;
@@ -356,6 +365,27 @@ const plugin: PluginDefinition = {
       () => _extractConfiguredProviders(api.pluginConfig as Record<string, unknown> | undefined, globalCfg),
       persistConfig,
     );
+
+    // rc.supervisor.review — manual grounding check for arbitrary inline text.
+    // Runs on an EPHEMERAL session state (never entered into _sessionStates), so
+    // repeated/concurrent manual reviews do not accumulate sessions and cannot
+    // delete a real session. Respects the grounding networkPolicy (off →
+    // unverifiable/local-only). messageRef/workspacePath are reserved (explicit
+    // unsupported error, never a silent no-op).
+    registerMethod('rc.supervisor.review', async (params) => {
+      const target = (params as { target?: unknown }).target;
+      const inlineText =
+        target && typeof target === 'object' && typeof (target as { inlineText?: unknown }).inlineText === 'string'
+          ? (target as { inlineText: string }).inlineText
+          : null;
+      if (inlineText === null) {
+        return { ok: false, error: 'unsupported target: only { inlineText } is supported in this version' };
+      }
+      const reviewId = `manual-${++_manualReviewSeq}`;
+      const ephemeral = newSessionState(reviewId); // NOT stored in _sessionStates
+      const findings = await groundingChecker.runCheck(inlineText, reviewId, [], ephemeral);
+      return { ok: true, reviewId, findings };
+    });
 
     // ── Register hooks (guarded: only once across discovery + gateway passes) ──
 
