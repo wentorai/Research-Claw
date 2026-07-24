@@ -12,6 +12,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 
 import type {
@@ -19,6 +20,7 @@ import type {
   PluginDefinition,
   SupervisorConfig,
   SessionState,
+  PendingFooter,
   ModelsProviderEntry,
   ConfiguredProvider,
 } from './src/core/types.js';
@@ -76,9 +78,55 @@ function newSessionState(sessionId: string): SessionState {
     regenerateAttempts: 0,
     regenerateHistory: [],
     pendingReviewFooter: undefined,
-    pendingChannelReviewFooter: undefined,
+    turnSeqCounter: 0,
+    pendingFooters: [],
+    lastDeliveredTurnSeq: 0,
     lastReviewReport: undefined,
   };
+}
+
+/** Max turn-scoped footers kept per session before the oldest is evicted. */
+const MAX_PENDING_FOOTERS = 8;
+
+/**
+ * Stable content hash used to correlate a cached footer to the exact outbound
+ * message that produced it. Trimmed so trailing-whitespace differences between
+ * the reviewed text and the delivered text do not spuriously withhold a footer.
+ */
+export function stableContentHash(s: string): string {
+  return createHash('sha1').update(s.trim()).digest('hex');
+}
+
+/**
+ * Pick the footer to deliver onto an outbound message: an un-delivered footer
+ * whose `outputHash` matches this outbound content, for a turn not already
+ * delivered. When several undelivered footers share the same content hash (two
+ * byte-identical turns in one session, whose async reviews may have completed
+ * out of order), the OLDEST turn is chosen — otherwise consuming a newer turn's
+ * entry would poison `lastDeliveredTurnSeq` and silently withhold the older one.
+ */
+export function selectPendingFooter(
+  footers: PendingFooter[],
+  contentHash: string,
+  lastDeliveredTurnSeq: number,
+): PendingFooter | undefined {
+  return footers
+    .filter((f) => !f.consumed && f.outputHash === contentHash && f.turnSeq > lastDeliveredTurnSeq)
+    .sort((a, b) => a.turnSeq - b.turnSeq)[0];
+}
+
+/**
+ * Append a turn-scoped footer to the session's bounded FIFO, evicting the oldest
+ * (recording the eviction) when over capacity. Never blocks; pure state mutation.
+ */
+function pushPendingFooter(state: SessionState, footer: PendingFooter, logger?: { warn: (m: string) => void }): void {
+  state.pendingFooters.push(footer);
+  while (state.pendingFooters.length > MAX_PENDING_FOOTERS) {
+    const evicted = state.pendingFooters.shift();
+    if (evicted && !evicted.consumed && logger) {
+      logger.warn(`[Supervisor] evicted un-delivered channel footer for turn ${evicted.turnSeq} (FIFO cap ${MAX_PENDING_FOOTERS})`);
+    }
+  }
 }
 
 /** Monotonic id for ephemeral manual reviews (stable, non-colliding, not time-based). */
@@ -557,12 +605,19 @@ const plugin: PluginDefinition = {
         // Review always runs (to record results for Dashboard panel), footer only when channel delivery is enabled
         if (!outputText.includes(SUPERVISOR_REVIEW_SUMMARY_MARKER)) {
           const shouldAttachToChannel = activeCfg.appendReviewToChannelOutput;
+          // Stamp this turn's identity NOW — at the one point we can see the content —
+          // because OC's outbound delivery path carries no runId/turn id (only
+          // ctx.channelId + ctx.sessionKey). The async review below resolves later
+          // (fire-and-forget by OC), and the resulting footer is delivered ONLY onto
+          // an outbound message whose content hashes to `outputHash`, so a slow turn's
+          // footer can never replace a different turn's outbound message.
+          const turnSeq = ++state.turnSeqCounter;
+          const outputHash = stableContentHash(outputText);
           outputReviewer.reviewMessageSending(outputText, sessionKey, state, {
             attachSummary: shouldAttachToChannel,
           }).then((modified) => {
             if (modified !== null) {
-              // Cache for channel delivery in message_sending hook
-              state.pendingChannelReviewFooter = modified;
+              pushPendingFooter(state, { turnSeq, runId: event.runId, outputHash, footer: modified, createdAt: Date.now(), consumed: false }, api.logger);
             }
           }).catch((err) => {
             api.logger.error(`[Supervisor] llm_output async review failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -592,8 +647,10 @@ const plugin: PluginDefinition = {
         return {};
       }
 
-      // Channel-delivery + streaming detection reads the EVENT (metadata lives there).
-      const snap = snapshotMessageSendingCtx(event);
+      // Channel-delivery + streaming detection: channel identity is AUTHORITATIVE on
+      // the ctx (ctx.channelId), because one real OC outbound path fires the event as
+      // { to, content } with no metadata at all. Pass BOTH so detection reads the ctx.
+      const snap = snapshotMessageSendingCtx(event, ctx);
       if (snap.deferReview) {
         return {};
       }
@@ -606,29 +663,53 @@ const plugin: PluginDefinition = {
         return {};
       }
       const state = _sessionStates.get(sessionKey);
+      if (!state) {
+        return {};
+      }
 
-      // Only attach review footer when delivering through external channels
+      // Only attach review footers when delivering through external channels.
+      // For dashboard/web delivery we KEEP the footers cached (the panel/audit path
+      // renders them) — do not clear, or a later channel delivery of the same turn
+      // would lose its footer.
       if (!snap.isChannelDelivery) {
-        if (state?.pendingChannelReviewFooter) {
-          state.pendingChannelReviewFooter = undefined;
+        return {};
+      }
+
+      // Idempotent: never double-footer a message that already carries one.
+      if (text.includes(SUPERVISOR_REVIEW_SUMMARY_MARKER)) {
+        return {};
+      }
+
+      // Correlate: deliver ONLY a footer computed from THIS outbound content, for a
+      // turn not already delivered. OC gives no runId on the delivery path, so the
+      // content hash is the load-bearing correlation key. This makes cross-turn
+      // replacement structurally impossible: turn 2's content cannot match turn 1's
+      // footer hash.
+      const contentHash = stableContentHash(text);
+      const match = selectPendingFooter(state.pendingFooters, contentHash, state.lastDeliveredTurnSeq);
+
+      if (!match) {
+        // No footer matches this exact outbound content. If an un-delivered footer is
+        // pending but did NOT match, that is a genuine correlation miss worth recording
+        // (degrade + observe) — but we NEVER pop some other turn's footer onto this
+        // message. Either way, pass the message through unchanged (never-block).
+        if (state.pendingFooters.some((f) => !f.consumed)) {
+          auditLog.record({
+            sessionId: sessionKey,
+            type: 'output_review',
+            action: 'warn',
+            details: 'channel outbound content did not match any pending review footer; footer withheld (no misdelivery)',
+            timestamp: Date.now(),
+          });
         }
         return {};
       }
 
-      // Channel delivery — deliver the footer cached by llm_output (consume once).
-      if (state?.pendingChannelReviewFooter) {
-        const footer = state.pendingChannelReviewFooter;
-        state.pendingChannelReviewFooter = undefined;
-        return { content: footer };
-      }
-
-      // No cached footer: the async llm_output review has not produced one for
-      // this turn. NEVER run a live reviewer on the delivery path — that would
-      // block outbound delivery on reviewer/network latency (never-block
-      // invariant) and would create a permanent session just to review. The
-      // review result reaches the Dashboard via the audit path regardless;
-      // here we best-effort pass the message through unchanged.
-      return {};
+      match.consumed = true;
+      state.lastDeliveredTurnSeq = Math.max(state.lastDeliveredTurnSeq, match.turnSeq);
+      // Drop consumed footers so the FIFO stays small.
+      state.pendingFooters = state.pendingFooters.filter((f) => !f.consumed);
+      return { content: match.footer };
     });
 
     // before_message_write — synchronously prepare session state for the review
@@ -844,7 +925,8 @@ function _extractConfiguredProviders(
  * in production; performs no mutation.
  */
 export function __peekSessionChannelFooter(sessionKey: string): string | undefined {
-  return _sessionStates.get(sessionKey)?.pendingChannelReviewFooter;
+  const pending = _sessionStates.get(sessionKey)?.pendingFooters.filter((f) => !f.consumed) ?? [];
+  return pending.length ? pending[pending.length - 1].footer : undefined;
 }
 
 export default plugin;

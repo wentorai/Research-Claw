@@ -36,9 +36,9 @@ export type MessageSendingCtxSnapshot = {
  * Also detects whether the message is being delivered through an external channel,
  * which determines whether the review footer should be appended.
  */
-export function snapshotMessageSendingCtx(ctx: unknown): MessageSendingCtxSnapshot {
-  const keys = ctx && typeof ctx === 'object' ? Object.keys(ctx as object).sort() : [];
-  const o = (ctx && typeof ctx === 'object' ? ctx : {}) as Record<string, unknown>;
+export function snapshotMessageSendingCtx(event: unknown, hookCtx?: unknown): MessageSendingCtxSnapshot {
+  const keys = event && typeof event === 'object' ? Object.keys(event as object).sort() : [];
+  const o = (event && typeof event === 'object' ? event : {}) as Record<string, unknown>;
   const flags = {
     streaming: o.streaming,
     partial: o.partial,
@@ -53,7 +53,7 @@ export function snapshotMessageSendingCtx(ctx: unknown): MessageSendingCtxSnapsh
   };
 
   // Detect channel delivery: the gateway sets channel info when delivering to external channels
-  const isChannelDelivery = detectChannelDelivery(o);
+  const isChannelDelivery = detectChannelDelivery(o, hookCtx);
 
   if (o.isFinal === true || o.done === true || o.complete === true) {
     return { keys, deferReview: false, isChannelDelivery, flags };
@@ -73,17 +73,34 @@ export function snapshotMessageSendingCtx(ctx: unknown): MessageSendingCtxSnapsh
 }
 
 /**
+ * Surfaces that are NOT external channels — a delivery whose authoritative
+ * `ctx.channelId` is one of these (or empty) must NOT receive the channel footer.
+ */
+const NON_CHANNEL_IDS = new Set(['', 'dashboard', 'web', 'internal', 'smoke']);
+
+/**
  * Detect whether the current message is being delivered through an external channel.
  *
- * The gateway provides channel context in `message_sending` when the message
- * is being routed to an external channel plugin (Telegram, WeChat, Discord, etc.).
- * Dashboard-initiated messages do NOT have channel context.
+ * AUTHORITATIVE signal: the OpenClaw hook ctx (2nd handler arg) carries a REQUIRED
+ * `channelId` on `PluginHookMessageContext` (host-derived from
+ * OriginatingChannel/Surface/Provider). One real OC path
+ * (`buildMessageSendingBeforeDeliver`) fires the event as `{ to, content }` with NO
+ * metadata at all — the channel lives ONLY in `ctx.channelId` — so channel detection
+ * MUST read the ctx, not just the event. Dashboard/web/internal surfaces are excluded.
+ *
+ * The event/metadata checks are kept as belt-and-suspenders for the other outbound
+ * paths (deliver/telegram) that DO stamp `metadata.channel`.
  */
-function detectChannelDelivery(ctx: Record<string, unknown>): boolean {
-  if (hasChannelSignals(ctx)) return true;
-  // OC 2026.6.1 PluginHookMessageSendingEvent carries channel info in `metadata`
-  // (event = { to, content, metadata }), so channel signals live there too.
-  const metadata = ctx.metadata as Record<string, unknown> | undefined;
+function detectChannelDelivery(event: Record<string, unknown>, hookCtx?: unknown): boolean {
+  // 1) Authoritative: non-empty ctx.channelId that is a real external channel.
+  const ctxObj = (hookCtx && typeof hookCtx === 'object' ? hookCtx : undefined) as Record<string, unknown> | undefined;
+  const channelId = ctxObj?.channelId;
+  if (typeof channelId === 'string' && channelId.length > 0) {
+    return !NON_CHANNEL_IDS.has(channelId.toLowerCase());
+  }
+  // 2) Belt-and-suspenders: some outbound paths stamp channel signals on the event/metadata.
+  if (hasChannelSignals(event)) return true;
+  const metadata = event.metadata as Record<string, unknown> | undefined;
   if (metadata && typeof metadata === 'object' && hasChannelSignals(metadata)) return true;
   return false;
 }

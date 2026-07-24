@@ -180,6 +180,22 @@ export interface RegenerateHistoryEntry {
   result: 'regenerating' | 'corrected' | 'max_reached';  // Outcome of this attempt
 }
 
+/**
+ * A channel review footer bound to the exact turn whose content produced it.
+ * OC's outbound `message_sending` path carries neither runId nor turn identity
+ * (only ctx.channelId + ctx.sessionKey), so the footer is correlated to its turn
+ * by `outputHash` (a stable hash of the assistant text under review): a footer
+ * may only ride the outbound message whose content hashes to the same value.
+ */
+export interface PendingFooter {
+  turnSeq: number;                 // Supervisor-minted monotonic turn id within the session
+  runId?: string;                  // llm_output runId (audit/lifecycle only — NOT the outbound match key)
+  outputHash: string;              // Stable hash of the exact assistant text the footer was computed from
+  footer: string;                  // The full message-with-footer to deliver on a matching outbound
+  createdAt: number;               // For bounded-FIFO eviction / staleness
+  consumed: boolean;               // Delivered once → never re-delivered
+}
+
 export interface SessionState {
   sessionId: string;               // Unique identifier for the conversation
   researchGoal?: string;           // The main research goal identified for this session
@@ -203,7 +219,12 @@ export interface SessionState {
   lostMemorySummary?: string;      // Summary of memories lost during conversation compression
   preCompactionMemory: MemoryItem[];  // Memory snapshots before conversation compaction
   pendingReviewFooter?: string;    // Cached review footer from llm_output (deprecated: for backward compat)
-  pendingChannelReviewFooter?: string; // Cached channel-only review footer, waiting to be attached in message_sending when delivering to external channel
+  // Channel review footers, each bound to the exact turn/content that produced it.
+  // Replaces a single session-keyed slot, which caused cross-turn content replacement
+  // (turn 1's late async review overwriting turn 2's outbound message). See PendingFooter.
+  turnSeqCounter: number;          // Supervisor-minted monotonic turn counter (OC gives no outbound runId)
+  pendingFooters: PendingFooter[]; // Bounded FIFO of turn-scoped footers awaiting channel delivery
+  lastDeliveredTurnSeq: number;    // High-water mark: never deliver a footer for a turn <= this
   lastReviewReport?: string;       // Most recent review report text (for Dashboard panel display)
   lastStaticSupervisorInjectAt?: number;  // Per-session debounce for static rules injection
   groundingFindings?: GroundingFinding[]; // Cached citation existence results (deduped by raw)
