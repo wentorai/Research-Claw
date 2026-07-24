@@ -286,9 +286,8 @@ while true; do
 
   # Non-zero, non-signal exit is a crash — point the user at the logs to send us.
   if [ "$CODE" -ne 0 ]; then
-    say "✗ Gateway exited (code $CODE). If it keeps failing, send us these two files:"
-    say "    ~/.research-claw/logs/openclaw.log   (full gateway log)"
-    say "    $RC_RUN_LOG   (this startup log)"
+    say "✗ Gateway exited (code $CODE). If it keeps failing, run:"
+    say "    bash scripts/diag.sh          # bundles logs + redacted config to send us"
   fi
   say "Restarting in 3s..."
   sleep 3
