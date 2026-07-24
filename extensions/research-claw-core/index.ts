@@ -41,6 +41,7 @@ import { registerSessionNamingRpc } from './src/session-naming/rpc.js';
 import { SessionNamingService } from './src/session-naming/service.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
+import { buildRpcErrorOutcome } from './src/rpc-error.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
@@ -1248,14 +1249,16 @@ const plugin: PluginDefinition = {
           const result = await handler(opts.params);
           opts.respond(true, result);
         } catch (err) {
-          // Handle both Error instances and plain ErrorShape objects from classifyError()
-          const message =
-            err instanceof Error
-              ? err.message
-              : typeof err === 'object' && err !== null && 'message' in err
-                ? String((err as { message: unknown }).message)
-                : String(err);
-          opts.respond(false, undefined, { code: 'PLUGIN_ERROR', message });
+          // Preserve the domain classification (classifyError → {code,message})
+          // instead of flattening to PLUGIN_ERROR, and record enough to trace
+          // the failure in the log file. Secret safety: log param KEYS only —
+          // never values (provider.upsert/setApiKey carry apiKey).
+          const paramKeys =
+            opts.params && typeof opts.params === 'object' ? Object.keys(opts.params) : [];
+          const outcome = buildRpcErrorOutcome(method, err, paramKeys);
+          if (outcome.level === 'error') api.logger.error(outcome.line);
+          else api.logger.warn(outcome.line);
+          opts.respond(false, undefined, { code: outcome.code, message: outcome.message });
         }
       });
     };
