@@ -487,7 +487,8 @@ describe('handleChatEvent error/aborted — parity with chat.ts:309-334', () => 
     expect(state.streamText).toBeNull();
     expect(state.runId).toBeNull();
     expect(state.lastError).toBe('Model overloaded, please retry');
-    expect(state.messages).toHaveLength(0); // no message appended on error
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].text).toBe('partial...');
   });
 
   /**

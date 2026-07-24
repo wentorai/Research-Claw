@@ -149,9 +149,16 @@ export default function ChatView() {
   const continueRun = useChatStore((s) => s.continueRun);
   const lastErrorMeta = useChatStore((s) => s.lastErrorMeta);
   const retry = useChatStore((s) => s.retry);
-  const hasRetryDraft = useChatStore((s) => s._lastSentDraft !== null);
+  const hasResendSource = useChatStore((s) =>
+    s._lastSentDraft !== null
+    || s.messages.some((message) =>
+      message.role === 'user'
+      && (Boolean(extractVisibleText(message).trim()) || Boolean(message.references?.length)),
+    ),
+  );
   const loadHistory = useChatStore((s) => s.loadHistory);
   const loadSessionUsage = useChatStore((s) => s.loadSessionUsage);
+  const createSession = useSessionsStore((s) => s.createSession);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const pendingTools = useToolStreamStore((s) => s.pendingTools);
   const activityLog = useToolStreamStore((s) => s.activityLog);
@@ -651,28 +658,43 @@ export default function ChatView() {
               }
               action={
                 <Space size="small">
-                  {canContinue && (
+                  {lastErrorMeta?.category === 'foreground-continue' && canContinue && (
                     <Button type="primary" size="small" onClick={continueRun}>
                       {t('chat.continueRun')}
                     </Button>
                   )}
-                  {!canContinue && lastErrorMeta?.retryable === true && hasRetryDraft && (
-                    <Button type="primary" size="small" onClick={retry}>
-                      {t('chat.retry')}
+                  {lastErrorMeta?.category === 'foreground-resend' && hasResendSource && (
+                    <Button
+                      type="primary"
+                      size="small"
+                      onClick={retry}
+                      disabled={connState !== 'connected'}
+                      title={connState === 'connected' ? undefined : t('chat.resendWaitingConnection')}
+                    >
+                      {t('chat.resend')}
                     </Button>
                   )}
-                  <Button size="small" onClick={() => setRightPanelTab('settings')}>
-                    {t('chat.openSettings')}
-                  </Button>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      void loadHistory();
-                      void loadSessionUsage();
-                    }}
-                  >
-                    {t('chat.refreshHistory')}
-                  </Button>
+                  {lastErrorMeta?.category === 'unrecoverable' && (
+                    <Button type="primary" size="small" onClick={() => { void createSession(); }}>
+                      {t('chat.newSession')}
+                    </Button>
+                  )}
+                  {lastErrorMeta?.category === 'config-fixable' && (
+                    <>
+                      <Button size="small" onClick={() => setRightPanelTab('settings')}>
+                        {t('chat.openSettings')}
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          void loadHistory();
+                          void loadSessionUsage();
+                        }}
+                      >
+                        {t('chat.refreshHistory')}
+                      </Button>
+                    </>
+                  )}
                 </Space>
               }
             />

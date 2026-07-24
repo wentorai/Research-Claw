@@ -377,8 +377,9 @@ describe('Chat store', () => {
           runId: 'run-1',
           streaming: true,
           streamText: null,
+          _userAbortedRunId: 'run-1',
           messages: [userMsg],
-          _lastSentDraft: { text: 'Edit me', attachments: [], runId: 'run-1' },
+          _lastSentDraft: { text: 'Edit me', attachments: [], references: [], runId: 'run-1' },
           _pendingUserMsgs: [userMsg],
         });
 
@@ -549,7 +550,7 @@ describe('Chat store', () => {
         sessionKey: 'main',
         streaming: true,
         messages: [userMsg],
-        _lastSentDraft: { text: 'Stop me', attachments: [], runId: 'run-1' },
+        _lastSentDraft: { text: 'Stop me', attachments: [], references: [], runId: 'run-1' },
       });
       mockGatewayClient.request.mockResolvedValueOnce({});
 
@@ -883,7 +884,7 @@ describe('Chat store', () => {
       expect(useChatStore.getState()._abortedUserSuppressCounts).toEqual({});
     });
 
-    it('drops empty aborted turns from history reload', async () => {
+    it('keeps provider-aborted turns in history so the failed request remains recoverable', async () => {
       mockGatewayClient.request.mockResolvedValueOnce({
         messages: [
           { role: 'user', text: '你能否清空着31篇论文', timestamp: 1000 },
@@ -902,6 +903,8 @@ describe('Chat store', () => {
       await useChatStore.getState().loadHistory();
 
       expect(useChatStore.getState().messages.map((m) => m.text)).toEqual([
+        '你能否清空着31篇论文',
+        undefined,
         '你能否清空这31篇论文',
         '请确认删除',
       ]);

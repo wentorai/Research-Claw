@@ -193,7 +193,10 @@ function startStaleStreamWatchdog(get: () => ChatState) {
           const message = i18n.t('chat.runStoppedAfterStaleStream');
           useChatStore.setState({
             lastError: message,
-            lastErrorMeta: { kind: 'unknown', message, suggestion: null, retryable: true, raw: '' },
+            lastErrorMeta: {
+              ...classifyRunFailure(message),
+              message,
+            },
           });
           useUiStore.getState().addNotification({
             type: 'error',
@@ -433,6 +436,7 @@ export interface ChatInputRestore {
 }
 
 interface LastSentDraft extends ChatInputRestore {
+  references: string[];
   runId: string;
 }
 
@@ -473,39 +477,6 @@ function filterAbortedUserMessagesFromTranscript(
     out.push(m);
   }
   return { messages: out, suppressCounts: next };
-}
-
-function isEmptyAbortedAssistantMessage(message: ChatMessage): boolean {
-  if (message.role !== 'assistant') return false;
-  const stopReason = message.stopReason;
-  const errorCode = (message as { errorCode?: string }).errorCode;
-  const errorMessage = (message as { errorMessage?: string }).errorMessage ?? '';
-  const aborted =
-    stopReason === 'aborted'
-    || errorCode === '20'
-    || /aborted/i.test(errorMessage);
-  return aborted && extractText(message).trim().length === 0;
-}
-
-function removeEmptyAbortedTurns(messages: ChatMessage[]): ChatMessage[] {
-  const out: ChatMessage[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    const current = messages[i];
-    const next = messages[i + 1];
-    if (
-      current?.role === 'user'
-      && next
-      && isEmptyAbortedAssistantMessage(next)
-    ) {
-      // The dashboard removes optimistic user input when a run is aborted.
-      // If the gateway transcript later reloads the empty aborted turn, keep
-      // the UI consistent by dropping both the cancelled user and empty reply.
-      i += 1;
-      continue;
-    }
-    out.push(current);
-  }
-  return out;
 }
 
 function bumpAbortedUserSuppress(
@@ -947,6 +918,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       _lastSentDraft: {
         text: displayText,
         attachments: cloneAttachments(attachments),
+        references: [...refPaths],
         runId: localRunId,
       },
       inputRestore: null,
@@ -1078,12 +1050,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         runId: null,
         _streamStartedAt: null, _lastDeltaAt: null,
         lastError: err instanceof Error ? err.message : i18n.t('chat.sendFailed'),
-        // Send failures (RPC reject / connection drop) are always retryable —
-        // the draft is still in _lastSentDraft.
-        lastErrorMeta: {
-          ...classifyRunFailure(err instanceof Error ? err.message : i18n.t('chat.sendFailed')),
-          retryable: true,
-        },
+        lastErrorMeta: classifyRunFailure(
+          err instanceof Error ? err.message : i18n.t('chat.sendFailed'),
+        ),
       });
       useTaskFlowStore.getState().endRun(localRunId, 'error');
     }
@@ -1185,7 +1154,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // Strip system-injected context and channel relay attribution from user messages.
       // Uses unified sanitizeUserMessage() which handles all known injection patterns:
       // [Research-Claw] blocks, System: lines, channel attributions (ou_xxx:, [System:], etc.)
-      const cleaned = removeEmptyAbortedTurns(visible
+      const cleaned = visible
         .map((m) => {
           if (m.role !== 'user') return m;
           const rawText = extractText(m);
@@ -1195,7 +1164,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           // Only set text override; keep original content for image rendering
           return { ...m, text: stripped };
         })
-        .filter(Boolean) as ChatMessage[]);
+        .filter(Boolean) as ChatMessage[];
 
       const filtered = filterAbortedUserMessagesFromTranscript(
         cleaned,
@@ -1320,7 +1289,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       data?: AgentFailureData;
     };
 
-    if (evt.sessionKey && normalizeSessionKey(evt.sessionKey) !== normalizeSessionKey(get().sessionKey)) {
+    // Session-less agent errors can belong to cron, heartbeat, or another
+    // operator. They must never leak into whichever chat happens to be active.
+    if (
+      !evt.sessionKey
+      || normalizeSessionKey(evt.sessionKey) !== normalizeSessionKey(get().sessionKey)
+    ) {
       return;
     }
 
@@ -1467,13 +1441,16 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         };
 
         if (event.runId === runId) {
-          // OC surfaces run failures as assistant finals prefixed with '⚠️'
-          // (embedded_run surface_error). Such a final ENDS the run but is a
+          // OC surface_error finals use the exact "Agent failed before reply"
+          // contract. A naked warning emoji is ordinary answer content. Such a
+          // final ENDS the run but is a
           // failure: keep the draft for Retry, and classify here so the Alert
           // appears deterministically — the follow-up agent-failure event may
           // be dropped by its own guards once this final clears runId (race
           // observed live: "⚠️ Agent failed before reply: Unknown model: …").
-          const isSurfacedFailure = text.trimStart().startsWith('⚠️');
+          const isSurfacedFailure =
+            event.message.isError === true
+            || /^(?:⚠️\s*)?(?:embedded\s+)?agent failed before reply:/i.test(text.trimStart());
           set((s) => ({
             messages: [...s.messages, finalMsg],
             streaming: false,
@@ -1585,67 +1562,54 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // gateway timeout / system abort (same 'aborted' event, no tag). Only the latter
         // surfaces an error + "continue" affordance; user stops stay silent.
         const wasUserAbort = get()._userAbortedRunId !== null && get()._userAbortedRunId === runId;
-        const abortPatch = wasUserAbort
-          ? { _userAbortedRunId: null }
-          : {
-              _userAbortedRunId: null,
-              lastError: i18n.t('chat.runTimedOut'),
-              // "Continue" is the recovery affordance here — not Retry.
-              lastErrorMeta: {
-                kind: 'timeout' as const,
-                message: i18n.t('chat.runTimedOut'),
-                suggestion: null,
-                retryable: false,
-                raw: '',
-              },
-              canContinue: true,
-            };
-
-        // Match restore to client runId (idempotencyKey), not gateway event.runId.
-        const partialText = get().streamText;
-        if (partialText) {
-          const abortedMsg: ChatMessage = {
-            role: 'assistant',
-            text: partialText,
-            timestamp: Date.now(),
-          };
+        const partialText = get().streamText?.trim() ? get().streamText : null;
+        if (wasUserAbort) {
+          // Match restore to client runId (idempotencyKey), not gateway event.runId.
           set((s) => {
             const restore = buildAbortInputRestorePatch(s, runId);
+            const restoredMessages = restore?.messages ?? s.messages;
             return {
-              messages: [...(restore?.messages ?? s.messages), abortedMsg],
-              streaming: false,
-              compacting: false,
-              streamText: null,
-              runId: null,
-              _streamStartedAt: null,
-              _lastDeltaAt: null,
-              _reconnectedAt: null,
+              ...clearActiveRunState(),
               ...(restore ?? { _pendingUserMsgs: [] }),
-              ...abortPatch,
+              messages: partialText
+                ? [...restoredMessages, { role: 'assistant', text: partialText, timestamp: Date.now() }]
+                : restoredMessages,
+              _userAbortedRunId: null,
+              canContinue: false,
             };
           });
         } else {
-          set((s) => {
-            const restore = buildAbortInputRestorePatch(s, runId);
-            return {
-              streaming: false,
-              compacting: false,
-              streamText: null,
-              runId: null,
-              _streamStartedAt: null,
-              _lastDeltaAt: null,
-              _reconnectedAt: null,
-              ...(restore ?? { _pendingUserMsgs: [] }),
-              ...abortPatch,
-            };
-          });
+          const timeoutMessage = partialText
+            ? i18n.t('chat.runTimedOut')
+            : i18n.t('chat.runTimedOutNoOutput');
+          const failureInfo = {
+            ...classifyRunFailure('request timed out', undefined, {
+              origin: 'foreground',
+              hasPartialOutput: Boolean(partialText),
+            }),
+            message: timeoutMessage,
+            retryable: !partialText,
+          };
+          set((s) => ({
+            ...clearActiveRunState(),
+            messages: partialText
+              ? [...s.messages, { role: 'assistant', text: partialText, timestamp: Date.now() }]
+              : s.messages,
+            _pendingUserMsgs: [],
+            _userAbortedRunId: null,
+            lastError: timeoutMessage,
+            lastErrorMeta: failureInfo,
+            canContinue: Boolean(partialText),
+          }));
         }
         // Top-banner notification for timeout/system aborts (user stops stay silent).
         if (!wasUserAbort) {
           useUiStore.getState().addNotification({
             type: 'error',
             title: i18n.t('chat.runIssueNotificationTitle'),
-            body: i18n.t('chat.runTimedOut'),
+            body: partialText
+              ? i18n.t('chat.runTimedOut')
+              : i18n.t('chat.runTimedOutNoOutput'),
             dedupKey: `chat-run-timeout:${get().sessionKey}:${runId ?? 'unknown'}`,
             targetSessionKey: get().sessionKey,
           });
@@ -1666,13 +1630,22 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
         // Classify with the gateway's own errorKind first; free-text sniffing
         // covers auth/network cases that upstream maps to "unknown".
-        const failureInfo = classifyRunFailure(event.errorMessage ?? '', event.errorKind);
-        set({
+        const partialText = get().streamText?.trim() ? get().streamText : null;
+        const failureInfo = classifyRunFailure(
+          event.errorMessage ?? '',
+          event.errorKind,
+          { origin: 'foreground', hasPartialOutput: Boolean(partialText) },
+        );
+        set((s) => ({
           ...clearActiveRunState(),
+          messages: partialText
+            ? [...s.messages, { role: 'assistant', text: partialText, timestamp: Date.now() }]
+            : s.messages,
           _pendingUserMsgs: [],
           lastError: failureInfo.message,
           lastErrorMeta: failureInfo,
-        });
+          canContinue: failureInfo.category === 'foreground-continue',
+        }));
         // Deferred gap recovery
         if (get()._pendingGapReload) {
           set({ _pendingGapReload: false });
@@ -1738,14 +1711,28 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   retry: () => {
-    const { streaming, sending, _lastSentDraft } = get();
+    const { streaming, sending, _lastSentDraft, messages } = get();
     // Same idle guard as continueRun; a Retry during an active run would fork it.
-    if (streaming || sending || !_lastSentDraft) return;
-    const draft = _lastSentDraft;
+    if (streaming || sending) return;
+    const latestUserMessage = [...messages].reverse().find((message) =>
+      message.role === 'user'
+      && (Boolean(extractText(message).trim()) || Boolean(message.references?.length)),
+    );
+    const draft = _lastSentDraft ?? (latestUserMessage
+      ? {
+          text: extractText(latestUserMessage),
+          attachments: [] as ChatAttachment[],
+          references: [...(latestUserMessage.references ?? [])],
+          runId: '',
+        }
+      : null);
+    if (!draft) return;
     set({ lastError: null, lastErrorMeta: null, canContinue: false });
     // send() generates a fresh localRunId → fresh idempotencyKey: the failed
     // attempt was never persisted, so this is a NEW run, not a duplicate.
-    void get().send(draft.text, draft.attachments);
+    void get().send(draft.text, draft.attachments, {
+      references: draft.references,
+    });
   },
 
   updateTokens: (input: number, output: number) => {

@@ -18,13 +18,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useChatStore } from '../../stores/chat';
 import i18n from '../../i18n';
+import { classifyRunFailure, recoveryCategory } from '../../utils/run-failure';
 import {
   ERROR_AUTH_401,
   ERROR_AUTH_401_FAILOVER,
   ERROR_RATE_LIMIT,
   ERROR_TIMEOUT_KIND,
+  ERROR_TIMEOUT_TEXT,
+  FINAL_BEFORE_TIMEOUT_ERROR,
+  ERROR_TIMEOUT_IDLE_REAL,
+  ERROR_ABORTED_TEXT,
+  ERROR_RATE_LIMIT_TEXT,
+  ERROR_AUTH_403_TEXT,
   ERROR_NETWORK,
   ERROR_CONTEXT_OVERFLOW,
+  ERROR_REFUSAL,
   ERROR_KIND_PRECEDENCE,
   ERROR_UNKNOWN,
 } from '../../__fixtures__/gateway-payloads/chat-error-events';
@@ -56,6 +64,61 @@ function primeErrorState(runId: string) {
   });
 }
 
+describe('classifyRunFailure — kind, category & new coverage (FIX-T1)', () => {
+  it('routes a foreground "This operation was aborted" with no output to resend', () => {
+    const info = classifyRunFailure('This operation was aborted');
+    expect(info.kind).toBe('aborted');
+    expect(info.category).toBe('foreground-resend');
+    expect(info.retryable).toBe(true);
+  });
+
+  it('routes the real screenshot timeout text to foreground resend', () => {
+    const info = classifyRunFailure('LLM request failed. | Request timed out before a response was generated.');
+    expect(info.kind).toBe('timeout');
+    expect(info.category).toBe('foreground-resend');
+  });
+
+  it('classifies a Cloudflare error as network (N11)', () => {
+    expect(classifyRunFailure('Cloudflare Error 502 Bad Gateway').kind).toBe('network');
+  });
+
+  it('maps the same transient failure by foreground/background and partial-output context', () => {
+    expect(recoveryCategory('timeout', { origin: 'background' })).toBe('transient-self-healing');
+    expect(recoveryCategory('network', { origin: 'foreground' })).toBe('foreground-resend');
+    expect(recoveryCategory('rate_limit', { origin: 'foreground', hasPartialOutput: true })).toBe('foreground-continue');
+    expect(recoveryCategory('aborted', { origin: 'foreground' })).toBe('foreground-resend');
+    expect(recoveryCategory('auth')).toBe('config-fixable');
+    expect(recoveryCategory('context_overflow')).toBe('unrecoverable');
+    expect(recoveryCategory('refusal')).toBe('unrecoverable');
+    expect(recoveryCategory('unknown')).toBe('foreground-resend');
+  });
+
+  it('auth is config-fixable (not a plain-resend transient)', () => {
+    const info = classifyRunFailure('HTTP 401: Invalid Authentication');
+    expect(info.kind).toBe('auth');
+    expect(info.category).toBe('config-fixable');
+  });
+
+  it('refusal is unrecoverable and NOT retryable', () => {
+    const info = classifyRunFailure('x', 'refusal');
+    expect(info.category).toBe('unrecoverable');
+    expect(info.retryable).toBe(false);
+  });
+
+  it('errorKind still wins over conflicting text, and carries a category', () => {
+    const info = classifyRunFailure('HTTP 401: Invalid Authentication', 'timeout');
+    expect(info.kind).toBe('timeout');
+    expect(info.category).toBe('foreground-resend');
+  });
+
+  it('empty foreground failure → unknown/resend, retryable', () => {
+    const info = classifyRunFailure('');
+    expect(info.kind).toBe('unknown');
+    expect(info.category).toBe('foreground-resend');
+    expect(info.retryable).toBe(true);
+  });
+});
+
 describe('Chat error classification (errorKind + text fallback)', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -69,7 +132,8 @@ describe('Chat error classification (errorKind + text fallback)', () => {
     expect(s.lastError).toBe(i18n.t('chat.failAuth'));
     expect(s.lastErrorMeta?.kind).toBe('auth');
     expect(s.lastErrorMeta?.suggestion).toBe(i18n.t('chat.failAuthSuggestion'));
-    expect(s.lastErrorMeta?.retryable).toBe(true);
+    expect(s.lastErrorMeta?.retryable).toBe(false);
+    expect(s.lastErrorMeta?.category).toBe('config-fixable');
     // Raw provider text preserved for the details block.
     expect(s.lastErrorMeta?.raw).toContain('HTTP 401: Invalid Authentication');
     expect(s.streaming).toBe(false);
@@ -97,6 +161,39 @@ describe('Chat error classification (errorKind + text fallback)', () => {
     const s = useChatStore.getState();
     expect(s.lastErrorMeta?.kind).toBe('timeout');
     expect(s.lastErrorMeta?.retryable).toBe(true);
+  });
+
+  it('surfaces the real idle-timeout error even when an empty final event arrived first', () => {
+    primeErrorState(ERROR_TIMEOUT_IDLE_REAL.runId);
+    useChatStore.getState().handleChatEvent(FINAL_BEFORE_TIMEOUT_ERROR);
+    expect(useChatStore.getState().runId).toBeNull();
+    expect(useChatStore.getState().lastError).toBeNull();
+
+    useChatStore.getState().handleChatEvent(ERROR_TIMEOUT_IDLE_REAL);
+    const state = useChatStore.getState();
+    expect(state.lastErrorMeta?.kind).toBe('timeout');
+    expect(state.lastErrorMeta?.category).toBe('foreground-resend');
+    expect(state.lastErrorMeta?.raw).toBe(ERROR_TIMEOUT_IDLE_REAL.errorMessage);
+  });
+
+  it.each([
+    [ERROR_TIMEOUT_TEXT, 'timeout'],
+    [ERROR_ABORTED_TEXT, 'aborted'],
+    [ERROR_RATE_LIMIT_TEXT, 'rate_limit'],
+    [ERROR_AUTH_403_TEXT, 'auth'],
+  ] as const)('classifies real text-only gateway payload %#', (event, expectedKind) => {
+    primeErrorState(event.runId);
+    useChatStore.getState().handleChatEvent(event);
+    expect(useChatStore.getState().lastErrorMeta?.kind).toBe(expectedKind);
+  });
+
+  it('honors upstream refusal and exposes no resend action', () => {
+    primeErrorState(ERROR_REFUSAL.runId);
+    useChatStore.getState().handleChatEvent(ERROR_REFUSAL);
+    const meta = useChatStore.getState().lastErrorMeta;
+    expect(meta?.kind).toBe('refusal');
+    expect(meta?.category).toBe('unrecoverable');
+    expect(meta?.retryable).toBe(false);
   });
 
   it('classifies ECONNREFUSED as network via text fallback', () => {
@@ -155,13 +252,19 @@ describe('retry() — resend last draft after failure', () => {
       lastError: 'boom',
       lastErrorMeta: {
         kind: 'network',
+        category: 'foreground-resend',
         message: 'boom',
         suggestion: null,
         retryable: true,
         raw: 'boom',
       },
       canContinue: false,
-      _lastSentDraft: { text: 'find papers on RNA', attachments: [], runId: 'old-run-id' },
+      _lastSentDraft: {
+        text: 'find papers on RNA',
+        attachments: [],
+        references: ['sources/rna-notes.pdf'],
+        runId: 'old-run-id',
+      },
       _pendingUserMsgs: [],
     });
   });
@@ -172,12 +275,13 @@ describe('retry() — resend last draft after failure', () => {
     await vi.waitFor(() => {
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'chat.send',
-        expect.objectContaining({ message: 'find papers on RNA' }),
+        expect.objectContaining({ message: expect.stringContaining('find papers on RNA') }),
       );
     });
     const call = mockGatewayClient.request.mock.calls.find((c) => c[0] === 'chat.send');
     expect(call?.[1].idempotencyKey).toBeTruthy();
     expect(call?.[1].idempotencyKey).not.toBe('old-run-id');
+    expect(call?.[1].message).toContain('sources/rna-notes.pdf');
     expect(useChatStore.getState().lastError).toBeNull();
   });
 
@@ -193,10 +297,128 @@ describe('retry() — resend last draft after failure', () => {
     expect(mockGatewayClient.request).not.toHaveBeenCalledWith('chat.send', expect.anything());
   });
 
-  it('is a no-op without a saved draft', () => {
-    useChatStore.setState({ _lastSentDraft: null });
+  it('recovers from the latest visible user turn when the in-memory draft is absent', async () => {
+    useChatStore.setState({
+      _lastSentDraft: null,
+      messages: [{
+        role: 'user',
+        text: 'rerun monitor analysis',
+        references: ['sources/monitor-context.md'],
+      }],
+    });
     useChatStore.getState().retry();
-    expect(mockGatewayClient.request).not.toHaveBeenCalledWith('chat.send', expect.anything());
+    await vi.waitFor(() => {
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'chat.send',
+        expect.objectContaining({
+          message: expect.stringContaining('sources/monitor-context.md'),
+        }),
+      );
+    });
+  });
+});
+
+describe('abort recovery semantics', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockGatewayClient.request.mockResolvedValue({});
+    useChatStore.setState({
+      messages: [{ role: 'user', text: 'long analysis', timestamp: 1 }],
+      sending: false,
+      streaming: true,
+      streamText: null,
+      runId: 'run-time-limit',
+      sessionKey: 'main',
+      lastError: null,
+      lastErrorMeta: null,
+      canContinue: false,
+      _userAbortedRunId: null,
+      _lastSentDraft: {
+        text: 'long analysis',
+        attachments: [],
+        references: [],
+        runId: 'run-time-limit',
+      },
+      _pendingUserMsgs: [],
+    });
+  });
+
+  it('keeps the draft and offers resend when a non-user abort produced no output', () => {
+    useChatStore.getState().handleChatEvent({
+      runId: 'run-time-limit',
+      sessionKey: 'main',
+      state: 'aborted',
+    });
+    const state = useChatStore.getState();
+    expect(state._lastSentDraft?.text).toBe('long analysis');
+    expect(state.messages.some((message) => message.role === 'user')).toBe(true);
+    expect(state.canContinue).toBe(false);
+    expect(state.lastErrorMeta?.category).toBe('foreground-resend');
+  });
+
+  it('offers continue only when a non-user abort preserves partial output', () => {
+    useChatStore.setState({ streamText: 'Partial result' });
+    useChatStore.getState().handleChatEvent({
+      runId: 'run-time-limit',
+      sessionKey: 'main',
+      state: 'aborted',
+    });
+    const state = useChatStore.getState();
+    expect(state.canContinue).toBe(true);
+    expect(state.lastErrorMeta?.category).toBe('foreground-continue');
+    expect(state.messages.at(-1)?.text).toBe('Partial result');
+  });
+});
+
+describe('agent failure isolation', () => {
+  it('drops a structured operational error that has no sessionKey', () => {
+    useChatStore.setState({
+      sessionKey: 'main',
+      lastError: null,
+      lastErrorMeta: null,
+      runId: null,
+      sending: false,
+      streaming: false,
+    });
+    useChatStore.getState().handleAgentFailureEvent({
+      stream: 'error',
+      data: {
+        code: 'AUTH_FAILED',
+        reason: 'HTTP 401: Invalid Authentication',
+        suggestion: 'fix config',
+      },
+    });
+    expect(useChatStore.getState().lastError).toBeNull();
+  });
+});
+
+describe('history reload after a provider/system abort', () => {
+  it('keeps the failed user turn instead of deleting it with an empty aborted assistant row', async () => {
+    mockGatewayClient.request.mockResolvedValueOnce({
+      messages: [
+        { role: 'user', text: 'keep this failed turn', timestamp: 1 },
+        {
+          role: 'assistant',
+          content: [],
+          stopReason: 'aborted',
+          errorMessage: 'This operation was aborted',
+          timestamp: 2,
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessionKey: 'main',
+      messages: [],
+      _pendingUserMsgs: [],
+      _localOnlyMsgs: [],
+      _abortedUserSuppressCounts: {},
+    });
+
+    await useChatStore.getState().loadHistory();
+
+    expect(useChatStore.getState().messages.some(
+      (message) => message.role === 'user' && message.text === 'keep this failed turn',
+    )).toBe(true);
   });
 });
 
@@ -218,7 +440,12 @@ describe('surface_error final must not consume the retry draft', () => {
       lastError: null,
       lastErrorMeta: null,
       canContinue: false,
-      _lastSentDraft: { text: '你好,请简短回复。', attachments: [], runId: 'run-fail-1' },
+      _lastSentDraft: {
+        text: '你好,请简短回复。',
+        attachments: [],
+        references: [],
+        runId: 'run-fail-1',
+      },
       _pendingUserMsgs: [],
     });
   });
@@ -240,7 +467,9 @@ describe('surface_error final must not consume the retry draft', () => {
     // The final itself must surface the Alert deterministically — the
     // follow-up agent-failure event may be dropped by its guards (live race).
     expect(s.lastError).toBeTruthy();
-    expect(s.lastErrorMeta?.retryable).toBe(true);
+    expect(s.lastErrorMeta?.kind).toBe('model_not_found');
+    expect(s.lastErrorMeta?.category).toBe('config-fixable');
+    expect(s.lastErrorMeta?.retryable).toBe(false);
   });
 
   it('still clears _lastSentDraft on a normal successful final', () => {
@@ -251,5 +480,21 @@ describe('surface_error final must not consume the retry draft', () => {
       message: { role: 'assistant', text: '你好!有什么可以帮你?', timestamp: Date.now() },
     });
     expect(useChatStore.getState()._lastSentDraft).toBeNull();
+  });
+
+  it('does not treat a normal warning-prefixed answer as a surfaced failure', () => {
+    useChatStore.getState().handleChatEvent({
+      runId: 'run-fail-1',
+      sessionKey: 'main',
+      state: 'final',
+      message: {
+        role: 'assistant',
+        text: '⚠️ 注意：这段 SQL 存在注入风险，但分析已正常完成。',
+        timestamp: Date.now(),
+      },
+    });
+    const state = useChatStore.getState();
+    expect(state.lastError).toBeNull();
+    expect(state._lastSentDraft).toBeNull();
   });
 });
