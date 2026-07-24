@@ -34,11 +34,14 @@ function clamp01(v: unknown): number {
  * Returns null if the response is fundamentally invalid.
  */
 export function validateReviewResult(raw: unknown): ReviewResult | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
 
-  // `blocked` must be boolean — if not, fail-safe to not-blocked
-  const blocked = isBoolean(r.blocked) ? r.blocked : false;
+  // `blocked` is a REQUIRED boolean in the OUTPUT_REVIEW schema. If it is missing
+  // or the wrong type, the response is malformed/schema-drifted — return null so
+  // the consumer records a degrade (never coerce a malformed body into a pass).
+  if (!isBoolean(r.blocked)) return null;
+  const blocked = r.blocked;
   const corrected = isBoolean(r.corrected) ? r.corrected : false;
 
   return {
@@ -62,14 +65,18 @@ export function validateToolReviewResult(
   raw: unknown,
   originalParamKeys: string[],
 ): ToolReviewResult | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
 
-  const blocked = isBoolean(r.blocked) ? r.blocked : false;
+  // `blocked` is a REQUIRED boolean in the TOOL_REVIEW schema. Missing / wrong
+  // type ⇒ malformed ⇒ return null (the consumer records a degrade + fails open
+  // WITH visibility; it must never read a malformed body as a silent "not blocked").
+  if (!isBoolean(r.blocked)) return null;
+  const blocked = r.blocked;
 
   let correctedParams: Record<string, unknown> | undefined;
   if (r.correctedParams && typeof r.correctedParams === 'object' && !Array.isArray(r.correctedParams)) {
-    // Only accept keys that exist in the original params
+    // Only accept keys that exist in the original params (anti param-injection).
     const filtered: Record<string, unknown> = {};
     const cp = r.correctedParams as Record<string, unknown>;
     let hasValidKey = false;
@@ -82,9 +89,17 @@ export function validateToolReviewResult(
     correctedParams = hasValidKey ? filtered : undefined;
   }
 
+  // A reviewer BLOCK must never be silently dropped: honor blocked:true even if
+  // the reason is missing/blank (synthesize one) rather than failing the whole
+  // result and fail-opening the dangerous call.
+  const cleanReason = isString(r.blockReason) && r.blockReason.trim() ? r.blockReason : undefined;
+  const blockReason = blocked
+    ? cleanReason ?? 'Deep review flagged this tool call (no reason provided)'
+    : cleanReason;
+
   return {
     blocked,
-    blockReason: isString(r.blockReason) ? r.blockReason : undefined,
+    blockReason,
     correctedParams,
     warnings: asStringArray(r.warnings),
   };

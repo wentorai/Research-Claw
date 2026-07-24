@@ -204,15 +204,28 @@ export class OutputReviewer {
       OUTPUT_REVIEW_SYSTEM_PROMPT,
       userContent,
     );
-    const result = validateReviewResult(raw);
 
-    if (!result) {
-      this.logger.warn(`[OutputReviewer] Deep review unavailable for session ${sessionId} (reviewer call failed)`);
+    // Distinguish reviewer-unavailable (null raw) from schema-invalid (responded
+    // but malformed). Both are observable degrades — never a silent pass.
+    if (raw === null) {
       this.auditLog.record({
         sessionId,
         type: 'output_review',
-        action: 'info',
-        details: 'Deep review failed (reviewer unavailable)',
+        action: 'warn',
+        details: 'Deep review degraded: reviewer unavailable (timeout/network)',
+        timestamp: Date.now(),
+      });
+      return null;
+    }
+
+    const result = validateReviewResult(raw);
+
+    if (!result) {
+      this.auditLog.record({
+        sessionId,
+        type: 'output_review',
+        action: 'warn',
+        details: 'Deep review degraded: reviewer response schema_invalid',
         timestamp: Date.now(),
       });
       return null;

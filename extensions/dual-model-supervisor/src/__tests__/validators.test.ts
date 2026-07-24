@@ -26,10 +26,9 @@ describe('validateReviewResult', () => {
     expect(r!.deviationScore).toBe(0.3);
   });
 
-  it('sanitizes non-boolean blocked to false (fail-safe)', () => {
-    const r = validateReviewResult({ blocked: 'yes', corrected: 'true' });
-    expect(r!.blocked).toBe(false);
-    expect(r!.corrected).toBe(false);
+  it('rejects a non-boolean blocked as schema-invalid (P1-C: malformed → null, not a coerced pass)', () => {
+    // `blocked` is a required boolean; a wrong type is schema drift, not a pass.
+    expect(validateReviewResult({ blocked: 'yes', corrected: 'true' })).toBeNull();
   });
 
   it('clamps scores to 0-1 range', () => {
@@ -90,9 +89,8 @@ describe('validateToolReviewResult', () => {
     expect(r!.correctedParams).toBeUndefined();
   });
 
-  it('handles blocked: "yes" as false (fail-safe)', () => {
-    const r = validateToolReviewResult({ blocked: 'yes' }, originalKeys);
-    expect(r!.blocked).toBe(false);
+  it('rejects blocked: "yes" as schema-invalid (P1-C: malformed → null, not a coerced pass)', () => {
+    expect(validateToolReviewResult({ blocked: 'yes' }, originalKeys)).toBeNull();
   });
 });
 

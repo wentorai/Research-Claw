@@ -76,10 +76,35 @@ export class ToolReviewer {
       TOOL_REVIEW_SYSTEM_PROMPT,
       userContent,
     );
+
+    // Distinguish "reviewer unavailable" (null raw: timeout/network/no adapter)
+    // from "reviewer responded but the body is malformed" (schema_invalid). Both
+    // fail OPEN for a high-risk-but-not-determined-danger tool (determined danger
+    // is already blocked by the quick check above), but each is recorded as an
+    // OBSERVABLE degrade — never as a pass. A malformed body must NOT be coerced
+    // into a silent "not blocked".
+    if (raw === null) {
+      this.auditLog.record({
+        sessionId,
+        type: 'tool_review',
+        action: 'warn',
+        details: `Tool ${tool} deep review degraded: reviewer unavailable (timeout/network) — failed open`,
+        timestamp: Date.now(),
+      });
+      return { block: false };
+    }
+
     const result = validateToolReviewResult(raw, Object.keys(params));
 
     if (!result) {
-      this.logger.warn(`Tool reviewer unavailable for ${tool}, passing through`);
+      this.auditLog.record({
+        sessionId,
+        type: 'tool_review',
+        action: 'warn',
+        // Do NOT log the raw reviewer body (may echo tool params) — privacy.
+        details: `Tool ${tool} deep review degraded: reviewer response schema_invalid — failed open`,
+        timestamp: Date.now(),
+      });
       return { block: false };
     }
 
