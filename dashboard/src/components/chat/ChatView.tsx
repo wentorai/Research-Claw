@@ -147,6 +147,9 @@ export default function ChatView() {
   const clearError = useChatStore((s) => s.clearError);
   const canContinue = useChatStore((s) => s.canContinue);
   const continueRun = useChatStore((s) => s.continueRun);
+  const lastErrorMeta = useChatStore((s) => s.lastErrorMeta);
+  const retry = useChatStore((s) => s.retry);
+  const hasRetryDraft = useChatStore((s) => s._lastSentDraft !== null);
   const loadHistory = useChatStore((s) => s.loadHistory);
   const loadSessionUsage = useChatStore((s) => s.loadSessionUsage);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
@@ -628,12 +631,34 @@ export default function ChatView() {
               closable
               onClose={clearError}
               message={t('chat.runIssueTitle')}
-              description={lastError}
+              description={
+                <div>
+                  <div>{lastError}</div>
+                  {lastErrorMeta?.suggestion && (
+                    <div style={{ marginTop: 4, opacity: 0.85 }}>{lastErrorMeta.suggestion}</div>
+                  )}
+                  {lastErrorMeta?.raw && lastErrorMeta.raw !== lastError && (
+                    <details style={{ marginTop: 6 }}>
+                      <summary style={{ cursor: 'pointer', fontSize: 12, opacity: 0.7 }}>
+                        {t('chat.errorDetails')}
+                      </summary>
+                      <Text copyable code style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        {lastErrorMeta.raw}
+                      </Text>
+                    </details>
+                  )}
+                </div>
+              }
               action={
                 <Space size="small">
                   {canContinue && (
                     <Button type="primary" size="small" onClick={continueRun}>
                       {t('chat.continueRun')}
+                    </Button>
+                  )}
+                  {!canContinue && lastErrorMeta?.retryable === true && hasRetryDraft && (
+                    <Button type="primary" size="small" onClick={retry}>
+                      {t('chat.retry')}
                     </Button>
                   )}
                   <Button size="small" onClick={() => setRightPanelTab('settings')}>

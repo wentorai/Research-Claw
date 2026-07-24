@@ -88,6 +88,10 @@ export interface ChatStreamEvent {
   state: 'delta' | 'final' | 'aborted' | 'error';
   message?: ChatMessage;
   errorMessage?: string;
+  /** Gateway-side failure classification for state:'error' events.
+   *  Source: openclaw/packages/gateway-protocol/src/schema/logs-chat.ts
+   *  (ChatEventErrorKindSchema), populated at src/gateway/server-chat.ts:480. */
+  errorKind?: 'refusal' | 'timeout' | 'rate_limit' | 'context_length' | 'unknown';
   usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number };
 }
 

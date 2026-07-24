@@ -784,7 +784,11 @@ describe('Chat store', () => {
         data: { phase: 'error', error: 'LLM request timed out.' },
       });
       expect(useChatStore.getState().streaming).toBe(false);
-      expect(useChatStore.getState().lastError).toContain('timed out');
+      // "timed out" text is now classified into a locale-aware summary;
+      // the raw provider text stays available in lastErrorMeta.raw.
+      expect(useChatStore.getState().lastError).toBeTruthy();
+      expect(useChatStore.getState().lastErrorMeta?.kind).toBe('timeout');
+      expect(useChatStore.getState().lastErrorMeta?.raw).toContain('timed out');
     });
 
     it('surfaces structured error details and repair suggestion', () => {
