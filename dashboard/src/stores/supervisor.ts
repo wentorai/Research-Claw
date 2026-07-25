@@ -24,7 +24,20 @@ export interface SessionInfo {
 export interface SupervisorStatus {
   enabled: boolean;
   reviewMode: string;
+  /** Stored marker: '' means "inherit the main model", never a resolved model name. */
   supervisorModel: string;
+  /** Where the reviewer model comes from. Reported separately from `enabled`: the
+   *  deterministic safety gate needs no model, so 'unavailable' means deep review is
+   *  degraded — it never means supervision is off. */
+  modelSource?: 'explicit' | 'inherited' | 'unavailable';
+  /** The model a deep review would actually call right now (resolved, not stored). */
+  effectiveSupervisorModel?: string;
+  reviewerReady?: boolean;
+  /** Why a deep-review call cannot be made — the same reason the call path would hit. */
+  reviewerUnavailableReason?: string;
+  /** How long a high-risk tool call waits for deep review before failing open. */
+  toolReviewGateMs?: number;
+  dangerousToolPolicy?: 'block' | 'approve';
   memoryGuardEnabled: boolean;
   courseCorrectionEnabled: boolean;
   deviationThreshold: number;
@@ -51,6 +64,9 @@ export interface SupervisorConfig {
     maxRegenerateAttempts: number;
   };
   highRiskTools: string[];
+  dangerousToolPolicy?: 'block' | 'approve';
+  /** Absent = the plugin default (4000ms, declared in openclaw.plugin.json). */
+  toolReviewGateMs?: number;
 }
 
 export interface AuditLogEntry {

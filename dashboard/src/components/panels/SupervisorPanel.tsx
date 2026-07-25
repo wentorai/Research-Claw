@@ -22,6 +22,9 @@ import {
   UpOutlined,
   DownOutlined,
   SearchOutlined,
+  AuditOutlined,
+  LinkOutlined,
+  HeartOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -35,14 +38,24 @@ const { Text } = Typography;
 
 // ── Type / Action metadata ────────────────────────────────────────────────
 
-const LOG_TYPE_META: Record<string, { icon: React.ReactNode; color: string; labelKey: string }> = {
+/**
+ * The panel's entire vocabulary for audit categories: group heading, colour/icon and
+ * the entries of the type filter (see TYPE_SELECT_OPTIONS) all come from here. A
+ * category the plugin can emit but this map omits is shown as "Unknown" and cannot be
+ * filtered for — so it must stay in step with the plugin's `AuditLogType` union
+ * (enforced by src/__tests__/supervisor-audit-visibility.test.tsx).
+ */
+export const LOG_TYPE_META: Record<string, { icon: React.ReactNode; color: string; labelKey: string }> = {
   output_review:      { icon: <FileTextOutlined />,     color: '#3B82F6', labelKey: 'supervisor.typeOutputReview' },
   tool_review:        { icon: <ToolOutlined />,          color: '#8B5CF6', labelKey: 'supervisor.typeToolReview' },
+  approval:           { icon: <AuditOutlined />,         color: '#F97316', labelKey: 'supervisor.typeApproval' },
   consistency_check:  { icon: <CheckCircleOutlined />,   color: '#06B6D4', labelKey: 'supervisor.typeConsistencyCheck' },
+  grounding:          { icon: <LinkOutlined />,          color: '#0EA5E9', labelKey: 'supervisor.typeGrounding' },
   memory_guard:       { icon: <LockOutlined />,          color: '#F59E0B', labelKey: 'supervisor.typeMemoryGuard' },
   course_correction:  { icon: <CompassOutlined />,       color: '#10B981', labelKey: 'supervisor.typeCourseCorrection' },
   force_regenerate:   { icon: <SyncOutlined />,          color: '#EF4444', labelKey: 'supervisor.typeForceRegenerate' },
   session_analysis:   { icon: <LineChartOutlined />,     color: '#71717A', labelKey: 'supervisor.typeSessionAnalysis' },
+  reviewer_health:    { icon: <HeartOutlined />,         color: '#EAB308', labelKey: 'supervisor.typeReviewerHealth' },
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -396,9 +409,23 @@ export default function SupervisorPanel() {
           <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 5px', border: 'none', background: tokens.bg.surfaceHover, color: tokens.text.secondary }}>
             {status.reviewMode}
           </Tag>
-          {status.supervisorModel && (
+          {/* An empty supervisorModel means "inherit the main model", not "no reviewer" —
+              show the model a review would actually call, and label where it came from. */}
+          {(status.effectiveSupervisorModel || status.supervisorModel) && (
             <Text style={{ fontSize: 10, color: tokens.text.muted, fontFamily: "'Fira Code', monospace" }}>
-              {status.supervisorModel}
+              {status.effectiveSupervisorModel || status.supervisorModel}
+            </Text>
+          )}
+          {status.modelSource === 'inherited' && (
+            <Text style={{ fontSize: 10, color: tokens.text.muted }}>
+              {t('supervisor.modelInherited', 'inherited from main model')}
+            </Text>
+          )}
+          {/* Deep review down ≠ supervision off: the deterministic gate keeps running,
+              so the reason is stated here instead of silently blanking the model chip. */}
+          {status.reviewerReady === false && (
+            <Text style={{ fontSize: 10, color: '#F59E0B' }}>
+              {t('supervisor.reviewerUnavailable', { reason: status.reviewerUnavailableReason ?? '' })}
             </Text>
           )}
           {status.activeSessions > 0 && (

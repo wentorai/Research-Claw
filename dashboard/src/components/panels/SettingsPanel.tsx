@@ -72,6 +72,14 @@ const SUPERVISOR_REVIEWER_PROVIDER_IDS = [
   'qwen',
 ] as const;
 
+// How long a high-risk tool call waits for the reviewer model's deep review before
+// failing open. Must match `toolReviewGateMs` in the plugin manifest; the presets are
+// what the UI offers, the manifest still accepts 500–30000ms from other callers.
+// Exported so `supervisor-gate-dashboard.test.tsx` can pin both to the manifest —
+// otherwise "must match" is a comment with nothing enforcing it.
+export const SUPERVISOR_GATE_DEFAULT_MS = 4000;
+export const SUPERVISOR_GATE_PRESETS_MS = [2000, 4000, 10000] as const;
+
 const { Text } = Typography;
 
 const CONNECTION_LOST_RE = /connection closed|not connected/i;
@@ -536,6 +544,10 @@ export default function SettingsPanel() {
   const [deviationThreshold, setDeviationThreshold] = useState(0.5);
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [maxRegenerateAttempts, setMaxRegenerateAttempts] = useState(3);
+  // Deep-review budget for a high-risk tool call. Mirrors the plugin manifest default
+  // (openclaw.plugin.json → toolReviewGateMs). A value outside the presets — set by
+  // hand or over RPC — is kept as-is and simply leaves no preset selected.
+  const [toolReviewGateMs, setToolReviewGateMs] = useState(SUPERVISOR_GATE_DEFAULT_MS);
 
   // Cache for supervisor API keys per provider
   const supervisorApiKeyCacheRef = useRef<Record<string, string>>({});
@@ -601,6 +613,7 @@ export default function SettingsPanel() {
       }
 
       setReviewMode(supervisorConfig.reviewMode === 'off' ? 'correct' : (supervisorConfig.reviewMode ?? 'correct'));
+      setToolReviewGateMs(supervisorConfig.toolReviewGateMs ?? SUPERVISOR_GATE_DEFAULT_MS);
       const cc = supervisorConfig.courseCorrection;
       if (cc) {
         setDeviationThreshold(cc.deviationThreshold ?? 0.5);
@@ -759,6 +772,7 @@ export default function SettingsPanel() {
   const supervisorBaselinedRef = useRef(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [supervisorAdvancedOpen, setSupervisorAdvancedOpen] = useState(false);
+  const [supervisorBehaviorOpen, setSupervisorBehaviorOpen] = useState(false);
 
   // Controls whether the next gatewayConfig change should sync into form fields.
   // True on mount (initial load) and after explicit refresh / save-restart.
@@ -808,7 +822,7 @@ export default function SettingsPanel() {
         webSearchEnabled, webSearchProvider, webSearchApiKey,
         heartbeatEnabled, heartbeatInterval,
         supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
-        reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
+        reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, toolReviewGateMs,
         textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
         // Only custom profiles carry an editable label; presets have none, so the
         // label is normalized away for them — otherwise a stale label left over from
@@ -823,7 +837,7 @@ export default function SettingsPanel() {
       webSearchEnabled, webSearchProvider, webSearchApiKey,
       heartbeatEnabled, heartbeatInterval,
       supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
-      reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
+      reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, toolReviewGateMs,
       textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
       profileLabel,
     ],
@@ -1556,6 +1570,7 @@ export default function SettingsPanel() {
           supervisorDeviationThreshold: supervisorEnabled ? deviationThreshold : undefined,
           supervisorForceRegenerate: supervisorEnabled ? forceRegenerate : undefined,
           supervisorMaxRegenerateAttempts: supervisorEnabled ? maxRegenerateAttempts : undefined,
+          supervisorToolReviewGateMs: supervisorEnabled ? toolReviewGateMs : undefined,
         },
       );
 
@@ -1597,7 +1612,7 @@ export default function SettingsPanel() {
     } finally {
       setSaving(false);
     }
-  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
+  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, toolReviewGateMs, t, refreshAuthStatuses, supportsAuthProfiles]);
 
   const applyConfigFieldsToForm = useCallback((configForEditor: Record<string, unknown>) => {
     const fields = extractConfigFields(configForEditor);
@@ -2460,12 +2475,30 @@ export default function SettingsPanel() {
                     {providerLabel(provider, t)} / {textModel}
                   </div>
                 )}
+                {/* Inheriting costs no configuration but does cost main-model tokens —
+                    say so where the choice is made, not in a release note. */}
+                {supervisorUseMainModel && (
+                  <div style={{ marginLeft: 24, fontSize: 12, color: tokens.text.muted }}>
+                    {t('settings.supervisorInheritMainHint')}
+                  </div>
+                )}
                 <Radio value="independent">
                   <span>{t('settings.supervisorIndependent')}</span>
                 </Radio>
               </div>
             </Radio.Group>
           </div>
+
+          {/* Deep review can be unusable (no key, unsupported protocol, …) while the
+              deterministic safety gate keeps running. Report the reason the call path
+              would actually hit, so the panel can never look healthier than it is. */}
+          {supervisorStatus?.reviewerReady === false && (
+            <div style={{ marginBottom: 12 }}>
+              <Text style={{ fontSize: 12, color: tokens.accent.amber }}>
+                {t('settings.supervisorReviewerUnavailable', { reason: supervisorStatus.reviewerUnavailableReason ?? '' })}
+              </Text>
+            </div>
+          )}
 
           {!supervisorUseMainModel && (
             <>
@@ -2737,6 +2770,40 @@ export default function SettingsPanel() {
               </div>
             </SettingRow>
           )}
+
+          {/* Review-behaviour knobs that apply to BOTH model sources — kept out of the
+              reviewer-provider block above, which never renders while inheriting. */}
+          <Collapse
+            activeKey={supervisorBehaviorOpen ? ['supervisorBehavior'] : []}
+            onChange={(keys) => setSupervisorBehaviorOpen((keys as string[]).includes('supervisorBehavior'))}
+            size="small"
+            style={{ marginBottom: 8 }}
+            items={[
+              {
+                key: 'supervisorBehavior',
+                label: t('settings.supervisorAdvancedBehavior'),
+                children: (
+                  <SettingRow
+                    label={t('settings.supervisorToolReviewGate')}
+                    description={t('settings.supervisorToolReviewGateHint', { seconds: toolReviewGateMs / 1000 })}
+                  >
+                    <Radio.Group
+                      value={toolReviewGateMs}
+                      onChange={(e) => setToolReviewGateMs(e.target.value as number)}
+                      size="small"
+                      optionType="button"
+                      buttonStyle="solid"
+                      options={SUPERVISOR_GATE_PRESETS_MS.map((ms) => ({
+                        // Chosen in seconds: a millisecond box invites 300 or 300000.
+                        label: t('settings.supervisorGateSeconds', { seconds: ms / 1000 }),
+                        value: ms,
+                      }))}
+                    />
+                  </SettingRow>
+                ),
+              },
+            ]}
+          />
 
           <div style={{ padding: '0 0 4px' }}>
             <Text type="secondary" style={{ fontSize: 11 }}>

@@ -97,6 +97,8 @@ export interface ConfigPatchInput {
   supervisorDeviationThreshold?: number;
   supervisorForceRegenerate?: boolean;
   supervisorMaxRegenerateAttempts?: number;
+  /** Deep-review budget for a high-risk tool call, in ms (manifest range 500–30000). */
+  supervisorToolReviewGateMs?: number;
 }
 
 export interface ExtractedConfig {
@@ -1224,6 +1226,12 @@ export function buildSaveConfig(
       supervisorModel: input.supervisorModel !== undefined ? input.supervisorModel : (existingSupervisorConfig.supervisorModel as string) ?? '',
       reviewMode: input.supervisorReviewMode ?? (existingSupervisorConfig.reviewMode as string) ?? 'off',
     };
+
+    // Only written when the form sends one — omitting it leaves whatever is already
+    // persisted (including a hand-widened gate) untouched rather than resetting it.
+    if (input.supervisorToolReviewGateMs !== undefined) {
+      supervisorConfig.toolReviewGateMs = input.supervisorToolReviewGateMs;
+    }
 
     // Only override courseCorrection if any supervisor field is explicitly provided
     if (input.supervisorDeviationThreshold !== undefined ||
