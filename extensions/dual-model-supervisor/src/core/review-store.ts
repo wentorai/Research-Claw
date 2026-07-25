@@ -135,6 +135,12 @@ export class ReviewStore {
    * Allocate the next DB-monotonic revision. Bumped on EVERY write so a replay cursor
    * over `revision` never misses a change — including an in-place started→terminal
    * update (whose reviewId/updatedAt would not advance) or a same-millisecond insert.
+   *
+   * MUST be called inside the SAME `BEGIN IMMEDIATE` transaction as the row write it
+   * stamps. Allocating in a separate autocommit statement makes revision order differ
+   * from COMMIT order: another connection can allocate a higher revision and commit
+   * first, a reader can advance its cursor past it, and the lower-revision row then
+   * commits permanently below the cursor — silently unreplayable forever.
    */
   private nextRevision(db: Database.Database): number {
     const row = db
@@ -188,12 +194,17 @@ export class ReviewStore {
     if (!db) return 0;
     try {
       const cutoff = now - (opts?.olderThanMs ?? 0);
-      // Row-by-row so each swept review gets a DISTINCT monotonic revision (a shared
-      // revision could be split across replay pages and lose rows past the cursor).
-      const orphans = db.prepare("SELECT reviewId FROM supervisor_reviews WHERE state = 'started' AND updatedAt <= ?").all(cutoff) as Array<{ reviewId: string }>;
-      const upd = db.prepare("UPDATE supervisor_reviews SET state = 'timedout', verdict = 'unverifiable', updatedAt = ?, revision = ? WHERE reviewId = ?");
-      for (const o of orphans) upd.run(now, this.nextRevision(db), o.reviewId);
-      return orphans.length;
+      const tx = db.transaction(() => {
+        // Row-by-row so each swept review gets a DISTINCT monotonic revision (a shared
+        // revision could be split across replay pages and lose rows past the cursor).
+        const orphans = db.prepare("SELECT reviewId FROM supervisor_reviews WHERE state = 'started' AND updatedAt <= ?").all(cutoff) as Array<{ reviewId: string }>;
+        // `AND state = 'started'` — never clobber a terminal that landed concurrently.
+        const upd = db.prepare("UPDATE supervisor_reviews SET state = 'timedout', verdict = 'unverifiable', updatedAt = ?, revision = ? WHERE reviewId = ? AND state = 'started'");
+        let swept = 0;
+        for (const o of orphans) swept += upd.run(now, this.nextRevision(db), o.reviewId).changes;
+        return swept;
+      });
+      return tx.immediate();
     } catch (err) {
       this.logger.error(`[ReviewStore] sweepOrphans failed: ${err instanceof Error ? err.message : String(err)}`);
       return 0;
@@ -206,12 +217,16 @@ export class ReviewStore {
     const db = this.getDb();
     if (!db) return { ok: false, reason: 'db_unavailable' };
     try {
-      const existing = db.prepare('SELECT state FROM supervisor_reviews WHERE reviewId = ?').get(reviewId) as { state: string } | undefined;
-      if (existing) return { ok: true }; // already started or already terminal → do not overwrite
-      db.prepare(
-        `INSERT INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt, revision)
-         VALUES (?, ?, ?, ?, ?, 'started', 'none', '[]', ?, ?, ?)`,
-      ).run(reviewId, REVIEW_SCHEMA_VERSION, meta.sessionKey, meta.runId ?? null, meta.kind, now, now, this.nextRevision(db));
+      // INSERT OR IGNORE: creating the row is a single atomic statement, so an existing
+      // row (already started OR already terminal) is never overwritten — no read-then-write
+      // window. Runs in the same IMMEDIATE transaction that allocates the revision.
+      const tx = db.transaction(() => {
+        db.prepare(
+          `INSERT OR IGNORE INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt, revision)
+           VALUES (?, ?, ?, ?, ?, 'started', 'none', '[]', ?, ?, ?)`,
+        ).run(reviewId, REVIEW_SCHEMA_VERSION, meta.sessionKey, meta.runId ?? null, meta.kind, now, now, this.nextRevision(db));
+      });
+      tx.immediate();
       return { ok: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -232,18 +247,27 @@ export class ReviewStore {
     const db = this.getDb();
     if (!db) return { ok: false, reason: 'db_unavailable' };
     try {
-      const existing = db.prepare('SELECT state FROM supervisor_reviews WHERE reviewId = ?').get(reviewId) as { state: string } | undefined;
       const findingsJson = JSON.stringify(data.findings);
-      if (!existing) {
+      // Two atomic conditional statements — no read-then-write window. A SELECT-then-UPDATE
+      // lets two connections both observe 'started' and both write a terminal (last writer
+      // wins, so the FIRST terminal is silently lost).
+      const tx = db.transaction(() => {
+        const rev = this.nextRevision(db);
+        // Only a live 'started' row may transition. changes === 0 ⇒ the row is missing OR
+        // a terminal already won.
+        const upd = db.prepare(
+          `UPDATE supervisor_reviews SET state = ?, verdict = ?, findings = ?, updatedAt = ?, revision = ?
+           WHERE reviewId = ? AND state = 'started'`,
+        ).run(state, data.verdict, findingsJson, now, rev, reviewId);
+        if (upd.changes > 0) return;
+        // Missing row ⇒ terminal-before-started, create it directly in the terminal state.
+        // Already terminal ⇒ OR IGNORE makes this a no-op: first terminal wins.
         db.prepare(
-          `INSERT INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt, revision)
+          `INSERT OR IGNORE INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt, revision)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(reviewId, REVIEW_SCHEMA_VERSION, data.sessionKey, data.runId ?? null, data.kind, state, data.verdict, findingsJson, now, now, this.nextRevision(db));
-        return { ok: true };
-      }
-      if (isTerminalReviewState(existing.state as ReviewState)) return { ok: true }; // first terminal wins — idempotent
-      db.prepare('UPDATE supervisor_reviews SET state = ?, verdict = ?, findings = ?, updatedAt = ?, revision = ? WHERE reviewId = ?')
-        .run(state, data.verdict, findingsJson, now, this.nextRevision(db), reviewId);
+        ).run(reviewId, REVIEW_SCHEMA_VERSION, data.sessionKey, data.runId ?? null, data.kind, state, data.verdict, findingsJson, now, now, rev);
+      });
+      tx.immediate();
       return { ok: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
