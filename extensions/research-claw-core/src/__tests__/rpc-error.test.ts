@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type BetterSqlite3 from 'better-sqlite3';
 import { buildRpcErrorOutcome } from '../rpc-error.js';
+import { createTestDb } from './setup.js';
+import { registerTaskRpc } from '../tasks/rpc.js';
+import { TaskService } from '../tasks/service.js';
+import { registerMonitorRpc } from '../monitor/rpc.js';
+import { MonitorService } from '../monitor/service.js';
 
 describe('buildRpcErrorOutcome', () => {
   it('logs unexpected Error at error level WITH stack, responds PLUGIN_ERROR', () => {
@@ -32,7 +38,7 @@ describe('buildRpcErrorOutcome', () => {
     expect(out.line).not.toContain('\n');
   });
 
-  it('falls back to RpcValidationError.errorCode as used by memory and task RPC', () => {
+  it('falls back to an errorCode carried alongside the message', () => {
     const err = Object.assign(new Error('title is required'), {
       name: 'RpcValidationError',
       errorCode: 'INVALID_PARAMS',
@@ -67,5 +73,68 @@ describe('buildRpcErrorOutcome', () => {
   it('renders (none) when there are no params', () => {
     const out = buildRpcErrorOutcome('rc.onboarding.status', new Error('x'), []);
     expect(out.line).toContain('params: [(none)]');
+  });
+});
+
+/**
+ * The unit cases above hand-build the thrown value. These drive the REAL
+ * registered handlers with real bad params, because the defect this guards
+ * against lived in the handler's re-throw, not in the classifier: a validation
+ * error whose code is stripped on the way out is indistinguishable from an
+ * unexpected bug and lands in the log at error level with a stack.
+ */
+describe('registered rc.* handlers deliver coded validation errors to the bridge', () => {
+  let db: BetterSqlite3.Database;
+  const handlers = new Map<string, (params: Record<string, unknown>) => Promise<unknown> | unknown>();
+
+  beforeEach(() => {
+    db = createTestDb();
+    handlers.clear();
+    const registerMethod = (
+      method: string,
+      handler: (params: Record<string, unknown>) => Promise<unknown> | unknown,
+    ): void => {
+      handlers.set(method, handler);
+    };
+    registerTaskRpc(registerMethod, new TaskService(db));
+    registerMonitorRpc(registerMethod, new MonitorService(db));
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  async function outcomeOf(method: string, params: Record<string, unknown>) {
+    const handler = handlers.get(method);
+    expect(handler, `${method} is not registered`).toBeDefined();
+    try {
+      await handler!(params);
+    } catch (err) {
+      return buildRpcErrorOutcome(method, err, Object.keys(params));
+    }
+    throw new Error(`${method} unexpectedly succeeded with invalid params`);
+  }
+
+  it.each([
+    ['rc.task.create', { task: { title: '' } }],
+    ['rc.task.get', { id: '' }],
+    ['rc.task.update', { id: 'abc', patch: 'not-an-object' }],
+    ['rc.task.upcoming', { hours: 99_999 }],
+    ['rc.monitor.get', { id: '' }],
+    ['rc.monitor.create', { name: 'ok' }],
+    ['rc.monitor.toggle', { id: 'abc', enabled: 'yes' }],
+  ])('%s classifies bad params as INVALID_PARAMS at warn without a stack', async (method, params) => {
+    const outcome = await outcomeOf(method, params as Record<string, unknown>);
+    expect(outcome.code).toBe('INVALID_PARAMS');
+    expect(outcome.level).toBe('warn');
+    expect(outcome.line).not.toContain('\n');
+    expect(outcome.line).not.toContain('at ');
+  });
+
+  it('still reports a genuine unexpected failure at error level with a stack', async () => {
+    const outcome = await outcomeOf('rc.task.get', { id: 'no-such-task' });
+    expect(outcome.code).toBe('PLUGIN_ERROR');
+    expect(outcome.level).toBe('error');
+    expect(outcome.line).toContain('at ');
   });
 });

@@ -6,6 +6,7 @@ import type { ProbeInput } from '../self-check/activation-probe.js';
 import {
   auditRuntimeMounts,
   readSessionPromptReport,
+  runtimeMountAuditSkipReason,
   selectModelVisibleEligibleSkills,
   type SkillsCliReport,
   type SystemPromptReportLike,
@@ -121,6 +122,36 @@ describe('runtime mount reconciliation', () => {
     expect(finding?.message).toContain('task_create');
   });
 
+  // skill_search is declared unconditionally (OpenClaw rejects registering an
+  // undeclared tool) but registered only when the research-plugins catalog
+  // exists, so its absence is the plugin's decision, not a mount failure.
+  it('excludes tools the plugin deliberately did not register', () => {
+    const partialReport = report({
+      tools: {
+        listChars: 10,
+        schemaChars: 100,
+        entries: [{ name: 'lit_search' }, { name: 'paper_download' }],
+      },
+    });
+    const findings = auditRuntimeMounts({
+      plugins,
+      systemPromptReport: partialReport,
+      indexedSkillNames: ['alpha'],
+      intentionallyUnregisteredTools: ['citation_graph'],
+    });
+    const finding = findings.find((item) => item.kind === 'tools-not-mounted');
+    expect(finding?.missingNames).toEqual(['task_create']);
+
+    expect(
+      auditRuntimeMounts({
+        plugins,
+        systemPromptReport: partialReport,
+        indexedSkillNames: ['alpha'],
+        intentionallyUnregisteredTools: ['citation_graph', 'task_create'],
+      }).find((item) => item.kind === 'tools-not-mounted'),
+    ).toBeUndefined();
+  });
+
   it('has no findings for a fully reconciled real run report', () => {
     expect(
       auditRuntimeMounts({
@@ -138,6 +169,113 @@ describe('runtime mount reconciliation', () => {
         systemPromptReport: report({ source: 'estimate' }),
         indexedSkillNames: ['alpha', 'bravo'],
       }),
+    ).toEqual([]);
+  });
+});
+
+describe('runtime mount audit admissibility', () => {
+  it('admits the canonical foreground session under no tool projection', () => {
+    expect(
+      runtimeMountAuditSkipReason({ sessionKey: 'agent:main:main', agentId: 'main', config: {} }),
+    ).toBeNull();
+  });
+
+  // A cron job may carry its own toolsAllow allowlist, so its run legitimately
+  // sees a restricted tool set — auditing it would flag every product tool.
+  it.each([
+    ['agent:main:cron:0fd87fdc-f563-4f74-b119-802b1df0d9db', 'cron'],
+    ['agent:main:main:heartbeat', 'heartbeat'],
+    ['agent:main:project-d9f76242', 'project-scoped'],
+  ])('skips the %s (%s) session', (sessionKey) => {
+    expect(
+      runtimeMountAuditSkipReason({ sessionKey, agentId: 'main', config: {} }),
+    ).toContain('canonical foreground session');
+  });
+
+  it('honours a non-default agentId', () => {
+    expect(
+      runtimeMountAuditSkipReason({ sessionKey: 'agent:writer:main', agentId: 'writer', config: {} }),
+    ).toBeNull();
+    expect(
+      runtimeMountAuditSkipReason({ sessionKey: 'agent:main:main', agentId: 'writer', config: {} }),
+    ).not.toBeNull();
+  });
+
+  // These modes replace the model-facing tool list wholesale before the report is
+  // written, so absence there says nothing about what is mounted. Every config
+  // below is a shape OpenClaw's own schema accepts, and the expectations follow
+  // its resolvers (resolveToolSearchConfig / resolveCodeModeConfig) rather than a
+  // guess at what the keys look like — the two disagree in both directions.
+  it.each([
+    ['toolSearch: true is the documented shorthand', { tools: { toolSearch: true } }, 'toolSearch'],
+    ['toolSearch object opts in without naming enabled', { tools: { toolSearch: { mode: 'tools' } } }, 'toolSearch'],
+    ['toolSearch explicit enable', { tools: { toolSearch: { enabled: true } } }, 'toolSearch'],
+    ['codeMode: true shorthand', { tools: { codeMode: true } }, 'codeMode'],
+    ['codeMode explicit enable', { tools: { codeMode: { enabled: true } } }, 'codeMode'],
+    [
+      'agent-level codeMode enables it for this agent alone',
+      { agents: { list: [{ id: 'main', tools: { codeMode: true } }] } },
+      'codeMode',
+    ],
+    [
+      'agent-level codeMode overrides a global off',
+      {
+        tools: { codeMode: { enabled: false } },
+        agents: { list: [{ id: 'other' }, { id: 'MAIN ', tools: { codeMode: { enabled: true } } }] },
+      },
+      'codeMode',
+    ],
+  ])('skips when %s', (_label, config, expected) => {
+    expect(
+      runtimeMountAuditSkipReason({ sessionKey: 'agent:main:main', agentId: 'main', config }),
+    ).toContain(expected);
+  });
+
+  // The mirror image, and the more dangerous direction: a skip that fires when no
+  // projection is active disables the audit silently.
+  it.each([
+    ['nothing is configured', {}],
+    ['both are explicitly off', { tools: { toolSearch: { enabled: false }, codeMode: false } }],
+    ['toolSearch enabled: false wins over other options', { tools: { toolSearch: { enabled: false, mode: 'tools' } } }],
+    ['an empty toolSearch object opts in to nothing', { tools: { toolSearch: {} } }],
+    ['codeMode has no implicit opt-in', { tools: { codeMode: { timeoutMs: 5_000 } } }],
+    ['codeMode enabled: false is off, not "present"', { tools: { codeMode: { enabled: false } } }],
+    [
+      'an agent-level codeMode off overrides a global on',
+      {
+        tools: { codeMode: true },
+        agents: { list: [{ id: 'main', tools: { codeMode: { enabled: false } } }] },
+      },
+    ],
+    [
+      'another agent enabling codeMode does not implicate this one',
+      { agents: { list: [{ id: 'writer', tools: { codeMode: true } }] } },
+    ],
+    // Lean local-model mode only drops browser/cron/message, so it must audit
+    // normally on both of its real config paths.
+    ['lean local-model mode is on for all agents', { agents: { defaults: { experimental: { localModelLean: true } } } }],
+    [
+      'lean local-model mode is on for this agent',
+      { agents: { list: [{ id: 'main', experimental: { localModelLean: true } }] } },
+    ],
+  ])('does not skip when %s', (_label, config) => {
+    expect(
+      runtimeMountAuditSkipReason({ sessionKey: 'agent:main:main', agentId: 'main', config }),
+    ).toBeNull();
+  });
+
+  // The premise that lets lean local-model mode go unskipped above: it removes
+  // exactly these three OpenClaw built-ins, and no product manifest declares
+  // them. If one ever does, the audit would start reporting it as unmounted on
+  // lean agents — fail here instead, where the reason is legible.
+  it('declares none of the tools lean local-model mode removes', () => {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, '../../openclaw.plugin.json'), 'utf8'),
+    ) as { contracts?: { tools?: string[] } };
+    const declared = manifest.contracts?.tools ?? [];
+    expect(declared.length).toBeGreaterThan(0);
+    expect(
+      declared.filter((name) => ['browser', 'cron', 'message'].includes(name.toLowerCase())),
     ).toEqual([]);
   });
 });
@@ -184,6 +322,35 @@ describe('persisted session report reader', () => {
         sessionKey: 'agent:main:main',
       })?.generatedAt,
     ).toBe(20);
+  });
+
+  // Before this run's report is persisted, a concurrent isolated run may hold
+  // the newest report. Falling back to it would audit an unrelated tool policy.
+  it('returns null rather than another session report when the requested one is absent', () => {
+    const stateDir = tempDir();
+    const storePath = path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json');
+    fs.mkdirSync(path.dirname(storePath), { recursive: true });
+    fs.writeFileSync(
+      storePath,
+      JSON.stringify({
+        'agent:main:cron:0fd87fdc': {
+          sessionId: 'cron',
+          updatedAt: 9,
+          systemPromptReport: report({
+            generatedAt: 90,
+            sessionKey: 'agent:main:cron:0fd87fdc',
+          }),
+        },
+      }),
+    );
+
+    expect(
+      readSessionPromptReport({
+        stateDir,
+        agentId: 'main',
+        sessionKey: 'agent:main:main',
+      }),
+    ).toBeNull();
   });
 
   it('supports a configured store path with the {agentId} placeholder', () => {

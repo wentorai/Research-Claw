@@ -52,14 +52,28 @@ function isSensitiveKey(key) {
     (parts.includes('api') && parts.includes('key'));
 }
 
+/**
+ * OpenClaw's own redactor is the first of two nets. Losing it — a moved module,
+ * a renamed export, a bundle built without OpenClaw — silently narrows what this
+ * bundle scrubs, and the bundle is what users are told to send us. Degrading is
+ * still the right call (the local rules below stay active), but it must be said
+ * out loud on stderr rather than passing for a full-strength redaction.
+ */
+const OPENCLAW_LAYER_UNAVAILABLE = 'openclaw redaction layer unavailable';
 let openClawRedact = value => value;
 try {
   const module = await import('openclaw/plugin-sdk/logging-core');
   if (typeof module.redactSensitiveText === 'function') {
     openClawRedact = value => module.redactSensitiveText(value, { mode: 'tools' });
+  } else {
+    process.stderr.write(
+      `${OPENCLAW_LAYER_UNAVAILABLE}: redactSensitiveText is not exported; local rules only\n`,
+    );
   }
-} catch {
-  // The conservative local rules below remain active when OpenClaw is absent.
+} catch (error) {
+  process.stderr.write(
+    `${OPENCLAW_LAYER_UNAVAILABLE}: ${error instanceof Error ? error.message : String(error)}; local rules only\n`,
+  );
 }
 
 function redactText(value) {
@@ -71,6 +85,19 @@ function redactText(value) {
     .replace(
       /(^|[\r\n])(\s*(?:set-)?cookie\s*:\s*)[^\r\n]*/giu,
       '$1$2***',
+    )
+    // Log lines pack headers into one structured blob, so a Cookie header is
+    // frequently mid-line. Consume the whole cookie-pair list up to the
+    // enclosing bracket/quote rather than stopping at the first ';'.
+    .replace(
+      /\b((?:set-)?cookie\s*:\s*)[^\r\n)\]}"']*/giu,
+      '$1***',
+    )
+    // Scheme-less proxy userinfo (HTTPS_PROXY=user:pass@host:port) carries the
+    // same credential as the URL form but has no '://' for the rule above.
+    .replace(
+      /\b([\w.~%+-]+):([^@\s/:]{3,})@((?:[\w-]+\.)+[\w-]+|\d{1,3}(?:\.\d{1,3}){3}|localhost)(?=[:/\s"',]|$)/giu,
+      '$1:***@$3',
     )
     .replace(
       /https?:\/\/hooks\.slack\.com\/services\/[^\s"'<>]+/giu,
@@ -88,10 +115,31 @@ function redactText(value) {
       /\b((?:api[_-]?key|access[_-]?token|authorization|bearer|credential|password|passphrase|secret|token)\s*[:=]\s*)(?!\$\{)[^\s,;}"']+/giu,
       '$1***',
     )
-    .replace(
-      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/gu,
-      REDACTED,
-    );
+    .replace(PEM_BLOCK, REDACTED);
+}
+
+const PEM_LABEL = '(?:[A-Z0-9]+ )*PRIVATE KEY';
+const PEM_BLOCK = new RegExp(
+  `-----BEGIN ${PEM_LABEL}-----[\\s\\S]*?-----END ${PEM_LABEL}-----`,
+  'gu',
+);
+const PEM_HEAD_ONLY = new RegExp(`-----BEGIN ${PEM_LABEL}-----[\\s\\S]*$`, 'gu');
+const PEM_TAIL_ONLY = new RegExp(
+  `(^|\\n)(?:[A-Za-z0-9+/=]{16,}[ \\t]*\\n)+(-----END ${PEM_LABEL}-----)`,
+  'gu',
+);
+
+/**
+ * PEM bodies span lines, so they must be folded before any per-line pass sees
+ * them. Log tails are cut at an arbitrary line, so a bundle can also contain a
+ * key with only its BEGIN or only its END marker; both halves are redacted
+ * fail-closed.
+ */
+function redactPemBlocks(input) {
+  return input
+    .replace(PEM_BLOCK, REDACTED)
+    .replace(PEM_TAIL_ONLY, `$1${REDACTED}\n$2`)
+    .replace(PEM_HEAD_ONLY, REDACTED);
 }
 
 function redactArray(values) {
@@ -133,7 +181,7 @@ function redactStructured(value) {
 }
 
 function redactTextWithJsonLines(input) {
-  return input
+  return redactPemBlocks(input)
     .split('\n')
     .map(line => {
       if (!line.trim().startsWith('{') && !line.trim().startsWith('[')) {

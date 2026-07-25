@@ -17,6 +17,17 @@ interface GatewayState {
   sessionDefaults: SessionDefaults | null;
   /** Last connection error details for UI display */
   connectError: { code: string; message: string } | null;
+  /**
+   * Monotonic count of event-stream discontinuities: a detected sequence gap,
+   * a (re)connection, or any departure from 'connected'.
+   *
+   * Consumers that infer "nothing else happened" from an uninterrupted run of
+   * events must compare this against the epoch they last observed. A change
+   * means frames may have been lost, so any such inference is void. It only
+   * ever increases — resetting it would let a stale inference look current
+   * again.
+   */
+  eventEpoch: number;
 
   connect: (url: string, token?: string) => void;
   disconnect: () => void;
@@ -31,12 +42,23 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
   connId: null,
   sessionDefaults: null,
   connectError: null,
+  eventEpoch: 0,
 
   connect: (url: string, token?: string) => {
     const existing = get().client;
     if (existing) {
       existing.disconnect();
     }
+
+    /**
+     * Must stay synchronous. GatewayClient.handleEvent reports a sequence gap
+     * and then fans the very same frame out to subscribers within one turn, so
+     * the bump has to land before that frame is handled. Deferring it behind a
+     * dynamic import — the idiom used elsewhere in this file to break store
+     * cycles — resolves a microtask too late, and the frame that revealed the
+     * gap is exactly the one most likely to need the new epoch.
+     */
+    const bumpEventEpoch = () => set((s) => ({ eventEpoch: s.eventEpoch + 1 }));
 
     const client = new GatewayClient({
       url,
@@ -46,9 +68,19 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       platform: 'browser',
       instanceId: _instanceId,
       onStateChange: (state: ConnectionState) => {
+        // Deliberately earlier than onHello. handleEvent has no connection-state
+        // gate and the subscriber set is never cleared on close, so a frame that
+        // arrives on the new socket before hello-ok resolves is still delivered
+        // to handlers registered on the previous connection. Leaving 'connected'
+        // is the last moment guaranteed to precede every frame of the next one.
+        if (state !== 'connected') bumpEventEpoch();
         set({ state, ...(state === 'connected' ? { connectError: null } : {}) });
       },
       onHello: (hello: HelloOk) => {
+        // Belt and braces over the departure bump above: the server restarts its
+        // per-connection sequence numbering and the client zeroes lastSeq, so no
+        // event on this connection can be sequenced against the previous one.
+        bumpEventEpoch();
         get().setServerInfo(hello);
         // Fix 2 — Reconnection-safe streaming state reset.
         // Old behavior: unconditionally clear streaming/runId on every reconnect.
@@ -143,6 +175,10 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       },
       onGap: ({ expected, received }: GapInfo) => {
         console.warn(`[Gateway] Event sequence gap: expected ${expected}, got ${received} — scheduling history sync`);
+        // First, and synchronously: the frame that revealed this gap has not
+        // reached the event subscribers yet, and it may itself be the cron
+        // completion whose place in a failure episode we can no longer establish.
+        bumpEventEpoch();
         // Dynamic import breaks gateway ↔ chat circular dependency.
         // Safe: onGap fires only after connect, when both stores are initialized.
         void import('./chat').then(({ useChatStore }) => {

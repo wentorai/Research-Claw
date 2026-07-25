@@ -1059,6 +1059,8 @@
     "configFailureBody": "{{error}} 请检查模型与服务商配置；重试无法恢复此类失败。",
     "transientFailureTitle": "“{{name}}”已连续失败 {{count}} 次",
     "transientFailureBody": "{{error}} OpenClaw 会保留该任务并继续调度；可打开隔离运行查看详情。",
+    "skippedTitle": "“{{name}}”已连续 {{count}} 次未执行",
+    "skippedBody": "{{error}} 模型服务不可达，任务被跳过；请确认服务商端点已启动。",
     "cronSessions": "定时任务",
     "deleteSessionConfirm": "删除该定时任务，并删除该会话的聊天记录？"
   },

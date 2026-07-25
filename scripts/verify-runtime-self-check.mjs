@@ -355,7 +355,15 @@ async function stopGateway() {
   gateway = undefined;
 }
 
-async function gatewayCall(method, params, timeoutMs = 15_000) {
+// Each call cold-starts the OpenClaw CLI, the dominant and most variable cost.
+// The deadline of every poll that wraps a call is derived from this rather than
+// written as a literal: a deadline at or below one call's budget cannot outlive a
+// single slow call, so its retry loop would never run a second attempt.
+const GATEWAY_CALL_TIMEOUT_MS = 30_000;
+/** Room for a hung call plus real retries after it. */
+const POLL_DEADLINE_MS = GATEWAY_CALL_TIMEOUT_MS * 3;
+
+async function gatewayCall(method, params, timeoutMs = GATEWAY_CALL_TIMEOUT_MS) {
   const { stdout } = await execFileAsync(
     process.execPath,
     [
@@ -384,13 +392,23 @@ async function gatewayCall(method, params, timeoutMs = 15_000) {
 }
 
 async function waitForNotifications(predicate, description) {
-  const deadline = Date.now() + 30_000;
+  // A transient call failure must not fail the run: each call pays a full CLI
+  // cold start, so a busy machine can exceed the per-call budget without the
+  // gateway being unhealthy. Only the deadline is allowed to fail this.
+  const deadline = Date.now() + POLL_DEADLINE_MS;
+  let lastError;
   while (Date.now() < deadline) {
-    const pending = await gatewayCall('rc.notifications.pending', {});
-    if (predicate(pending.custom ?? [])) return pending.custom;
+    try {
+      const pending = await gatewayCall('rc.notifications.pending', {});
+      if (predicate(pending.custom ?? [])) return pending.custom;
+    } catch (error) {
+      lastError = error;
+    }
     await sleep(250);
   }
-  throw new Error(`notification polling timed out: ${description}`);
+  throw new Error(
+    `notification polling timed out: ${description}${lastError ? `; last error: ${lastError.message}` : ''}`,
+  );
 }
 
 function parseLogRecords(rawLogs) {

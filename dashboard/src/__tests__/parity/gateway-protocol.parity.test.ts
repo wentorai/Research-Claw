@@ -702,6 +702,54 @@ describe('Gateway protocol parity with OpenClaw', () => {
       client.disconnect();
     });
 
+    it('reports no gap across a reconnect, because sequencing restarts', async () => {
+      // Server reference: gateway/server/server-broadcast.ts — clientSeq is kept
+      // per connection (a WeakMap keyed by the socket), so a new connection
+      // starts again at 1. Our client mirrors that by zeroing lastSeq in the
+      // connect resolve; combined with the `lastSeq > 0` guard, onGap can never
+      // fire on the first event of a connection.
+      //
+      // The consequence is the reason the event-stream epoch (stores/gateway.ts)
+      // is bumped on reconnect and not only on onGap: every event missed while
+      // the socket was down is invisible to gap detection.
+      const onGap = vi.fn();
+      const client = createClient({ onGap });
+      await completeHandshake(client, mockWsInstance);
+
+      mockWsInstance.simulateMessage(TICK_EVENT_SEQ_1);
+      mockWsInstance.simulateMessage(TICK_EVENT_SEQ_2);
+      mockWsInstance.simulateMessage(CHAT_EVENT_SEQ_3);
+      expect(onGap).not.toHaveBeenCalled();
+
+      // Drop the connection and let the backoff timer fire the reconnect.
+      mockWsInstance.simulateClose(1006, 'lost');
+      expect(client.connectionState).toBe('reconnecting');
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      mockWsInstance.simulateOpen();
+      mockWsInstance.simulateMessage(CONNECT_CHALLENGE);
+      await flushMicrotasks();
+      const reconnectFrame = mockWsInstance.sent
+        .map((s) => JSON.parse(s))
+        .reverse()
+        .find((f: any) => f.method === 'connect');
+      mockWsInstance.simulateMessage({
+        type: 'res',
+        id: reconnectFrame.id,
+        ok: true,
+        payload: HELLO_OK_PAYLOAD,
+      });
+      expect(client.connectionState).toBe('connected');
+
+      // Arbitrarily many events may have been broadcast while we were away.
+      // This one is seq 1 on the new connection, and nothing about it is
+      // distinguishable from an uninterrupted stream.
+      mockWsInstance.simulateMessage(TICK_EVENT_SEQ_1);
+      expect(onGap).not.toHaveBeenCalled();
+
+      client.disconnect();
+    });
+
     it('updates lastSeq even when gap is detected', async () => {
       // OpenClaw reference: ui/src/ui/gateway.ts:414
       //   this.lastSeq = seq;  (after gap callback)

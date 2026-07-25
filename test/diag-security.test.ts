@@ -8,6 +8,17 @@ const ROOT = path.resolve(__dirname, '..');
 const DIAG = path.join(ROOT, 'scripts', 'diag.sh');
 const REDACTOR = path.join(ROOT, 'scripts', 'diag-redact.mjs');
 
+/**
+ * diag.sh spawns a node redactor per collected artifact, so it is the slowest
+ * thing this repo tests: ~4s on an idle box, ~18s when the machine is
+ * oversubscribed. Two budgets, and the order between them matters — a test cap
+ * below the subprocess budget it grants kills the run being measured partway
+ * through, which surfaces as a flaky assertion (SIGTERM → exit 143) rather than
+ * as the slow-machine symptom it actually is. Keep TEST strictly above SUBPROCESS.
+ */
+const DIAG_SUBPROCESS_TIMEOUT_MS = 90_000;
+const DIAG_TEST_TIMEOUT_MS = 120_000;
+
 function readAllFiles(root: string): string {
   const chunks: string[] = [];
   const visit = (entryPath: string): void => {
@@ -99,7 +110,7 @@ describe('diag.sh security boundary', () => {
         RC_DIAG_TS: 'security-test',
       },
       encoding: 'utf8',
-      timeout: 30_000,
+      timeout: DIAG_SUBPROCESS_TIMEOUT_MS,
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -141,7 +152,7 @@ describe('diag.sh security boundary', () => {
     ]) {
       expect(bundleText).toContain(useful);
     }
-  }, 20_000);
+  }, DIAG_TEST_TIMEOUT_MS);
 
   it('fails closed without printing success when the output path is not a directory', () => {
     const notDirectory = path.join(tempRoot, 'not-a-directory');
@@ -160,7 +171,7 @@ describe('diag.sh security boundary', () => {
         TMPDIR: tempRoot,
       },
       encoding: 'utf8',
-      timeout: 30_000,
+      timeout: DIAG_SUBPROCESS_TIMEOUT_MS,
     });
 
     expect(result.status).not.toBe(0);
@@ -168,7 +179,7 @@ describe('diag.sh security boundary', () => {
     expect(
       fs.readdirSync(tempRoot).filter((name) => name.startsWith('rc-diag-')),
     ).toEqual([]);
-  });
+  }, DIAG_TEST_TIMEOUT_MS);
 
   it('reports tar failure and removes its protected staging directory via EXIT trap', () => {
     const fakeBin = path.join(tempRoot, 'fake-bin');
@@ -193,15 +204,22 @@ describe('diag.sh security boundary', () => {
         PATH: `${fakeBin}:${process.env.PATH}`,
       },
       encoding: 'utf8',
-      timeout: 30_000,
+      timeout: DIAG_SUBPROCESS_TIMEOUT_MS,
     });
 
     expect(result.status).not.toBe(0);
     expect(result.stdout).not.toContain('诊断包已生成');
     expect(result.stderr).toContain('tar 打包失败');
-    expect(fs.readdirSync(stagingRoot)).toEqual([]);
+    // Assert on the staging directories diag.sh owns, not on the whole TMPDIR.
+    // Node writes its own scratch state here (`node-compile-cache`), so an
+    // emptiness assertion measures the runtime's housekeeping rather than the
+    // EXIT trap under test, and fails on any machine that has the compile cache
+    // enabled — which CI does, since nothing sets NODE_DISABLE_COMPILE_CACHE.
+    expect(
+      fs.readdirSync(stagingRoot).filter((name) => name.startsWith('rc-diag-')),
+    ).toEqual([]);
     expect(fs.existsSync(path.join(outDir, 'rc-diag-tar-failure.tar.gz'))).toBe(false);
-  }, 15_000);
+  }, DIAG_TEST_TIMEOUT_MS);
 
   it('reduces a proxy URL to scheme, host, and port for run.sh logging', () => {
     const secretUser = 'DIAG_PROXY_LOG_USER';
@@ -219,5 +237,94 @@ describe('diag.sh security boundary', () => {
     expect(output).not.toContain(secretUser);
     expect(output).not.toContain(secretPass);
     expect(output).not.toContain('/private');
+  });
+
+  // Log tails are the weakest artifact in the bundle: they are copied as free
+  // text, cut at an arbitrary line, and pack headers into one blob. These are
+  // the secret shapes that survived the line-by-line pass.
+  describe('log-tail text redaction', () => {
+    const redactText = (input: string): string =>
+      execFileSync(process.execPath, [REDACTOR, 'text', '-', '-'], {
+        input,
+        encoding: 'utf8',
+      });
+
+    it('folds a multi-line PEM private key before the per-line pass sees it', () => {
+      const body = 'DIAG_PEM_BODY_SECRET_1234567890';
+      const output = redactText(
+        [
+          'keep-before-context',
+          '-----BEGIN RSA PRIVATE KEY-----', // pragma: allowlist secret
+          `MIIBOwIBAAJB${body}AAAAAAAAAAAAAAAA`,
+          `BBBB${body}CCCCCCCCCCCCCCCCCCCC`,
+          '-----END RSA PRIVATE KEY-----',
+          'keep-after-context',
+        ].join('\n'),
+      );
+
+      expect(output).not.toContain(body);
+      expect(output).toContain('keep-before-context');
+      expect(output).toContain('keep-after-context');
+    });
+
+    it('redacts a PEM key truncated by tail at either marker', () => {
+      const head = 'DIAG_PEM_HEAD_SECRET_1234567890';
+      // A real PEM body is base64, which is what identifies an orphaned tail.
+      const tail = 'DIAGPEMTAILSECRET1234567890';
+
+      expect(
+        redactText(`-----BEGIN OPENSSH PRIVATE KEY-----\n${head}AAAAAAAAAAAA\n`), // pragma: allowlist secret
+      ).not.toContain(head);
+      expect(
+        redactText(
+          `keep-before-context\n${tail}BBBBBBBBBBBB\n-----END RSA PRIVATE KEY-----\n`,
+        ),
+      ).not.toContain(tail);
+    });
+
+    it('redacts a Cookie header packed mid-line', () => {
+      const secret = 'DIAG_INLINE_COOKIE_SECRET_1234567890';
+      const output = redactText(
+        `DEBUG req GET /x headers={host: a.com, Cookie: sid=${secret}; theme=dark} ua=curl\n`,
+      );
+
+      expect(output).not.toContain(secret);
+      expect(output).toContain('ua=curl');
+    });
+
+    it('redacts scheme-less proxy userinfo without clobbering ordinary key:value', () => {
+      const secret = 'DIAG_SCHEMELESS_PROXY_PASS_1234567890';
+      const output = redactText(
+        `HTTPS_PROXY=proxyuser:${secret}@10.0.0.1:7890\nINFO host=api.example.com:443 t=12:30:45\n`,
+      );
+
+      expect(output).not.toContain(secret);
+      expect(output).toContain('host=api.example.com:443');
+      expect(output).toContain('t=12:30:45');
+    });
+  });
+
+  /**
+   * The redactor runs OpenClaw's redactSensitiveText first and the local rules
+   * second. If that import ever breaks, the local rules still run — so every
+   * test above keeps passing while the bundle quietly scrubs less. These assert
+   * the first net is present, so an OpenClaw upgrade that moves or renames it
+   * fails here instead of shipping a weaker bundle.
+   */
+  describe('OpenClaw redaction layer', () => {
+    it('still exports redactSensitiveText from the imported entrypoint', async () => {
+      const loggingCore = await import('openclaw/plugin-sdk/logging-core');
+      expect(typeof loggingCore.redactSensitiveText).toBe('function');
+    });
+
+    it('runs without reporting a degraded layer', () => {
+      const result = spawnSync(process.execPath, [REDACTOR, 'text', '-', '-'], {
+        input: 'INFO nothing sensitive here\n',
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).not.toContain('openclaw redaction layer unavailable');
+    });
   });
 });

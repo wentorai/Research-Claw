@@ -53,7 +53,9 @@ import {
   auditRuntimeMounts,
   readSessionPromptReport,
   readSkillsCliReport,
+  runtimeMountAuditSkipReason,
   selectModelVisibleEligibleSkills,
+  type RuntimeProbeConfigLike,
 } from './src/self-check/runtime-probe.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
@@ -196,6 +198,17 @@ const JOB_SYNC_THROTTLE_MS = 3_000;
 const JOB_SYNC_INTERVAL_MS = 20_000;
 const _runtimeProbeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const _lastRuntimeProbeReportAt = new Map<string, number>();
+/** Agents already reconciled in this gateway process (see the once-per-lifetime note). */
+const _runtimeReconciledAgents = new Set<string>();
+/**
+ * Manifest-declared tools this process chose not to register, keyed by reason.
+ *
+ * `contracts.tools` must list every tool the plugin may register, so a tool
+ * registered behind a runtime condition is still declared unconditionally. The
+ * runtime mount audit reads that manifest, so it needs to be told which absences
+ * are deliberate — otherwise it reports our own decision as a mount failure.
+ */
+const _unregisteredDeclaredTools = new Map<string, string>();
 
 // ── Tool call probe state ─────────────────────────────────────────────
 // Caches Ollama tool-calling probe results per model string (30-min TTL).
@@ -1153,6 +1166,10 @@ const plugin: PluginDefinition = {
 
       if (!rpRoot) {
         api.logger.warn('[SkillSearch] research-plugins catalog.json not found — skill search disabled');
+        _unregisteredDeclaredTools.set(
+          'skill_search',
+          'research-plugins catalog.json not found, so skill search has nothing to search',
+        );
       } else {
         const indexedCount = initSkillIndex(rpRoot);
         api.logger.info(`[SkillSearch] Indexed ${indexedCount} skills from ${rpRoot}`);
@@ -1760,7 +1777,10 @@ const plugin: PluginDefinition = {
     // Hooks MUST only be registered once — duplicate registration causes
     // handlers to fire multiple times per event.
     if (!_hooksRegistered) {
-    type SelfCheckConfig = {
+    // Extends the probe's own config view rather than restating it: the tool
+    // projection shapes are subtle enough that a second hand-written copy would
+    // drift, and a drifted copy reads as "no projection configured".
+    type SelfCheckConfig = RuntimeProbeConfigLike & {
       plugins?: { load?: { paths?: unknown } };
       session?: { store?: unknown };
     };
@@ -1807,6 +1827,11 @@ const plugin: PluginDefinition = {
       const sessionKey = hookContext?.sessionKey;
       if (!sessionKey) return;
       const agentId = hookContext?.agentId?.trim() || 'main';
+      // Plugins register their tools once at gateway startup, so the
+      // manifest→mount contract is process-stable: one reconciliation per agent
+      // per gateway lifetime is enough. Re-auditing every turn would spawn a
+      // skills CLI subprocess and re-poll the session store on the hot path.
+      if (_runtimeReconciledAgents.has(agentId)) return;
       const timerKey = `${agentId}:${sessionKey}`;
       const priorTimer = _runtimeProbeTimers.get(timerKey);
       if (priorTimer) clearTimeout(priorTimer);
@@ -1818,6 +1843,15 @@ const plugin: PluginDefinition = {
         api.logger.warn(
           `[self-check] runtime probe setup failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
         );
+        return;
+      }
+      const skipReason = runtimeMountAuditSkipReason({
+        sessionKey,
+        agentId,
+        config: selfCheckContext.config,
+      });
+      if (skipReason) {
+        api.logger.debug?.(`[self-check] runtime reconciliation skipped: ${skipReason}`);
         return;
       }
       const configuredStore =
@@ -1862,6 +1896,7 @@ const plugin: PluginDefinition = {
 
         _runtimeProbeTimers.delete(timerKey);
         _lastRuntimeProbeReportAt.set(timerKey, report.generatedAt);
+        _runtimeReconciledAgents.add(agentId);
         const entryPath = process.argv[1];
         if (!entryPath || !fs.existsSync(entryPath)) {
           api.logger.warn(
@@ -1884,10 +1919,14 @@ const plugin: PluginDefinition = {
                 pluginInput.id === 'research-claw-core' ||
                 pluginInput.id === 'research-plugins',
             );
+            for (const [tool, reason] of _unregisteredDeclaredTools) {
+              api.logger.info(`[self-check] ${tool} intentionally not registered: ${reason}`);
+            }
             const findings = auditRuntimeMounts({
               plugins: productPlugins,
               systemPromptReport: report,
               indexedSkillNames: selectModelVisibleEligibleSkills(skillsReport),
+              intentionallyUnregisteredTools: _unregisteredDeclaredTools.keys(),
             });
             for (const finding of findings) {
               api.logger.warn(`[self-check] ${finding.message}`);

@@ -73,6 +73,29 @@ export const CRON_AUTH_FIRST = {
   runAtMs: 1785001999000,
 };
 
+/** The same misconfiguration one scheduled run later: OpenClaw incremented its counter. */
+export const CRON_AUTH_SECOND = {
+  ...CRON_AUTH_FIRST,
+  job: failedJob(2, authError, 'auth'),
+  sessionId: 'session-auth-2',
+  sessionKey: 'agent:main:cron:monitor-job-7:run:auth-2',
+  runAtMs: 1785010199000,
+};
+
+/**
+ * A fresh failure run after the job had recovered: the successful run in between
+ * zeroed consecutiveErrors, so this one is back at 1. The dashboard may never
+ * have seen that success — the gateway broadcasts cron events with dropIfSlow,
+ * and the dashboard is frequently not even open.
+ */
+export const CRON_AUTH_NEW_EPISODE = {
+  ...CRON_AUTH_FIRST,
+  job: failedJob(1, authError, 'auth'),
+  sessionId: 'session-auth-relapse',
+  sessionKey: 'agent:main:cron:monitor-job-7:run:auth-relapse',
+  runAtMs: 1785131999000,
+};
+
 const providerPreflightError =
   'Agent cron job uses test/hang but the local provider endpoint is not reachable at http://127.0.0.1:28801/v1. Skipping this cron run; OpenClaw will retry the provider preflight on a later scheduled run. Last error: TimeoutError: request timed out';
 

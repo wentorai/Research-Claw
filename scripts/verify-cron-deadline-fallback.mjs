@@ -17,7 +17,18 @@ const entryPath = path.join(projectRoot, 'node_modules', 'openclaw', 'dist', 'en
 const gatewayPort = Number(process.env.RC_TEST_GATEWAY_PORT ?? 28799);
 const providerPort = Number(process.env.RC_TEST_PROVIDER_PORT ?? 28801);
 const gatewayToken = 'rc-cron-fallback-test';
+// The cron job carries this in its own payload; it is what makes the deadline
+// fire and the fallback engage.
 const timeoutSeconds = 2;
+/**
+ * Deliberately far above the cron budget. This script's second half asserts that
+ * a *user* abort does not trigger the fallback, which requires the interactive
+ * run to still be alive when the abort lands. Sharing the cron's 2s deadline
+ * made that a race against the deadline abort: on a loaded machine the run was
+ * already gone, and the script reported a broken abort path that was really just
+ * its own configuration killing the subject under test.
+ */
+const agentDefaultTimeoutSeconds = 300;
 
 let tempRoot;
 let gateway;
@@ -129,7 +140,23 @@ async function startProvider() {
   });
 }
 
-async function gatewayCall(method, params, timeoutMs = 10_000) {
+/**
+ * Every call pays a full OpenClaw CLI cold start, which is the dominant and most
+ * variable cost here — a busy CI runner can spend most of a 10s budget just
+ * booting. The polling loops below bound total wall-clock, so this per-call
+ * budget only needs to be generous enough that a slow boot is not mistaken for a
+ * broken gateway.
+ *
+ * Every poll deadline in this file is derived from it rather than written as a
+ * literal, because the two numbers only mean anything relative to each other: a
+ * deadline at or below one call's budget cannot survive a single slow call, so
+ * the retry it appears to implement never actually happens.
+ */
+const GATEWAY_CALL_TIMEOUT_MS = 30_000;
+/** Room for a hung call plus real retries after it. */
+const POLL_DEADLINE_MS = GATEWAY_CALL_TIMEOUT_MS * 3;
+
+async function gatewayCall(method, params, timeoutMs = GATEWAY_CALL_TIMEOUT_MS) {
   const { stdout } = await execFileAsync(
     process.execPath,
     [
@@ -199,7 +226,7 @@ async function writeConfig() {
         defaults: {
           workspace: workspaceDir,
           model: { primary: 'test/primary', fallbacks: ['test/fallback'] },
-          timeoutSeconds,
+          timeoutSeconds: agentDefaultTimeoutSeconds,
         },
       },
       models: {
@@ -247,23 +274,75 @@ async function startGateway() {
 }
 
 async function waitForCronResult() {
-  const deadline = Date.now() + 20_000;
+  // Tolerate a transient call failure the way waitForHealth does. A single slow
+  // CLI boot used to abort the whole verification, so the script reported a
+  // fallback regression that had not happened — the exact false signal this
+  // acceptance lane exists to catch. Only the deadline may fail the run.
+  const deadline = Date.now() + POLL_DEADLINE_MS;
+  let lastError;
   while (Date.now() < deadline) {
-    const runs = await gatewayCall('cron.runs', { id: jobId, limit: 5 });
-    const entries = runs.entries ?? runs.runs ?? [];
-    if (entries.length > 0 && entries[0].status !== 'running') return entries[0];
+    try {
+      const runs = await gatewayCall('cron.runs', { id: jobId, limit: 5 });
+      const entries = runs.entries ?? runs.runs ?? [];
+      if (entries.length > 0 && entries[0].status !== 'running') return entries[0];
+    } catch (error) {
+      lastError = error;
+      if (gateway?.exitCode !== null) {
+        throw new Error(`gateway exited while polling cron runs with code ${gateway.exitCode}`);
+      }
+    }
     await sleep(200);
   }
-  throw new Error('cron result polling timed out');
+  throw new Error(
+    `cron result polling timed out${lastError ? `; last error: ${lastError.message}` : ''}`,
+  );
 }
 
 async function waitForPrimaryRequest(expected) {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (primaryRequests >= expected) return;
     await sleep(50);
   }
-  throw new Error(`primary model was not called ${expected} times`);
+  throw new Error(
+    `primary model was not called ${expected} times (observed ${primaryRequests})`,
+  );
+}
+
+/**
+ * Reaching the provider means the run exists, but the gateway registers it as
+ * abortable a moment later. Retrying the precondition keeps the real assertion —
+ * that a user abort must not trigger the fallback model — from being reported as
+ * a fallback regression when it is only a registration race.
+ *
+ * A thrown call is retried rather than fatal, for the same reason the other polls
+ * here tolerate one: a slow CLI cold start is not a broken abort path. The caller
+ * owns the assertion, so the last failure rides back on the result instead of
+ * being raised here — that keeps the send/abort context in one message.
+ */
+async function abortWithRetry(sessionKey, runId) {
+  const deadline = Date.now() + POLL_DEADLINE_MS;
+  let last;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      last = await gatewayCall('chat.abort', {
+        sessionKey,
+        ...(runId ? { runId } : {}),
+      });
+      if (last.aborted === true) return last;
+    } catch (error) {
+      lastError = error;
+      if (gateway?.exitCode !== null) {
+        throw new Error(`gateway exited while aborting with code ${gateway.exitCode}`);
+      }
+    }
+    await sleep(200);
+  }
+  return {
+    ...(last ?? { aborted: false }),
+    ...(lastError ? { lastError: lastError.message } : {}),
+  };
 }
 
 async function stopChild(child) {
@@ -324,17 +403,19 @@ async function main() {
     throw new Error(`expected test/fallback telemetry, got ${result.provider}/${result.model}`);
   }
   const fallbackCountAfterCron = fallbackRequests;
+  const primaryCountAfterCron = primaryRequests;
   const userSessionKey = `rc-test-user-abort-${Date.now()}`;
   const chatSendResult = await gatewayCall('chat.send', {
     message: 'This request will be cancelled by the user.',
     sessionKey: userSessionKey,
     idempotencyKey: randomUUID(),
   });
-  await waitForPrimaryRequest(2);
-  const chatAbortResult = await gatewayCall('chat.abort', {
-    sessionKey: userSessionKey,
-    ...(chatSendResult.runId ? { runId: chatSendResult.runId } : {}),
-  });
+  // Relative, not absolute: the cron phase already drove primaryRequests past
+  // any fixed threshold, so waiting for an absolute count returned immediately
+  // and we aborted a run the gateway had not registered yet. Waiting for THIS
+  // run to reach the stub provider is what makes it abortable.
+  await waitForPrimaryRequest(primaryCountAfterCron + 1);
+  const chatAbortResult = await abortWithRetry(userSessionKey, chatSendResult.runId);
   if (chatAbortResult.aborted !== true) {
     throw new Error(
       `chat.abort did not reach the active run: send=${JSON.stringify(chatSendResult)} `
