@@ -27,11 +27,22 @@ import type {
 } from '../core/types.js';
 import { AuditLogService } from '../core/audit-log.js';
 
+/**
+ * Where a citation's `title` came from — this GATES title-search eligibility.
+ *  - 'structured': a machine-structured title field (registry record, tool result, an
+ *    explicit manual-review argument). Provably a title, so it may be searched.
+ *  - 'raw' (default): a string parsed out of prose or a bibliography list. NOT provably
+ *    a bare title, so it is never searched. Fail-safe: anything unlabelled is 'raw'.
+ */
+export type CitationProvenance = 'structured' | 'raw';
+
 export interface Citation {
   raw: string; // Token as it appeared (dedup key + display)
   doi?: string;
   arxivId?: string;
+  /** Only ever title-searched when `provenance === 'structured'`. */
   title?: string;
+  provenance?: CitationProvenance;
 }
 
 export type GroundingNetworkPolicy = SupervisorConfig['grounding']['networkPolicy'];
@@ -56,28 +67,17 @@ function cleanDoi(doi: string): string {
 }
 
 /**
- * Heuristic: is `s` a reliably-CLEAN paper title (safe to send to a title-search), as
- * opposed to a raw bibliographic line (author, year, journal, volume, pages)? Raw lines
- * are noisy — a title-search MISSES them, so a REAL paper cited as a full reference would
- * be falsely flagged `not_found`. Only clean titles may go online; every other reference
- * string stays TITLE-LESS (→ unverifiable, never a fabrication accusation). Conservative:
- * when in doubt, treat as NOT clean. Applies to BOTH current-turn and prior (summary) refs.
- */
-export function isLikelyCleanTitle(s: string): boolean {
-  const t = (s ?? '').trim();
-  if (t.length < MIN_TITLE_LEN || t.length > 200) return false;
-  if (/\((?:19|20)\d{2}[a-z]?\)/.test(t)) return false;                         // (YYYY) year
-  if (/\bvol\.?\s*\d|\bno\.?\s*\d|\bpp\.?\s*\d|\b\d+\s*[–-]\s*\d+\b/i.test(t)) return false; // vol/issue/pages
-  if (hasCitationIdentifier(t)) return false;                                   // DOI/arXiv → scanIds handles it
-  if (/https?:\/\//i.test(t)) return false;                                     // URL
-  if (/[A-Z][a-z]+,\s+[A-Z]\./.test(t)) return false;                           // "Lastname, F." author list
-  if (/\bet\s+al\.?/i.test(t)) return false;                                    // "et al."
-  return true;
-}
-
-/**
- * Extract citations: structured ids (DOI / arXiv) from the raw text, plus bare
- * titles from the `references` list (never guessed out of free prose). Deduped.
+ * Extract citations: structured ids (DOI / arXiv) from the raw text, plus the reference
+ * strings themselves — the latter always TITLE-LESS and marked `provenance: 'raw'`.
+ * Deduped.
+ *
+ * Why no title is ever derived here: a reference string may be a bare title OR a full
+ * bibliographic line ("Vaswani A. Attention Is All You Need. NeurIPS. 2017."). A
+ * title-search on the latter MISSES, which would flag a REAL paper as `not_found` — the
+ * one thing grounding must never do. Pattern heuristics cannot decide this: they are
+ * blacklists over an open-ended format space, so any unlisted style slips through. So the
+ * rule is structural instead of statistical — no title, therefore no title search is even
+ * reachable for these citations; they can only ever become `unverifiable`.
  */
 export function extractCitations(text: string, references: string[] = []): Citation[] {
   const out: Citation[] = [];
@@ -90,17 +90,19 @@ export function extractCitations(text: string, references: string[] = []): Citat
     out.push(c);
   };
 
-  const scanIds = (src: string, title?: string): boolean => {
+  // No `title` parameter by construction: an identifier found inside a reference line must
+  // not inherit that line as a searchable title either.
+  const scanIds = (src: string): boolean => {
     let found = false;
     DOI_RE.lastIndex = 0;
     for (let m = DOI_RE.exec(src); m; m = DOI_RE.exec(src)) {
       const doi = cleanDoi(m[0]);
-      push({ raw: doi, doi, title });
+      push({ raw: doi, doi, provenance: 'raw' });
       found = true;
     }
     ARXIV_LABELED_RE.lastIndex = 0;
     for (let m = ARXIV_LABELED_RE.exec(src); m; m = ARXIV_LABELED_RE.exec(src)) {
-      push({ raw: m[0], arxivId: m[1], title });
+      push({ raw: m[0], arxivId: m[1], provenance: 'raw' });
       found = true;
     }
     return found;
@@ -110,10 +112,8 @@ export function extractCitations(text: string, references: string[] = []): Citat
   for (const ref of references) {
     const r = (ref ?? '').trim();
     if (!r) continue;
-    const hadId = scanIds(r, r);
-    // Only a reliably-clean title may carry `title` (→ title-search). A raw bibliographic
-    // line is pushed TITLE-LESS so it becomes unverifiable, never falsely `not_found`.
-    if (!hadId && r.length >= MIN_TITLE_LEN) push(isLikelyCleanTitle(r) ? { raw: r, title: r } : { raw: r });
+    const hadId = scanIds(r);
+    if (!hadId && r.length >= MIN_TITLE_LEN) push({ raw: r, provenance: 'raw' });
   }
   return out;
 }
@@ -124,11 +124,6 @@ const REF_HEADING_RE = /^\s*[#*_]*\s*(references|bibliography|works cited|citati
 // A reference ENTRY must begin with a list marker ([1], 1., 1), -, *, •). Requiring a
 // marker avoids harvesting trailing prose (notes/disclaimers) that follows the section.
 const REF_ENTRY_RE = /^(?:[-*•]\s+|\[(\d+)\]\s*|(\d+)[.)]\s+)(.+)$/;
-
-/** True when the text carries a verifiable identifier (DOI / labeled arXiv). */
-export function hasCitationIdentifier(s: string): boolean {
-  return /\b10\.\d{4,9}\/[-._;()/:a-z0-9]+/i.test(s) || /\barxiv:\s*\d{4}\.\d{4,5}/i.test(s);
-}
 
 /**
  * Deterministically harvest MARKED reference entries from a structured References /
@@ -274,8 +269,10 @@ async function doCheckExistence(c: Citation, policy: GroundingNetworkPolicy, tim
     if (r.ok && r.status === 200) return { verdict: 'exists', via: 'openalex_doi', sources };
   }
 
-  // Title search sends the TITLE externally — only under explicit 'full' opt-in.
-  if (c.title && policy === 'full') {
+  // Title search sends the TITLE externally — only under explicit 'full' opt-in, and only
+  // for a STRUCTURED title. A raw reference string is never searched: a miss on a real
+  // paper's bibliographic line would become a `not_found` fabrication accusation.
+  if (c.title && c.provenance === 'structured' && policy === 'full') {
     const r = await getJson(
       `https://api.openalex.org/works?filter=title.search:${encodeURIComponent(c.title)}&per-page=5`,
       timeoutMs,
@@ -346,10 +343,13 @@ export class GroundingChecker {
   /** Awaitable worker. Returns the fresh findings verified this call. Never throws. */
   async runCheck(output: string, sessionId: string, references: string[], sessionState: SessionState): Promise<GroundingFinding[]> {
     try {
-      // Prior (summary) refs AND the current turn's References-section entries both flow
-      // through extractCitations, which title-searches ONLY reliably-clean titles and keeps
-      // raw bibliographic lines TITLE-LESS (→ unverifiable, never a false not_found). This
-      // closes the priorRefs hole where a summary's raw bibliographic string was searched.
+      // Prior (summary) refs AND the current turn's References-section entries are BOTH
+      // raw strings: extractCitations keeps them title-less, so no title search is reachable
+      // for them and a real paper can never be flagged not_found. They are still represented
+      // (as `unverifiable`), so a title-only-citing turn is never recorded as a clean review.
+      // Trade-off, stated plainly: a FABRICATED title-only citation is also `unverifiable`
+      // rather than `not_found`. Fabrication detection therefore rests on DOI/arXiv
+      // identifiers, which are verified exactly. Accusing a real paper is the worse error.
       const citations = extractCitations(output, [...references, ...extractReferenceLines(output)]);
       if (!citations.length) return [];
 

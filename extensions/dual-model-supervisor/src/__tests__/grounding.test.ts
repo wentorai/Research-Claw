@@ -12,7 +12,6 @@ import {
   inflightCount,
   GroundingChecker,
   extractReferenceLines,
-  isLikelyCleanTitle,
 } from '../hooks/grounding-checker.js';
 import { parseConfig } from '../core/config.js';
 import type { AuditLogService } from '../core/audit-log.js';
@@ -44,7 +43,7 @@ describe('extractCitations', () => {
   it('extracts DOI, labeled arXiv, and reference titles', () => {
     expect(extractCitations('see 10.1038/nature14539')[0].doi).toBe('10.1038/nature14539');
     expect(extractCitations('arXiv:1706.03762 rocks')[0].arxivId).toBe('1706.03762');
-    expect(extractCitations('', ['Attention Is All You Need']).some((c) => c.title === 'Attention Is All You Need')).toBe(true);
+    expect(extractCitations('', ['Attention Is All You Need'])[0].raw).toBe('Attention Is All You Need');
   });
 });
 
@@ -86,7 +85,8 @@ describe('P2-D checkExistence privacy networkPolicy', () => {
       if (url.includes('title.search')) return { status: 200, json: { results: [{ title: 'Attention Is All You Need' }] } };
       return { status: 404 };
     });
-    const r = await checkExistence({ raw: 'x', doi: '10.5/x', title: 'Attention Is All You Need' }, { networkPolicy: 'full' });
+    // A structured title — the policy gate is what is under test here, not provenance.
+    const r = await checkExistence({ raw: 'x', doi: '10.5/x', title: 'Attention Is All You Need', provenance: 'structured' }, { networkPolicy: 'full' });
     expect(r.verdict).toBe('exists');
     expect(r.via).toBe('openalex_title');
     expect(fetchFn.mock.calls.some((c) => String(c[0]).includes('title.search'))).toBe(true);
@@ -187,19 +187,58 @@ describe('P2 (reopened) current-turn title-only citations', () => {
     for (const f of findings) expect(f.verdict).not.toBe('not_found'); // never accuse a real paper
   });
 
-  it('a reliably-CLEAN title in priorRefs IS still title-searched (not over-suppressed)', async () => {
-    const fetchFn = mockFetch((url) => (url.includes('title.search') ? { status: 200, json: { results: [{ title: 'Attention Is All You Need' }] } } : { status: 404 }));
-    const findings = await makeChecker('full').runCheck('builds on prior art.', 's', ['Attention Is All You Need'], emptyState());
-    expect(findings.some((f) => f.verdict === 'exists')).toBe(true); // clean title verified online
-    expect(fetchFn.mock.calls.some((c) => String(c[0]).includes('title.search'))).toBe(true);
-  });
+  // H3 (3rd reopen). A "does this look like a clean title?" heuristic is a BLACKLIST: it
+  // under-approximates the bibliographic format space, so any unlisted format is searched
+  // and a REAL paper comes back not_found. Both strings below are real papers that the
+  // heuristic accepted. The guarantee must be STRUCTURAL, not pattern-based: a string whose
+  // provenance is a reference list / prose is never eligible for a title search at all.
+  describe('raw reference strings are structurally ineligible for title search', () => {
+    const REAL_PAPERS_AS_RAW_LINES = [
+      'Vaswani A. Attention Is All You Need. NeurIPS. 2017.',
+      'Vaswani A, Shazeer N, Parmar N. Attention Is All You Need. Adv Neural Inf Process Syst. 2017;30.',
+      'Attention Is All You Need', // even a bare title: nothing PROVES it is one
+      'He K, Zhang X. Deep Residual Learning for Image Recognition. CVPR 2016.',
+    ];
 
-  it('isLikelyCleanTitle: clean titles pass, bibliographic lines are rejected', () => {
-    expect(isLikelyCleanTitle('Attention Is All You Need')).toBe(true);
-    expect(isLikelyCleanTitle('Deep Residual Learning for Image Recognition')).toBe(true);
-    expect(isLikelyCleanTitle('Vaswani, A. et al. (2017). Attention Is All You Need. NeurIPS, 30, 5998-6008.')).toBe(false);
-    expect(isLikelyCleanTitle('Smith, J. (2020). Deep learning. Nature, 521, 436-444.')).toBe(false);
-    expect(isLikelyCleanTitle('see https://example.com/paper')).toBe(false);
+    it.each(REAL_PAPERS_AS_RAW_LINES)('priorRefs %# is never title-searched and never not_found', async (ref) => {
+      const fetchFn = mockFetch(() => ({ status: 404 })); // a title search WOULD miss → not_found
+      const findings = await makeChecker('full').runCheck('Our work builds on prior art.', 's', [ref], emptyState());
+      expect(findings.length).toBeGreaterThan(0); // represented, not silently dropped
+      for (const f of findings) expect(f.verdict).not.toBe('not_found'); // never accuse a real paper
+      // Structural: the raw line never left the process at all.
+      expect(fetchFn.mock.calls.some((c) => String(c[0]).includes('title.search'))).toBe(false);
+    });
+
+    it('a current-turn References line is likewise never title-searched', async () => {
+      const fetchFn = mockFetch(() => ({ status: 404 }));
+      const output = 'Our method.\n\nReferences\n1. Vaswani A. Attention Is All You Need. NeurIPS. 2017.';
+      const findings = await makeChecker('full').runCheck(output, 's', [], emptyState());
+      expect(findings.length).toBeGreaterThan(0);
+      for (const f of findings) expect(f.verdict).not.toBe('not_found');
+      expect(fetchFn.mock.calls.some((c) => String(c[0]).includes('title.search'))).toBe(false);
+    });
+
+    it('extractCitations marks every reference-derived citation raw + title-less', () => {
+      for (const ref of REAL_PAPERS_AS_RAW_LINES) {
+        const c = extractCitations('', [ref])[0];
+        expect(c.title).toBeUndefined(); // no title ⇒ no title search is even possible
+        expect(c.provenance).toBe('raw');
+      }
+    });
+
+    // The escape hatch stays open for a genuinely structured title (a registry record, a
+    // tool result, an explicit manual-review argument) — that is what the benchmark uses.
+    it('an explicitly STRUCTURED title is still verified online', async () => {
+      const fetchFn = mockFetch((url) => (url.includes('title.search')
+        ? { status: 200, json: { results: [{ title: 'Attention Is All You Need' }] } }
+        : { status: 404 }));
+      const r = await checkExistence(
+        { raw: 't', title: 'Attention Is All You Need', provenance: 'structured' },
+        { networkPolicy: 'full' },
+      );
+      expect(r.verdict).toBe('exists');
+      expect(fetchFn.mock.calls.some((c) => String(c[0]).includes('title.search'))).toBe(true);
+    });
   });
 
   it('a title-only finding carries a non-empty identity (normTitle from raw), never {}', async () => {
