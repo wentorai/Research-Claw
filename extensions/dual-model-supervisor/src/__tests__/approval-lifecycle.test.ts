@@ -22,7 +22,7 @@ const BASE = {
   },
 };
 
-interface LogEntry { type: string; action: string; details: string }
+interface LogEntry { type: string; action: string; details: string; metadata?: string }
 interface ApprovalReq {
   title: string;
   description: string;
@@ -94,6 +94,26 @@ describe('P1-D approval lifecycle', () => {
     await r.requireApproval!.onResolution!('allow-once'); // conflicting late resolution
     const log = await approvalLog(h);
     expect(log.filter(isTerminal).length).toBe(1);
+  });
+
+  // Codex repro: with a bounded/evictable global set, resolving many OTHER approvals
+  // could evict an old approval's id, letting it be re-resolved into a SECOND, conflicting
+  // terminal. The per-callback one-shot latch makes this impossible regardless of count.
+  it('re-resolving an approval after many other approvals stays idempotent (no cross-approval eviction)', async () => {
+    const h = await loadPluginFresh({ ...BASE, dangerousToolPolicy: 'approve' });
+    const first = (await h.fire('before_tool_call', dangerEvent(), dangerCtx('sk1'))) as ToolResult;
+    await first.requireApproval!.onResolution!('allow-once'); // approval-1 → allowed terminal
+    // Many more approvals resolve in between (would evict an old id from a bounded set).
+    for (let i = 0; i < 8; i++) {
+      const r = (await h.fire('before_tool_call', dangerEvent(), dangerCtx(`skN${i}`))) as ToolResult;
+      await r.requireApproval!.onResolution!('deny');
+    }
+    // Re-resolve the FIRST approval with a CONFLICTING decision — must be ignored.
+    await first.requireApproval!.onResolution!('deny');
+    const log = await approvalLog(h);
+    const firstTerminals = log.filter((e) => isTerminal(e) && /"approvalId":"approval-1"/.test(e.metadata ?? ''));
+    expect(firstTerminals.length).toBe(1); // exactly one terminal for approval-1
+    expect(/allowed/i.test(firstTerminals[0].details)).toBe(true); // the ORIGINAL, not the late deny
   });
 });
 

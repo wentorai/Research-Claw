@@ -29,11 +29,6 @@ export class ToolReviewer {
   private auditLog: AuditLogService;
   /** Monotonic per-process approval id source (stable, non-colliding, not time-based). */
   private approvalSeq = 0;
-  /** Approval ids that have already reached a terminal state (idempotent resolution).
-   *  Bounded (oldest evicted past the cap) so it cannot grow without limit over a long
-   *  process; approvals are rare human-in-loop events, so the cap is never realistically hit. */
-  private readonly resolvedApprovals = new Set<string>();
-  private static readonly MAX_RESOLVED_APPROVALS = 1000;
 
   constructor(
     config: SupervisorConfig,
@@ -186,35 +181,37 @@ export class ToolReviewer {
       timestamp: Date.now(),
     });
 
+    // Idempotency is a per-approval ONE-SHOT LATCH captured in this closure — NOT a
+    // shared/evictable set. The first resolution wins; any later/duplicate/conflicting
+    // resolution for THIS approval is ignored, regardless of how many other approvals
+    // occur (an evictable global set could drop an old id and let it be re-resolved into
+    // a second, conflicting terminal). The latch's lifetime is exactly this callback.
+    let resolved = false;
     const requireApproval: RequireApproval = {
       title: `Approve dangerous tool: ${tool}`,
       description: reason,
       severity: 'critical',
       allowedDecisions: ['allow-once', 'allow-always', 'deny'],
       timeoutBehavior: 'deny',
-      onResolution: (decision) => this.resolveApproval(approvalId, tool, sessionId, decision),
+      onResolution: (decision) => {
+        if (resolved) {
+          this.logger.warn(`[ToolReviewer] duplicate approval resolution ignored (${approvalId}: ${decision})`);
+          return;
+        }
+        resolved = true;
+        this.resolveApproval(approvalId, tool, sessionId, decision);
+      },
     };
     return { block: false, requireApproval };
   }
 
   /**
-   * Terminal transition for an approval. Idempotent: the FIRST resolution wins and
-   * writes exactly one terminal audit; later/duplicate/conflicting resolutions are
-   * ignored (state machine: requested → one terminal only). Errors are contained
-   * (never thrown back to the tool host) but observable via the logger.
+   * Write the single terminal audit for an approval. Called at most once per approval
+   * (the caller's one-shot latch enforces idempotency). Errors are contained (never
+   * thrown back to the tool host) but observable via the logger.
    */
   private resolveApproval(approvalId: string, tool: string, sessionId: string, decision: PluginApprovalResolution): void {
     try {
-      if (this.resolvedApprovals.has(approvalId)) {
-        this.logger.warn(`[ToolReviewer] duplicate approval resolution ignored (${approvalId}: ${decision})`);
-        return;
-      }
-      this.resolvedApprovals.add(approvalId);
-      if (this.resolvedApprovals.size > ToolReviewer.MAX_RESOLVED_APPROVALS) {
-        const oldest = this.resolvedApprovals.values().next().value; // Set preserves insertion order
-        if (oldest !== undefined) this.resolvedApprovals.delete(oldest);
-      }
-
       const terminal: Record<PluginApprovalResolution, { action: 'info' | 'block' | 'warn'; label: string }> = {
         'allow-once': { action: 'info', label: 'allowed:allow-once' },
         'allow-always': { action: 'info', label: 'allowed:allow-always' },
