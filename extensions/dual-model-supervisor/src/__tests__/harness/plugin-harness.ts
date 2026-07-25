@@ -3,7 +3,7 @@
  * through a mock PluginApi, invoking hooks with the true OpenClaw
  * `handler(event, ctx)` two-argument contract. No hook logic is re-implemented
  * here; the harness only captures the handlers the plugin registers and fires
- * them, so tests exercise production wiring (session resolution, footer cache,
+ * them, so tests exercise production wiring (session resolution, review store,
  * audit) exactly as the gateway would.
  */
 

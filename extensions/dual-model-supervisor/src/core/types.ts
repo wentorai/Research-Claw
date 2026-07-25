@@ -186,12 +186,15 @@ export interface TaskParsingResult {
 }
 
 export interface RegenerateHistoryEntry {
-  attempt: number;                 // Which regeneration attempt (1, 2, 3, ...)
-  timestamp: number;               // When the regeneration was triggered
-  deviationScore: number;          // The deviation score that triggered regeneration
-  originalOutputPreview: string;   // First 200 chars of the deviated output
+  attempt: number;                 // Which course correction (1, 2, 3, ...)
+  timestamp: number;               // When the correction was queued
+  deviationScore: number;          // The deviation score that triggered the correction
+  originalOutputPreview: string;   // First 200 chars of the drifted output
   correctionInstruction: string;   // The correction instruction that was injected
-  result: 'regenerating' | 'corrected' | 'max_reached';  // Outcome of this attempt
+  // The ONLY observable outcome. The drifted output was already delivered, and whether the
+  // model then honored the queued correction is never measured — so 'corrected' is not a
+  // state this plugin can truthfully record.
+  result: 'correction_queued';
 }
 
 export interface SessionState {
