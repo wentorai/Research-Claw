@@ -96,25 +96,38 @@ describe('P1-D approval lifecycle', () => {
     expect(log.filter(isTerminal).length).toBe(1);
   });
 
-  // Codex repro: with a bounded/evictable global set, resolving many OTHER approvals
-  // could evict an old approval's id, letting it be re-resolved into a SECOND, conflicting
-  // terminal. The per-callback one-shot latch makes this impossible regardless of count.
-  it('re-resolving an approval after many other approvals stays idempotent (no cross-approval eviction)', async () => {
+  /**
+   * Idempotency must not depend on how many OTHER approvals happened in between.
+   *
+   * The implementation this replaced tracked resolved ids in a global Set bounded at
+   * 1000 entries, evicting the oldest past the cap. Once approval-1's id was evicted,
+   * re-resolving it wrote a SECOND, conflicting terminal (allowed, then denied). To
+   * actually reach that eviction the probe must cross the cap — a handful of
+   * in-between approvals passes on the broken implementation too and proves nothing.
+   * The per-callback one-shot latch has no cap, so the count is irrelevant to it.
+   */
+  const EVICTION_PROBE_COUNT = 1_001; // > the 1000-entry cap of the bounded-Set implementation
+
+  it('re-resolving an approval after 1001 other approvals stays idempotent (crosses any bounded-set cap)', async () => {
     const h = await loadPluginFresh({ ...BASE, dangerousToolPolicy: 'approve' });
     const first = (await h.fire('before_tool_call', dangerEvent(), dangerCtx('sk1'))) as ToolResult;
     await first.requireApproval!.onResolution!('allow-once'); // approval-1 → allowed terminal
-    // Many more approvals resolve in between (would evict an old id from a bounded set).
-    for (let i = 0; i < 8; i++) {
+
+    for (let i = 0; i < EVICTION_PROBE_COUNT; i++) {
       const r = (await h.fire('before_tool_call', dangerEvent(), dangerCtx(`skN${i}`))) as ToolResult;
       await r.requireApproval!.onResolution!('deny');
     }
+
     // Re-resolve the FIRST approval with a CONFLICTING decision — must be ignored.
     await first.requireApproval!.onResolution!('deny');
-    const log = await approvalLog(h);
-    const firstTerminals = log.filter((e) => isTerminal(e) && /"approvalId":"approval-1"/.test(e.metadata ?? ''));
+
+    // Scope the query to approval-1's own session: with 1000+ approvals recorded, a
+    // global tail query would never reach back to it.
+    const r = (await h.rpc.get('rc.supervisor.log')!({ type: 'approval', sessionId: 'agent:main:sk1', limit: 50 })) as { entries: LogEntry[] };
+    const firstTerminals = r.entries.filter((e) => isTerminal(e) && /"approvalId":"approval-1"/.test(e.metadata ?? ''));
     expect(firstTerminals.length).toBe(1); // exactly one terminal for approval-1
     expect(/allowed/i.test(firstTerminals[0].details)).toBe(true); // the ORIGINAL, not the late deny
-  });
+  }, 60_000);
 });
 
 // Deep-review danger (tool passes quick-check but the reviewer flags blocked:true).

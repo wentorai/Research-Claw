@@ -6,6 +6,9 @@
  * started → one terminal; duplicates/out-of-order merge safely.
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ReviewStore, aggregateReview, REVIEW_SCHEMA_VERSION, isTerminalReviewState, type ReviewFinding } from '../core/review-store.js';
@@ -117,12 +120,28 @@ describe('M6 review persistence / replay (no broadcast involved)', () => {
 
 describe('M6 (reopened) restart identity, orphan recovery, DB availability', () => {
   // H4-a: boot epoch is PERSISTED, so a per-process counter can't collide across restarts.
-  it('allocateBootEpoch is persisted + monotonic across store re-instantiation on the same DB', () => {
-    const db2 = new Database(':memory:');
-    const e1 = new ReviewStore(db2, LOGGER).allocateBootEpoch();
-    const e2 = new ReviewStore(db2, LOGGER).allocateBootEpoch(); // simulate restart on the SAME db
-    expect(e2).toBe(e1 + 1); // proves DB persistence, not an in-memory counter
-    db2.close();
+  // A shared in-memory handle would not prove this: the epoch must survive the DB
+  // connection being CLOSED and a new one opened on the same file, which is what a real
+  // gateway restart does. So this uses a temp file and closes the first connection first.
+  it('allocateBootEpoch survives closing the DB and reopening the same file (real restart)', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rc-review-epoch-')), 'supervisor.db');
+    const first = new Database(file);
+    const e1 = new ReviewStore(first, LOGGER).allocateBootEpoch();
+    // Move the ON-DISK epoch out of band. Any implementation that counts in memory
+    // instead of reading the row cannot see this, so `e2` pins the source of the value
+    // to the file rather than to a surviving process.
+    first.prepare("UPDATE supervisor_review_meta SET v = 41 WHERE k = 'boot_epoch'").run();
+    first.close(); // the old process is GONE — nothing in-memory may carry over
+    expect(first.open).toBe(false);
+
+    const second = new Database(file);
+    const e2 = new ReviewStore(second, LOGGER).allocateBootEpoch();
+    const onDisk = second.prepare("SELECT v FROM supervisor_review_meta WHERE k = 'boot_epoch'").get() as { v: number };
+    second.close();
+
+    expect(e1).toBe(1);
+    expect(e2).toBe(42); // read back from disk
+    expect(onDisk.v).toBe(42); // and written back, so the next restart advances again
   });
 
   // H4-b: orphan 'started' recovery.
