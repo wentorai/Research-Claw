@@ -207,8 +207,10 @@ export class ReviewerClient {
    *  - `bypassQueue`: skip the shared serial `_reviewQueue` so a benign high-risk
    *    tool's gate is not stalled behind unrelated summary/output reviews.
    *  - `timeoutMs`: fail OPEN (resolve `null`) if the review does not complete in
-   *    time. The underlying call keeps running (its result is still cached); only
-   *    the CALLER's wait is bounded, so the tool is never stalled on a slow round-trip.
+   *    time, so the tool is never stalled on a slow round-trip. On timeout the
+   *    underlying request is ABORTED: the tool has already proceeded, so its answer
+   *    can no longer influence anything and letting it run to the 30s cap would just
+   *    hold a connection and spend reviewer tokens.
    */
   async review<T>(
     systemPrompt: string,
@@ -221,14 +223,17 @@ export class ReviewerClient {
       return cached;
     }
 
+    const gated = opts?.timeoutMs != null && opts.timeoutMs > 0;
+    const controller = gated ? new AbortController() : undefined;
+
     let core: Promise<T | null>;
     if (opts?.bypassQueue) {
       // Do NOT chain onto (or advance) the shared queue — run immediately.
-      core = this._reviewAfterQueue<T>(systemPrompt, userContent, key);
+      core = this._reviewAfterQueue<T>(systemPrompt, userContent, key, controller?.signal);
     } else {
       const run = this._reviewQueue
         .catch(() => undefined)
-        .then(() => this._reviewAfterQueue<T>(systemPrompt, userContent, key));
+        .then(() => this._reviewAfterQueue<T>(systemPrompt, userContent, key, controller?.signal));
       this._reviewQueue = run.then(
         () => undefined,
         () => undefined,
@@ -239,16 +244,18 @@ export class ReviewerClient {
     // No gate requested (undefined/0/negative) → return the raw call. Callers that
     // need the never-over-block bound (the before_tool_call security gate) MUST pass
     // a positive timeoutMs; parseConfig guarantees toolReviewGateMs > 0.
-    if (opts?.timeoutMs == null || opts.timeoutMs <= 0) {
+    if (!gated) {
       return core;
     }
 
     // Gate: whichever settles first. `core` never rejects (_reviewAfterQueue catches
-    // and returns null), so on timeout we fail open with null and let `core` finish
-    // in the background (its result is cached, harmless).
+    // and returns null), so on timeout we fail open with null.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const gate = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), opts.timeoutMs);
+      timer = setTimeout(() => {
+        controller!.abort(new Error(`reviewer gate timeout after ${opts.timeoutMs}ms`));
+        resolve(null);
+      }, opts.timeoutMs);
     });
     try {
       return await Promise.race([core, gate]);
@@ -261,14 +268,21 @@ export class ReviewerClient {
     systemPrompt: string,
     userContent: string,
     key: string,
+    signal?: AbortSignal,
   ): Promise<T | null> {
     try {
-      const result = await this._callApi(systemPrompt, userContent);
+      const result = await this._callApi(systemPrompt, userContent, signal);
       if (result !== null) {
         setCache(key, result);
       }
       return result as T | null;
     } catch (err) {
+      // A gate timeout cancels this request on purpose — the caller already failed open.
+      // Reporting it as a failure would blame the reviewer for our own deadline.
+      if (signal?.aborted) {
+        this.logger.debug?.(`[ReviewerClient] Deep review cancelled: ${signal.reason instanceof Error ? signal.reason.message : 'gate timeout'}`);
+        return null;
+      }
       this.logger.error(`Reviewer call failed: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
@@ -286,7 +300,7 @@ export class ReviewerClient {
       });
   }
 
-  private async _callApi(systemPrompt: string, userContent: string): Promise<unknown | null> {
+  private async _callApi(systemPrompt: string, userContent: string, signal?: AbortSignal): Promise<unknown | null> {
     // Same truth source as status/audit: whatever readiness says is unavailable is
     // exactly what fails here, with the same reason.
     const readiness = this._readiness;
@@ -314,11 +328,12 @@ export class ReviewerClient {
     const headers = adapter.buildHeaders(providerCfg);
     const body = adapter.buildBody(providerCfg, parsed.modelId, systemPrompt, userContent);
 
+    // Hard cap for ungated callers; the caller's gate signal (when present) cancels earlier.
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {

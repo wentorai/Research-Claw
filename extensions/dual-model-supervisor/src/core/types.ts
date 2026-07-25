@@ -96,7 +96,11 @@ export const DEFAULT_CONFIG: SupervisorConfig = {
   },
   highRiskTools: ['exec', 'write', 'edit', 'send_notification', 'browser'],
   dangerousToolPolicy: 'block',
-  toolReviewGateMs: 10000,
+  // How long a high-risk tool call waits for the deep review before proceeding. Every
+  // high-risk tool pays this in the worst case, so it is tuned for interactive use, not
+  // for review completeness: on timeout the deep pass is skipped (fail-open, audited)
+  // while the deterministic danger rules — which need no model — still block instantly.
+  toolReviewGateMs: 4000,
   grounding: {
     networkPolicy: 'off',   // zero external requests by default (privacy)
     verdictMode: 'flag',

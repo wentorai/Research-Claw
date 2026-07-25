@@ -69,6 +69,13 @@
         "description": "Confirmed-dangerous tool call: block=hard block; approve=pause for human approval. Default block.",
         "default": "block"
       },
+      "toolReviewGateMs": {
+        "type": "number",
+        "minimum": 500,
+        "maximum": 30000,
+        "description": "How long a high-risk tool call waits for the reviewer model's deep review, in ms. On timeout the deep review is skipped and the tool proceeds (audited); the deterministic dangerous-command rules still block instantly and are unaffected.",
+        "default": 4000
+      },
       "grounding": {
         "type": "object",
         "description": "Citation existence checking (privacy-gated, best-effort).",
