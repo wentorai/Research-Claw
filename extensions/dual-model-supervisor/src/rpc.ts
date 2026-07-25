@@ -4,7 +4,7 @@
  * Registers rc.supervisor.* RPC methods for Dashboard communication.
  */
 
-import type { RegisterMethod, SupervisorConfig, PluginLogger, ConfiguredProvider } from './core/types.js';
+import type { RegisterMethod, SupervisorConfig, PluginLogger, ConfiguredProvider, ReviewerReadiness } from './core/types.js';
 import { DEFAULT_CONFIG } from './core/types.js';
 import { AuditLogService } from './core/audit-log.js';
 import { parseConfig } from './core/config.js';
@@ -18,6 +18,7 @@ import { parseConfig } from './core/config.js';
  * @param logger             Plugin logger
  * @param getSessionStates   Returns the live session state map (optional)
  * @param getConfiguredProviders Returns the available model providers for reviewer (optional)
+ * @param getReviewerReadiness Returns the reviewer model readiness (optional)
  */
 export function registerSupervisorRpc(
   registerMethod: RegisterMethod,
@@ -29,6 +30,7 @@ export function registerSupervisorRpc(
   getConfiguredProviders?: () => ConfiguredProvider[],
   persistConfig?: (cfg: SupervisorConfig) => void,
   getReviewStoreAvailable?: () => boolean,
+  getReviewerReadiness?: () => ReviewerReadiness,
 ): void {
   registerMethod('rc.supervisor.status', async () => {
     const cfg = getActiveConfig();
@@ -50,10 +52,21 @@ export function registerSupervisorRpc(
       }
     }
 
+    // Reviewer availability is reported SEPARATELY from `enabled`/`reviewMode`: the
+    // deterministic safety gate runs without any model, so "deep review unavailable"
+    // must never read as "supervision off" (and vice versa).
+    const readiness = getReviewerReadiness?.();
+
     return {
       enabled: cfg.enabled,
       reviewMode: cfg.reviewMode,
+      // The stored marker: '' means "inherit the main model dynamically" — the resolved
+      // model is reported as effectiveSupervisorModel, never written back here.
       supervisorModel: cfg.supervisorModel,
+      modelSource: readiness?.modelSource,
+      effectiveSupervisorModel: readiness?.effectiveModel,
+      reviewerReady: readiness?.ready,
+      reviewerUnavailableReason: readiness?.reason,
       memoryGuardEnabled: cfg.memoryGuard.enabled,
       courseCorrectionEnabled: cfg.courseCorrection.enabled,
       deviationThreshold: cfg.courseCorrection.deviationThreshold,

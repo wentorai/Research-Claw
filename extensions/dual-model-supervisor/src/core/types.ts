@@ -160,7 +160,8 @@ export type AuditLogType =
   | 'force_regenerate'    // Force regeneration on deviation
   | 'approval'            // Human-in-the-loop approval lifecycle (requested → allowed/denied/timeout/cancelled)
   | 'grounding'           // Citation existence check (exists / not_found / unverifiable)
-  | 'session_analysis';   // End-of-session analysis
+  | 'session_analysis'    // End-of-session analysis
+  | 'reviewer_health';    // Reviewer model availability at startup / config change (deep review degraded)
 
 export interface AuditLogEntry {
   id?: number;                    // Database primary key (auto-increment)
@@ -235,6 +236,32 @@ export interface SessionState {
 /** API protocols the dual-model reviewer client implements (non-streaming completion). */
 export const SUPPORTED_REVIEWER_APIS = ['openai-completions', 'anthropic-messages'] as const;
 export type SupportedReviewerApi = (typeof SUPPORTED_REVIEWER_APIS)[number];
+
+/**
+ * Where the reviewer model comes from:
+ *  - 'explicit'    — `supervisorModel` is configured;
+ *  - 'inherited'   — `supervisorModel` is empty, so the MAIN model is used (deep review
+ *                    therefore spends extra main-model tokens);
+ *  - 'unavailable' — no usable reviewer model; deep review is degraded while the
+ *                    deterministic safety gate keeps running.
+ */
+export type ReviewerModelSource = 'explicit' | 'inherited' | 'unavailable';
+
+/** Reviewer-model readiness — one truth source for status/audit/logs. */
+export interface ReviewerReadiness {
+  /**
+   * Whether a deep-review call can be ATTEMPTED: the model reference resolves, its
+   * provider exists, the protocol is supported and credentials are present. This is a
+   * static config check, not a liveness probe — the endpoint can still reject the call
+   * (that failure is logged per call and fails open).
+   */
+  ready: boolean;
+  modelSource: ReviewerModelSource;
+  /** `supervisorModel || mainModel`, re-resolved on every config/provider/main-model change; '' when neither is set. */
+  effectiveModel: string;
+  /** Why deep review cannot run. Present iff `ready` is false. */
+  reason?: string;
+}
 
 /** One element of `models.providers.*.models[]` — same fields as main-model catalog. */
 export interface ModelsProviderModelDef {

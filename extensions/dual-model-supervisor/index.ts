@@ -58,6 +58,9 @@ let _activeConfig: SupervisorConfig | null = null;
 
 const _sessionStates = new Map<string, SessionState>();
 let _hooksDone = false;
+/** Last reviewer-health state reported (log + audit), so re-registration and unrelated
+ *  config saves do not re-emit the same line; a real state change always does. */
+let _reportedReviewerHealth = '';
 
 /** Fresh SessionState value (not stored). Used for both tracked sessions and
  *  ephemeral manual-review runs (which must NOT enter the session map). */
@@ -76,6 +79,52 @@ function newSessionState(sessionId: string): SessionState {
     regenerateHistory: [],
     lastReviewReport: undefined,
   };
+}
+
+/**
+ * Report reviewer-model availability once per distinct state. Every state is logged;
+ * only the UNAVAILABLE state also writes an audit row (a working reviewer is not an
+ * event worth persisting). `rc.supervisor.status` exposes the same readiness object,
+ * so the reported reason cannot drift from the reason a call actually fails.
+ *
+ * An unusable reviewer degrades DEEP review ONLY — the deterministic safety gate
+ * (quick check + dangerousToolPolicy) has no model dependency and keeps running.
+ * Saying that out loud is the point: the failure mode being fixed here is a
+ * supervisor that turned itself off without telling anyone.
+ */
+function reportReviewerHealth(
+  client: ReviewerClient,
+  auditLog: AuditLogService,
+  logger: PluginApi['logger'],
+  cfg: SupervisorConfig,
+): void {
+  const r = client.getReadiness();
+  const key = `${cfg.enabled}|${cfg.reviewMode}|${r.ready}|${r.modelSource}|${r.effectiveModel}|${r.reason ?? ''}`;
+  if (key === _reportedReviewerHealth) return;
+  _reportedReviewerHealth = key;
+
+  if (!isSupervisorActive(cfg)) {
+    logger.info(`[Supervisor] supervision OFF (enabled=${cfg.enabled}, mode=${cfg.reviewMode})`);
+    return;
+  }
+
+  if (r.ready) {
+    const inherited = r.modelSource === 'inherited';
+    logger.info(
+      `[Supervisor] reviewer model ready: ${r.effectiveModel} (${r.modelSource}${inherited ? ' — deep review spends extra main-model tokens' : ''})`,
+    );
+    return;
+  }
+
+  const details = `Deep review unavailable (${r.reason}). Deterministic safety gate (quick check + dangerous tool policy) remains ACTIVE.`;
+  logger.warn(`[Supervisor] ${details}`);
+  auditLog.record({
+    sessionId: 'supervisor',
+    type: 'reviewer_health',
+    action: 'warn',
+    details,
+    timestamp: Date.now(),
+  });
 }
 
 /** Monotonic id for ephemeral manual reviews within this process. Namespaced by the
@@ -216,7 +265,7 @@ const plugin: PluginDefinition = {
     const mainModelPrimary = (mainModel?.model as Record<string, unknown>)?.primary;
     const fallbackModel = typeof mainModelPrimary === 'string' ? mainModelPrimary : '';
 
-    api.logger.info(`Dual Model Supervisor initializing (enabled=${cfg.enabled}, mode=${cfg.reviewMode}, model=${cfg.supervisorModel || `(inherit: ${fallbackModel})` || '(none)'})`);
+    api.logger.info(`Dual Model Supervisor initializing (enabled=${cfg.enabled}, mode=${cfg.reviewMode})`);
 
     if (!_initialized) {
       try {
@@ -285,6 +334,10 @@ const plugin: PluginDefinition = {
     const summaryExtractor = _summaryExtractor!;
     const groundingChecker = _groundingChecker!;
     const reviewStore = _reviewStore!;
+
+    // Reviewer-model availability is reported now (and again on every config change),
+    // never inferred from silence.
+    reportReviewerHealth(reviewerClient, auditLog, api.logger, _activeConfig ?? cfg);
 
     // ── Register database lifecycle service ───────────────────────
     api.registerService({
@@ -365,6 +418,7 @@ const plugin: PluginDefinition = {
       (newCfg: SupervisorConfig) => {
         _activeConfig = newCfg;
         reviewerClient.updateSupervisorConfig(newCfg);
+        reportReviewerHealth(reviewerClient, auditLog, api.logger, newCfg);
         outputReviewer.updateConfig(newCfg);
         toolReviewer.updateConfig(newCfg);
         memoryGuardian.updateConfig(newCfg);
@@ -379,6 +433,7 @@ const plugin: PluginDefinition = {
       () => _extractConfiguredProviders(api.pluginConfig as Record<string, unknown> | undefined, globalCfg),
       persistConfig,
       () => reviewStore.isAvailable(),
+      () => reviewerClient.getReadiness(),
     );
 
     // rc.supervisor.review — manual grounding check for arbitrary inline text.

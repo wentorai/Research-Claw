@@ -80,10 +80,18 @@ function parseStringArray(raw: unknown, defaults: string[]): string[] {
 }
 
 /**
- * Check if supervisor is effectively active (enabled + model configured + mode not off).
+ * Check if supervisor is effectively active (enabled + mode not off).
+ *
+ * Deliberately model-independent. `supervisorModel: ''` is the "inherit the main
+ * model" marker the Dashboard saves by default, and the deterministic safety gate
+ * (quick check + dangerousToolPolicy) needs no model at all — so requiring a
+ * non-empty `supervisorModel` here would silently disable supervision for the
+ * default configuration. Reviewer-model availability is a separate, observable
+ * concern (see ReviewerClient.getReadiness / rc.supervisor.status.reviewerReady):
+ * an unusable reviewer degrades deep review, it never opens the safety gate.
  */
 export function isSupervisorActive(cfg: SupervisorConfig): boolean {
-  return cfg.enabled && cfg.supervisorModel.length > 0 && cfg.reviewMode !== 'off';
+  return cfg.enabled && cfg.reviewMode !== 'off';
 }
 
 /**

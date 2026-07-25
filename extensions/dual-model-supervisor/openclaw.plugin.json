@@ -17,7 +17,7 @@
       },
       "supervisorModel": {
         "type": "string",
-        "description": "Reviewer model in provider/model format (e.g. openai/gpt-4o-mini). Leave empty to disable.",
+        "description": "Reviewer model in provider/model format (e.g. openai/gpt-4o-mini). Leave empty to inherit the main model — supervision stays on and deep review then spends main-model tokens. Turn supervision off with enabled/reviewMode instead.",
         "default": ""
       },
       "reviewMode": {
