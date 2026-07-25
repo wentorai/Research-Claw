@@ -19,11 +19,11 @@ import { validateReviewResult } from '../core/validators.js';
 /** Format a deep review result into a compact multi-line report for the Dashboard panel. */
 function formatReviewReport(r: ReviewResult): string {
   const lines: string[] = [];
-  if (r.blocked) lines.push('  ⛔ Deep review flagged this output');
+  if (r.flagged) lines.push('  ⛔ Deep review flagged this output');
   for (const w of r.warnings) lines.push(`  ⚠ ${w}`);
   for (const m of r.memoryAlerts) lines.push(`  🧠 ${m}`);
-  // A correctedVersion is only a SUGGESTION — it is never applied to the delivered output.
-  if (r.corrected && r.correctionNote) lines.push(`  📝 Suggested correction: ${r.correctionNote}`);
+  // A suggestedVersion is only a SUGGESTION — it is never applied to the delivered output.
+  if (r.hasSuggestion && r.suggestionNote) lines.push(`  📝 Suggested correction: ${r.suggestionNote}`);
   lines.push(`  (quality ${r.qualityScore.toFixed(2)}, deviation ${r.deviationScore.toFixed(2)})`);
   return lines.join('\n');
 }
@@ -154,15 +154,15 @@ export class OutputReviewer {
     // Output review is ADVISORY: it never blocks or applies a correction, so a flag or a
     // suggested correction is recorded as 'warn' (not 'block'/'correct', which would imply
     // enforcement). Only a clean review is 'pass'.
-    const advisory = result.blocked || result.corrected || result.warnings.length > 0;
+    const advisory = result.flagged || result.hasSuggestion || result.warnings.length > 0;
     const action = advisory ? 'warn' : 'pass';
 
     const details = !advisory
       ? `Review passed (quality: ${result.qualityScore.toFixed(2)}, deviation: ${result.deviationScore.toFixed(2)})`
-      : result.corrected
-        ? `Suggested correction (advisory, not applied): ${result.correctionNote ?? 'see correctedVersion'}`
-        : result.blocked
-          ? `Flagged (advisory, output not blocked): ${result.correctionNote ?? result.warnings.join('; ') ?? 'flagged'}`
+      : result.hasSuggestion
+        ? `Suggested correction (advisory, not applied): ${result.suggestionNote ?? 'see suggestedVersion'}`
+        : result.flagged
+          ? `Flagged (advisory, output not blocked): ${result.suggestionNote ?? result.warnings.join('; ') ?? 'flagged'}`
           : result.warnings.join('; ');
 
     this.auditLog.record({

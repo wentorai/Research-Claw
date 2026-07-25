@@ -1,17 +1,18 @@
 /**
- * P1-C — the SAFETY-CRITICAL `blocked` field is strictly gated; malformed → degrade,
+ * P1-C — the SAFETY-CRITICAL verdict field is strictly gated; malformed → degrade,
  * never a silent pass. (Advisory fields — warnings/scores — are intentionally coerced,
- * NOT a full strict schema; only the block/pass decision is hard-validated.)
+ * NOT a full strict schema; only the verdict itself is hard-validated.)
  *
- * The reviewer returns JSON. The consumers (tool-reviewer / output-reviewer) key
- * their block/pass decision on `blocked`. A coercing validator that turns any
- * malformed object into `{ blocked: false }` makes schema drift / missing fields
- * read as "not blocked" — a silent fail-open with no observable degrade. So a missing
- * or wrong-typed `blocked` returns null and the consumer records a degrade audit
- * (distinguishing reviewer-unavailable from schema-invalid) and fails open only
- * with visibility. A reviewer BLOCK must never be silently dropped, so `blocked:true`
- * without a reason is still honored as a block (synthesized reason). Cross-field
- * coherence: `corrected:true` is demoted to false unless a `correctedVersion` is present.
+ * The reviewer returns JSON. The tool gate keys its block/pass decision on
+ * `ToolReviewResult.blocked`; the output review keys its (advisory) verdict on
+ * `ReviewResult.flagged`. A coercing validator that turns any malformed object into
+ * a `false` verdict makes schema drift / missing fields read as "nothing wrong" — a
+ * silent fail-open with no observable degrade. So a missing or wrong-typed verdict
+ * returns null and the consumer records a degrade audit (distinguishing
+ * reviewer-unavailable from schema-invalid) and fails open only with visibility.
+ * A reviewer BLOCK must never be silently dropped, so `blocked:true` without a reason
+ * is still honored as a block (synthesized reason). Cross-field coherence:
+ * `hasSuggestion:true` is demoted to false unless a `suggestedVersion` is present.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,16 +52,16 @@ describe('P1-C strict validateToolReviewResult', () => {
 });
 
 describe('P1-C strict validateReviewResult', () => {
-  it('rejects {} (missing blocked) → null', () => {
+  it('rejects {} (missing flagged) → null', () => {
     expect(validateReviewResult({})).toBeNull();
   });
-  it('rejects wrong-typed blocked → null', () => {
-    expect(validateReviewResult({ blocked: 'no' })).toBeNull();
+  it('rejects wrong-typed flagged → null', () => {
+    expect(validateReviewResult({ flagged: 'no' })).toBeNull();
   });
   it('accepts a clean result', () => {
-    const r = validateReviewResult({ blocked: false, qualityScore: 0.9 });
+    const r = validateReviewResult({ flagged: false, qualityScore: 0.9 });
     expect(r).not.toBeNull();
-    expect(r!.blocked).toBe(false);
+    expect(r!.flagged).toBe(false);
   });
 });
 

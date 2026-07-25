@@ -105,11 +105,17 @@ export const DEFAULT_CONFIG: SupervisorConfig = {
 
 // ── Review Results ─────────────────────────────────────────────────────
 
+/**
+ * Verdict of an output review (llm_output). Every field is ADVISORY: the reviewed
+ * message was already delivered, so nothing here withholds or rewrites it. The field
+ * names say so deliberately — `blocked`/`corrected` would assert an enforcement this
+ * path does not have (that belongs to `ToolReviewResult`, below).
+ */
 export interface ReviewResult {
-  blocked: boolean;               // Whether the output was blocked entirely
-  corrected: boolean;             // Whether correction was applied
-  correctedVersion?: string;      // The corrected version of the output (if corrected)
-  correctionNote?: string;        // Explanation of what was corrected
+  flagged: boolean;               // Reviewer flagged a serious violation (advisory — output already delivered)
+  hasSuggestion: boolean;         // Reviewer supplied an improved version (never applied)
+  suggestedVersion?: string;      // The improved output the reviewer would have written
+  suggestionNote?: string;        // Explanation of what the reviewer would change
   warnings: string[];             // Safety or quality warnings
   memoryAlerts: string[];         // Alerts about memory inconsistencies or loss
   deviationScore: number;         // 0-1, how much the output deviates from expected trajectory

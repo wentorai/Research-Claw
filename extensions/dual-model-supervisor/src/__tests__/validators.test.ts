@@ -12,8 +12,8 @@ import {
 describe('validateReviewResult', () => {
   it('accepts valid response', () => {
     const r = validateReviewResult({
-      blocked: false,
-      corrected: false,
+      flagged: false,
+      hasSuggestion: false,
       warnings: ['test warning'],
       memoryAlerts: [],
       deviationScore: 0.3,
@@ -21,18 +21,18 @@ describe('validateReviewResult', () => {
       reportText: 'Looks good',
     });
     expect(r).not.toBeNull();
-    expect(r!.blocked).toBe(false);
+    expect(r!.flagged).toBe(false);
     expect(r!.warnings).toEqual(['test warning']);
     expect(r!.deviationScore).toBe(0.3);
   });
 
-  it('rejects a non-boolean blocked as schema-invalid (P1-C: malformed → null, not a coerced pass)', () => {
-    // `blocked` is a required boolean; a wrong type is schema drift, not a pass.
-    expect(validateReviewResult({ blocked: 'yes', corrected: 'true' })).toBeNull();
+  it('rejects a non-boolean flagged as schema-invalid (P1-C: malformed → null, not a coerced pass)', () => {
+    // `flagged` is a required boolean; a wrong type is schema drift, not a pass.
+    expect(validateReviewResult({ flagged: 'yes', hasSuggestion: 'true' })).toBeNull();
   });
 
   it('clamps scores to 0-1 range', () => {
-    const r = validateReviewResult({ blocked: false, deviationScore: 5.0, qualityScore: -1 });
+    const r = validateReviewResult({ flagged: false, deviationScore: 5.0, qualityScore: -1 });
     expect(r!.deviationScore).toBe(1);
     expect(r!.qualityScore).toBe(0);
   });
@@ -44,21 +44,21 @@ describe('validateReviewResult', () => {
   });
 
   it('filters non-string items from warnings array', () => {
-    const r = validateReviewResult({ blocked: false, warnings: ['valid', 42, null, 'also valid'] });
+    const r = validateReviewResult({ flagged: false, warnings: ['valid', 42, null, 'also valid'] });
     expect(r!.warnings).toEqual(['valid', 'also valid']);
   });
 
-  it('never reports corrected:true without a correctedVersion (cross-field coherence)', () => {
-    const r = validateReviewResult({ blocked: false, corrected: true }); // claims a correction but provides none
-    expect(r!.corrected).toBe(false); // incoherent claim demoted
-    expect(r!.correctedVersion).toBeUndefined();
-    // a blank correctedVersion is likewise not a real correction
-    const r2 = validateReviewResult({ blocked: false, corrected: true, correctedVersion: '   ' });
-    expect(r2!.corrected).toBe(false);
-    // a genuine correction is preserved
-    const r3 = validateReviewResult({ blocked: false, corrected: true, correctedVersion: 'fixed text' });
-    expect(r3!.corrected).toBe(true);
-    expect(r3!.correctedVersion).toBe('fixed text');
+  it('never reports hasSuggestion:true without a suggestedVersion (cross-field coherence)', () => {
+    const r = validateReviewResult({ flagged: false, hasSuggestion: true }); // claims a suggestion but provides none
+    expect(r!.hasSuggestion).toBe(false); // incoherent claim demoted
+    expect(r!.suggestedVersion).toBeUndefined();
+    // a blank suggestedVersion is likewise not a real suggestion
+    const r2 = validateReviewResult({ flagged: false, hasSuggestion: true, suggestedVersion: '   ' });
+    expect(r2!.hasSuggestion).toBe(false);
+    // a genuine suggestion is preserved
+    const r3 = validateReviewResult({ flagged: false, hasSuggestion: true, suggestedVersion: 'fixed text' });
+    expect(r3!.hasSuggestion).toBe(true);
+    expect(r3!.suggestedVersion).toBe('fixed text');
   });
 });
 

@@ -37,21 +37,21 @@ export function validateReviewResult(raw: unknown): ReviewResult | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
 
-  // `blocked` is a REQUIRED boolean in the OUTPUT_REVIEW schema. If it is missing
+  // `flagged` is a REQUIRED boolean in the OUTPUT_REVIEW schema. If it is missing
   // or the wrong type, the response is malformed/schema-drifted — return null so
   // the consumer records a degrade (never coerce a malformed body into a pass).
-  if (!isBoolean(r.blocked)) return null;
-  const blocked = r.blocked;
-  const correctedVersion = isString(r.correctedVersion) && r.correctedVersion.trim() ? r.correctedVersion : undefined;
-  // Cross-field coherence: `corrected: true` is meaningless without corrected text —
-  // never report a correction that carries no correctedVersion.
-  const corrected = (isBoolean(r.corrected) ? r.corrected : false) && correctedVersion !== undefined;
+  if (!isBoolean(r.flagged)) return null;
+  const flagged = r.flagged;
+  const suggestedVersion = isString(r.suggestedVersion) && r.suggestedVersion.trim() ? r.suggestedVersion : undefined;
+  // Cross-field coherence: `hasSuggestion: true` is meaningless without suggested text —
+  // never report a suggestion that carries no suggestedVersion.
+  const hasSuggestion = (isBoolean(r.hasSuggestion) ? r.hasSuggestion : false) && suggestedVersion !== undefined;
 
   return {
-    blocked,
-    corrected,
-    correctedVersion,
-    correctionNote: isString(r.correctionNote) ? r.correctionNote : undefined,
+    flagged,
+    hasSuggestion,
+    suggestedVersion,
+    suggestionNote: isString(r.suggestionNote) ? r.suggestionNote : undefined,
     warnings: asStringArray(r.warnings),
     memoryAlerts: asStringArray(r.memoryAlerts),
     deviationScore: clamp01(r.deviationScore),
