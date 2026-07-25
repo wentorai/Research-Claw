@@ -56,6 +56,26 @@ function cleanDoi(doi: string): string {
 }
 
 /**
+ * Heuristic: is `s` a reliably-CLEAN paper title (safe to send to a title-search), as
+ * opposed to a raw bibliographic line (author, year, journal, volume, pages)? Raw lines
+ * are noisy — a title-search MISSES them, so a REAL paper cited as a full reference would
+ * be falsely flagged `not_found`. Only clean titles may go online; every other reference
+ * string stays TITLE-LESS (→ unverifiable, never a fabrication accusation). Conservative:
+ * when in doubt, treat as NOT clean. Applies to BOTH current-turn and prior (summary) refs.
+ */
+export function isLikelyCleanTitle(s: string): boolean {
+  const t = (s ?? '').trim();
+  if (t.length < MIN_TITLE_LEN || t.length > 200) return false;
+  if (/\((?:19|20)\d{2}[a-z]?\)/.test(t)) return false;                         // (YYYY) year
+  if (/\bvol\.?\s*\d|\bno\.?\s*\d|\bpp\.?\s*\d|\b\d+\s*[–-]\s*\d+\b/i.test(t)) return false; // vol/issue/pages
+  if (hasCitationIdentifier(t)) return false;                                   // DOI/arXiv → scanIds handles it
+  if (/https?:\/\//i.test(t)) return false;                                     // URL
+  if (/[A-Z][a-z]+,\s+[A-Z]\./.test(t)) return false;                           // "Lastname, F." author list
+  if (/\bet\s+al\.?/i.test(t)) return false;                                    // "et al."
+  return true;
+}
+
+/**
  * Extract citations: structured ids (DOI / arXiv) from the raw text, plus bare
  * titles from the `references` list (never guessed out of free prose). Deduped.
  */
@@ -91,7 +111,9 @@ export function extractCitations(text: string, references: string[] = []): Citat
     const r = (ref ?? '').trim();
     if (!r) continue;
     const hadId = scanIds(r, r);
-    if (!hadId && r.length >= MIN_TITLE_LEN) push({ raw: r, title: r });
+    // Only a reliably-clean title may carry `title` (→ title-search). A raw bibliographic
+    // line is pushed TITLE-LESS so it becomes unverifiable, never falsely `not_found`.
+    if (!hadId && r.length >= MIN_TITLE_LEN) push(isLikelyCleanTitle(r) ? { raw: r, title: r } : { raw: r });
   }
   return out;
 }
@@ -324,21 +346,11 @@ export class GroundingChecker {
   /** Awaitable worker. Returns the fresh findings verified this call. Never throws. */
   async runCheck(output: string, sessionId: string, references: string[], sessionState: SessionState): Promise<GroundingFinding[]> {
     try {
-      const citations = extractCitations(output, references);
-      // Represent the CURRENT turn's title-only reference entries (no verifiable
-      // identifier) as UNVERIFIABLE-present, so a title-only-citing turn is honestly
-      // non-clean. Do NOT title-search these raw bibliographic lines — that would
-      // false-flag real papers. Identifiers (DOI/arXiv) in the output are already
-      // caught by extractCitations' text scan; here we only add TITLE-LESS markers
-      // (no doi/arxiv/title → checkExistence returns 'unverifiable', no network call).
-      const seen = new Set(citations.map((c) => c.raw.toLowerCase().trim()));
-      for (const entry of extractReferenceLines(output)) {
-        if (hasCitationIdentifier(entry)) continue; // identifier already handled by the text scan
-        const key = entry.toLowerCase().trim();
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        citations.push({ raw: entry }); // title-LESS → unverifiable, never not_found
-      }
+      // Prior (summary) refs AND the current turn's References-section entries both flow
+      // through extractCitations, which title-searches ONLY reliably-clean titles and keeps
+      // raw bibliographic lines TITLE-LESS (→ unverifiable, never a false not_found). This
+      // closes the priorRefs hole where a summary's raw bibliographic string was searched.
+      const citations = extractCitations(output, [...references, ...extractReferenceLines(output)]);
       if (!citations.length) return [];
 
       const already = new Set((sessionState.groundingFindings ?? []).map((f) => f.raw.toLowerCase()));
@@ -383,7 +395,13 @@ export class GroundingChecker {
       verdict,
       via: result.via,
       sources: result.sources ?? {},
-      identity: { doi: c.doi, arxivId: c.arxivId, normTitle: c.title ? normTitle(c.title) : undefined },
+      // Every finding carries a non-empty identity: an identifier finding has doi/arxivId;
+      // a title-only (title-less) finding falls back to the normalized raw so it is never {}.
+      identity: {
+        doi: c.doi,
+        arxivId: c.arxivId,
+        normTitle: c.title ? normTitle(c.title) : (!c.doi && !c.arxivId ? normTitle(c.raw) : undefined),
+      },
     };
   }
 

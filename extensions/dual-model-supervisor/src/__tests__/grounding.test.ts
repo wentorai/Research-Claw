@@ -12,6 +12,7 @@ import {
   inflightCount,
   GroundingChecker,
   extractReferenceLines,
+  isLikelyCleanTitle,
 } from '../hooks/grounding-checker.js';
 import { parseConfig } from '../core/config.js';
 import type { AuditLogService } from '../core/audit-log.js';
@@ -174,6 +175,39 @@ describe('P2 (reopened) current-turn title-only citations', () => {
     const lines = extractReferenceLines('References\n- Deep Residual Learning for Image Recognition\n\nNote: all papers were accessed in January 2024 via institutional access.');
     expect(lines.some((l) => l.includes('Deep Residual Learning'))).toBe(true);
     expect(lines.some((l) => l.includes('Note:'))).toBe(false); // trailing prose (no list marker) not harvested
+  });
+
+  // H3 priorRefs: a summary reference (passed as priorRefs) that is a RAW bibliographic
+  // line must NOT be title-searched — that false-flags a real paper as not_found.
+  it('does NOT false-flag a real paper cited via priorRefs (raw biblio line stays unverifiable)', async () => {
+    mockFetch(() => ({ status: 404 })); // title-search (if it ran) would miss → not_found
+    const priorRefs = ['Vaswani, A. et al. (2017). Attention Is All You Need. NeurIPS, 30, 5998-6008.'];
+    const findings = await makeChecker('full').runCheck('Our work builds on prior art.', 's', priorRefs, emptyState());
+    expect(findings.length).toBeGreaterThan(0);
+    for (const f of findings) expect(f.verdict).not.toBe('not_found'); // never accuse a real paper
+  });
+
+  it('a reliably-CLEAN title in priorRefs IS still title-searched (not over-suppressed)', async () => {
+    const fetchFn = mockFetch((url) => (url.includes('title.search') ? { status: 200, json: { results: [{ title: 'Attention Is All You Need' }] } } : { status: 404 }));
+    const findings = await makeChecker('full').runCheck('builds on prior art.', 's', ['Attention Is All You Need'], emptyState());
+    expect(findings.some((f) => f.verdict === 'exists')).toBe(true); // clean title verified online
+    expect(fetchFn.mock.calls.some((c) => String(c[0]).includes('title.search'))).toBe(true);
+  });
+
+  it('isLikelyCleanTitle: clean titles pass, bibliographic lines are rejected', () => {
+    expect(isLikelyCleanTitle('Attention Is All You Need')).toBe(true);
+    expect(isLikelyCleanTitle('Deep Residual Learning for Image Recognition')).toBe(true);
+    expect(isLikelyCleanTitle('Vaswani, A. et al. (2017). Attention Is All You Need. NeurIPS, 30, 5998-6008.')).toBe(false);
+    expect(isLikelyCleanTitle('Smith, J. (2020). Deep learning. Nature, 521, 436-444.')).toBe(false);
+    expect(isLikelyCleanTitle('see https://example.com/paper')).toBe(false);
+  });
+
+  it('a title-only finding carries a non-empty identity (normTitle from raw), never {}', async () => {
+    mockFetch(() => ({ status: 404 }));
+    const findings = await makeChecker('identifiers-only').runCheck('References\n- Deep Residual Learning for Image Recognition', 's', [], emptyState());
+    const f = findings.find((x) => x.raw.includes('Deep Residual'))!;
+    expect(f.identity).toBeDefined();
+    expect(f.identity!.normTitle && f.identity!.normTitle.length > 0).toBe(true); // never an empty identity
   });
 });
 

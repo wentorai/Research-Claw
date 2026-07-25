@@ -75,10 +75,11 @@ describe('M6 review persistence / replay (no broadcast involved)', () => {
     expect(store.list({ runId: 'runB' }).reviews.map((r) => r.reviewId)).toEqual(['auto:runB']);
   });
 
-  it('supports incremental replay via sinceUpdatedAt (dedup on reconnect)', () => {
+  it('supports incremental replay via sinceRevision (dedup on reconnect)', () => {
     store.finalize('a', 'completed', { sessionKey: 'sk', kind: 'auto', verdict: 'exists', findings: [] }, 100);
+    const afterA = store.list({ sessionKey: 'sk', sinceRevision: 0 }).nextCursor!;
     store.finalize('b', 'completed', { sessionKey: 'sk', kind: 'auto', verdict: 'exists', findings: [] }, 200);
-    const since = store.list({ sessionKey: 'sk', sinceUpdatedAt: 150 });
+    const since = store.list({ sessionKey: 'sk', sinceRevision: afterA });
     expect(since.reviews.map((r) => r.reviewId)).toEqual(['b']); // only newer than the cursor
   });
 
@@ -89,16 +90,28 @@ describe('M6 review persistence / replay (no broadcast involved)', () => {
     expect(page.reviews.length).toBe(2);
   });
 
-  // H4-d: composite (updatedAt, reviewId) cursor — same-millisecond records are never skipped.
-  it('same-millisecond records are NOT skipped on replay (composite cursor)', () => {
+  // H4-d (revision cursor): same-millisecond records are never skipped on replay.
+  it('same-millisecond records are NOT skipped on replay (monotonic revision cursor)', () => {
     store.finalize('a', 'completed', { sessionKey: 'sk', kind: 'auto', verdict: 'exists', findings: [] }, 200);
     store.finalize('b', 'completed', { sessionKey: 'sk', kind: 'auto', verdict: 'exists', findings: [] }, 200); // SAME ms
-    const p1 = store.list({ sessionKey: 'sk', since: { updatedAt: 0, reviewId: '' }, limit: 1 });
+    const p1 = store.list({ sessionKey: 'sk', sinceRevision: 0, limit: 1 });
     expect(p1.reviews.map((r) => r.reviewId)).toEqual(['a']);
-    const p2 = store.list({ sessionKey: 'sk', since: p1.nextCursor, limit: 1 });
+    const p2 = store.list({ sessionKey: 'sk', sinceRevision: p1.nextCursor, limit: 1 });
     expect(p2.reviews.map((r) => r.reviewId)).toEqual(['b']); // co-ms record reachable, not skipped
-    const p3 = store.list({ sessionKey: 'sk', since: p2.nextCursor, limit: 1 });
+    const p3 = store.list({ sessionKey: 'sk', sinceRevision: p2.nextCursor, limit: 1 });
     expect(p3.reviews).toEqual([]); // clean end, no infinite loop
+  });
+
+  // Codex #2: an in-place started→terminal transition at the SAME ms/reviewId MUST be
+  // re-delivered on replay (the composite (updatedAt, reviewId) cursor missed it).
+  it('an in-place started→terminal change is re-delivered on replay (revision advances)', () => {
+    store.begin('r', { sessionKey: 'sk', runId: 'run', kind: 'auto' }, 100);
+    const afterStarted = store.list({ sessionKey: 'sk', sinceRevision: 0 });
+    expect(afterStarted.reviews[0].state).toBe('started');
+    const cursor = afterStarted.nextCursor!;
+    store.finalize('r', 'completed', { sessionKey: 'sk', runId: 'run', kind: 'auto', verdict: 'exists', findings: [] }, 100); // SAME ms
+    const replay = store.list({ sessionKey: 'sk', sinceRevision: cursor });
+    expect(replay.reviews.map((x) => x.state)).toEqual(['completed']); // the terminal transition is NOT missed
   });
 });
 

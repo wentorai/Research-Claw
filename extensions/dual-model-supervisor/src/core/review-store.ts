@@ -23,7 +23,7 @@ import Database from 'better-sqlite3';
 import type { PluginLogger } from './types.js';
 
 /** Bump when the persisted shape or aggregation rules change. */
-export const REVIEW_SCHEMA_VERSION = 2;
+export const REVIEW_SCHEMA_VERSION = 3;
 
 // 'timedout' is a terminal DISTINCT from 'failed': failed = the check ran and threw;
 // timedout = the process died / never completed (orphan 'started' recovered on boot).
@@ -40,15 +40,20 @@ export type PersistOutcome =
   | { ok: false; reason: 'db_unavailable' }
   | { ok: false; reason: 'error'; message: string };
 
-/** A composite replay cursor: strictly greater than (updatedAt, reviewId) is a TOTAL
- *  order, so two records sharing a millisecond are never skipped on incremental replay. */
-export interface ReviewCursor { updatedAt: number; reviewId: string }
+/** Replay cursor = a DB-monotonic `revision` (bumped on EVERY write, incl. an in-place
+ *  started→terminal update). A wall-clock ms timestamp + business id cannot serve as a
+ *  change sequence: it misses same-ms inserts AND in-place state changes (the row's key
+ *  does not advance). `revision` strictly increases per write, so replay never misses a
+ *  change. `nextCursor` is the max revision returned — feed it back verbatim. */
+export type ReviewCursor = number;
 
 export interface ReviewFinding {
   raw: string;
   verdict: string;
   via?: string;
   sources?: Record<string, string>;
+  /** Normalized identity (no response body) — persisted so a finding is always complete. */
+  identity?: { doi?: string; arxivId?: string; normTitle?: string };
 }
 
 export interface ReviewRecord {
@@ -62,6 +67,7 @@ export interface ReviewRecord {
   findings: ReviewFinding[];
   createdAt: number;
   updatedAt: number;
+  revision: number; // DB-monotonic change sequence (for replay cursors)
 }
 
 interface Row {
@@ -75,6 +81,7 @@ interface Row {
   findings: string;
   createdAt: number;
   updatedAt: number;
+  revision: number;
 }
 
 export class ReviewStore {
@@ -93,7 +100,8 @@ export class ReviewStore {
   }
 
   private migrate(): void {
-    this.db!.exec(`
+    const db = this.db!;
+    db.exec(`
       CREATE TABLE IF NOT EXISTS supervisor_reviews (
         reviewId TEXT PRIMARY KEY,
         schemaVersion INTEGER NOT NULL,
@@ -104,7 +112,8 @@ export class ReviewStore {
         verdict TEXT NOT NULL DEFAULT 'none',
         findings TEXT NOT NULL DEFAULT '[]',
         createdAt INTEGER NOT NULL,
-        updatedAt INTEGER NOT NULL
+        updatedAt INTEGER NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS supervisor_review_meta (
         k TEXT PRIMARY KEY,
@@ -113,8 +122,25 @@ export class ReviewStore {
       CREATE INDEX IF NOT EXISTS idx_reviews_session ON supervisor_reviews(sessionKey);
       CREATE INDEX IF NOT EXISTS idx_reviews_run ON supervisor_reviews(runId);
       CREATE INDEX IF NOT EXISTS idx_reviews_updated ON supervisor_reviews(updatedAt);
-      CREATE INDEX IF NOT EXISTS idx_reviews_cursor ON supervisor_reviews(updatedAt, reviewId);
     `);
+    // In-place upgrade for a pre-v3 table: add the monotonic revision column.
+    const cols = db.prepare('PRAGMA table_info(supervisor_reviews)').all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'revision')) {
+      db.exec('ALTER TABLE supervisor_reviews ADD COLUMN revision INTEGER NOT NULL DEFAULT 0');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_reviews_revision ON supervisor_reviews(revision)');
+  }
+
+  /**
+   * Allocate the next DB-monotonic revision. Bumped on EVERY write so a replay cursor
+   * over `revision` never misses a change — including an in-place started→terminal
+   * update (whose reviewId/updatedAt would not advance) or a same-millisecond insert.
+   */
+  private nextRevision(db: Database.Database): number {
+    const row = db
+      .prepare("INSERT INTO supervisor_review_meta (k, v) VALUES ('revision_seq', 1) ON CONFLICT(k) DO UPDATE SET v = v + 1 RETURNING v")
+      .get() as { v: number };
+    return row.v;
   }
 
   private getDb(): Database.Database | null {
@@ -162,10 +188,12 @@ export class ReviewStore {
     if (!db) return 0;
     try {
       const cutoff = now - (opts?.olderThanMs ?? 0);
-      const res = db
-        .prepare("UPDATE supervisor_reviews SET state = 'timedout', verdict = 'unverifiable', updatedAt = ? WHERE state = 'started' AND updatedAt <= ?")
-        .run(now, cutoff);
-      return res.changes;
+      // Row-by-row so each swept review gets a DISTINCT monotonic revision (a shared
+      // revision could be split across replay pages and lose rows past the cursor).
+      const orphans = db.prepare("SELECT reviewId FROM supervisor_reviews WHERE state = 'started' AND updatedAt <= ?").all(cutoff) as Array<{ reviewId: string }>;
+      const upd = db.prepare("UPDATE supervisor_reviews SET state = 'timedout', verdict = 'unverifiable', updatedAt = ?, revision = ? WHERE reviewId = ?");
+      for (const o of orphans) upd.run(now, this.nextRevision(db), o.reviewId);
+      return orphans.length;
     } catch (err) {
       this.logger.error(`[ReviewStore] sweepOrphans failed: ${err instanceof Error ? err.message : String(err)}`);
       return 0;
@@ -181,9 +209,9 @@ export class ReviewStore {
       const existing = db.prepare('SELECT state FROM supervisor_reviews WHERE reviewId = ?').get(reviewId) as { state: string } | undefined;
       if (existing) return { ok: true }; // already started or already terminal → do not overwrite
       db.prepare(
-        `INSERT INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, 'started', 'none', '[]', ?, ?)`,
-      ).run(reviewId, REVIEW_SCHEMA_VERSION, meta.sessionKey, meta.runId ?? null, meta.kind, now, now);
+        `INSERT INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt, revision)
+         VALUES (?, ?, ?, ?, ?, 'started', 'none', '[]', ?, ?, ?)`,
+      ).run(reviewId, REVIEW_SCHEMA_VERSION, meta.sessionKey, meta.runId ?? null, meta.kind, now, now, this.nextRevision(db));
       return { ok: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -208,14 +236,14 @@ export class ReviewStore {
       const findingsJson = JSON.stringify(data.findings);
       if (!existing) {
         db.prepare(
-          `INSERT INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(reviewId, REVIEW_SCHEMA_VERSION, data.sessionKey, data.runId ?? null, data.kind, state, data.verdict, findingsJson, now, now);
+          `INSERT INTO supervisor_reviews (reviewId, schemaVersion, sessionKey, runId, kind, state, verdict, findings, createdAt, updatedAt, revision)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(reviewId, REVIEW_SCHEMA_VERSION, data.sessionKey, data.runId ?? null, data.kind, state, data.verdict, findingsJson, now, now, this.nextRevision(db));
         return { ok: true };
       }
       if (isTerminalReviewState(existing.state as ReviewState)) return { ok: true }; // first terminal wins — idempotent
-      db.prepare('UPDATE supervisor_reviews SET state = ?, verdict = ?, findings = ?, updatedAt = ? WHERE reviewId = ?')
-        .run(state, data.verdict, findingsJson, now, reviewId);
+      db.prepare('UPDATE supervisor_reviews SET state = ?, verdict = ?, findings = ?, updatedAt = ?, revision = ? WHERE reviewId = ?')
+        .run(state, data.verdict, findingsJson, now, this.nextRevision(db), reviewId);
       return { ok: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -233,37 +261,35 @@ export class ReviewStore {
 
   /**
    * List reviews (snapshot / replay). Filter by session or run; paginated.
-   *  - Snapshot (no `since`): latest-first (updatedAt DESC, reviewId DESC).
-   *  - Replay (`since` composite cursor): walks FORWARD by the total order
-   *    (updatedAt, reviewId), so two records sharing a millisecond are never
-   *    skipped; `nextCursor` is the last row's cursor — feed it back verbatim.
-   *  - `sinceUpdatedAt` (legacy, strict `> ms`) is kept for back-compat.
+   *  - Snapshot (no `sinceRevision`): latest-first (updatedAt DESC, reviewId DESC).
+   *  - Replay (`sinceRevision`): walks FORWARD by the DB-monotonic `revision`
+   *    (`revision > ?`, ORDER BY revision ASC). Because revision is bumped on EVERY
+   *    write — incl. an in-place started→terminal update — replay never misses a
+   *    change or a same-ms insert. `nextCursor` is the max revision returned; feed it
+   *    back verbatim as `sinceRevision`.
    */
-  list(params: { sessionKey?: string; runId?: string; since?: ReviewCursor; sinceUpdatedAt?: number; limit?: number; offset?: number }): { reviews: ReviewRecord[]; total: number; nextCursor?: ReviewCursor } {
+  list(params: { sessionKey?: string; runId?: string; sinceRevision?: ReviewCursor; limit?: number; offset?: number }): { reviews: ReviewRecord[]; total: number; nextCursor?: ReviewCursor } {
     const db = this.getDb();
     if (!db) return { reviews: [], total: 0 };
     const conditions: string[] = [];
     const values: unknown[] = [];
     if (params.sessionKey) { conditions.push('sessionKey = ?'); values.push(params.sessionKey); }
     if (params.runId) { conditions.push('runId = ?'); values.push(params.runId); }
-    const replay = !!params.since;
-    if (params.since) {
-      conditions.push('(updatedAt > ? OR (updatedAt = ? AND reviewId > ?))');
-      values.push(params.since.updatedAt, params.since.updatedAt, params.since.reviewId);
-    } else if (typeof params.sinceUpdatedAt === 'number') {
-      conditions.push('updatedAt > ?');
-      values.push(params.sinceUpdatedAt);
+    const replay = typeof params.sinceRevision === 'number';
+    if (replay) {
+      conditions.push('revision > ?');
+      values.push(params.sinceRevision);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const total = (db.prepare(`SELECT COUNT(*) as n FROM supervisor_reviews ${where}`).get(...values) as { n: number }).n;
     const limit = Math.min(params.limit ?? 50, 200);
     const offset = params.offset ?? 0;
-    const order = replay ? 'updatedAt ASC, reviewId ASC' : 'updatedAt DESC, reviewId DESC';
+    const order = replay ? 'revision ASC' : 'updatedAt DESC, reviewId DESC';
     const rows = db.prepare(`SELECT * FROM supervisor_reviews ${where} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...values, limit, offset) as Row[];
     const reviews = rows.map((r) => this.toRecord(r));
-    if (replay && reviews.length) {
-      const last = reviews[reviews.length - 1];
-      return { reviews, total, nextCursor: { updatedAt: last.updatedAt, reviewId: last.reviewId } };
+    if (replay && rows.length) {
+      const nextCursor = Math.max(...rows.map((r) => r.revision));
+      return { reviews, total, nextCursor };
     }
     return { reviews, total };
   }
@@ -282,6 +308,7 @@ export class ReviewStore {
       findings,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      revision: row.revision,
     };
   }
 }

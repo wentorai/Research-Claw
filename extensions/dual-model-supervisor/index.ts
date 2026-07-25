@@ -426,7 +426,7 @@ const plugin: PluginDefinition = {
     // The DB is the truth source; these let a dashboard recover state after being
     // offline or reconnecting, independent of any broadcast notification.
     registerMethod('rc.supervisor.reviews.list', async (params) => {
-      const p = params as { sessionKey?: string; runId?: string; since?: { updatedAt: number; reviewId: string }; sinceUpdatedAt?: number; limit?: number; offset?: number };
+      const p = params as { sessionKey?: string; runId?: string; sinceRevision?: number; limit?: number; offset?: number };
       return reviewStore.list(p);
     });
     registerMethod('rc.supervisor.reviews.get', async (params) => {
