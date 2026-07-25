@@ -337,8 +337,11 @@ export interface SupervisorStatus {
   supervisorModel: string; // Currently configured supervisor model
   stats: {
     total: number;         // Total number of review operations performed
-    blocked: number;       // Number of outputs/tools blocked
-    corrected: number;     // Number of outputs/tools corrected
+    // Both counters come from the audit `action` column, and only the before_tool_call
+    // path can produce those actions — output review is advisory and always lands on
+    // 'warn'/'pass'. So neither counter ever includes a delivered assistant message.
+    blocked: number;       // Tool calls blocked (incl. denied approvals)
+    corrected: number;     // Tool calls whose parameters were rewritten before execution
     warnings: number;      // Number of warnings issued
   };
 }

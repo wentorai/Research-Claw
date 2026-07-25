@@ -58,7 +58,7 @@ export class OutputReviewer {
    * Review the main model's output ASYNCHRONOUSLY. Records findings to the audit log +
    * the Dashboard panel report (sessionState.lastReviewReport). NEVER returns or applies
    * modified text — the message has already been delivered (OC fires llm_output
-   * fire-and-forget). All findings are advisory; a `correctedVersion` is a SUGGESTION,
+   * fire-and-forget). All findings are advisory; a `suggestedVersion` is a SUGGESTION,
    * never applied. Never throws; never blocks.
    */
   async reviewOutput(message: string, sessionId: string, sessionState?: SessionState): Promise<void> {
