@@ -24,8 +24,6 @@ export interface Harness {
    * so it is correct regardless of machine speed or how long the async work takes.
    */
   waitUntil(predicate: () => boolean, opts?: { timeoutMs?: number; intervalMs?: number }): Promise<void>;
-  /** Read-only: the channel footer cached for a session by the async llm_output review. */
-  peekFooter(sessionKey: string): string | undefined;
   hookNames(): string[];
 }
 
@@ -90,7 +88,6 @@ export async function loadPluginFresh(
 
   const mod = (await import('../../../index.js')) as {
     default: { register: (api: unknown) => void };
-    __peekSessionChannelFooter: (sessionKey: string) => string | undefined;
   };
   mod.default.register(api);
 
@@ -119,7 +116,6 @@ export async function loadPluginFresh(
         await new Promise((r) => setTimeout(r, intervalMs));
       }
     },
-    peekFooter: (sessionKey: string) => mod.__peekSessionChannelFooter(sessionKey),
     hookNames: () => [...hooks.keys()],
   };
 }

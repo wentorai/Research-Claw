@@ -121,7 +121,6 @@
           "enabled": false,
           "supervisorModel": "",
           "reviewMode": "off",
-          "appendReviewToChannelOutput": true,
           "memoryGuard": {
             "enabled": true,
             "keyCategories": [

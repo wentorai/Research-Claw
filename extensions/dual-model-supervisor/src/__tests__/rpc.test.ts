@@ -4,7 +4,7 @@ import { parseConfig } from '../core/config.js';
 describe('rc.supervisor.config allowlist', () => {
   const ALLOWED_KEYS = [
     'enabled', 'supervisorModel', 'reviewMode',
-    'appendReviewToChannelOutput', 'memoryGuard',
+    'memoryGuard',
     'courseCorrection', 'highRiskTools',
   ];
 
@@ -34,7 +34,6 @@ describe('rc.supervisor.config allowlist', () => {
       enabled: true,
       supervisorModel: 'openai/gpt-4o-mini',
       reviewMode: 'correct',
-      appendReviewToChannelOutput: false,
       memoryGuard: { enabled: true, keyCategories: [] },
       courseCorrection: { enabled: false, deviationThreshold: 0.5, forceRegenerate: false, maxRegenerateAttempts: 3 },
       highRiskTools: ['bash'],
@@ -75,7 +74,6 @@ describe('rc.supervisor.config nested merge', () => {
       enabled: true,
       supervisorModel: 'test/model',
       reviewMode: 'full' as const,
-      appendReviewToChannelOutput: true,
       memoryGuard: {
         enabled: true,
         keyCategories: ['custom_a', 'custom_b'],
@@ -108,7 +106,6 @@ describe('rc.supervisor.config nested merge', () => {
       enabled: true,
       supervisorModel: 'test/model',
       reviewMode: 'correct' as const,
-      appendReviewToChannelOutput: false,
       memoryGuard: {
         enabled: true,
         keyCategories: ['research_goal'],
@@ -142,7 +139,6 @@ describe('rc.supervisor.config nested merge', () => {
       enabled: true,
       supervisorModel: 'test/model',
       reviewMode: 'full' as const,
-      appendReviewToChannelOutput: true,
       memoryGuard: undefined as unknown,
       courseCorrection: {
         enabled: true,

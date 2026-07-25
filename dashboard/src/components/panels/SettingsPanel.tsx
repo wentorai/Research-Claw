@@ -533,7 +533,6 @@ export default function SettingsPanel() {
   const [supervisorApiKeyDeletePending, setSupervisorApiKeyDeletePending] = useState(false);
   const [supervisorUseMainModel, setSupervisorUseMainModel] = useState(true);
   const [reviewMode, setReviewMode] = useState<'filter-only' | 'correct' | 'full'>('correct');
-  const [appendReviewToChannelOutput, setAppendReviewToChannelOutput] = useState(true);
   const [deviationThreshold, setDeviationThreshold] = useState(0.5);
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [maxRegenerateAttempts, setMaxRegenerateAttempts] = useState(3);
@@ -602,7 +601,6 @@ export default function SettingsPanel() {
       }
 
       setReviewMode(supervisorConfig.reviewMode === 'off' ? 'correct' : (supervisorConfig.reviewMode ?? 'correct'));
-      setAppendReviewToChannelOutput(supervisorConfig.appendReviewToChannelOutput ?? true);
       const cc = supervisorConfig.courseCorrection;
       if (cc) {
         setDeviationThreshold(cc.deviationThreshold ?? 0.5);
@@ -810,7 +808,7 @@ export default function SettingsPanel() {
         webSearchEnabled, webSearchProvider, webSearchApiKey,
         heartbeatEnabled, heartbeatInterval,
         supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
-        reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
+        reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
         textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
         // Only custom profiles carry an editable label; presets have none, so the
         // label is normalized away for them — otherwise a stale label left over from
@@ -825,7 +823,7 @@ export default function SettingsPanel() {
       webSearchEnabled, webSearchProvider, webSearchApiKey,
       heartbeatEnabled, heartbeatInterval,
       supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
-      reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
+      reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
       textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
       profileLabel,
     ],
@@ -1555,7 +1553,6 @@ export default function SettingsPanel() {
             ? (supervisorUseMainModel ? '' : (supervisorProvider && supervisorModelId ? `${supervisorProvider}/${supervisorModelId}` : undefined))
             : undefined,
           supervisorReviewMode: supervisorEnabled ? reviewMode : undefined,
-          supervisorAppendReviewToChannelOutput: supervisorEnabled ? appendReviewToChannelOutput : undefined,
           supervisorDeviationThreshold: supervisorEnabled ? deviationThreshold : undefined,
           supervisorForceRegenerate: supervisorEnabled ? forceRegenerate : undefined,
           supervisorMaxRegenerateAttempts: supervisorEnabled ? maxRegenerateAttempts : undefined,
@@ -1600,7 +1597,7 @@ export default function SettingsPanel() {
     } finally {
       setSaving(false);
     }
-  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
+  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
 
   const applyConfigFieldsToForm = useCallback((configForEditor: Record<string, unknown>) => {
     const fields = extractConfigFields(configForEditor);
@@ -2679,10 +2676,6 @@ export default function SettingsPanel() {
                 </div>
               )}
             />
-          </SettingRow>
-
-          <SettingRow label={t('settings.appendReviewToChannelOutput')} description={t('settings.appendReviewToChannelOutputHint')}>
-            <Switch checked={appendReviewToChannelOutput} onChange={setAppendReviewToChannelOutput} size="small" />
           </SettingRow>
 
           <SettingRow

@@ -94,7 +94,6 @@ export interface ConfigPatchInput {
   supervisorEnabled?: boolean;
   supervisorModel?: string;
   supervisorReviewMode?: string;
-  supervisorAppendReviewToChannelOutput?: boolean;
   supervisorDeviationThreshold?: number;
   supervisorForceRegenerate?: boolean;
   supervisorMaxRegenerateAttempts?: number;
@@ -1224,7 +1223,6 @@ export function buildSaveConfig(
       enabled: input.supervisorEnabled ?? (existingSupervisorConfig.enabled as boolean) ?? false,
       supervisorModel: input.supervisorModel !== undefined ? input.supervisorModel : (existingSupervisorConfig.supervisorModel as string) ?? '',
       reviewMode: input.supervisorReviewMode ?? (existingSupervisorConfig.reviewMode as string) ?? 'off',
-      appendReviewToChannelOutput: input.supervisorAppendReviewToChannelOutput ?? (existingSupervisorConfig.appendReviewToChannelOutput as boolean) ?? true,
     };
 
     // Only override courseCorrection if any supervisor field is explicitly provided

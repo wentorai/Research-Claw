@@ -54,7 +54,6 @@ export function registerSupervisorRpc(
       enabled: cfg.enabled,
       reviewMode: cfg.reviewMode,
       supervisorModel: cfg.supervisorModel,
-      appendReviewToChannelOutput: cfg.appendReviewToChannelOutput,
       memoryGuardEnabled: cfg.memoryGuard.enabled,
       courseCorrectionEnabled: cfg.courseCorrection.enabled,
       deviationThreshold: cfg.courseCorrection.deviationThreshold,
@@ -77,7 +76,7 @@ export function registerSupervisorRpc(
       // Only accept known config keys — reject arbitrary params
       const ALLOWED_KEYS = [
         'enabled', 'supervisorModel', 'reviewMode',
-        'appendReviewToChannelOutput', 'memoryGuard',
+        'memoryGuard',
         'courseCorrection', 'highRiskTools',
         'dangerousToolPolicy', 'toolReviewGateMs', 'grounding',
       ] as const;

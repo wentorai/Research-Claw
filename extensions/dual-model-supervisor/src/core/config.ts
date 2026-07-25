@@ -17,9 +17,6 @@ export function parseConfig(raw: Record<string, unknown> | undefined): Superviso
     enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULT_CONFIG.enabled,
     supervisorModel: typeof raw.supervisorModel === 'string' ? raw.supervisorModel : DEFAULT_CONFIG.supervisorModel,
     reviewMode: isValidReviewMode(raw.reviewMode) ? raw.reviewMode : DEFAULT_CONFIG.reviewMode,
-    appendReviewToChannelOutput: typeof raw.appendReviewToChannelOutput === 'boolean'
-      ? raw.appendReviewToChannelOutput
-      : DEFAULT_CONFIG.appendReviewToChannelOutput,
     memoryGuard: parseMemoryGuard(raw.memoryGuard),
     courseCorrection: parseCourseCorrection(raw.courseCorrection),
     highRiskTools: parseStringArray(raw.highRiskTools, DEFAULT_CONFIG.highRiskTools),

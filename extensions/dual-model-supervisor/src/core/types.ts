@@ -58,8 +58,6 @@ export interface SupervisorConfig {
   enabled: boolean;                    // Whether supervisor is active
   supervisorModel: string;             // "provider/model" e.g. "openai/gpt-4o-mini"
   reviewMode: 'off' | 'filter-only' | 'correct' | 'full';  // Review depth level
-  /** Append review report to output only when message is delivered through an external channel (Telegram, WeChat, etc.). Dashboard users see review results in the Supervisor panel instead. */
-  appendReviewToChannelOutput: boolean;
   memoryGuard: MemoryGuardConfig;      // Memory protection settings
   courseCorrection: CourseCorrectionConfig;  // Course correction settings
   highRiskTools: string[];             // Tool names that require extra review
@@ -86,7 +84,6 @@ export const DEFAULT_CONFIG: SupervisorConfig = {
   enabled: false,
   supervisorModel: '',
   reviewMode: 'off',
-  appendReviewToChannelOutput: true,     // Only append review footer when delivering via external channel
   memoryGuard: {
     enabled: true,
     keyCategories: ['research_goal', 'key_conclusion', 'user_preference', 'methodology_decision'],
@@ -197,22 +194,6 @@ export interface RegenerateHistoryEntry {
   result: 'regenerating' | 'corrected' | 'max_reached';  // Outcome of this attempt
 }
 
-/**
- * A channel review footer bound to the exact turn whose content produced it.
- * OC's outbound `message_sending` path carries neither runId nor turn identity
- * (only ctx.channelId + ctx.sessionKey), so the footer is correlated to its turn
- * by `outputHash` (a stable hash of the assistant text under review): a footer
- * may only ride the outbound message whose content hashes to the same value.
- */
-export interface PendingFooter {
-  turnSeq: number;                 // Supervisor-minted monotonic turn id within the session
-  runId?: string;                  // llm_output runId (audit/lifecycle only — NOT the outbound match key)
-  outputHash: string;              // Stable hash of the exact assistant text the footer was computed from
-  footer: string;                  // The full message-with-footer to deliver on a matching outbound
-  createdAt: number;               // For bounded-FIFO eviction / staleness
-  consumed: boolean;               // Delivered once → never re-delivered
-}
-
 export interface SessionState {
   sessionId: string;               // Unique identifier for the conversation
   researchGoal?: string;           // The main research goal identified for this session
@@ -235,13 +216,6 @@ export interface SessionState {
   regenerateHistory: RegenerateHistoryEntry[];  // History of regeneration attempts
   lostMemorySummary?: string;      // Summary of memories lost during conversation compression
   preCompactionMemory: MemoryItem[];  // Memory snapshots before conversation compaction
-  pendingReviewFooter?: string;    // Cached review footer from llm_output (deprecated: for backward compat)
-  // Channel review footers, each bound to the exact turn/content that produced it.
-  // Replaces a single session-keyed slot, which caused cross-turn content replacement
-  // (turn 1's late async review overwriting turn 2's outbound message). See PendingFooter.
-  turnSeqCounter: number;          // Supervisor-minted monotonic turn counter (OC gives no outbound runId)
-  pendingFooters: PendingFooter[]; // Bounded FIFO of turn-scoped footers awaiting channel delivery
-  lastDeliveredTurnSeq: number;    // High-water mark: never deliver a footer for a turn <= this
   lastReviewReport?: string;       // Most recent review report text (for Dashboard panel display)
   lastStaticSupervisorInjectAt?: number;  // Per-session debounce for static rules injection
   groundingFindings?: GroundingFinding[]; // Cached citation existence results (deduped by raw)

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadPluginFresh } from './harness/plugin-harness.js';
 
-const CONFIG = { enabled: true, supervisorModel: 'fake/model', reviewMode: 'full', appendReviewToChannelOutput: true };
+const CONFIG = { enabled: true, supervisorModel: 'fake/model', reviewMode: 'full' };
 
 interface LogEntry { type: string; action: string; details: string }
 

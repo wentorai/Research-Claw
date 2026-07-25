@@ -5,9 +5,20 @@
 import Database from 'better-sqlite3';
 import type { AuditLogEntry, AuditLogType, PluginLogger } from './types.js';
 
+/** Observable outcome of an audit write — a caller can tell whether it was persisted
+ *  rather than assuming "zero loss". Audit persistence is best-effort: entries persist
+ *  WHEN the DB is available, and any failure is observable (returned + logged). */
+export type AuditPersistOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'db_unavailable' }
+  | { ok: false; reason: 'error'; message: string };
+
 export class AuditLogService {
   private db: Database.Database | null;
   private logger: PluginLogger;
+  /** Warn once when the DB goes unavailable, so persistence loss is observable
+   *  without flooding the log on every subsequent audit write. */
+  private _warnedDbUnavailable = false;
 
   /**
    * @param db   SQLite database instance (shared across plugin lifecycle). May be null if DB init failed — service degrades to log-only.
@@ -45,9 +56,22 @@ export class AuditLogService {
     return this.db;
   }
 
-  record(entry: Omit<AuditLogEntry, 'id'>): void {
+  /**
+   * Record an audit log entry. Returns an observable outcome so a caller can tell
+   * whether it was persisted — persistence is best-effort ("persisted when the DB is
+   * available; failure observable"), NOT a zero-loss guarantee. DB-unavailable and
+   * write failures are surfaced (returned + logged), never silently dropped.
+   */
+  record(entry: Omit<AuditLogEntry, 'id'>): AuditPersistOutcome {
     const db = this.getDb();
-    if (!db) return;
+    if (!db) {
+      if (!this._warnedDbUnavailable) {
+        this.logger.warn('[AuditLog] audit persistence unavailable (DB not open) — entries are NOT being persisted');
+        this._warnedDbUnavailable = true;
+      }
+      return { ok: false, reason: 'db_unavailable' };
+    }
+    this._warnedDbUnavailable = false;
     try {
       db.prepare(
         `INSERT INTO supervisor_audit_log (sessionId, type, action, details, metadata, timestamp)
@@ -60,8 +84,11 @@ export class AuditLogService {
         entry.metadata ?? null,
         entry.timestamp,
       );
+      return { ok: true };
     } catch (err) {
-      this.logger.error(`Audit log write failed: ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Audit log write failed: ${message}`);
+      return { ok: false, reason: 'error', message };
     }
   }
 

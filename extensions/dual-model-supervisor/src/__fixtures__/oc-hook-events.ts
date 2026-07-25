@@ -15,7 +15,6 @@
 
 import type {
   PluginHookMessageReceivedEvent,
-  PluginHookMessageSendingEvent,
   PluginHookLlmOutputEvent,
   PluginHookLlmInputEvent,
   PluginHookBeforeToolCallEvent,
@@ -38,18 +37,6 @@ export const MESSAGE_RECEIVED_EVENT: PluginHookMessageReceivedEvent = {
   metadata: { channel: 'telegram', accountId: 'acct-1' },
 };
 export const MESSAGE_CONTEXT: PluginHookMessageContext = { channelId: 'telegram', sessionKey: 'agent:main:conv-1' };
-
-// message_sending (PluginHookMessageSendingEvent = { to, content, metadata }).
-// NOTE: this type has NO sessionId — adding one is a compile error (contract lock).
-export const MESSAGE_SENDING_CHANNEL_EVENT: PluginHookMessageSendingEvent = {
-  to: '+15555550100',
-  content: 'Here is the answer.',
-  metadata: { channel: 'telegram', accountId: 'acct-1' },
-};
-export const MESSAGE_SENDING_DASHBOARD_EVENT: PluginHookMessageSendingEvent = {
-  to: 'dashboard',
-  content: 'Here is the answer.',
-};
 
 // llm_output (PluginHookLlmOutputEvent) — assistant text is `assistantTexts: string[]`.
 export const LLM_OUTPUT_EVENT: PluginHookLlmOutputEvent = {

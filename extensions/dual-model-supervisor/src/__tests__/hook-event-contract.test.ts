@@ -11,12 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { extractLlmOutputText } from '../../index.js';
-import { snapshotMessageSendingCtx } from '../hooks/hook-context.js';
-import {
-  LLM_OUTPUT_EVENT,
-  MESSAGE_SENDING_CHANNEL_EVENT,
-  MESSAGE_SENDING_DASHBOARD_EVENT,
-} from '../__fixtures__/oc-hook-events.js';
+import { LLM_OUTPUT_EVENT } from '../__fixtures__/oc-hook-events.js';
 
 describe('P2-E llm_output contract', () => {
   it('production extractor reads assistant text from `assistantTexts`', () => {
@@ -26,18 +21,5 @@ describe('P2-E llm_output contract', () => {
     // A stripped event (only the required non-text fields) yields no text.
     const stripped = { runId: 'r', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [] } as unknown as typeof LLM_OUTPUT_EVENT;
     expect(extractLlmOutputText(stripped)).toBeUndefined();
-  });
-});
-
-describe('P2-E message_sending channel-detection contract', () => {
-  it('detects channel delivery from metadata.channel on the real event', () => {
-    expect(snapshotMessageSendingCtx(MESSAGE_SENDING_CHANNEL_EVENT).isChannelDelivery).toBe(true);
-  });
-  it('dashboard delivery (no channel metadata) is not channel delivery', () => {
-    expect(snapshotMessageSendingCtx(MESSAGE_SENDING_DASHBOARD_EVENT).isChannelDelivery).toBe(false);
-  });
-  it('discriminating: removing metadata.channel flips channel detection off', () => {
-    const noChannel = { ...MESSAGE_SENDING_CHANNEL_EVENT, metadata: {} };
-    expect(snapshotMessageSendingCtx(noChannel).isChannelDelivery).toBe(false);
   });
 });

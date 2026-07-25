@@ -1,27 +1,29 @@
 /**
- * Dual Model Supervisor — Output Reviewer (message_sending hook)
+ * Dual Model Supervisor — Output Reviewer (llm_output hook)
  *
- * Reviews the main model's output before it reaches the user.
- * Quick check runs synchronously; when `appendReviewToChannelOutput` is true, deep review
- * is awaited and a non-empty review footer is always attached (including pass / unavailable fallbacks).
+ * Reviews the main model's output ASYNCHRONOUSLY and records the result to the audit
+ * log + the Dashboard panel report. It NEVER modifies or blocks the outbound message:
+ * OC fires llm_output fire-and-forget and the message is delivered before the review
+ * resolves, so a suggested correction is recorded as a SUGGESTION (never applied), and
+ * findings are advisory. The review result reaches the user via the audit / panel / RPC
+ * path (the truth source), not by appending to output.
  */
 
 import type { ReviewResult, SupervisorConfig, PluginLogger, SessionState } from '../core/types.js';
 import { ReviewerClient } from '../client/reviewer.js';
 import { QuickChecker } from './quick-checker.js';
 import { AuditLogService } from '../core/audit-log.js';
-import { isForceRegenerateActive } from '../core/config.js';
 import { OUTPUT_REVIEW_SYSTEM_PROMPT } from '../core/prompts.js';
-import { SUPERVISOR_REVIEW_SUMMARY_MARKER } from './hook-context.js';
 import { validateReviewResult } from '../core/validators.js';
 
-/** Format a deep review result into a compact multi-line footer for appending to output. */
-function formatDeepReviewForAppend(r: ReviewResult): string {
+/** Format a deep review result into a compact multi-line report for the Dashboard panel. */
+function formatReviewReport(r: ReviewResult): string {
   const lines: string[] = [];
-  if (r.blocked) lines.push('  ⛔ Deep review flagged this output (blocked)');
+  if (r.blocked) lines.push('  ⛔ Deep review flagged this output');
   for (const w of r.warnings) lines.push(`  ⚠ ${w}`);
   for (const m of r.memoryAlerts) lines.push(`  🧠 ${m}`);
-  if (r.correctionNote) lines.push(`  📝 ${r.correctionNote}`);
+  // A correctedVersion is only a SUGGESTION — it is never applied to the delivered output.
+  if (r.corrected && r.correctionNote) lines.push(`  📝 Suggested correction: ${r.correctionNote}`);
   lines.push(`  (quality ${r.qualityScore.toFixed(2)}, deviation ${r.deviationScore.toFixed(2)})`);
   return lines.join('\n');
 }
@@ -53,123 +55,41 @@ export class OutputReviewer {
   }
 
   /**
-   * Review output before sending to user. Returns modified message or null to pass through.
-   * @param options.attachSummary When `true`, append review footer to message (used only for channel delivery).
+   * Review the main model's output ASYNCHRONOUSLY. Records findings to the audit log +
+   * the Dashboard panel report (sessionState.lastReviewReport). NEVER returns or applies
+   * modified text — the message has already been delivered (OC fires llm_output
+   * fire-and-forget). All findings are advisory; a `correctedVersion` is a SUGGESTION,
+   * never applied. Never throws; never blocks.
    */
-  async reviewMessageSending(
-    message: string,
-    sessionId: string,
-    sessionState?: SessionState,
-    options?: { attachSummary?: boolean },
-  ): Promise<string | null> {
+  async reviewOutput(message: string, sessionId: string, sessionState?: SessionState): Promise<void> {
     if (!this.config.enabled || this.config.reviewMode === 'off') {
-      this.logger.warn('[OutputReviewer] Review skipped: disabled or reviewMode=off');
-      return null;
-    }
-
-    if (sessionState && isForceRegenerateActive(this.config) && sessionState.pendingForceRegenerate) {
-      if (sessionState.regenerateAttempts < this.config.courseCorrection.maxRegenerateAttempts) {
-        const maxAttempts = this.config.courseCorrection.maxRegenerateAttempts;
-        const attempt = sessionState.regenerateAttempts + 1;
-        this.auditLog.record({
-          sessionId,
-          type: 'force_regenerate',
-          action: 'block',
-          details: `Output blocked for force regeneration attempt ${attempt}/${maxAttempts}. Deviation score: ${sessionState.pendingForceRegenerate.deviationScore.toFixed(2)}`,
-          timestamp: Date.now(),
-        });
-        const blockMessage = `🔄 [Supervisor] Output blocked — deviation detected (score: ${sessionState.pendingForceRegenerate.deviationScore.toFixed(2)}). Regenerating corrected content (attempt ${attempt}/${maxAttempts})...`;
-        return blockMessage;
-      } else {
-        this.logger.warn(`[OutputReviewer] Force regeneration max attempts reached (${this.config.courseCorrection.maxRegenerateAttempts}), allowing output to pass`);
-      }
-    }
-
-    if (message.includes(SUPERVISOR_REVIEW_SUMMARY_MARKER)) {
-      return null;
+      return;
     }
 
     const quickResult = this.quickChecker.check(message);
-
     if (quickResult.blocked) {
-      this.logger.warn(`[OutputReviewer] Quick check blocked: ${quickResult.blockReason}`);
+      // Advisory only — output review NEVER blocks/modifies the delivered message.
       this.auditLog.record({
         sessionId,
         type: 'output_review',
-        action: 'block',
-        details: quickResult.blockReason ?? 'Blocked by quick checker',
+        action: 'warn',
+        details: `Quick check flagged output (advisory, not blocked): ${quickResult.blockReason ?? 'flagged'}`,
         timestamp: Date.now(),
       });
-      const blockMessage = `⚠️ [Supervisor] Output blocked by review. Reason: ${quickResult.blockReason}`;
-      return blockMessage;
+    }
+    for (const w of quickResult.warnings) {
+      this.auditLog.record({ sessionId, type: 'output_review', action: 'warn', details: w, timestamp: Date.now() });
     }
 
-    const attachSummary = options?.attachSummary ?? false;
-
-    let deep: ReviewResult | null = null;
-
-    if (sessionState) {
-      deep = await this.deepReview(message, sessionId, sessionState);
-
-      // Always store the review report in session state for Dashboard panel display
-      if (deep) {
-        const reportBody = deep.reportText?.trim()
-          ? deep.reportText.trim()
-          : formatDeepReviewForAppend(deep);
-        sessionState.lastReviewReport = reportBody;
-      }
-    } else {
-      this.logger.warn('[OutputReviewer] Deep review skipped: no session state');
+    if (!sessionState) {
+      return;
     }
 
-    // C7: When deep review provides a corrected version, use it instead of the original message
-    let effectiveMessage = message;
-    if (deep?.corrected && deep.correctedVersion) {
-      this.logger.info(`[OutputReviewer] Using corrected version from deep review`);
-      effectiveMessage = deep.correctedVersion;
-    }
-
-    if (quickResult.warnings.length > 0) {
-      for (const w of quickResult.warnings) {
-        this.logger.warn(`[OutputReviewer] Quick check warning: ${w}`);
-        this.auditLog.record({
-          sessionId,
-          type: 'output_review',
-          action: 'warn',
-          details: w,
-          timestamp: Date.now(),
-        });
-      }
-    }
-
-    // Only append footer when explicitly requested (channel delivery scenario)
-    if (!attachSummary) {
-      // Return corrected version if available, null otherwise (pass through original)
-      return effectiveMessage !== message ? effectiveMessage : null;
-    }
-
-    const sections: string[] = [];
-    if (quickResult.warnings.length > 0) {
-      sections.push(...quickResult.warnings.map((w) => `  ⚠ [Quick] ${w}`));
-    }
-
-    // Prefer supervisor model's natural-language report; fall back to structured footer
+    const deep = await this.deepReview(message, sessionId, sessionState);
     if (deep) {
-      const reportBody = deep.reportText?.trim()
-        ? deep.reportText.trim()
-        : formatDeepReviewForAppend(deep);
-      sections.push(reportBody);
-    } else if (sessionState) {
-      sections.push(
-        '  ℹ [Supervisor] Deep review did not return a result (reviewer unavailable, timeout, or parse error). Quick check passed.',
-      );
-      this.logger.warn('[OutputReviewer] Deep review unavailable, adding fallback message');
-    } else {
-      sections.push('  ℹ [Supervisor] Deep review was skipped (no session state). Quick check passed.');
+      // Store the review report for the Dashboard panel (truth source is audit/DB).
+      sessionState.lastReviewReport = deep.reportText?.trim() ? deep.reportText.trim() : formatReviewReport(deep);
     }
-
-    const finalMessage = `${effectiveMessage}\n\n---\n${SUPERVISOR_REVIEW_SUMMARY_MARKER}\n${sections.join('\n')}`;
-    return finalMessage;
   }
 
   /**
@@ -231,11 +151,19 @@ export class OutputReviewer {
       return null;
     }
 
-    const action = result.blocked ? 'block' : result.corrected ? 'correct' : result.warnings.length > 0 ? 'warn' : 'pass';
+    // Output review is ADVISORY: it never blocks or applies a correction, so a flag or a
+    // suggested correction is recorded as 'warn' (not 'block'/'correct', which would imply
+    // enforcement). Only a clean review is 'pass'.
+    const advisory = result.blocked || result.corrected || result.warnings.length > 0;
+    const action = advisory ? 'warn' : 'pass';
 
-    const details = action === 'pass'
+    const details = !advisory
       ? `Review passed (quality: ${result.qualityScore.toFixed(2)}, deviation: ${result.deviationScore.toFixed(2)})`
-      : result.correctionNote ?? result.warnings.join('; ') ?? 'Review passed';
+      : result.corrected
+        ? `Suggested correction (advisory, not applied): ${result.correctionNote ?? 'see correctedVersion'}`
+        : result.blocked
+          ? `Flagged (advisory, output not blocked): ${result.correctionNote ?? result.warnings.join('; ') ?? 'flagged'}`
+          : result.warnings.join('; ');
 
     this.auditLog.record({
       sessionId,

@@ -782,8 +782,6 @@
       "reviewModeFilterDesc": "Only filter dangerous content (fabricated citations, sensitive data, dangerous commands). No course correction.",
       "reviewModeCorrectDesc": "Safety filtering + deviation detection + consistency checking + target conclusion tracking",
       "reviewModeFullDesc": "Auto-correction + key memory protection during context compaction + memory loss detection",
-      "appendReviewToChannelOutput": "Append Control to External Channels",
-      "appendReviewToChannelOutputHint": "When enabled, control footers are appended to messages delivered via external channels (Telegram, WeChat, etc.). Dashboard users see control results in the Quality Control panel.",
       "deviationThreshold": "Deviation Threshold",
     "deviationThresholdHint": "Trigger course correction when deviation score exceeds this value",
     "deviationThresholdTooltip": "Score from 0-1. When the reviewer model judges the main model's output deviates from the research goal beyond this threshold, course correction is triggered. 0.3 = more sensitive, 0.7 = more lenient. Default: 0.5",

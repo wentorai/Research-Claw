@@ -1,8 +1,8 @@
 /**
  * Dual Model Supervisor — Plugin Entry Point
  *
- * Registers 10 hooks + 10 RPC methods for dual-model supervision:
- *   - Safety filtering (message_sending, before_tool_call)
+ * Registers 9 hooks + 10 RPC methods for dual-model supervision:
+ *   - Safety gate (before_tool_call)
  *   - Course correction (llm_output → session analysis, before_prompt_build, llm_input)
  *   - Memory guarding (before_compaction, after_compaction)
  *   - Audit logging (SQLite)
@@ -12,7 +12,6 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 
 import type {
@@ -20,7 +19,6 @@ import type {
   PluginDefinition,
   SupervisorConfig,
   SessionState,
-  PendingFooter,
   ModelsProviderEntry,
   ConfiguredProvider,
 } from './src/core/types.js';
@@ -38,7 +36,6 @@ import { GroundingChecker } from './src/hooks/grounding-checker.js';
 import { ReviewStore, aggregateReview } from './src/core/review-store.js';
 import { AuditLogService } from './src/core/audit-log.js';
 import { registerSupervisorRpc } from './src/rpc.js';
-import { snapshotMessageSendingCtx, SUPERVISOR_REVIEW_SUMMARY_MARKER } from './src/hooks/hook-context.js';
 import { hookSessionKey } from './src/oc/hook-types.js';
 import type { PluginHookLlmOutputEvent, PluginHookLlmInputEvent } from './src/oc/hook-types.js';
 
@@ -77,56 +74,8 @@ function newSessionState(sessionId: string): SessionState {
     preCompactionMemory: [],
     regenerateAttempts: 0,
     regenerateHistory: [],
-    pendingReviewFooter: undefined,
-    turnSeqCounter: 0,
-    pendingFooters: [],
-    lastDeliveredTurnSeq: 0,
     lastReviewReport: undefined,
   };
-}
-
-/** Max turn-scoped footers kept per session before the oldest is evicted. */
-const MAX_PENDING_FOOTERS = 8;
-
-/**
- * Stable content hash used to correlate a cached footer to the exact outbound
- * message that produced it. Trimmed so trailing-whitespace differences between
- * the reviewed text and the delivered text do not spuriously withhold a footer.
- */
-export function stableContentHash(s: string): string {
-  return createHash('sha1').update(s.trim()).digest('hex');
-}
-
-/**
- * Pick the footer to deliver onto an outbound message: an un-delivered footer
- * whose `outputHash` matches this outbound content, for a turn not already
- * delivered. When several undelivered footers share the same content hash (two
- * byte-identical turns in one session, whose async reviews may have completed
- * out of order), the OLDEST turn is chosen — otherwise consuming a newer turn's
- * entry would poison `lastDeliveredTurnSeq` and silently withhold the older one.
- */
-export function selectPendingFooter(
-  footers: PendingFooter[],
-  contentHash: string,
-  lastDeliveredTurnSeq: number,
-): PendingFooter | undefined {
-  return footers
-    .filter((f) => !f.consumed && f.outputHash === contentHash && f.turnSeq > lastDeliveredTurnSeq)
-    .sort((a, b) => a.turnSeq - b.turnSeq)[0];
-}
-
-/**
- * Append a turn-scoped footer to the session's bounded FIFO, evicting the oldest
- * (recording the eviction) when over capacity. Never blocks; pure state mutation.
- */
-function pushPendingFooter(state: SessionState, footer: PendingFooter, logger?: { warn: (m: string) => void }): void {
-  state.pendingFooters.push(footer);
-  while (state.pendingFooters.length > MAX_PENDING_FOOTERS) {
-    const evicted = state.pendingFooters.shift();
-    if (evicted && !evicted.consumed && logger) {
-      logger.warn(`[Supervisor] evicted un-delivered channel footer for turn ${evicted.turnSeq} (FIFO cap ${MAX_PENDING_FOOTERS})`);
-    }
-  }
 }
 
 /** Monotonic id for ephemeral manual reviews within this process. Namespaced by the
@@ -237,7 +186,7 @@ function extractLlmInputMessages(event: PluginHookLlmInputEvent): Array<{ role: 
  * NEVER falls back to a process-global "last active session" (that leaked one
  * session's output to another). Structural best-effort for hooks whose ctx also
  * carries sessionId; the strict, type-checked path is `hookSessionKey(ctx)`,
- * used where a session must not be guessed (message_sending).
+ * used where a session must not be guessed.
  */
 function resolveSessionKey(
   ctx: { sessionKey?: string; sessionId?: string } | undefined,
@@ -393,7 +342,6 @@ const plugin: PluginDefinition = {
           enabled: newCfg.enabled,
           supervisorModel: newCfg.supervisorModel,
           reviewMode: newCfg.reviewMode,
-          appendReviewToChannelOutput: newCfg.appendReviewToChannelOutput,
           memoryGuard: newCfg.memoryGuard,
           courseCorrection: newCfg.courseCorrection,
           highRiskTools: newCfg.highRiskTools,
@@ -577,9 +525,8 @@ const plugin: PluginDefinition = {
       void consistencyChecker.checkConsistency(messages, sessionKey, state);
     });
 
-    // llm_output — record raw output, extract structured summary, run course correction.
-    // Also triggers output review and caches the result in session state,
-    // so `before_message_write` / `message_sending` can attach the review footer.
+    // llm_output — record raw output, extract structured summary, run course correction,
+    // and run the async output review (audit + Dashboard panel only; never modifies output).
     api.on('llm_output', (event, ctx) => {
       const activeCfg = _activeConfig ?? cfg;
       if (!isSupervisorActive(activeCfg)) {
@@ -587,8 +534,6 @@ const plugin: PluginDefinition = {
       }
 
       const outputText = extractLlmOutputText(event);
-      // Key by the canonical sessionKey so the footer cached here is found by
-      // message_sending (which resolves the SAME ctx.sessionKey).
       const sessionKey = resolveSessionKey(ctx, event);
 
       if (!sessionKey || !outputText) {
@@ -624,115 +569,17 @@ const plugin: PluginDefinition = {
           courseCorrector.analyzeSession(sessionKey, state);
         }
 
-        // Trigger output review and cache the channel footer for message_sending
-        // Review always runs (to record results for Dashboard panel), footer only when channel delivery is enabled
-        if (!outputText.includes(SUPERVISOR_REVIEW_SUMMARY_MARKER)) {
-          const shouldAttachToChannel = activeCfg.appendReviewToChannelOutput;
-          // Stamp this turn's identity NOW — at the one point we can see the content —
-          // because OC's outbound delivery path carries no runId/turn id (only
-          // ctx.channelId + ctx.sessionKey). The async review below resolves later
-          // (fire-and-forget by OC), and the resulting footer is delivered ONLY onto
-          // an outbound message whose content hashes to `outputHash`, so a slow turn's
-          // footer can never replace a different turn's outbound message.
-          const turnSeq = ++state.turnSeqCounter;
-          const outputHash = stableContentHash(outputText);
-          outputReviewer.reviewMessageSending(outputText, sessionKey, state, {
-            attachSummary: shouldAttachToChannel,
-          }).then((modified) => {
-            if (modified !== null) {
-              pushPendingFooter(state, { turnSeq, runId: event.runId, outputHash, footer: modified, createdAt: Date.now(), consumed: false }, api.logger);
-            }
-          }).catch((err) => {
-            api.logger.error(`[Supervisor] llm_output async review failed: ${err instanceof Error ? err.message : String(err)}`);
-          });
-        }
+        // Output review runs asynchronously (fire-and-forget, never-block) and ONLY
+        // records an audit entry + the Dashboard panel report. It NEVER modifies or
+        // blocks the outbound message: OC fires llm_output fire-and-forget and the
+        // message is delivered before this resolves, so the review result is delivered
+        // via the audit / panel / RPC path (the truth source), not appended to output.
+        void outputReviewer.reviewOutput(outputText, sessionKey, state).catch((err) => {
+          api.logger.error(`[Supervisor] llm_output async review failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
       } catch (err) {
         api.logger.error(`[Supervisor] llm_output error: ${err instanceof Error ? err.message : String(err)}`);
       }
-    });
-
-    // message_sending — append review footer ONLY when delivering through external channels.
-    // Dashboard users see review results in the Supervisor panel instead.
-    // When delivering to Telegram/WeChat/Discord, the review footer is appended so
-    // users who interact through IM channels receive the audit report directly.
-    api.on('message_sending', (event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
-
-      if (!isSupervisorActive(activeCfg)) {
-        return {};
-      }
-
-      // Outgoing text is `event.content` (typed PluginHookMessageSendingEvent);
-      // the result field is `content` (PluginHookMessageSendingResult). Typed
-      // access — reading a phantom field (e.g. event.sessionId) fails tsc.
-      const text = event.content;
-      if (!text) {
-        return {};
-      }
-
-      // Channel-delivery + streaming detection: channel identity is AUTHORITATIVE on
-      // the ctx (ctx.channelId), because one real OC outbound path fires the event as
-      // { to, content } with no metadata at all. Pass BOTH so detection reads the ctx.
-      const snap = snapshotMessageSendingCtx(event, ctx);
-      if (snap.deferReview) {
-        return {};
-      }
-
-      // Canonical session key ONLY — message_sending has no sessionId anywhere and
-      // must NEVER guess a session (that leaked one user's review to another).
-      // hookSessionKey is typed to the OC ctx, so a sessionKey rename fails tsc.
-      const sessionKey = hookSessionKey(ctx);
-      if (!sessionKey) {
-        return {};
-      }
-      const state = _sessionStates.get(sessionKey);
-      if (!state) {
-        return {};
-      }
-
-      // Only attach review footers when delivering through external channels.
-      // For dashboard/web delivery we KEEP the footers cached (the panel/audit path
-      // renders them) — do not clear, or a later channel delivery of the same turn
-      // would lose its footer.
-      if (!snap.isChannelDelivery) {
-        return {};
-      }
-
-      // Idempotent: never double-footer a message that already carries one.
-      if (text.includes(SUPERVISOR_REVIEW_SUMMARY_MARKER)) {
-        return {};
-      }
-
-      // Correlate: deliver ONLY a footer computed from THIS outbound content, for a
-      // turn not already delivered. OC gives no runId on the delivery path, so the
-      // content hash is the load-bearing correlation key. This makes cross-turn
-      // replacement structurally impossible: turn 2's content cannot match turn 1's
-      // footer hash.
-      const contentHash = stableContentHash(text);
-      const match = selectPendingFooter(state.pendingFooters, contentHash, state.lastDeliveredTurnSeq);
-
-      if (!match) {
-        // No footer matches this exact outbound content. If an un-delivered footer is
-        // pending but did NOT match, that is a genuine correlation miss worth recording
-        // (degrade + observe) — but we NEVER pop some other turn's footer onto this
-        // message. Either way, pass the message through unchanged (never-block).
-        if (state.pendingFooters.some((f) => !f.consumed)) {
-          auditLog.record({
-            sessionId: sessionKey,
-            type: 'output_review',
-            action: 'warn',
-            details: 'channel outbound content did not match any pending review footer; footer withheld (no misdelivery)',
-            timestamp: Date.now(),
-          });
-        }
-        return {};
-      }
-
-      match.consumed = true;
-      state.lastDeliveredTurnSeq = Math.max(state.lastDeliveredTurnSeq, match.turnSeq);
-      // Drop consumed footers so the FIFO stays small.
-      state.pendingFooters = state.pendingFooters.filter((f) => !f.consumed);
-      return { content: match.footer };
     });
 
     // before_message_write — synchronously prepare session state for the review
@@ -882,7 +729,7 @@ const plugin: PluginDefinition = {
     _hooksDone = true;
     } // end _hooksDone guard
 
-    api.logger.info('Dual Model Supervisor registered (10 hooks + 10 RPC methods)');
+    api.logger.info('Dual Model Supervisor registered (9 hooks + 10 RPC methods)');
   },
 };
 
@@ -939,17 +786,6 @@ function _extractConfiguredProviders(
   }
 
   return result;
-}
-
-/**
- * TEST-ONLY, read-only accessor for deterministic test synchronization — lets a
- * harness poll whether a session's channel footer has been cached by the async
- * `llm_output` review (a real state condition, not a fixed sleep). Never called
- * in production; performs no mutation.
- */
-export function __peekSessionChannelFooter(sessionKey: string): string | undefined {
-  const pending = _sessionStates.get(sessionKey)?.pendingFooters.filter((f) => !f.consumed) ?? [];
-  return pending.length ? pending[pending.length - 1].footer : undefined;
 }
 
 export default plugin;

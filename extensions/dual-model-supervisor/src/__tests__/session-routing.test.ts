@@ -17,9 +17,6 @@ function makeSessionState(id: string): SessionState {
     preCompactionMemory: [],
     regenerateAttempts: 0,
     regenerateHistory: [],
-    turnSeqCounter: 0,
-    pendingFooters: [],
-    lastDeliveredTurnSeq: 0,
   };
 }
 

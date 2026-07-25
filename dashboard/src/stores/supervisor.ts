@@ -25,7 +25,6 @@ export interface SupervisorStatus {
   enabled: boolean;
   reviewMode: string;
   supervisorModel: string;
-  appendReviewToChannelOutput: boolean;
   memoryGuardEnabled: boolean;
   courseCorrectionEnabled: boolean;
   deviationThreshold: number;
@@ -41,7 +40,6 @@ export interface SupervisorConfig {
   enabled: boolean;
   supervisorModel: string;
   reviewMode: 'off' | 'filter-only' | 'correct' | 'full';
-  appendReviewToChannelOutput: boolean;
   memoryGuard: {
     enabled: boolean;
     keyCategories: string[];

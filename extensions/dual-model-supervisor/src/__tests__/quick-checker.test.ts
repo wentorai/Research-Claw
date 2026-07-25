@@ -5,7 +5,6 @@ const defaultConfig = {
   enabled: true,
   supervisorModel: 'test/model',
   reviewMode: 'full' as const,
-  appendReviewToChannelOutput: true,
   memoryGuard: { enabled: true, keyCategories: [] },
   courseCorrection: { enabled: true, deviationThreshold: 0.5, forceRegenerate: false, maxRegenerateAttempts: 3 },
   highRiskTools: ['exec', 'write', 'edit'],

@@ -782,8 +782,6 @@
       "reviewModeFilterDesc": "仅过滤危险内容（伪造引用、敏感信息泄露、危险命令），不纠正方向",
       "reviewModeCorrectDesc": "安全检查 + 偏离检测 + 一致性检查 + 目标结论追踪",
       "reviewModeFullDesc": "自动纠正 + 上下文压缩时的关键记忆保护 + 记忆丢失检测",
-      "appendReviewToChannelOutput": "外部渠道附加管控结果",
-      "appendReviewToChannelOutputHint": "启用后，通过外部渠道（Telegram、微信等）发送的消息末尾会附着管控结果。Dashboard 用户可在质量管控面板中查看管控结果。",
       "deviationThreshold": "偏离阈值",
       "deviationThresholdHint": "当偏离分数超过此值时触发纠正",
       "deviationThresholdTooltip": "0-1 的分数。当 reviewer 模型判断主模型输出偏离研究目标超过此值时，触发课程纠正。0.3 = 较敏感，0.7 = 较宽松。默认 0.5",
