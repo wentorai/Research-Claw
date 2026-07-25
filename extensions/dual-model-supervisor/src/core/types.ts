@@ -73,7 +73,9 @@ export interface SupervisorConfig {
    * a high-risk-but-not-determined-danger tool before failing OPEN. Bounds the wait
    * so a slow/queued reviewer never stalls tool execution (never-over-block). The
    * deep review still runs (and can block within this window); on timeout the tool
-   * is allowed and an observable degrade is recorded. Default 10s.
+   * is allowed and an observable degrade is recorded. The default and its bounds are
+   * declared once, in DEFAULT_CONFIG and the manifest's `toolReviewGateMs` — restating
+   * the number here is what let this comment claim 10s long after the default became 4s.
    */
   toolReviewGateMs: number;
   /** Citation existence checking (grounding) — privacy-gated, best-effort, never-block. */
