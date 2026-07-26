@@ -84,7 +84,13 @@ describe('SupervisorReviewListener', () => {
     const h = makeClient();
     useGatewayStore.setState({ client: h.client as never, state: 'connected' });
     render(<SupervisorReviewListener />);
-    expect(h.request).not.toHaveBeenCalled();
+    // Initial DB hydration is also what gives the plugin this connection's
+    // GatewayRequestContext.broadcast function.
+    await waitFor(() => {
+      expect(h.request).toHaveBeenCalledWith('rc.supervisor.status', {});
+      expect(h.request).toHaveBeenCalledWith('rc.supervisor.log', { limit: 200 });
+    });
+    h.request.mockClear();
 
     act(() => {
       h.emit('plugin.supervisor.review.updated', {
