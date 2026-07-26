@@ -45,4 +45,45 @@ describe('supervisor audit broadcast wiring', () => {
     }]);
     expect(JSON.stringify(h.broadcasts)).not.toContain('rm -rf');
   });
+
+  it('broadcasts a serving-hook audit through the RPC context owned by another module instance', async () => {
+    const config = {
+      enabled: true,
+      supervisorModel: 'testprov/testmodel',
+      reviewMode: 'correct',
+      dangerousToolPolicy: 'block',
+      providers: {
+        testprov: {
+          api: 'openai-completions',
+          baseUrl: 'http://mock.local/x',
+          apiKey: 'k',
+          models: [{ id: 'testmodel' }],
+        },
+      },
+    };
+    const servingHooks = await loadPluginFresh(config);
+    const rpcOwner = await loadPluginFresh(
+      config,
+      undefined,
+      { preserveRuntimeConfigHub: true },
+    );
+
+    await rpcOwner.rpc.get('rc.supervisor.status')!({});
+    await servingHooks.fire(
+      'before_tool_call',
+      { toolName: 'exec', params: { command: 'rm -rf /' } },
+      { sessionKey: 'agent:main:cross-module-broadcast', toolName: 'exec' },
+    );
+
+    expect(rpcOwner.broadcasts).toEqual([{
+      event: 'plugin.supervisor.review.updated',
+      payload: {
+        sessionId: 'agent:main:cross-module-broadcast',
+        type: 'tool_review',
+        action: 'block',
+        timestamp: expect.any(Number),
+        persisted: true,
+      },
+    }]);
+  });
 });

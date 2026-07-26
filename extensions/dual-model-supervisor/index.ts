@@ -59,13 +59,17 @@ let _activeConfig: SupervisorConfig | null = null;
 
 interface SharedRuntimeConfigState {
   current: SupervisorConfig | null;
+  broadcast: ((event: string, payload: unknown) => void) | null;
 }
 
 const RUNTIME_CONFIG_KEY = Symbol.for('research-claw.dual-model-supervisor.runtime-config.v1');
 const runtimeGlobal = globalThis as typeof globalThis & {
   [RUNTIME_CONFIG_KEY]?: SharedRuntimeConfigState;
 };
-const _sharedRuntimeConfig = runtimeGlobal[RUNTIME_CONFIG_KEY] ?? { current: null };
+const _sharedRuntimeConfig = runtimeGlobal[RUNTIME_CONFIG_KEY] ?? {
+  current: null,
+  broadcast: null,
+};
 runtimeGlobal[RUNTIME_CONFIG_KEY] = _sharedRuntimeConfig;
 
 const _sessionStates = new Map<string, SessionState>();
@@ -76,7 +80,6 @@ const _hookRegistrationApis = new WeakSet<object>();
 /** Last reviewer-health state reported (log + audit), so re-registration and unrelated
  *  config saves do not re-emit the same line; a real state change always does. */
 let _reportedReviewerHealth = '';
-let _broadcast: ((event: string, payload: unknown) => void) | null = null;
 
 /** Fresh SessionState value (not stored). Used for both tracked sessions and
  *  ephemeral manual-review runs (which must NOT enter the session map). */
@@ -336,7 +339,7 @@ const plugin: PluginDefinition = {
       }
 
       _auditLog = new AuditLogService(_db, api.logger, (entry) => {
-        _broadcast?.('plugin.supervisor.review.updated', {
+        _sharedRuntimeConfig.broadcast?.('plugin.supervisor.review.updated', {
           sessionId: entry.sessionId,
           type: entry.type,
           action: entry.action,
@@ -427,7 +430,7 @@ const plugin: PluginDefinition = {
     // ── Register RPC methods ─────────────────────────────────────
     const registerMethod = (method: string, handler: (params: Record<string, unknown>) => Promise<unknown>) => {
       api.registerGatewayMethod(method, async (opts: GatewayRequestHandlerOptions) => {
-        _broadcast = opts.context.broadcast;
+        _sharedRuntimeConfig.broadcast = opts.context.broadcast;
         try {
           const result = await handler(opts.params);
           opts.respond(true, result);
