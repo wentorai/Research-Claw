@@ -52,7 +52,7 @@
           },
           "deviationThreshold": {
             "type": "number",
-            "description": "Deviation score threshold (0-1) above which correction is triggered",
+            "description": "Deviation score threshold (0-1). Correction is triggered when the score reaches or exceeds it.",
             "default": 0.5
           }
         }

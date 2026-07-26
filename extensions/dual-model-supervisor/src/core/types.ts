@@ -13,7 +13,7 @@ export interface MemoryGuardConfig {
 
 export interface CourseCorrectionConfig {
   enabled: boolean;            // Whether course correction is active
-  deviationThreshold: number;  // 0-1 threshold to trigger correction (0.5 = 50% deviation)
+  deviationThreshold: number;  // Correct at or above this deviation; 0-1 inclusive at both ends
   forceRegenerate: boolean;    // Whether to force regeneration when deviation detected
   maxRegenerateAttempts: number; // Max regeneration attempts per session (default: 3)
 }

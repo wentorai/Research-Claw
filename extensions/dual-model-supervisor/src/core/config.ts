@@ -126,19 +126,42 @@ function parseMemoryGuard(raw: unknown): SupervisorConfig['memoryGuard'] {
   };
 }
 
-/** Parse courseCorrection sub-config; clamps deviationThreshold to [0,1] and maxRegenerateAttempts to ≥1. */
+/**
+ * Parse courseCorrection sub-config; clamps deviationThreshold to [0,1] and
+ * maxRegenerateAttempts to ≥1.
+ *
+ * Unlike toolReviewGateMs, here the parser really is the only enforcement point. The
+ * manifest declares deviationThreshold as a plain `number` whose *description* says
+ * "(0-1)" but carries no `minimum`/`maximum`, and does not declare maxRegenerateAttempts
+ * at all — so `deviationThreshold: 99` and `maxRegenerateAttempts: 0` both pass OpenClaw's
+ * schema validation and arrive here intact. `maxRegenerateAttempts: 0` makes
+ * `regenerateAttempts < maxAttempts` false on the first turn, so force-regenerate never
+ * fires while the Dashboard still reports it enabled; the floor of 1 is what closes that.
+ *
+ * The threshold clamp does less than it looks like it does, and is documented here so the
+ * next reader does not over-trust it. It normalises the value onto the documented range,
+ * which is all: it cannot make 99 mean anything, and mapping 99 onto the maximum is only
+ * safe because course-corrector.ts compares with `>=`. Under the strict `>` this code
+ * shipped with, a threshold of exactly 1 could never be exceeded (deviation is itself
+ * clamped to [0,1] by validateDeviationAnalysis), so clamping 99 landed the config on a
+ * value that silently disabled correction just as thoroughly as 99 had. Range and
+ * comparison are separate obligations; see course-correction-semantics.test.ts.
+ *
+ * The `finiteOr` guards are defensive only: NaN and ±Infinity cannot be expressed in JSON,
+ * and both callers of parseConfig get their input from JSON. They are here because NaN
+ * would survive Math.min/Math.max unchanged and would make every comparison against it
+ * false — a dead switch by a route no clamp would catch — not because that has been observed.
+ */
 function parseCourseCorrection(raw: unknown): SupervisorConfig['courseCorrection'] {
   if (typeof raw !== 'object' || raw === null) return { ...DEFAULT_CONFIG.courseCorrection };
   const obj = raw as Record<string, unknown>;
+  const threshold = finiteOr(obj.deviationThreshold, DEFAULT_CONFIG.courseCorrection.deviationThreshold);
+  const attempts = finiteOr(obj.maxRegenerateAttempts, DEFAULT_CONFIG.courseCorrection.maxRegenerateAttempts);
   return {
     enabled: typeof obj.enabled === 'boolean' ? obj.enabled : DEFAULT_CONFIG.courseCorrection.enabled,
-    deviationThreshold: typeof obj.deviationThreshold === 'number'
-      ? Math.min(1, Math.max(0, obj.deviationThreshold))
-      : DEFAULT_CONFIG.courseCorrection.deviationThreshold,
+    deviationThreshold: Math.min(1, Math.max(0, threshold)),
     forceRegenerate: typeof obj.forceRegenerate === 'boolean' ? obj.forceRegenerate : DEFAULT_CONFIG.courseCorrection.forceRegenerate,
-    maxRegenerateAttempts: typeof obj.maxRegenerateAttempts === 'number'
-      ? Math.max(1, Math.round(obj.maxRegenerateAttempts))
-      : DEFAULT_CONFIG.courseCorrection.maxRegenerateAttempts,
+    maxRegenerateAttempts: Math.max(1, Math.round(attempts)),
   };
 }
 

@@ -100,16 +100,25 @@ export class CourseCorrector {
 
       if (!result) return;
 
+      // `>=`, not `>`: validateDeviationAnalysis clamps deviation to [0,1], so a strict
+      // comparison makes a threshold of exactly 1 unreachable — course correction would
+      // switch itself off for good while the Dashboard still showed it enabled, and the
+      // Settings slider (min 0, max 1, step 0.1) reaches that value in one drag. Reading
+      // the threshold as "correct at or above this deviation" leaves every setting the UI
+      // can produce live. The audit action and the branch share the comparison so a run
+      // recorded as 'warn' is exactly a run that queued a correction.
+      const deviates = result.deviation >= this.config.courseCorrection.deviationThreshold;
+
       this.auditLog.record({
         sessionId,
         type: 'session_analysis',
-        action: result.deviation > this.config.courseCorrection.deviationThreshold ? 'warn' : 'info',
+        action: deviates ? 'warn' : 'info',
         details: result.summary ?? `Deviation: ${result.deviation.toFixed(2)}, Quality: ${result.qualityScore.toFixed(2)}`,
         metadata: JSON.stringify(result),
         timestamp: Date.now(),
       });
 
-      if (result.deviation > this.config.courseCorrection.deviationThreshold && result.courseCorrection) {
+      if (deviates && result.courseCorrection) {
         sessionState.pendingCourseCorrection = result.courseCorrection;
 
         if (isForceRegenerateActive(this.config)) {
