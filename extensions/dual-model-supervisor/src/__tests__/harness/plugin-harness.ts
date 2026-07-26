@@ -47,7 +47,12 @@ let _dbCounter = 0;
 export async function loadPluginFresh(
   pluginConfig: Record<string, unknown>,
   globalConfig?: Record<string, unknown>,
+  opts?: { preserveRuntimeConfigHub?: boolean },
 ): Promise<Harness> {
+  if (!opts?.preserveRuntimeConfigHub) {
+    const runtimeConfigKey = Symbol.for('research-claw.dual-model-supervisor.runtime-config.v1');
+    delete (globalThis as Record<PropertyKey, unknown>)[runtimeConfigKey];
+  }
   vi.resetModules();
 
   const logs = { info: [] as string[], warn: [] as string[], error: [] as string[] };

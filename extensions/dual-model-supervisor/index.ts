@@ -57,6 +57,17 @@ let _groundingChecker: GroundingChecker | null = null;
 let _reviewStore: ReviewStore | null = null;
 let _activeConfig: SupervisorConfig | null = null;
 
+interface SharedRuntimeConfigState {
+  current: SupervisorConfig | null;
+}
+
+const RUNTIME_CONFIG_KEY = Symbol.for('research-claw.dual-model-supervisor.runtime-config.v1');
+const runtimeGlobal = globalThis as typeof globalThis & {
+  [RUNTIME_CONFIG_KEY]?: SharedRuntimeConfigState;
+};
+const _sharedRuntimeConfig = runtimeGlobal[RUNTIME_CONFIG_KEY] ?? { current: null };
+runtimeGlobal[RUNTIME_CONFIG_KEY] = _sharedRuntimeConfig;
+
 const _sessionStates = new Map<string, SessionState>();
 /** Hook registration is scoped to the host PluginApi/registry instance.
  *  An in-process gateway restart can reuse this evaluated module with a fresh
@@ -137,6 +148,37 @@ function reportReviewerHealth(
 let _manualReviewSeq = 0;
 /** Persisted, restart-monotonic epoch — namespaces reviewIds so restarts don't collide. */
 let _bootEpoch = 0;
+
+/**
+ * OpenClaw can evaluate this plugin more than once in one process: one module
+ * instance may own the serving hooks while another owns the gateway RPC handler.
+ * Keep only the current config shared; every module retains and updates its own
+ * service objects, DB handle and session map.
+ */
+function applyLocalRuntimeConfig(config: SupervisorConfig): void {
+  if (_activeConfig === config) return;
+  _activeConfig = config;
+  _reviewerClient?.updateSupervisorConfig(config);
+  _outputReviewer?.updateConfig(config);
+  _toolReviewer?.updateConfig(config);
+  _memoryGuardian?.updateConfig(config);
+  _courseCorrector?.updateConfig(config);
+  _consistencyChecker?.updateConfig(config);
+  _goalParser?.updateConfig(config);
+  _summaryExtractor?.updateConfig(config);
+  _groundingChecker?.updateConfig(config);
+}
+
+function publishRuntimeConfig(config: SupervisorConfig): void {
+  _sharedRuntimeConfig.current = config;
+  applyLocalRuntimeConfig(config);
+}
+
+function currentRuntimeConfig(fallback: SupervisorConfig): SupervisorConfig {
+  const config = _sharedRuntimeConfig.current ?? fallback;
+  applyLocalRuntimeConfig(config);
+  return config;
+}
 
 function getOrCreateSession(sessionId: string): SessionState {
   let state = _sessionStates.get(sessionId);
@@ -260,7 +302,7 @@ const plugin: PluginDefinition = {
 
   register(api: PluginApi) {
     const cfg = parseConfig(api.pluginConfig as Record<string, unknown> | undefined);
-    _activeConfig = cfg;
+    publishRuntimeConfig(cfg);
 
     const globalCfg = api.config;
     const mergedProviders = _extractProviders(api.pluginConfig as Record<string, unknown> | undefined, globalCfg);
@@ -341,7 +383,7 @@ const plugin: PluginDefinition = {
       _initialized = true;
     } else {
       _reviewerClient!.updateProviders(mergedProviders);
-      _reviewerClient!.updateSupervisorConfig(_activeConfig ?? cfg);
+      _reviewerClient!.updateSupervisorConfig(currentRuntimeConfig(cfg));
       _reviewerClient!.updateFallbackModel(fallbackModel);
     }
 
@@ -359,7 +401,7 @@ const plugin: PluginDefinition = {
 
     // Reviewer-model availability is reported now (and again on every config change),
     // never inferred from silence.
-    reportReviewerHealth(reviewerClient, auditLog, api.logger, _activeConfig ?? cfg);
+    reportReviewerHealth(reviewerClient, auditLog, api.logger, currentRuntimeConfig(cfg));
 
     // ── Register database lifecycle service ───────────────────────
     api.registerService({
@@ -434,19 +476,10 @@ const plugin: PluginDefinition = {
     registerSupervisorRpc(
       registerMethod,
       auditLog,
-      () => _activeConfig ?? cfg,
+      () => currentRuntimeConfig(cfg),
       (newCfg: SupervisorConfig) => {
-        _activeConfig = newCfg;
-        reviewerClient.updateSupervisorConfig(newCfg);
+        publishRuntimeConfig(newCfg);
         reportReviewerHealth(reviewerClient, auditLog, api.logger, newCfg);
-        outputReviewer.updateConfig(newCfg);
-        toolReviewer.updateConfig(newCfg);
-        memoryGuardian.updateConfig(newCfg);
-        courseCorrector.updateConfig(newCfg);
-        consistencyChecker.updateConfig(newCfg);
-        goalParser.updateConfig(newCfg);
-        summaryExtractor.updateConfig(newCfg);
-        groundingChecker.updateConfig(newCfg);
       },
       api.logger,
       () => _sessionStates,
@@ -517,7 +550,7 @@ const plugin: PluginDefinition = {
     // before_prompt_build — inject supervisor rules + corrections + lost memory + research goal.
     // ctx (PluginHookAgentContext) carries the canonical sessionKey; no global fallback.
     api.on('before_prompt_build', (_event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
+      const activeCfg = currentRuntimeConfig(cfg);
       if (!isSupervisorActive(activeCfg)) {
         return {};
       }
@@ -567,7 +600,7 @@ const plugin: PluginDefinition = {
     // message_received — parse research goal. Inbound text is `event.content`;
     // canonical session key is on ctx (or the event), never a global fallback.
     api.on('message_received', (event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
+      const activeCfg = currentRuntimeConfig(cfg);
       if (!isSupervisorActive(activeCfg)) {
         return;
       }
@@ -585,7 +618,7 @@ const plugin: PluginDefinition = {
     // consistency injection cannot take effect here; retained best-effort for
     // detection only, resolving the session from ctx.
     api.on('llm_input', (event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
+      const activeCfg = currentRuntimeConfig(cfg);
       if (!isSupervisorActive(activeCfg)) {
         return;
       }
@@ -604,7 +637,7 @@ const plugin: PluginDefinition = {
     // llm_output — record raw output, extract structured summary, run course correction,
     // and run the async output review (audit + Dashboard panel only; never modifies output).
     api.on('llm_output', (event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
+      const activeCfg = currentRuntimeConfig(cfg);
       if (!isSupervisorActive(activeCfg)) {
         return;
       }
@@ -664,7 +697,7 @@ const plugin: PluginDefinition = {
     // (via `async`) causes the result to be silently ignored. All actual review
     // logic lives in `llm_output` which correctly supports async handlers.
     api.on('before_message_write', (_event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
+      const activeCfg = currentRuntimeConfig(cfg);
       if (!isSupervisorActive(activeCfg)) {
         return {};
       }
@@ -683,7 +716,7 @@ const plugin: PluginDefinition = {
     // review runs regardless of session (safety is never skipped); the session
     // key is used only for the audit record.
     api.on('before_tool_call', async (event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
+      const activeCfg = currentRuntimeConfig(cfg);
       if (!isSupervisorActive(activeCfg)) {
         return {};
       }
@@ -714,7 +747,7 @@ const plugin: PluginDefinition = {
     // before_compaction — memory anchor injection (memory-guard business →
     // gated by the memory-guard switch, per invariant: no memory work when off).
     api.on('before_compaction', async (event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
+      const activeCfg = currentRuntimeConfig(cfg);
       if (!isMemoryGuardActive(activeCfg)) {
         return;
       }
@@ -763,7 +796,7 @@ const plugin: PluginDefinition = {
     // memory-guard remediation (not P1). `void memoryGuardian` keeps the
     // dependency wired for that follow-up.
     api.on('after_compaction', (event, ctx) => {
-      const activeCfg = _activeConfig ?? cfg;
+      const activeCfg = currentRuntimeConfig(cfg);
       // Feature switch first: no memory_guard business audit when the guard is
       // OFF (invariant: observability must not override the feature switch).
       if (!isMemoryGuardActive(activeCfg)) {
