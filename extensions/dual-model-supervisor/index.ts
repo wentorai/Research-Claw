@@ -38,6 +38,7 @@ import { AuditLogService } from './src/core/audit-log.js';
 import { registerSupervisorRpc } from './src/rpc.js';
 import { hookSessionKey } from './src/oc/hook-types.js';
 import type { PluginHookLlmOutputEvent, PluginHookLlmInputEvent } from './src/oc/hook-types.js';
+import type { GatewayRequestHandlerOptions } from 'openclaw/plugin-sdk/core';
 
 // ── Module-level state (survives multiple register() calls) ──────────
 let _initialized = false;
@@ -61,6 +62,7 @@ let _hooksDone = false;
 /** Last reviewer-health state reported (log + audit), so re-registration and unrelated
  *  config saves do not re-emit the same line; a real state change always does. */
 let _reportedReviewerHealth = '';
+let _broadcast: ((event: string, payload: unknown) => void) | null = null;
 
 /** Fresh SessionState value (not stored). Used for both tracked sessions and
  *  ephemeral manual-review runs (which must NOT enter the session map). */
@@ -288,7 +290,15 @@ const plugin: PluginDefinition = {
         _db = null;
       }
 
-      _auditLog = new AuditLogService(_db, api.logger);
+      _auditLog = new AuditLogService(_db, api.logger, (entry) => {
+        _broadcast?.('plugin.supervisor.review.updated', {
+          sessionId: entry.sessionId,
+          type: entry.type,
+          action: entry.action,
+          timestamp: entry.timestamp,
+          persisted: true,
+        });
+      });
 
       _reviewerClient = new ReviewerClient({
         supervisorConfig: cfg,
@@ -371,10 +381,8 @@ const plugin: PluginDefinition = {
 
     // ── Register RPC methods ─────────────────────────────────────
     const registerMethod = (method: string, handler: (params: Record<string, unknown>) => Promise<unknown>) => {
-      api.registerGatewayMethod(method, async (opts: {
-        params: Record<string, unknown>;
-        respond: (ok: boolean, payload?: unknown, error?: { code: string; message: string }) => void;
-      }) => {
+      api.registerGatewayMethod(method, async (opts: GatewayRequestHandlerOptions) => {
+        _broadcast = opts.context.broadcast;
         try {
           const result = await handler(opts.params);
           opts.respond(true, result);

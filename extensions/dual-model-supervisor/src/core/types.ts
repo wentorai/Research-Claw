@@ -3,6 +3,7 @@
  */
 
 import type { PluginHookHandlerMap } from '../oc/hook-types.js';
+import type { GatewayRequestHandlerOptions } from 'openclaw/plugin-sdk/core';
 
 // ── Configuration ──────────────────────────────────────────────────────
 
@@ -344,7 +345,10 @@ export interface PluginApi {
   logger: PluginLogger;
   resolvePath: (input: string) => string;
   registerTool: (tool: unknown) => void;
-  registerGatewayMethod: (method: string, handler: unknown) => void;
+  registerGatewayMethod: (
+    method: string,
+    handler: (opts: GatewayRequestHandlerOptions) => Promise<void> | void,
+  ) => void;
   registerHttpRoute: (params: {
     path: string;
     handler: (req: unknown, res: unknown) => Promise<boolean | void> | boolean | void;

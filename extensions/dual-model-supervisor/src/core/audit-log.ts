@@ -16,6 +16,7 @@ export type AuditPersistOutcome =
 export class AuditLogService {
   private db: Database.Database | null;
   private logger: PluginLogger;
+  private onPersisted?: (entry: Omit<AuditLogEntry, 'id'>) => void;
   /** Warn once when the DB goes unavailable, so persistence loss is observable
    *  without flooding the log on every subsequent audit write. */
   private _warnedDbUnavailable = false;
@@ -24,9 +25,14 @@ export class AuditLogService {
    * @param db   SQLite database instance (shared across plugin lifecycle). May be null if DB init failed — service degrades to log-only.
    * @param logger Plugin logger for error reporting
    */
-  constructor(db: Database.Database | null, logger: PluginLogger) {
+  constructor(
+    db: Database.Database | null,
+    logger: PluginLogger,
+    onPersisted?: (entry: Omit<AuditLogEntry, 'id'>) => void,
+  ) {
     this.db = db;
     this.logger = logger;
+    this.onPersisted = onPersisted;
     if (db) this._runMigrations();
   }
 
@@ -84,12 +90,18 @@ export class AuditLogService {
         entry.metadata ?? null,
         entry.timestamp,
       );
-      return { ok: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Audit log write failed: ${message}`);
       return { ok: false, reason: 'error', message };
     }
+    try {
+      this.onPersisted?.(entry);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Audit log notification failed: ${message}`);
+    }
+    return { ok: true };
   }
 
   /**
