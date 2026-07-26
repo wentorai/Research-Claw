@@ -11,7 +11,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { extractLlmOutputText } from '../../index.js';
-import { LLM_OUTPUT_EVENT } from '../__fixtures__/oc-hook-events.js';
+import {
+  LLM_OUTPUT_EVENT,
+  SESSION_END_EVENT,
+} from '../__fixtures__/oc-hook-events.js';
 
 describe('P2-E llm_output contract', () => {
   it('production extractor reads assistant text from `assistantTexts`', () => {
@@ -21,5 +24,11 @@ describe('P2-E llm_output contract', () => {
     // A stripped event (only the required non-text fields) yields no text.
     const stripped = { runId: 'r', sessionId: 's', provider: 'p', model: 'm', assistantTexts: [] } as unknown as typeof LLM_OUTPUT_EVENT;
     expect(extractLlmOutputText(stripped)).toBeUndefined();
+  });
+});
+
+describe('P2-E session_end contract', () => {
+  it('uses the compaction reason captured from the real gateway, never a phantom completed reason', () => {
+    expect(SESSION_END_EVENT.reason).toBe('compaction');
   });
 });

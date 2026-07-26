@@ -6,7 +6,8 @@
  * (the same types the gateway ships). Because each fixture is annotated with its
  * real OC event type, TypeScript REJECTS any phantom field (e.g. a `sessionId`
  * on a message_sending event, which does not exist) and rejects removing a
- * required field — so the fixture can only ever describe a real event shape.
+ * required field — so each fixture is constrained to a contract-valid shape.
+ * Runtime provenance is stated separately where a fixture comes from a capture.
  *
  * Cross-checked against a live gateway capture (message_received keys observed:
  * from, content, timestamp, threadId, messageId, senderId, sessionKey, runId,
@@ -19,6 +20,7 @@ import type {
   PluginHookLlmInputEvent,
   PluginHookBeforeToolCallEvent,
   PluginHookAfterCompactionEvent,
+  PluginHookSessionEndEvent,
   PluginHookMessageContext,
   PluginHookAgentContext,
 } from '../oc/hook-types.js';
@@ -72,4 +74,16 @@ export const AFTER_COMPACTION_EVENT: PluginHookAfterCompactionEvent = {
   tokenCount: 8000,
   compactedCount: 12,
   sessionFile: '/tmp/session.jsonl',
+};
+
+// session_end — normalized subset of the 2026-07-26 isolated gateway capture.
+// Opaque IDs are scrubbed and undefined optional fields are omitted.
+// The public OC contract has no "completed" reason.
+export const SESSION_END_EVENT: PluginHookSessionEndEvent = {
+  sessionId: 'native-session-before-compaction',
+  sessionKey: 'agent:main:conv-1',
+  messageCount: 0,
+  reason: 'compaction',
+  transcriptArchived: false,
+  nextSessionId: 'native-session-after-compaction',
 };
