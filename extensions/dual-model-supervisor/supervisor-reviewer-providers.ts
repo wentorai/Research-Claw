@@ -11,6 +11,7 @@ export const SUPERVISOR_REVIEWER_PROVIDER_IDS = [
   'zai-coding-global',
   'moonshot',
   'moonshot-cn',
+  'deepseek',
   'kimi-coding',
   'minimax',
   'minimax-cn',

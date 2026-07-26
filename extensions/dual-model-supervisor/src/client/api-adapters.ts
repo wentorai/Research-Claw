@@ -87,6 +87,22 @@ const openaiCompatAdapter: ReviewerApiAdapter = {
   extractText: extractOpenAiText,
 };
 
+// ── DeepSeek OpenAI-compatible adapter ────────────────────────────────
+// DeepSeek thinking models may spend the entire output budget on reasoning and
+// return an empty `message.content`. Reviewer prompts require a compact JSON answer,
+// so disable thinking explicitly instead of parsing or persisting reasoning_content.
+
+const deepseekAdapter: ReviewerApiAdapter = {
+  ...openaiCompatAdapter,
+  buildBody(provider, modelId, system, user) {
+    return {
+      ...openaiCompatAdapter.buildBody(provider, modelId, system, user),
+      stream: false,
+      thinking: { type: 'disabled' },
+    };
+  },
+};
+
 // ── Anthropic Messages-compatible adapter (Kimi Coding) ────────────────
 // Auth: `x-api-key` + `anthropic-version`, same as Anthropic Messages API — not Bearer.
 // Reviewer resolves POST URL to `{baseUrl}/v1/messages` in reviewer.ts.
@@ -163,6 +179,7 @@ export const REVIEWER_ADAPTER_BY_PROVIDER: Record<SupervisorReviewerProviderId, 
   'zai-coding-global':  openaiCompatAdapter,
   'moonshot':           openaiCompatAdapter,
   'moonshot-cn':        openaiCompatAdapter,
+  'deepseek':           deepseekAdapter,
   'kimi-coding':        kimiCodingAdapter,
   'minimax':            minimaxAdapter,
   'minimax-cn':         minimaxAdapter,
