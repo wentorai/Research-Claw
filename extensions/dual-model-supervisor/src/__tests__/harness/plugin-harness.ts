@@ -18,6 +18,8 @@ export interface Harness {
   rpc: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
   /** Captured logger output. */
   logs: { info: string[]; warn: string[]; error: string[] };
+  /** Events emitted through the real gateway request context's broadcast function. */
+  broadcasts: Array<{ event: string; payload: unknown }>;
   /**
    * Wait until `predicate()` is truthy (polling real state), or reject after
    * `timeoutMs`. This is a state-based completion condition — NOT a fixed sleep —
@@ -43,6 +45,7 @@ export async function loadPluginFresh(
   const logs = { info: [] as string[], warn: [] as string[], error: [] as string[] };
   const hooks = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
   const rpc = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>();
+  const broadcasts: Array<{ event: string; payload: unknown }> = [];
 
   // Unique temp DB path per harness so better-sqlite3 never collides.
   const dbPath = pluginConfig.dbPath ?? path.join(os.tmpdir(), `rc-supervisor-test-${process.pid}-${_dbCounter++}.db`);
@@ -71,7 +74,9 @@ export async function loadPluginFresh(
             if (ok) captured = payload;
             else capturedErr = error;
           },
-          context: {},
+          context: {
+            broadcast: (event: string, payload: unknown) => broadcasts.push({ event, payload }),
+          },
         });
         if (capturedErr) throw new Error(capturedErr.message);
         return captured;
@@ -103,6 +108,7 @@ export async function loadPluginFresh(
     },
     rpc,
     logs,
+    broadcasts,
     async waitUntil(predicate, opts) {
       const timeoutMs = opts?.timeoutMs ?? 2000;
       const intervalMs = opts?.intervalMs ?? 5;
