@@ -1001,7 +1001,8 @@
       "riskLow": "Low",
       "riskMedium": "Medium",
       "riskHigh": "High",
-      "approveAlways": "Approve (Always)"
+      "approveAlways": "Approve (Always)",
+      "resolveFailed": "Approval could not be submitted. It remains pending."
     },
     "file": {
       "open": "Open",

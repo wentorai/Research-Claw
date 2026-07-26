@@ -1001,7 +1001,8 @@
       "riskLow": "低",
       "riskMedium": "中",
       "riskHigh": "高",
-      "approveAlways": "批准（始终）"
+      "approveAlways": "批准（始终）",
+      "resolveFailed": "审批提交失败，仍保持待处理状态。"
     },
     "file": {
       "open": "打开",

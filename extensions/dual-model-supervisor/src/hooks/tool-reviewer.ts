@@ -12,6 +12,12 @@ import { validateToolReviewResult } from '../core/validators.js';
 
 /** OC's requireApproval descriptor (the shape before_tool_call returns). */
 type RequireApproval = NonNullable<PluginHookBeforeToolCallResult['requireApproval']>;
+const APPROVAL_TITLE_MAX_LENGTH = 80;
+const APPROVAL_DESCRIPTION_MAX_LENGTH = 256;
+
+function truncateApprovalText(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : value.slice(0, maxLength);
+}
 
 /** The tool gate's decision: block, allow, correct params, or request approval. */
 export interface ToolGateDecision {
@@ -188,8 +194,8 @@ export class ToolReviewer {
     // a second, conflicting terminal). The latch's lifetime is exactly this callback.
     let resolved = false;
     const requireApproval: RequireApproval = {
-      title: `Approve dangerous tool: ${tool}`,
-      description: reason,
+      title: truncateApprovalText(`Approve dangerous tool: ${tool}`, APPROVAL_TITLE_MAX_LENGTH),
+      description: truncateApprovalText(reason, APPROVAL_DESCRIPTION_MAX_LENGTH),
       severity: 'critical',
       allowedDecisions: ['allow-once', 'allow-always', 'deny'],
       timeoutBehavior: 'deny',
