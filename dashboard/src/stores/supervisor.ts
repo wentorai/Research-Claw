@@ -65,7 +65,12 @@ export interface SupervisorConfig {
   };
   highRiskTools: string[];
   dangerousToolPolicy?: 'block' | 'approve';
-  /** Absent = the plugin default (4000ms, declared in openclaw.plugin.json). */
+  /**
+   * Absent = whatever the plugin's own default is. The number lives in
+   * openclaw.plugin.json, mirrored by SUPERVISOR_GATE_DEFAULT_MS (which a test pins to
+   * the manifest). Quoting it here would be a third copy with nothing enforcing it —
+   * the same setup that let the plugin's own JSDoc claim 10s long after it became 4s.
+   */
   toolReviewGateMs?: number;
 }
 

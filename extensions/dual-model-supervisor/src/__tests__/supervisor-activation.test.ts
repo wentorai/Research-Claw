@@ -47,7 +47,7 @@ const INHERIT_CONFIG = {
   enabled: true,
   supervisorModel: '',
   reviewMode: 'correct',
-  toolReviewGateMs: 300,
+  toolReviewGateMs: 500, // the floor of the supported range; 300 would be clamped up to it
 };
 
 const RM_RF = { toolName: 'exec', params: { command: 'rm -rf /' } };

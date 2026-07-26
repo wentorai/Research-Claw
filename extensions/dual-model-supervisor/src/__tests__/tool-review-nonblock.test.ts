@@ -16,7 +16,12 @@ const CONFIG = {
   enabled: true,
   supervisorModel: 'testprov/testmodel',
   reviewMode: 'correct',
-  toolReviewGateMs: 150, // short gate → fast, deterministic test
+  // The floor of the supported range — the shortest gate a real deployment can be set to,
+  // so the test runs against a value the parser will not silently substitute. It used to
+  // say 150 "for a fast test", which parseConfig now clamps to 500: the number in the
+  // fixture was no longer the number under test, and the race margins below were being
+  // measured against a gate a third of its real length.
+  toolReviewGateMs: 500,
   providers: {
     testprov: { api: 'openai-completions', baseUrl: 'http://mock.local/v1/chat/completions', apiKey: 'k', models: [{ id: 'testmodel', maxTokens: 1000 }] },
   },
@@ -52,7 +57,9 @@ describe('P1-B before_tool_call never over-blocks on the reviewer', () => {
     const hookP = h.fire('before_tool_call', { toolName: 'exec', params: { command: 'ls -la' } }, { sessionKey: 'agent:main:skA' });
     const raced = (await Promise.race([
       hookP.then((r) => ({ tag: 'RESOLVED', r })),
-      new Promise((res) => setTimeout(() => res({ tag: 'BLOCKED' }), 1000)),
+      // 4× the gate: enough headroom that a slow machine cannot fail this, while still far
+      // below the reviewer round-trip it is guarding against (the stub fetch never resolves).
+      new Promise((res) => setTimeout(() => res({ tag: 'BLOCKED' }), 2000)),
     ])) as { tag: string; r?: unknown };
     expect(raced.tag).toBe('RESOLVED'); // must not hang on the 30s reviewer round-trip
     expect(raced.r).toEqual({}); // fail-open: tool allowed (no block)

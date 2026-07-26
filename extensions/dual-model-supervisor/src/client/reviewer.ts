@@ -243,7 +243,8 @@ export class ReviewerClient {
 
     // No gate requested (undefined/0/negative) → return the raw call. Callers that
     // need the never-over-block bound (the before_tool_call security gate) MUST pass
-    // a positive timeoutMs; parseConfig guarantees toolReviewGateMs > 0.
+    // a positive timeoutMs; parseConfig clamps toolReviewGateMs into its declared
+    // range, so a config-derived gate is always positive and finite.
     if (!gated) {
       return core;
     }

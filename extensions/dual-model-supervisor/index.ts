@@ -267,6 +267,15 @@ const plugin: PluginDefinition = {
 
     api.logger.info(`Dual Model Supervisor initializing (enabled=${cfg.enabled}, mode=${cfg.reviewMode})`);
 
+    // No gate-range warning here on purpose: OpenClaw validates plugins.entries[*].config
+    // against the manifest's configSchema before the plugin loads, so on any OpenClaw-loaded
+    // path api.pluginConfig cannot carry an out-of-range toolReviewGateMs — cold start, config
+    // reload and runtime plugin reload all reject the file instead (the two createApi call
+    // sites pass either {} or the loader-validated value). A warning here would be dead code
+    // on every one of those paths; a non-OpenClaw host, such as this plugin's own test
+    // harness, can still construct one, which is where the clamp is actually exercised.
+    // The RPC write path is the one that bypasses OpenClaw; it warns in rpc.ts.
+
     if (!_initialized) {
       try {
         const dbPath = resolveSupervisorDbPath(api.pluginConfig as Record<string, unknown> | undefined);

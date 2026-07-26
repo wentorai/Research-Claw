@@ -73,14 +73,30 @@ export interface SupervisorConfig {
    * a high-risk-but-not-determined-danger tool before failing OPEN. Bounds the wait
    * so a slow/queued reviewer never stalls tool execution (never-over-block). The
    * deep review still runs (and can block within this window); on timeout the tool
-   * is allowed and an observable degrade is recorded. The default and its bounds are
-   * declared once, in DEFAULT_CONFIG and the manifest's `toolReviewGateMs` — restating
-   * the number here is what let this comment claim 10s long after the default became 4s.
+   * is allowed and an observable degrade is recorded. The default lives in
+   * DEFAULT_CONFIG and the enforced range in TOOL_REVIEW_GATE_MIN_MS/MAX_MS — restating
+   * a number here is what let this comment claim 10s long after the default became 4s.
    */
   toolReviewGateMs: number;
   /** Citation existence checking (grounding) — privacy-gated, best-effort, never-block. */
   grounding: GroundingConfig;
 }
+
+/**
+ * Bounds for `toolReviewGateMs`, mirroring the manifest's `minimum`/`maximum`.
+ *
+ * OpenClaw enforces the manifest values on anything that comes from openclaw.json.
+ * These constants exist because `rc.supervisor.config` writes the live config without
+ * going through OpenClaw at all, so parseConfig has to apply the same range itself
+ * (see parseToolReviewGateMs). `tool-review-gate-budget.test.ts` pins both to the
+ * manifest so the two enforcement points cannot drift apart.
+ *
+ * Floor: below ~500ms no reviewer round trip can finish, so a smaller gate would mean
+ * "always fail open" while still claiming to deep-review. Ceiling: the gate is paid by
+ * every high-risk tool call in the worst case; past 30s the agent looks hung.
+ */
+export const TOOL_REVIEW_GATE_MIN_MS = 500;
+export const TOOL_REVIEW_GATE_MAX_MS = 30000;
 
 export const DEFAULT_CONFIG: SupervisorConfig = {
   enabled: false,
