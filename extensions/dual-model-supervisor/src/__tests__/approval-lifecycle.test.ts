@@ -135,6 +135,32 @@ describe('P1-D approval lifecycle — deep-review danger', () => {
   const origFetch = globalThis.fetch;
   afterEach(() => { (globalThis as { fetch: unknown }).fetch = origFetch; vi.restoreAllMocks(); });
 
+  it('keeps the native plugin approval descriptor within the OpenClaw title and description limits', async () => {
+    const longTool = `tool-${'工具'.repeat(80)}`;
+    (globalThis as { fetch: unknown }).fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ blocked: true, blockReason: 'X'.repeat(400) }) } }],
+      }),
+      text: async () => '',
+    }));
+    const h = await loadPluginFresh({
+      ...BASE,
+      dangerousToolPolicy: 'approve',
+      highRiskTools: [longTool],
+    });
+    const r = (await h.fire(
+      'before_tool_call',
+      { toolName: longTool, params: {} },
+      { sessionKey: 'agent:main:length', toolName: longTool },
+    )) as ToolResult;
+
+    expect(r.requireApproval).toBeDefined();
+    expect(r.requireApproval!.title.length).toBeLessThanOrEqual(80);
+    expect(r.requireApproval!.description.length).toBeLessThanOrEqual(256);
+  });
+
   it('approve: reviewer-flagged block → requireApproval + requested (no block pre-resolution)', async () => {
     (globalThis as { fetch: unknown }).fetch = vi.fn(async () => ({
       ok: true,
