@@ -58,7 +58,10 @@ let _reviewStore: ReviewStore | null = null;
 let _activeConfig: SupervisorConfig | null = null;
 
 const _sessionStates = new Map<string, SessionState>();
-let _hooksDone = false;
+/** Hook registration is scoped to the host PluginApi/registry instance.
+ *  An in-process gateway restart can reuse this evaluated module with a fresh
+ *  registry, which must receive its own complete hook set. */
+const _hookRegistrationApis = new WeakSet<object>();
 /** Last reviewer-health state reported (log + audit), so re-registration and unrelated
  *  config saves do not re-emit the same line; a real state change always does. */
 let _reportedReviewerHealth = '';
@@ -506,9 +509,10 @@ const plugin: PluginDefinition = {
       return { review: typeof id === 'string' ? reviewStore.get(id) : null };
     });
 
-    // ── Register hooks (guarded: only once across discovery + gateway passes) ──
+    // ── Register hooks once per host PluginApi/registry instance ──
 
-    if (!_hooksDone) {
+    const hookRegistrationKey: object = api;
+    if (!_hookRegistrationApis.has(hookRegistrationKey)) {
 
     // before_prompt_build — inject supervisor rules + corrections + lost memory + research goal.
     // ctx (PluginHookAgentContext) carries the canonical sessionKey; no global fallback.
@@ -798,8 +802,8 @@ const plugin: PluginDefinition = {
       _sessionStates.delete(sessionKey);
     });
 
-    _hooksDone = true;
-    } // end _hooksDone guard
+    _hookRegistrationApis.add(hookRegistrationKey);
+    } // end per-PluginApi hook-registration guard
 
     api.logger.info('Dual Model Supervisor registered (9 hooks + 10 RPC methods)');
   },

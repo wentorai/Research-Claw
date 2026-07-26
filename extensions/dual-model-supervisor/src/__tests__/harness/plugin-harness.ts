@@ -27,6 +27,14 @@ export interface Harness {
    */
   waitUntil(predicate: () => boolean, opts?: { timeoutMs?: number; intervalMs?: number }): Promise<void>;
   hookNames(): string[];
+  hookHandlerCounts(): Record<string, number>;
+  /** Re-register against the same PluginApi surface to verify local de-duplication. */
+  reregisterCurrentApi(): void;
+  /**
+   * Register the already-evaluated plugin module against a fresh PluginApi
+   * registration surface, as happens during an in-process gateway restart.
+   */
+  registerFreshApi(): string[];
 }
 
 let _dbCounter = 0;
@@ -123,5 +131,22 @@ export async function loadPluginFresh(
       }
     },
     hookNames: () => [...hooks.keys()],
+    hookHandlerCounts: () => Object.fromEntries([...hooks].map(([name, handlers]) => [name, handlers.length])),
+    reregisterCurrentApi() {
+      mod.default.register(api);
+    },
+    registerFreshApi() {
+      const restartedHooks = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
+      const restartedApi = {
+        ...api,
+        on: (hookName: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+          const list = restartedHooks.get(hookName) ?? [];
+          list.push(handler);
+          restartedHooks.set(hookName, list);
+        },
+      };
+      mod.default.register(restartedApi);
+      return [...restartedHooks.keys()];
+    },
   };
 }
