@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PluginApprovalListener from './PluginApprovalListener';
 import { useGatewayStore } from '../stores/gateway';
 import { useApprovalsStore } from '../stores/approvals';
@@ -47,6 +47,10 @@ describe('PluginApprovalListener — OC native approval path', () => {
     useApprovalsStore.getState().clear();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('renders a real plugin.approval.requested event and resolves it through plugin.approval.resolve', async () => {
     const h = makeClient();
     useGatewayStore.setState({
@@ -69,8 +73,8 @@ describe('PluginApprovalListener — OC native approval path', () => {
           sessionKey: 'agent:main:approval-test',
           allowedDecisions: ['allow-once', 'allow-always', 'deny'],
         },
-        createdAtMs: 1000,
-        expiresAtMs: 121000,
+        createdAtMs: Date.now(),
+        expiresAtMs: Date.now() + 120000,
       });
     });
 
@@ -112,8 +116,8 @@ describe('PluginApprovalListener — OC native approval path', () => {
         description: 'Must remain pending on RPC failure',
         severity: 'warning',
       },
-      createdAtMs: 2000,
-      expiresAtMs: 122000,
+      createdAtMs: Date.now(),
+      expiresAtMs: Date.now() + 120000,
     };
     act(() => {
       h.emit('plugin.approval.requested', event);
@@ -127,5 +131,36 @@ describe('PluginApprovalListener — OC native approval path', () => {
       expect(screen.getByText('card.approval.resolveFailed')).toBeInTheDocument();
     });
     expect(useApprovalsStore.getState().pending).toHaveLength(1);
+  });
+
+  it('removes an expired request even when OpenClaw emits no resolved event', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const h = makeClient();
+    useGatewayStore.setState({
+      client: h.client as never,
+      state: 'connected',
+    });
+    render(<PluginApprovalListener />);
+
+    act(() => {
+      h.emit('plugin.approval.requested', {
+        id: 'plugin:approval-timeout',
+        request: {
+          title: 'Expires without a resolved event',
+          severity: 'critical',
+        },
+        createdAtMs: 10_000,
+        expiresAtMs: 11_000,
+      });
+    });
+    expect(screen.getByText('Expires without a resolved event')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_001);
+    });
+
+    expect(screen.queryByText('Expires without a resolved event')).not.toBeInTheDocument();
+    expect(useApprovalsStore.getState().pending).toHaveLength(0);
   });
 });

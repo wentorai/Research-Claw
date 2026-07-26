@@ -43,6 +43,18 @@ export default function PluginApprovalListener() {
     };
   }, [add, client, remove]);
 
+  useEffect(() => {
+    if (pending.length === 0) return;
+    const nextExpiry = Math.min(...pending.map((approval) => approval.expiresAtMs));
+    const timeout = window.setTimeout(() => {
+      const now = Date.now();
+      for (const approval of useApprovalsStore.getState().pending) {
+        if (approval.expiresAtMs <= now) remove(approval.id);
+      }
+    }, Math.max(0, nextExpiry - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [pending, remove]);
+
   if (pending.length === 0) return null;
 
   return (
