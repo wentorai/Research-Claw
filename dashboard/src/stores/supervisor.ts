@@ -24,9 +24,20 @@ export interface SessionInfo {
 export interface SupervisorStatus {
   enabled: boolean;
   reviewMode: string;
+  /** Stored marker: '' means "inherit the main model", never a resolved model name. */
   supervisorModel: string;
-  appendReviewToChannelOutput: boolean;
-  memoryGuardEnabled: boolean;
+  /** Where the reviewer model comes from. Reported separately from `enabled`: the
+   *  deterministic safety gate needs no model, so 'unavailable' means deep review is
+   *  degraded — it never means supervision is off. */
+  modelSource?: 'explicit' | 'inherited' | 'unavailable';
+  /** The model a deep review would actually call right now (resolved, not stored). */
+  effectiveSupervisorModel?: string;
+  reviewerReady?: boolean;
+  /** Why a deep-review call cannot be made — the same reason the call path would hit. */
+  reviewerUnavailableReason?: string;
+  /** How long a high-risk tool call waits for deep review before failing open. */
+  toolReviewGateMs?: number;
+  dangerousToolPolicy?: 'block' | 'approve';
   courseCorrectionEnabled: boolean;
   deviationThreshold: number;
   forceRegenerate: boolean;
@@ -40,12 +51,7 @@ export interface SupervisorStatus {
 export interface SupervisorConfig {
   enabled: boolean;
   supervisorModel: string;
-  reviewMode: 'off' | 'filter-only' | 'correct' | 'full';
-  appendReviewToChannelOutput: boolean;
-  memoryGuard: {
-    enabled: boolean;
-    keyCategories: string[];
-  };
+  reviewMode: 'off' | 'filter-only' | 'correct';
   courseCorrection: {
     enabled: boolean;
     deviationThreshold: number;
@@ -53,6 +59,14 @@ export interface SupervisorConfig {
     maxRegenerateAttempts: number;
   };
   highRiskTools: string[];
+  dangerousToolPolicy?: 'block' | 'approve';
+  /**
+   * Absent = whatever the plugin's own default is. The number lives in
+   * openclaw.plugin.json, mirrored by SUPERVISOR_GATE_DEFAULT_MS (which a test pins to
+   * the manifest). Quoting it here would be a third copy with nothing enforcing it —
+   * the same setup that let the plugin's own JSDoc claim 10s long after it became 4s.
+   */
+  toolReviewGateMs?: number;
 }
 
 export interface AuditLogEntry {

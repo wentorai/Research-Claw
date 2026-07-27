@@ -20,10 +20,14 @@ import {
 import { getPreset } from './provider-presets';
 import { findCatalogEntry } from './oc-catalog-align';
 import { getModelCatalogCache } from './catalog-cache';
+import scientificCompactionInstructionsRaw from '../../../config/research-compaction-instructions.txt?raw';
 
 /** Legacy sentinel value OpenClaw may return in redacted config snapshots. */
 export const REDACTED_SENTINEL = '__OPENCLAW_REDACTED__';
 const RC_DB_PATH_DEFAULT = '~/.research-claw/library.db';
+/** Single-source RC default; startup migration reads the same tracked text file. */
+export const RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS =
+  scientificCompactionInstructionsRaw.trim();
 
 export interface ConfigPatchInput {
   /** OpenClaw native provider key (e.g. 'zai', 'openai', 'anthropic') */
@@ -94,10 +98,11 @@ export interface ConfigPatchInput {
   supervisorEnabled?: boolean;
   supervisorModel?: string;
   supervisorReviewMode?: string;
-  supervisorAppendReviewToChannelOutput?: boolean;
   supervisorDeviationThreshold?: number;
   supervisorForceRegenerate?: boolean;
   supervisorMaxRegenerateAttempts?: number;
+  /** Deep-review budget for a high-risk tool call, in ms (manifest range 500–30000). */
+  supervisorToolReviewGateMs?: number;
 }
 
 export interface ExtractedConfig {
@@ -559,7 +564,10 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
     defaults: {
       workspace: './workspace',
       skipBootstrap: true,
-      compaction: { mode: 'safeguard' },
+      compaction: {
+        mode: 'safeguard',
+        customInstructions: RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS,
+      },
       thinkingDefault: 'medium',
       subagents: { announceTimeoutMs: 480000 },
       heartbeat: { every: '30m', lightContext: true, isolatedSession: true },
@@ -614,10 +622,6 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
           enabled: false,
           supervisorModel: '',
           reviewMode: 'off',
-          memoryGuard: {
-            enabled: true,
-            keyCategories: ['research_goal', 'key_conclusion', 'user_preference', 'methodology_decision'],
-          },
           courseCorrection: {
             enabled: true,
             deviationThreshold: 0.5,
@@ -1122,6 +1126,13 @@ export function buildSaveConfig(
     delete compaction.reserveTokens;
     delete compaction.reserveTokensFloor;
     if (compaction.mode === undefined) compaction.mode = 'safeguard';
+    const existingInstructions = compaction.customInstructions;
+    if (
+      typeof existingInstructions !== 'string'
+      || existingInstructions.trim().length === 0
+    ) {
+      compaction.customInstructions = RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS;
+    }
 
     defaults.compaction = compaction;
   }
@@ -1219,13 +1230,24 @@ export function buildSaveConfig(
     const existingSupervisorConfig = (existingSupervisorEntry?.config as Record<string, unknown> | undefined) ?? {};
 
     // Preserve existing supervisor config values when not explicitly overridden
+    const { memoryGuard: _withdrawnMemoryGuard, ...supportedSupervisorConfig } =
+      existingSupervisorConfig;
+    const requestedReviewMode =
+      input.supervisorReviewMode ??
+      (existingSupervisorConfig.reviewMode as string) ??
+      'off';
     const supervisorConfig: Record<string, unknown> = {
-      ...existingSupervisorConfig,
+      ...supportedSupervisorConfig,
       enabled: input.supervisorEnabled ?? (existingSupervisorConfig.enabled as boolean) ?? false,
       supervisorModel: input.supervisorModel !== undefined ? input.supervisorModel : (existingSupervisorConfig.supervisorModel as string) ?? '',
-      reviewMode: input.supervisorReviewMode ?? (existingSupervisorConfig.reviewMode as string) ?? 'off',
-      appendReviewToChannelOutput: input.supervisorAppendReviewToChannelOutput ?? (existingSupervisorConfig.appendReviewToChannelOutput as boolean) ?? true,
+      reviewMode: requestedReviewMode === 'full' ? 'correct' : requestedReviewMode,
     };
+
+    // Only written when the form sends one — omitting it leaves whatever is already
+    // persisted (including a hand-widened gate) untouched rather than resetting it.
+    if (input.supervisorToolReviewGateMs !== undefined) {
+      supervisorConfig.toolReviewGateMs = input.supervisorToolReviewGateMs;
+    }
 
     // Only override courseCorrection if any supervisor field is explicitly provided
     if (input.supervisorDeviationThreshold !== undefined ||
@@ -1238,9 +1260,9 @@ export function buildSaveConfig(
         forceRegenerate: input.supervisorForceRegenerate ?? (existingCourseCorrection.forceRegenerate as boolean) ?? false,
         maxRegenerateAttempts: input.supervisorMaxRegenerateAttempts ?? (existingCourseCorrection.maxRegenerateAttempts as number) ?? 3,
       };
-      // Enable courseCorrection when review mode is 'correct' or 'full'
+      // Enable courseCorrection only in the supported correction mode.
       (supervisorConfig.courseCorrection as Record<string, unknown>).enabled =
-        supervisorConfig.reviewMode === 'correct' || supervisorConfig.reviewMode === 'full';
+        supervisorConfig.reviewMode === 'correct';
     }
 
     result.plugins = {

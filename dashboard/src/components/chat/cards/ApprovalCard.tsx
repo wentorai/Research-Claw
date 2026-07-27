@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import CardContainer from './CardContainer';
 import { useConfigStore } from '@/stores/config';
 import { useGatewayStore } from '@/stores/gateway';
-import { useChatStore } from '@/stores/chat';
 import { getThemeTokens } from '@/styles/theme';
 import type { ApprovalCard as ApprovalCardType } from '@/types/cards';
 
@@ -30,43 +29,35 @@ export default function ApprovalCard(props: ApprovalCardProps) {
   const theme = useConfigStore((s) => s.theme);
   const tokens = getThemeTokens(theme);
   const client = useGatewayStore((s) => s.client);
-  const chatSend = useChatStore((s) => s.send);
   const [status, setStatus] = useState<ApprovalStatus>('pending');
+  const [resolving, setResolving] = useState(false);
+  const [resolveFailed, setResolveFailed] = useState(false);
 
   const borderColor = RISK_BORDER_COLORS[props.risk_level] ?? '#F59E0B';
 
   const handleResolve = useCallback(async (decision: 'allow-once' | 'allow-always' | 'deny') => {
+    if (resolving) return;
     const isApproved = decision !== 'deny';
     const newStatus: ApprovalStatus = isApproved ? 'allowed' : 'denied';
-
-    let rpcOk = false;
-    if (props.approval_id && client) {
-      // OC native exec.approval system — call the RPC (agent is blocking on Promise).
-      try {
-        await client.request('exec.approval.resolve', {
-          id: props.approval_id,
-          decision,
-        });
-        rpcOk = true;
-      } catch {
-        // RPC failed — approval_id may be LLM-hallucinated, fall through to chat path.
-      }
+    setResolving(true);
+    setResolveFailed(false);
+    try {
+      if (!props.approval_id || !client) throw new Error('approval RPC unavailable');
+      const method = props.approval_id.startsWith('plugin:')
+        ? 'plugin.approval.resolve'
+        : 'exec.approval.resolve';
+      await client.request(method, {
+        id: props.approval_id,
+        decision,
+      });
+      setStatus(newStatus);
+      props.onResolve?.(decision);
+    } catch {
+      setResolveFailed(true);
+    } finally {
+      setResolving(false);
     }
-
-    if (!rpcOk) {
-      // RC custom approval card — no blocking Promise exists.
-      // Send a chat message so the agent receives the user's decision.
-      const message = decision === 'deny'
-        ? `❌ 已拒绝: ${props.action}`
-        : decision === 'allow-always'
-          ? `✅ 已批准 (始终允许): ${props.action}`
-          : `✅ 已批准: ${props.action}`;
-      chatSend(message).catch(() => {});
-    }
-
-    setStatus(newStatus);
-    props.onResolve?.(decision);
-  }, [client, chatSend, props]);
+  }, [client, props, resolving]);
 
   const riskLabel = {
     low: t('card.approval.riskLow'),
@@ -192,12 +183,19 @@ export default function ApprovalCard(props: ApprovalCardProps) {
 
       {/* Action buttons */}
       {isPending && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <>
+          {resolveFailed && (
+            <Text type="danger" role="alert" style={{ display: 'block', marginBottom: 8 }}>
+              {t('card.approval.resolveFailed')}
+            </Text>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           {/* Approve: primary "Allow Once" + dropdown "Always Allow" (hidden for high risk) */}
           {props.risk_level === 'high' ? (
             <Button
               type="primary"
               size="small"
+              loading={resolving}
               onClick={() => handleResolve('allow-once')}
               aria-label={t('card.approval.approve')}
               style={{
@@ -212,6 +210,7 @@ export default function ApprovalCard(props: ApprovalCardProps) {
             <Dropdown.Button
               type="primary"
               size="small"
+              disabled={resolving}
               onClick={() => handleResolve('allow-once')}
               menu={{
                 items: [
@@ -249,6 +248,7 @@ export default function ApprovalCard(props: ApprovalCardProps) {
           <Button
             size="small"
             danger
+            disabled={resolving}
             onClick={() => handleResolve('deny')}
             aria-label={t('card.approval.reject')}
             style={{
@@ -258,7 +258,8 @@ export default function ApprovalCard(props: ApprovalCardProps) {
           >
             {t('card.approval.reject')}
           </Button>
-        </div>
+          </div>
+        </>
       )}
     </CardContainer>
   );

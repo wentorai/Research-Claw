@@ -28,7 +28,8 @@
       "skipBootstrap": true,
       "timeoutSeconds": 3600,
       "compaction": {
-        "mode": "safeguard"
+        "mode": "safeguard",
+        "customInstructions": "Research-Claw scientific-fidelity requirements for the compaction summary:\nPreserve exact facts and qualifiers:\n1. Research questions/goals, hypotheses, scope, user constraints.\n2. Observations, experimental/negative results, conflicting evidence.\n3. Numbers with units, uncertainty/error, sample sizes, statistics, experimental conditions, time ranges.\n4. Methods/design, datasets and versions, parameters, environment, reproduction steps.\n5. Citations/IDs: DOIs, URLs, file paths, commit hashes.\n6. Decisions with rationale, unresolved questions, next steps, and blockers.\n7. Evidence status: observations, inferences, hypotheses, plans; never turn uncertainty into fact.\nRemove greetings, repetition, and process noise; do not drop conditions or qualifiers needed for scientific conclusions."
       },
       "thinkingDefault": "medium",
       "subagents": {
@@ -126,7 +127,6 @@
           "enabled": false,
           "supervisorModel": "",
           "reviewMode": "off",
-          "appendReviewToChannelOutput": true,
           "memoryGuard": {
             "enabled": true,
             "keyCategories": [

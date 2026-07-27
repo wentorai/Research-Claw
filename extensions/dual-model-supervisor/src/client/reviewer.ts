@@ -6,7 +6,7 @@
  * `baseUrl` is used as the HTTP POST URL as stored in config (only trailing `/` trimmed); do not append paths here — match whatever the gateway / dashboard persists for that provider.
  */
 
-import type { ModelsProviderEntry, PluginLogger, SupervisorConfig } from '../core/types.js';
+import type { ModelsProviderEntry, PluginLogger, ReviewerReadiness, SupervisorConfig } from '../core/types.js';
 import { SUPPORTED_REVIEWER_APIS } from '../core/types.js';
 import { parseModelRef } from '../core/config.js';
 import type { ReviewerApiAdapter } from './api-adapters.js';
@@ -79,8 +79,16 @@ export class ReviewerClient {
   private logger: PluginLogger;
   /** Fallback model reference from main model config (`agents.defaults.model.primary`). */
   private fallbackModel: string;
-  /** Cached adapter for current `supervisorModel` provider; refreshed on config/provider updates. */
+  /** Cached adapter for the effective reviewer model; refreshed on config/provider updates. */
   private _adapter: ReviewerApiAdapter | null = null;
+  /**
+   * Cached readiness for the effective reviewer model — recomputed with `_adapter`, never
+   * separately. This initializer is never observable: the constructor calls
+   * `_resolveAdapter()`, which overwrites it on both the success and the failure path.
+   */
+  private _readiness: ReviewerReadiness = { ready: false, modelSource: 'unavailable', effectiveModel: '', reason: 'not resolved yet' };
+  /** Last readiness state already logged, so a persistent failure is reported once, not per call. */
+  private _loggedReadinessKey = '';
 
   /**
    * Serialize all reviewer HTTP calls. Multiple hooks (summary extract, output review, consistency, …)
@@ -113,88 +121,169 @@ export class ReviewerClient {
   }
 
   /**
-   * Recompute protocol adapter for `supervisorModel` → provider `api` (must be supported reviewer protocol).
+   * The effective reviewer model and whether it can be called.
+   *
+   * `supervisorModel` empty ⇒ the MAIN model is inherited DYNAMICALLY: it is resolved
+   * here on every config/provider/main-model update and never written back into config
+   * (materializing it would freeze the inherit relation the moment the user switches
+   * main models). Callers use this for status, audit and logs so the reason a deep
+   * review is unavailable cannot drift from the reason the call actually fails.
    */
-  private _resolveAdapter(): void {
-    const cfg = this.supervisorConfig;
-    let modelRef = cfg.supervisorModel;
+  getReadiness(): ReviewerReadiness {
+    return { ...this._readiness };
+  }
 
-    // Skip adapter resolution when disabled and no explicit supervisorModel.
-    // The fallback model (main model) may use an unsupported reviewer API (e.g.
-    // openai-chatgpt-responses). We don't need an adapter until the supervisor is
-    // enabled — _resolveAdapter() is re-called by updateSupervisorConfig() at
-    // enable time so hot-enable always gets a fresh resolution.
-    if (!cfg.enabled && !cfg.supervisorModel) {
-      this._adapter = null;
-      return;
+  /**
+   * Recompute the effective model, its readiness and the protocol adapter together.
+   * Pure (no network, no logging) so it can run on every update regardless of state.
+   */
+  private _computeReadiness(): { readiness: ReviewerReadiness; adapter: ReviewerApiAdapter | null } {
+    const explicit = this.supervisorConfig.supervisorModel.trim();
+    const effectiveModel = explicit || this.fallbackModel.trim();
+    const configuredSource = explicit ? 'explicit' as const : 'inherited' as const;
+    const unavailable = (reason: string) => ({
+      readiness: { ready: false, modelSource: 'unavailable' as const, effectiveModel, reason },
+      adapter: null,
+    });
+
+    if (!effectiveModel) {
+      return unavailable('no reviewer model: supervisorModel is empty and the main model (agents.defaults.model.primary) is not set');
     }
 
-    // Fallback to main model when supervisor model is not configured
-    if (!modelRef && this.fallbackModel) {
-      modelRef = this.fallbackModel;
-    }
-
-    const parsed = parseModelRef(modelRef);
+    const parsed = parseModelRef(effectiveModel);
     if (!parsed) {
-      // Only log error if there was a model string to parse (not empty/fallback)
-      if (modelRef) {
-        this.logger.error(`[ReviewerClient] Failed to parse model reference: ${modelRef}`);
-      }
-      this._adapter = null;
-      return;
+      return unavailable(`unparsable model reference "${effectiveModel}" (expected "<provider>/<modelId>")`);
     }
 
     const providerCfg = this.providers[parsed.provider];
     if (!providerCfg) {
-      this.logger.error(`[ReviewerClient] Provider not found: ${parsed.provider}. Available providers: ${Object.keys(this.providers).join(', ')}`);
-      this._adapter = null;
-      return;
+      return unavailable(`provider "${parsed.provider}" not found in models.providers (available: ${Object.keys(this.providers).join(', ') || 'none'})`);
     }
 
     const adapter = resolveAdapterForReviewer(parsed.provider, providerCfg.api);
     if (!adapter) {
-      this.logger.error(
-        `[ReviewerClient] Unsupported api "${String(providerCfg.api ?? 'openai-completions')}" for provider "${parsed.provider}". Supported: ${SUPPORTED_REVIEWER_APIS.join(', ')}`,
+      return unavailable(
+        `unsupported reviewer protocol "${String(providerCfg.api ?? 'openai-completions')}" for provider "${parsed.provider}" (supported: ${SUPPORTED_REVIEWER_APIS.join(', ')})`,
       );
-      this._adapter = null;
-      return;
     }
 
-    this._adapter = adapter;
+    if (!hasProviderAuth(providerCfg)) {
+      return unavailable(`missing credentials: provider "${parsed.provider}" has no apiKey and no Authorization header`);
+    }
+
+    // Typed `string | undefined`, but openclaw.json is hand-editable and the plugin's
+    // `providers` block is not covered by configSchema — the value is genuinely unknown.
+    if (typeof providerCfg.baseUrl !== 'string' || !providerCfg.baseUrl.trim()) {
+      return unavailable(`invalid baseUrl: models.providers.${parsed.provider}.baseUrl must be a non-empty string for the reviewer model`);
+    }
+
+    return { readiness: { ready: true, modelSource: configuredSource, effectiveModel }, adapter };
+  }
+
+  /** Refresh cached readiness + adapter after any config / provider / main-model change. */
+  private _resolveAdapter(): void {
+    try {
+      const { readiness, adapter } = this._computeReadiness();
+      this._readiness = readiness;
+      this._adapter = adapter;
+    } catch (err) {
+      // Backstop: this runs in the CONSTRUCTOR, so an exception would escape register()
+      // and take the whole plugin — including the model-free safety gate — down with it.
+      // A broken provider entry must only ever degrade deep review.
+      this._readiness = {
+        ready: false,
+        modelSource: 'unavailable',
+        effectiveModel: '',
+        reason: `reviewer model resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+      this._adapter = null;
+    }
   }
 
   /**
    * Call the reviewer model. Returns parsed JSON or null on failure.
+   *
+   * Options for the before_tool_call SECURITY GATE (never-over-block):
+   *  - `bypassQueue`: skip the shared serial `_reviewQueue` so a benign high-risk
+   *    tool's gate is not stalled behind unrelated summary/output reviews.
+   *  - `timeoutMs`: fail OPEN (resolve `null`) if the review does not complete in
+   *    time, so the tool is never stalled on a slow round-trip. On timeout the
+   *    underlying request is ABORTED: the tool has already proceeded, so its answer
+   *    can no longer influence anything and letting it run to the 30s cap would just
+   *    hold a connection and spend reviewer tokens.
    */
-  async review<T>(systemPrompt: string, userContent: string): Promise<T | null> {
+  async review<T>(
+    systemPrompt: string,
+    userContent: string,
+    opts?: { bypassQueue?: boolean; timeoutMs?: number },
+  ): Promise<T | null> {
     const key = cacheKey(systemPrompt, userContent);
     const cached = getCached<T>(key);
     if (cached !== null) {
       return cached;
     }
 
-    const run = this._reviewQueue
-      .catch(() => undefined)
-      .then(() => this._reviewAfterQueue<T>(systemPrompt, userContent, key));
-    this._reviewQueue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    const gated = opts?.timeoutMs != null && opts.timeoutMs > 0;
+    const controller = gated ? new AbortController() : undefined;
+
+    let core: Promise<T | null>;
+    if (opts?.bypassQueue) {
+      // Do NOT chain onto (or advance) the shared queue — run immediately.
+      core = this._reviewAfterQueue<T>(systemPrompt, userContent, key, controller?.signal);
+    } else {
+      const run = this._reviewQueue
+        .catch(() => undefined)
+        .then(() => this._reviewAfterQueue<T>(systemPrompt, userContent, key, controller?.signal));
+      this._reviewQueue = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      core = run;
+    }
+
+    // No gate requested (undefined/0/negative) → return the raw call. Callers that
+    // need the never-over-block bound (the before_tool_call security gate) MUST pass
+    // a positive timeoutMs; parseConfig clamps toolReviewGateMs into its declared
+    // range, so a config-derived gate is always positive and finite.
+    if (!gated) {
+      return core;
+    }
+
+    // Gate: whichever settles first. `core` never rejects (_reviewAfterQueue catches
+    // and returns null), so on timeout we fail open with null.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const gate = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        controller!.abort(new Error(`reviewer gate timeout after ${opts.timeoutMs}ms`));
+        resolve(null);
+      }, opts.timeoutMs);
+    });
+    try {
+      return await Promise.race([core, gate]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private async _reviewAfterQueue<T>(
     systemPrompt: string,
     userContent: string,
     key: string,
+    signal?: AbortSignal,
   ): Promise<T | null> {
     try {
-      const result = await this._callApi(systemPrompt, userContent);
+      const result = await this._callApi(systemPrompt, userContent, signal);
       if (result !== null) {
         setCache(key, result);
       }
       return result as T | null;
     } catch (err) {
+      // A gate timeout cancels this request on purpose — the caller already failed open.
+      // Reporting it as a failure would blame the reviewer for our own deadline.
+      if (signal?.aborted) {
+        this.logger.debug?.(`[ReviewerClient] Deep review cancelled: ${signal.reason instanceof Error ? signal.reason.message : 'gate timeout'}`);
+        return null;
+      }
       this.logger.error(`Reviewer call failed: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
@@ -212,40 +301,26 @@ export class ReviewerClient {
       });
   }
 
-  private async _callApi(systemPrompt: string, userContent: string): Promise<unknown | null> {
-    const cfg = this.supervisorConfig;
-    let modelRef = cfg.supervisorModel;
-    if (!modelRef && this.fallbackModel) {
-      modelRef = this.fallbackModel;
-    }
-    const parsed = parseModelRef(modelRef);
-    if (!parsed) {
-      this.logger.error(`Invalid model reference: ${modelRef}`);
+  private async _callApi(systemPrompt: string, userContent: string, signal?: AbortSignal): Promise<unknown | null> {
+    // Same truth source as status/audit: whatever readiness says is unavailable is
+    // exactly what fails here, with the same reason.
+    const readiness = this._readiness;
+    if (!readiness.ready) {
+      const key = `${readiness.effectiveModel}|${readiness.reason ?? ''}`;
+      if (key !== this._loggedReadinessKey) {
+        this._loggedReadinessKey = key;
+        this.logger.error(`[ReviewerClient] Deep review unavailable — ${readiness.reason}`);
+      }
       return null;
     }
+    this._loggedReadinessKey = '';
 
+    // Non-null by construction: readiness.ready ⇒ model parses, provider exists with
+    // auth + baseUrl, and the adapter resolved.
+    const parsed = parseModelRef(readiness.effectiveModel)!;
     const providerCfg = this.providers[parsed.provider];
-    if (!providerCfg) {
-      this.logger.error(`No provider config found for: ${parsed.provider}`);
-      return null;
-    }
-
-    if (!hasProviderAuth(providerCfg)) {
-      this.logger.error(`No API key or Authorization header for provider: ${parsed.provider}`);
-      return null;
-    }
-
-    const base = providerCfg.baseUrl?.trim();
-    if (!base) {
-      this.logger.error(`Set baseUrl on models.providers.${parsed.provider} for the reviewer model`);
-      return null;
-    }
-
-    const adapter = this._adapter;
-    if (!adapter) {
-      this.logger.error('[ReviewerClient] No adapter resolved for reviewer model');
-      return null;
-    }
+    const base = providerCfg.baseUrl!.trim();
+    const adapter = this._adapter!;
 
     const url =
       adapter.protocol === 'anthropic-messages'
@@ -254,11 +329,12 @@ export class ReviewerClient {
     const headers = adapter.buildHeaders(providerCfg);
     const body = adapter.buildBody(providerCfg, parsed.modelId, systemPrompt, userContent);
 
+    // Hard cap for ungated callers; the caller's gate signal (when present) cancels earlier.
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {

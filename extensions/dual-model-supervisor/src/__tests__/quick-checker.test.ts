@@ -4,11 +4,12 @@ import { QuickChecker } from '../hooks/quick-checker.js';
 const defaultConfig = {
   enabled: true,
   supervisorModel: 'test/model',
-  reviewMode: 'full' as const,
-  appendReviewToChannelOutput: true,
-  memoryGuard: { enabled: true, keyCategories: [] },
+  reviewMode: 'correct' as const,
   courseCorrection: { enabled: true, deviationThreshold: 0.5, forceRegenerate: false, maxRegenerateAttempts: 3 },
   highRiskTools: ['exec', 'write', 'edit'],
+  dangerousToolPolicy: 'block' as const,
+  toolReviewGateMs: 10000,
+  grounding: { networkPolicy: 'off' as const, verdictMode: 'flag' as const },
 };
 
 const logger = { info: () => {}, warn: () => {}, error: () => {} };

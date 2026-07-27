@@ -390,7 +390,7 @@ pnpm backup         # 备份数据库
 
 | 命令 | 说明 |
 |:--|:--|
-| `/compact` | 压缩会话上下文（解决 token 超限问题） |
+| `/compact` | 压缩会话上下文；默认优先保留科研目标、证据、数值条件、方法与引用（提高保留优先级，不保证完全无损） |
 | `/model [name]` | 查看或切换当前模型 |
 | `/think [level]` | 设置思考级别（off / low / medium / high） |
 | `/fast [on\|off]` | 切换快速模式 |

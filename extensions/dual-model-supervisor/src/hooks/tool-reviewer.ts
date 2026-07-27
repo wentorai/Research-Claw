@@ -3,11 +3,29 @@
  */
 
 import type { ToolReviewResult, SupervisorConfig, PluginLogger } from '../core/types.js';
+import type { PluginHookBeforeToolCallResult, PluginApprovalResolution } from '../oc/hook-types.js';
 import { ReviewerClient } from '../client/reviewer.js';
 import { QuickChecker } from './quick-checker.js';
 import { AuditLogService } from '../core/audit-log.js';
 import { TOOL_REVIEW_SYSTEM_PROMPT } from '../core/prompts.js';
 import { validateToolReviewResult } from '../core/validators.js';
+
+/** OC's requireApproval descriptor (the shape before_tool_call returns). */
+type RequireApproval = NonNullable<PluginHookBeforeToolCallResult['requireApproval']>;
+const APPROVAL_TITLE_MAX_LENGTH = 80;
+const APPROVAL_DESCRIPTION_MAX_LENGTH = 256;
+
+function truncateApprovalText(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : value.slice(0, maxLength);
+}
+
+/** The tool gate's decision: block, allow, correct params, or request approval. */
+export interface ToolGateDecision {
+  block: boolean;
+  blockReason?: string;
+  params?: Record<string, unknown>;
+  requireApproval?: RequireApproval;
+}
 
 export class ToolReviewer {
   private config: SupervisorConfig;
@@ -15,6 +33,8 @@ export class ToolReviewer {
   private reviewerClient: ReviewerClient;
   private quickChecker: QuickChecker;
   private auditLog: AuditLogService;
+  /** Monotonic per-process approval id source (stable, non-colliding, not time-based). */
+  private approvalSeq = 0;
 
   constructor(
     config: SupervisorConfig,
@@ -46,7 +66,7 @@ export class ToolReviewer {
     tool: string,
     params: Record<string, unknown>,
     sessionId: string,
-  ): Promise<{ block: boolean; blockReason?: string; params?: Record<string, unknown> }> {
+  ): Promise<ToolGateDecision> {
     if (!this.config.enabled || this.config.reviewMode === 'off') {
       return { block: false };
     }
@@ -54,15 +74,10 @@ export class ToolReviewer {
     const quickResult = this.quickChecker.checkToolCall(tool, params);
 
     if (quickResult.blocked) {
-      this.logger.warn(`[ToolReviewer] Tool ${tool} blocked by quick check: ${quickResult.blockReason}`);
-      this.auditLog.record({
-        sessionId,
-        type: 'tool_review',
-        action: 'block',
-        details: `Tool ${tool} blocked: ${quickResult.blockReason}`,
-        timestamp: Date.now(),
-      });
-      return { block: true, blockReason: quickResult.blockReason };
+      // Confirmed danger (deterministic quick check). Under 'approve' this becomes
+      // a human-in-the-loop approval; under 'block' it hard-blocks. Either way it
+      // is NEVER silently allowed.
+      return this.blockOrApprove(tool, quickResult.blockReason ?? 'Quick check flagged this tool call', sessionId);
     }
 
     const isHighRisk = this.config.highRiskTools.includes(tool);
@@ -72,28 +87,49 @@ export class ToolReviewer {
     }
 
     const userContent = `<user_content>\n## Tool Call\nTool: ${tool}\nParameters: ${JSON.stringify(params, null, 2)}\n</user_content>`;
+    // Never-over-block: the deep review runs with a bounded gate and bypasses the
+    // shared reviewer queue. Determined danger is already handled by the quick check
+    // above; this deep pass may still block within the gate, but a slow/unavailable
+    // reviewer must NOT stall a benign high-risk tool — it fails OPEN on timeout.
     const raw = await this.reviewerClient.review<Record<string, unknown>>(
       TOOL_REVIEW_SYSTEM_PROMPT,
       userContent,
+      { bypassQueue: true, timeoutMs: this.config.toolReviewGateMs },
     );
+
+    // Distinguish "reviewer unavailable" (null raw: timeout/network/no adapter)
+    // from "reviewer responded but the body is malformed" (schema_invalid). Both
+    // fail OPEN for a high-risk-but-not-determined-danger tool (determined danger
+    // is already blocked by the quick check above), but each is recorded as an
+    // OBSERVABLE degrade — never as a pass. A malformed body must NOT be coerced
+    // into a silent "not blocked".
+    if (raw === null) {
+      this.auditLog.record({
+        sessionId,
+        type: 'tool_review',
+        action: 'warn',
+        details: `Tool ${tool} deep review degraded: reviewer unavailable or gate timeout — failed open`,
+        timestamp: Date.now(),
+      });
+      return { block: false };
+    }
+
     const result = validateToolReviewResult(raw, Object.keys(params));
 
     if (!result) {
-      this.logger.warn(`Tool reviewer unavailable for ${tool}, passing through`);
+      this.auditLog.record({
+        sessionId,
+        type: 'tool_review',
+        action: 'warn',
+        // Do NOT log the raw reviewer body (may echo tool params) — privacy.
+        details: `Tool ${tool} deep review degraded: reviewer response schema_invalid — failed open`,
+        timestamp: Date.now(),
+      });
       return { block: false };
     }
 
     if (result.blocked) {
-      this.logger.warn(`[ToolReviewer] Tool ${tool} blocked by deep review: ${result.blockReason}`);
-      this.auditLog.record({
-        sessionId,
-        type: 'tool_review',
-        action: 'block',
-        details: `Tool ${tool} blocked: ${result.blockReason ?? 'Deep review block'}`,
-        metadata: JSON.stringify(result),
-        timestamp: Date.now(),
-      });
-      return { block: true, blockReason: result.blockReason };
+      return this.blockOrApprove(tool, result.blockReason ?? 'Deep review flagged this tool call', sessionId);
     }
 
     if (result.correctedParams) {
@@ -119,5 +155,87 @@ export class ToolReviewer {
     }
 
     return { block: false };
+  }
+
+  /**
+   * Decide what to do with a confirmed-dangerous tool call per dangerousToolPolicy.
+   *  - 'block'  : hard block + a `block` audit (default; unchanged behavior).
+   *  - 'approve': hand OC a `requireApproval` and record ONLY a `requested` audit
+   *               (action 'info' — never a block/denied before the user decides).
+   */
+  private blockOrApprove(tool: string, reason: string, sessionId: string): ToolGateDecision {
+    if (this.config.dangerousToolPolicy !== 'approve') {
+      this.logger.warn(`[ToolReviewer] Tool ${tool} blocked: ${reason}`);
+      this.auditLog.record({
+        sessionId,
+        type: 'tool_review',
+        action: 'block',
+        details: `Tool ${tool} blocked: ${reason}`,
+        timestamp: Date.now(),
+      });
+      return { block: true, blockReason: reason };
+    }
+
+    const approvalId = `approval-${++this.approvalSeq}`;
+    // Pre-resolution: pending/requested only. MUST NOT be a block/denied here.
+    this.auditLog.record({
+      sessionId,
+      type: 'approval',
+      action: 'info',
+      details: `requested: ${tool} — ${reason}`,
+      metadata: JSON.stringify({ approvalId, tool, state: 'requested' }),
+      timestamp: Date.now(),
+    });
+
+    // Idempotency is a per-approval ONE-SHOT LATCH captured in this closure — NOT a
+    // shared/evictable set. The first resolution wins; any later/duplicate/conflicting
+    // resolution for THIS approval is ignored, regardless of how many other approvals
+    // occur (an evictable global set could drop an old id and let it be re-resolved into
+    // a second, conflicting terminal). The latch's lifetime is exactly this callback.
+    let resolved = false;
+    const requireApproval: RequireApproval = {
+      title: truncateApprovalText(`Approve dangerous tool: ${tool}`, APPROVAL_TITLE_MAX_LENGTH),
+      description: truncateApprovalText(reason, APPROVAL_DESCRIPTION_MAX_LENGTH),
+      severity: 'critical',
+      allowedDecisions: ['allow-once', 'allow-always', 'deny'],
+      timeoutBehavior: 'deny',
+      onResolution: (decision) => {
+        if (resolved) {
+          this.logger.warn(`[ToolReviewer] duplicate approval resolution ignored (${approvalId}: ${decision})`);
+          return;
+        }
+        resolved = true;
+        this.resolveApproval(approvalId, tool, sessionId, decision);
+      },
+    };
+    return { block: false, requireApproval };
+  }
+
+  /**
+   * Write the single terminal audit for an approval. Called at most once per approval
+   * (the caller's one-shot latch enforces idempotency). Errors are contained (never
+   * thrown back to the tool host) but observable via the logger.
+   */
+  private resolveApproval(approvalId: string, tool: string, sessionId: string, decision: PluginApprovalResolution): void {
+    try {
+      const terminal: Record<PluginApprovalResolution, { action: 'info' | 'block' | 'warn'; label: string }> = {
+        'allow-once': { action: 'info', label: 'allowed:allow-once' },
+        'allow-always': { action: 'info', label: 'allowed:allow-always' },
+        deny: { action: 'block', label: 'denied' },
+        timeout: { action: 'warn', label: 'timeout' },
+        cancelled: { action: 'warn', label: 'cancelled' },
+      };
+      const t = terminal[decision] ?? { action: 'warn' as const, label: `unknown:${decision}` };
+      this.auditLog.record({
+        sessionId,
+        type: 'approval',
+        action: t.action,
+        details: `${t.label}: ${tool}`,
+        metadata: JSON.stringify({ approvalId, tool, decision, state: 'resolved' }),
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      this.logger.error(`[ToolReviewer] approval resolution error (${approvalId}): ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }

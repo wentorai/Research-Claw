@@ -123,7 +123,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 
 | ID | 命令 | 功能 |
 |----|------|------|
-| F-07-01 | `/compact` | 压缩会话上下文 |
+| F-07-01 | `/compact` | OpenClaw safeguard 压缩；无用户自定义时追加 RC 科研保真指令，已有非空 `customInstructions` 原样保留 |
 | F-07-02 | `/new` | 新建会话 |
 | F-07-03 | `/stop` | 停止当前 run |
 | F-07-04 | `/clear` | 清空聊天记录 |
@@ -315,14 +315,14 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 | ID | 功能 | 说明 |
 |----|------|------|
 | F-17-01 | 双模型架构 | 主模型执行 + Reviewer 模型审查 |
-| F-17-02 | 管控模式 | filter-only / correct / full |
+| F-17-02 | 管控模式 | off / filter-only / correct；旧 full 配置迁移为 correct |
 | F-17-03 | 输出审查 | 伪造引用、敏感信息、危险命令 |
 | F-17-04 | 工具调用审查 | exec/write/edit/send_notification/browser 等 |
 | F-17-05 | 方向纠正 | deviationThreshold 可配 |
-| F-17-06 | 记忆保护 | compaction 时保护关键结论 |
+| F-17-06 | 研究约束连续性 | 每轮提示保留研究目标、目标结论和方法约束；不承诺压缩前保护或内容级丢失检测 |
 | F-17-07 | 强制重新生成 | 偏离后 regen，max attempts 可配 |
-| F-17-08 | 外部渠道附加审查结果 | Telegram/微信等 |
-| F-17-09 | 管控日志面板 | 7 类 log + 4 统计卡片 |
+| F-17-08 | 异步审查结果交付 | DB 可用时持久化审计，并由 Dashboard 面板/RPC 查询；写入失败可观察 |
+| F-17-09 | 管控日志面板 | 展示持久化审计与统计；未知历史类型使用通用回退显示 |
 | F-17-10 | 研究目标解析 | goal + target conclusions 展示 |
 | F-17-11 | rc.supervisor.* RPC | config / status / audit |
 
@@ -468,7 +468,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 | TC-C-01 | P0 | 发送「你好」 | 流式回复，Agent 状态 idle→streaming→idle |
 | TC-C-02 | P0 | `/new` | 新 session，历史清空 |
 | TC-C-03 | P0 | 长任务运行中点 Stop | run 中止，输入内容恢复 |
-| TC-C-04 | P1 | `/compact` | 返回成功，上下文压缩 |
+| TC-C-04 | P1 | 对含唯一目标、数值单位条件、方法参数、精确引用、负结果、未决问题和证据等级的 fixture 执行 `/compact` | 请求收到 RC 科研指令；摘要逐项保留 fixture 语义，不外推为普遍无损保证 |
 | TC-C-05 | P1 | `/model` 无参 | 显示当前模型 |
 | TC-C-06 | P1 | 上传 <5MB PNG | 附件预览，发送成功 |
 | TC-C-07 | P1 | 上传 >5MB 图片 | 拒绝并提示 |
@@ -581,7 +581,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 | TC-K-01 | P1 | 启用 supervisor + correct 模式 | 管控面板 status=on |
 | TC-K-02 | P1 | 触发 exec 高风险命令 | tool_review log，可能 block |
 | TC-K-03 | P1 | 主模型偏离研究目标 | course_correction 或 regen |
-| TC-K-04 | P2 | full 模式长对话 compaction | memory_guard 日志 |
+| TC-K-04 | P2 | correct 模式下继续多轮研究对话 | 后续提示仍含研究目标、目标结论和方法约束；不产生专用压缩保护审计 |
 | TC-K-05 | P1 | 面板筛选 action=block | 仅显示拦截记录 |
 
 ### 模块 L：扩展与 IM

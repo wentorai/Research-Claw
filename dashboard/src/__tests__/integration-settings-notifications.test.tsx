@@ -84,8 +84,6 @@ function stubSupervisorConfig() {
     enabled: false,
     supervisorModel: '',
     reviewMode: 'off' as const,
-    appendReviewToChannelOutput: true,
-    memoryGuard: { enabled: false, keyCategories: [] as string[] },
     courseCorrection: {
       enabled: true,
       deviationThreshold: 0.5,
@@ -106,8 +104,6 @@ function defaultMockRequest(method: string): Promise<unknown> {
       enabled: false,
       reviewMode: 'off',
       supervisorModel: '',
-      appendReviewToChannelOutput: true,
-      memoryGuardEnabled: false,
       courseCorrectionEnabled: true,
       deviationThreshold: 0.5,
       forceRegenerate: false,

@@ -3,8 +3,11 @@
  *
  * Analyzes session after agent turn completes, and injects corrections
  * into the next turn's prompt context.
- * When forceRegenerate is enabled, blocks deviated output and triggers
- * regeneration with strong correction instructions.
+ *
+ * Nothing here can block or rewrite output: agent_end fires after the turn was
+ * delivered, and before_prompt_build only reaches the NEXT turn. `forceRegenerate`
+ * therefore raises the strength of that forward instruction (a dedicated reviewer
+ * pass + a mandatory-wording injection) — it does not intercept anything.
  */
 
 import type { SupervisorConfig, PluginLogger, SessionState, RegenerateHistoryEntry } from '../core/types.js';
@@ -97,16 +100,25 @@ export class CourseCorrector {
 
       if (!result) return;
 
+      // `>=`, not `>`: validateDeviationAnalysis clamps deviation to [0,1], so a strict
+      // comparison makes a threshold of exactly 1 unreachable — course correction would
+      // switch itself off for good while the Dashboard still showed it enabled, and the
+      // Settings slider (min 0, max 1, step 0.1) reaches that value in one drag. Reading
+      // the threshold as "correct at or above this deviation" leaves every setting the UI
+      // can produce live. The audit action and the branch share the comparison so a run
+      // recorded as 'warn' is exactly a run that queued a correction.
+      const deviates = result.deviation >= this.config.courseCorrection.deviationThreshold;
+
       this.auditLog.record({
         sessionId,
         type: 'session_analysis',
-        action: result.deviation > this.config.courseCorrection.deviationThreshold ? 'warn' : 'info',
+        action: deviates ? 'warn' : 'info',
         details: result.summary ?? `Deviation: ${result.deviation.toFixed(2)}, Quality: ${result.qualityScore.toFixed(2)}`,
         metadata: JSON.stringify(result),
         timestamp: Date.now(),
       });
 
-      if (result.deviation > this.config.courseCorrection.deviationThreshold && result.courseCorrection) {
+      if (deviates && result.courseCorrection) {
         sessionState.pendingCourseCorrection = result.courseCorrection;
 
         if (isForceRegenerateActive(this.config)) {
@@ -124,11 +136,14 @@ export class CourseCorrector {
                 originalOutputPreview: originalPreview,
               };
 
+              // ADVISORY, not a block: agent_end fires after the output was delivered, so
+              // all that happens here is queuing an instruction into the next turn's prompt.
+              // `action: 'block'` would assert delivery was prevented — it never was.
               this.auditLog.record({
                 sessionId,
                 type: 'force_regenerate',
-                action: 'block',
-                details: `Deviation ${result.deviation.toFixed(2)} triggered force regeneration (attempt ${sessionState.regenerateAttempts + 1}/${maxAttempts}): ${correctionResult.deviationSummary}`,
+                action: 'warn',
+                details: `Deviation ${result.deviation.toFixed(2)} — course correction queued for the next turn (${sessionState.regenerateAttempts + 1}/${maxAttempts}); the output was already delivered: ${correctionResult.deviationSummary}`,
                 metadata: JSON.stringify(correctionResult),
                 timestamp: Date.now(),
               });
@@ -138,7 +153,7 @@ export class CourseCorrector {
               sessionId,
               type: 'force_regenerate',
               action: 'warn',
-              details: `Max regeneration attempts (${maxAttempts}) reached. Deviation persists at ${result.deviation.toFixed(2)}.`,
+              details: `Max course corrections (${maxAttempts}) reached; no further correction will be queued. Deviation persists at ${result.deviation.toFixed(2)}.`,
               timestamp: Date.now(),
             });
           }
@@ -179,9 +194,9 @@ export class CourseCorrector {
 
     if (sessionState.regenerateHistory.length > 0) {
       const previousAttempts = sessionState.regenerateHistory
-        .map((h) => `Attempt ${h.attempt}: deviation=${h.deviationScore.toFixed(2)}, result=${h.result}`)
+        .map((h) => `Correction ${h.attempt}: deviation=${h.deviationScore.toFixed(2)}, result=${h.result}`)
         .join('; ');
-      contextParts.push(`Previous regeneration attempts: ${previousAttempts}`);
+      contextParts.push(`Previously queued course corrections: ${previousAttempts}`);
     }
 
     const userContent = `<user_content>\n${contextParts.join('\n\n')}\n</user_content>`;
@@ -203,13 +218,6 @@ export class CourseCorrector {
 
     const lines: string[] = [];
 
-    if (sessionState.lostMemorySummary) {
-      lines.push('[Supervisor] ⚠️ Context compaction may have lost the following key information. Refer to it:');
-      lines.push(sessionState.lostMemorySummary);
-      lines.push('');
-      sessionState.lostMemorySummary = undefined;
-    }
-
     if (sessionState.pendingCourseCorrection && isCourseCorrectionActive(this.config)) {
       lines.push('[Supervisor] 🧭 Drift detected in the previous turn. Please note:');
       lines.push(sessionState.pendingCourseCorrection);
@@ -222,14 +230,14 @@ export class CourseCorrector {
       const maxAttempts = this.config.courseCorrection.maxRegenerateAttempts;
       const remaining = maxAttempts - sessionState.regenerateAttempts;
 
-      lines.push('[Supervisor] 🚫 Your previous output was BLOCKED because it deviated from the research goal.');
+      lines.push('[Supervisor] ⚠️ Your previous response drifted from the research goal. It has ALREADY been delivered to the user — the supervisor never intercepts output. Apply this as a forward correction.');
       lines.push(`[Supervisor] Deviation score: ${pfr.deviationScore.toFixed(2)} (threshold: ${this.config.courseCorrection.deviationThreshold})`);
-      lines.push(`[Supervisor] Regeneration attempt ${sessionState.regenerateAttempts + 1} of ${maxAttempts}. ${remaining > 0 ? `${remaining} attempt(s) remaining.` : 'This is the final attempt.'}`);
+      lines.push(`[Supervisor] Course correction ${sessionState.regenerateAttempts + 1} of ${maxAttempts}. ${remaining > 0 ? `${remaining} correction(s) remaining.` : 'This is the final correction.'}`);
       lines.push('');
-      lines.push('[Supervisor] You MUST regenerate your output following this correction:');
+      lines.push('[Supervisor] You MUST follow this correction in your NEXT response:');
       lines.push(pfr.correctionInstruction);
       lines.push('');
-      lines.push('[Supervisor] Your previous deviated output (for reference — do NOT repeat it):');
+      lines.push('[Supervisor] Your previous drifted output (for reference — do NOT repeat it):');
       lines.push(pfr.originalOutputPreview);
       lines.push('');
       lines.push('[Supervisor] IMPORTANT: Do NOT simply rephrase the previous output. Address the specific issues identified and ensure your response aligns with the research goal.');
@@ -240,7 +248,7 @@ export class CourseCorrector {
         deviationScore: pfr.deviationScore,
         originalOutputPreview: pfr.originalOutputPreview,
         correctionInstruction: pfr.correctionInstruction,
-        result: 'regenerating',
+        result: 'correction_queued',
       };
       sessionState.regenerateHistory.push(historyEntry);
       sessionState.regenerateAttempts++;
@@ -253,36 +261,31 @@ export class CourseCorrector {
   }
 
   /**
-   * Build a human-readable summary of all regeneration attempts in this session.
+   * Build a human-readable summary of the course corrections queued this session.
    * Called at session_end for audit logging.
+   *
+   * Only ONE outcome is observable here: a correction was queued into a later prompt.
+   * Whether the model then followed it is not measured anywhere, so this summary must
+   * not claim an output was "corrected" — that would assert an unverified result.
    */
   buildRegenerationSummary(sessionState: SessionState): string {
     if (sessionState.regenerateHistory.length === 0) return '';
 
     const lines: string[] = [];
-    lines.push('📋 [Supervisor] Regeneration Summary');
-    lines.push(`Total regeneration attempts: ${sessionState.regenerateAttempts}`);
+    lines.push('📋 [Supervisor] Course Correction Summary');
+    lines.push(`Total corrections queued: ${sessionState.regenerateAttempts}`);
     lines.push('');
 
     for (const entry of sessionState.regenerateHistory) {
-      const status = entry.result === 'max_reached' ? '❌ Max reached' :
-                     entry.result === 'corrected' ? '✅ Corrected' :
-                     '🔄 Regenerating';
-      lines.push(`  Attempt ${entry.attempt}: deviation=${entry.deviationScore.toFixed(2)} — ${status}`);
+      lines.push(`  Correction ${entry.attempt}: deviation=${entry.deviationScore.toFixed(2)} — 🔄 queued for the following turn`);
       if (entry.originalOutputPreview) {
         lines.push(`    Output preview: ${entry.originalOutputPreview.slice(0, 100)}...`);
       }
     }
 
-    const lastEntry = sessionState.regenerateHistory[sessionState.regenerateHistory.length - 1];
-    if (lastEntry) {
-      if (lastEntry.result === 'max_reached') {
-        lines.push('');
-        lines.push('⚠️ Maximum regeneration attempts reached. The output may still deviate from the research goal.');
-      } else if (lastEntry.result === 'corrected') {
-        lines.push('');
-        lines.push('✅ Output was successfully corrected after regeneration.');
-      }
+    if (sessionState.regenerateAttempts >= this.config.courseCorrection.maxRegenerateAttempts) {
+      lines.push('');
+      lines.push('⚠️ Maximum course corrections reached. The output may still deviate from the research goal.');
     }
 
     return lines.join('\n');

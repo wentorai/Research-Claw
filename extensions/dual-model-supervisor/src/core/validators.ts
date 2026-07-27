@@ -34,18 +34,24 @@ function clamp01(v: unknown): number {
  * Returns null if the response is fundamentally invalid.
  */
 export function validateReviewResult(raw: unknown): ReviewResult | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
 
-  // `blocked` must be boolean — if not, fail-safe to not-blocked
-  const blocked = isBoolean(r.blocked) ? r.blocked : false;
-  const corrected = isBoolean(r.corrected) ? r.corrected : false;
+  // `flagged` is a REQUIRED boolean in the OUTPUT_REVIEW schema. If it is missing
+  // or the wrong type, the response is malformed/schema-drifted — return null so
+  // the consumer records a degrade (never coerce a malformed body into a pass).
+  if (!isBoolean(r.flagged)) return null;
+  const flagged = r.flagged;
+  const suggestedVersion = isString(r.suggestedVersion) && r.suggestedVersion.trim() ? r.suggestedVersion : undefined;
+  // Cross-field coherence: `hasSuggestion: true` is meaningless without suggested text —
+  // never report a suggestion that carries no suggestedVersion.
+  const hasSuggestion = (isBoolean(r.hasSuggestion) ? r.hasSuggestion : false) && suggestedVersion !== undefined;
 
   return {
-    blocked,
-    corrected,
-    correctedVersion: isString(r.correctedVersion) ? r.correctedVersion : undefined,
-    correctionNote: isString(r.correctionNote) ? r.correctionNote : undefined,
+    flagged,
+    hasSuggestion,
+    suggestedVersion,
+    suggestionNote: isString(r.suggestionNote) ? r.suggestionNote : undefined,
     warnings: asStringArray(r.warnings),
     memoryAlerts: asStringArray(r.memoryAlerts),
     deviationScore: clamp01(r.deviationScore),
@@ -62,14 +68,18 @@ export function validateToolReviewResult(
   raw: unknown,
   originalParamKeys: string[],
 ): ToolReviewResult | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
 
-  const blocked = isBoolean(r.blocked) ? r.blocked : false;
+  // `blocked` is a REQUIRED boolean in the TOOL_REVIEW schema. Missing / wrong
+  // type ⇒ malformed ⇒ return null (the consumer records a degrade + fails open
+  // WITH visibility; it must never read a malformed body as a silent "not blocked").
+  if (!isBoolean(r.blocked)) return null;
+  const blocked = r.blocked;
 
   let correctedParams: Record<string, unknown> | undefined;
   if (r.correctedParams && typeof r.correctedParams === 'object' && !Array.isArray(r.correctedParams)) {
-    // Only accept keys that exist in the original params
+    // Only accept keys that exist in the original params (anti param-injection).
     const filtered: Record<string, unknown> = {};
     const cp = r.correctedParams as Record<string, unknown>;
     let hasValidKey = false;
@@ -82,9 +92,17 @@ export function validateToolReviewResult(
     correctedParams = hasValidKey ? filtered : undefined;
   }
 
+  // A reviewer BLOCK must never be silently dropped: honor blocked:true even if
+  // the reason is missing/blank (synthesize one) rather than failing the whole
+  // result and fail-opening the dangerous call.
+  const cleanReason = isString(r.blockReason) && r.blockReason.trim() ? r.blockReason : undefined;
+  const blockReason = blocked
+    ? cleanReason ?? 'Deep review flagged this tool call (no reason provided)'
+    : cleanReason;
+
   return {
     blocked,
-    blockReason: isString(r.blockReason) ? r.blockReason : undefined,
+    blockReason,
     correctedParams,
     warnings: asStringArray(r.warnings),
   };
@@ -138,45 +156,6 @@ export function validateMessageSummary(raw: unknown): MessageSummary | null {
     negations: asStringArray(r.negations),
     nextSteps: asStringArray(r.nextSteps),
   };
-}
-
-/**
- * Validate memory loss items from after_compaction review.
- */
-export function validateMemoryLossItems(raw: unknown): Array<{ category: string; content: string; importance: string }> {
-  if (!raw || typeof raw !== 'object') return [];
-  const r = raw as Record<string, unknown>;
-  const items = r.lostItems;
-  if (!Array.isArray(items)) return [];
-
-  return items
-    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-    .filter((item) => isString(item.category) && isString(item.content))
-    .map((item) => ({
-      category: item.category as string,
-      content: item.content as string,
-      importance: isString(item.importance) ? item.importance : 'medium',
-    }));
-}
-
-/**
- * Validate key memory items from before_compaction review.
- */
-export function validateKeyMemoryItems(raw: unknown): Array<{ category: string; summary: string; source: string; timestamp: number }> {
-  if (!raw || typeof raw !== 'object') return [];
-  const r = raw as Record<string, unknown>;
-  const items = r.keyItems;
-  if (!Array.isArray(items)) return [];
-
-  return items
-    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-    .filter((item) => isString(item.category) && isString(item.summary))
-    .map((item) => ({
-      category: item.category as string,
-      summary: item.summary as string,
-      source: isString(item.source) ? item.source : '',
-      timestamp: isNumber(item.timestamp) ? item.timestamp : 0,
-    }));
 }
 
 /**

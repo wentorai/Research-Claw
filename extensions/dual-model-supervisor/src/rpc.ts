@@ -4,10 +4,10 @@
  * Registers rc.supervisor.* RPC methods for Dashboard communication.
  */
 
-import type { RegisterMethod, SupervisorConfig, PluginLogger, ConfiguredProvider } from './core/types.js';
+import type { RegisterMethod, SupervisorConfig, PluginLogger, ConfiguredProvider, ReviewerReadiness } from './core/types.js';
 import { DEFAULT_CONFIG } from './core/types.js';
 import { AuditLogService } from './core/audit-log.js';
-import { parseConfig } from './core/config.js';
+import { describeToolReviewGateOverride, parseConfig } from './core/config.js';
 
 /**
  * Register all `rc.supervisor.*` RPC methods for Dashboard communication.
@@ -18,6 +18,7 @@ import { parseConfig } from './core/config.js';
  * @param logger             Plugin logger
  * @param getSessionStates   Returns the live session state map (optional)
  * @param getConfiguredProviders Returns the available model providers for reviewer (optional)
+ * @param getReviewerReadiness Returns the reviewer model readiness (optional)
  */
 export function registerSupervisorRpc(
   registerMethod: RegisterMethod,
@@ -28,6 +29,8 @@ export function registerSupervisorRpc(
   getSessionStates?: () => Map<string, import('./core/types.js').SessionState>,
   getConfiguredProviders?: () => ConfiguredProvider[],
   persistConfig?: (cfg: SupervisorConfig) => void,
+  getReviewStoreAvailable?: () => boolean,
+  getReviewerReadiness?: () => ReviewerReadiness,
 ): void {
   registerMethod('rc.supervisor.status', async () => {
     const cfg = getActiveConfig();
@@ -49,17 +52,30 @@ export function registerSupervisorRpc(
       }
     }
 
+    // Reviewer availability is reported SEPARATELY from `enabled`/`reviewMode`: the
+    // deterministic safety gate runs without any model, so "deep review unavailable"
+    // must never read as "supervision off" (and vice versa).
+    const readiness = getReviewerReadiness?.();
+
     return {
       enabled: cfg.enabled,
       reviewMode: cfg.reviewMode,
+      // The stored marker: '' means "inherit the main model dynamically" — the resolved
+      // model is reported as effectiveSupervisorModel, never written back here.
       supervisorModel: cfg.supervisorModel,
-      appendReviewToChannelOutput: cfg.appendReviewToChannelOutput,
-      memoryGuardEnabled: cfg.memoryGuard.enabled,
+      modelSource: readiness?.modelSource,
+      effectiveSupervisorModel: readiness?.effectiveModel,
+      reviewerReady: readiness?.ready,
+      reviewerUnavailableReason: readiness?.reason,
       courseCorrectionEnabled: cfg.courseCorrection.enabled,
       deviationThreshold: cfg.courseCorrection.deviationThreshold,
       forceRegenerate: cfg.courseCorrection.forceRegenerate,
       maxRegenerateAttempts: cfg.courseCorrection.maxRegenerateAttempts,
       highRiskTools: cfg.highRiskTools,
+      dangerousToolPolicy: cfg.dangerousToolPolicy,
+      toolReviewGateMs: cfg.toolReviewGateMs,
+      grounding: cfg.grounding,
+      reviewStoreAvailable: getReviewStoreAvailable ? getReviewStoreAvailable() : undefined,
       stats,
       activeSessions,
       sessionsInfo,
@@ -72,8 +88,8 @@ export function registerSupervisorRpc(
       // Only accept known config keys — reject arbitrary params
       const ALLOWED_KEYS = [
         'enabled', 'supervisorModel', 'reviewMode',
-        'appendReviewToChannelOutput', 'memoryGuard',
         'courseCorrection', 'highRiskTools',
+        'dangerousToolPolicy', 'toolReviewGateMs', 'grounding',
       ] as const;
       const filtered: Record<string, unknown> = {};
       for (const key of ALLOWED_KEYS) {
@@ -86,12 +102,14 @@ export function registerSupervisorRpc(
       }
       // Deep-merge nested config objects to preserve sub-fields on partial updates
       const merged: Record<string, unknown> = { ...current, ...filtered };
-      if (filtered.memoryGuard && typeof filtered.memoryGuard === 'object' && current.memoryGuard) {
-        merged.memoryGuard = { ...current.memoryGuard, ...(filtered.memoryGuard as Record<string, unknown>) };
-      }
       if (filtered.courseCorrection && typeof filtered.courseCorrection === 'object' && current.courseCorrection) {
         merged.courseCorrection = { ...current.courseCorrection, ...(filtered.courseCorrection as Record<string, unknown>) };
       }
+      if (filtered.grounding && typeof filtered.grounding === 'object' && current.grounding) {
+        merged.grounding = { ...current.grounding, ...(filtered.grounding as Record<string, unknown>) };
+      }
+      const gateOverride = describeToolReviewGateOverride(filtered);
+      if (gateOverride) logger.warn(`Supervisor config: ${gateOverride}`);
       const updated = parseConfig(merged);
       setActiveConfig(updated);
       persistConfig?.(updated);

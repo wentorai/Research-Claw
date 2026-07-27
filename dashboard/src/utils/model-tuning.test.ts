@@ -10,6 +10,7 @@ import {
   CONTEXT_WINDOW_MIN,
   CONTEXT_WINDOW_MAX,
   OC_DEFAULT_CONTEXT_WINDOW,
+  RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS,
   type ConfigPatchInput,
 } from './config-patch';
 import { setModelCatalogCache } from './catalog-cache';
@@ -186,12 +187,16 @@ describe('buildSaveConfig — manual window + global compaction (拉通)', () =>
   it('writes no reserve keys for a small window (reserve is OC-owned, floor guarantees turn-1)', () => {
     // RC no longer tunes the compaction reserve — OC pins the turn-1 precheck reserve
     // at its own default regardless of config, so the CONTEXT_WINDOW_MIN floor is what
-    // guarantees turn-1 fits. Any manual window writes only mode:safeguard.
+    // guarantees turn-1 fits. The only additional compaction field is the
+    // Research-Claw scientific-fidelity instruction.
     const cfg = buildSaveConfig(null, baseInput({ customContextWindow: 32_000 }));
     const compaction = (
       (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
     );
-    expect(compaction).toEqual({ mode: 'safeguard' });
+    expect(compaction).toEqual({
+      mode: 'safeguard',
+      customInstructions: RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS,
+    });
   });
 
   it('writes no reserve keys for a large window (mainstream untouched, OC default 20000)', () => {
@@ -199,15 +204,21 @@ describe('buildSaveConfig — manual window + global compaction (拉通)', () =>
     const compaction = (
       (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
     );
-    expect(compaction).toEqual({ mode: 'safeguard' });
+    expect(compaction).toEqual({
+      mode: 'safeguard',
+      customInstructions: RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS,
+    });
   });
 
-  it('leaves only mode:safeguard when no manual window is provided (auto)', () => {
+  it('keeps safeguard plus the scientific instructions when no manual window is provided', () => {
     const cfg = buildSaveConfig(null, baseInput());
     const compaction = (
       (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
     );
-    expect(compaction).toEqual({ mode: 'safeguard' });
+    expect(compaction).toEqual({
+      mode: 'safeguard',
+      customInstructions: RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS,
+    });
   });
 
   it('always strips any prior maxHistoryShare (RC defers it to OC default 0.5)', () => {

@@ -2,40 +2,101 @@
  * Dual Model Supervisor — Core Type Definitions
  */
 
-// ── Configuration ──────────────────────────────────────────────────────
+import type { PluginHookHandlerMap } from '../oc/hook-types.js';
+import type { GatewayRequestHandlerOptions } from 'openclaw/plugin-sdk/core';
 
-export interface MemoryGuardConfig {
-  enabled: boolean;            // Whether memory guard is active
-  keyCategories: string[];     // Categories of memory to protect (e.g., 'research_goal', 'key_conclusion')
-}
+// ── Configuration ──────────────────────────────────────────────────────
 
 export interface CourseCorrectionConfig {
   enabled: boolean;            // Whether course correction is active
-  deviationThreshold: number;  // 0-1 threshold to trigger correction (0.5 = 50% deviation)
+  deviationThreshold: number;  // Correct at or above this deviation; 0-1 inclusive at both ends
   forceRegenerate: boolean;    // Whether to force regeneration when deviation detected
   maxRegenerateAttempts: number; // Max regeneration attempts per session (default: 3)
+}
+
+/** Deterministic existence verdict for one extracted citation. */
+export type GroundingVerdict = 'exists' | 'not_found' | 'unverifiable';
+
+/** A cached grounding result for one citation. */
+export interface GroundingFinding {
+  raw: string;                 // Raw citation token (DOI / arXiv id / title)
+  verdict: GroundingVerdict;
+  via?: string;                // Which registry confirmed existence (openalex_doi, etc.) or 'local-only'
+  /**
+   * Per-registry outcome tokens ONLY (e.g. { openalex_doi: 'hit', crossref_doi: 'miss' }
+   * or 'err:<code>'). NEVER the HTTP response body — just hit/miss/err so a persisted
+   * finding is auditable without leaking content. Empty object when networkPolicy='off'.
+   */
+  sources?: Record<string, string>;
+  /** Normalized identity of the citation (no response body) for dashboard/dedup. */
+  identity?: { doi?: string; arxivId?: string; normTitle?: string };
+}
+
+export interface GroundingConfig {
+  /**
+   * Privacy switch for citation existence checking. Controls what (if anything)
+   * is sent to external registries (OpenAlex / CrossRef / arXiv).
+   *  - 'off'              : DEFAULT. Zero external requests; no automatic grounding.
+   *                         Manual checks return `unverifiable` (local-only).
+   *  - 'identifiers-only' : send only public identifiers (DOI / arXiv id). NEVER titles/text.
+   *  - 'full'             : additionally allow title-search lookups (may reveal unpublished titles).
+   */
+  networkPolicy: 'off' | 'identifiers-only' | 'full';
+  /**
+   * How to report a citation no registry can find.
+   *  - 'flag' : emit `not_found` (suspected fabrication) — default.
+   *  - 'info' : soften `not_found` → `unverifiable` (never assert fabrication).
+   */
+  verdictMode: 'flag' | 'info';
 }
 
 export interface SupervisorConfig {
   enabled: boolean;                    // Whether supervisor is active
   supervisorModel: string;             // "provider/model" e.g. "openai/gpt-4o-mini"
-  reviewMode: 'off' | 'filter-only' | 'correct' | 'full';  // Review depth level
-  /** Append review report to output only when message is delivered through an external channel (Telegram, WeChat, etc.). Dashboard users see review results in the Supervisor panel instead. */
-  appendReviewToChannelOutput: boolean;
-  memoryGuard: MemoryGuardConfig;      // Memory protection settings
+  reviewMode: 'off' | 'filter-only' | 'correct';  // Review depth level
   courseCorrection: CourseCorrectionConfig;  // Course correction settings
   highRiskTools: string[];             // Tool names that require extra review
+  /**
+   * What to do with a confirmed-dangerous tool call:
+   *  - 'block'   : hard block (agent gets a tool error). Default — unchanged behavior.
+   *  - 'approve' : pause and ask the user (before_tool_call → requireApproval →
+   *                OC's native approval flow). The tool runs only if allowed.
+   */
+  dangerousToolPolicy: 'block' | 'approve';
+  /**
+   * Max time (ms) the before_tool_call security gate waits for the deep reviewer on
+   * a high-risk-but-not-determined-danger tool before failing OPEN. Bounds the wait
+   * so a slow/queued reviewer never stalls tool execution (never-over-block). The
+   * deep review still runs (and can block within this window); on timeout the tool
+   * is allowed and an observable degrade is recorded. The default lives in
+   * DEFAULT_CONFIG and the enforced range in TOOL_REVIEW_GATE_MIN_MS/MAX_MS — restating
+   * a number here is what let this comment claim 10s long after the default became 4s.
+   */
+  toolReviewGateMs: number;
+  /** Citation existence checking (grounding) — privacy-gated, best-effort, never-block. */
+  grounding: GroundingConfig;
 }
+
+/**
+ * Bounds for `toolReviewGateMs`, mirroring the manifest's `minimum`/`maximum`.
+ *
+ * OpenClaw enforces the manifest values on anything that comes from openclaw.json.
+ * These constants exist because `rc.supervisor.config` writes the live config without
+ * going through OpenClaw at all, so parseConfig has to apply the same range itself
+ * (see parseToolReviewGateMs). `tool-review-gate-budget.test.ts` pins both to the
+ * manifest so the two enforcement points cannot drift apart.
+ *
+ * Floor: below ~500ms no reviewer round trip can finish, so a smaller gate would mean
+ * "always fail open" while still claiming to deep-review. Ceiling: the gate is paid by
+ * every high-risk tool call in the worst case; past 30s the agent looks hung.
+ */
+export const TOOL_REVIEW_GATE_MIN_MS = 500;
+export const TOOL_REVIEW_GATE_MAX_MS = 30000;
 
 export const DEFAULT_CONFIG: SupervisorConfig = {
   enabled: false,
   supervisorModel: '',
   reviewMode: 'off',
-  appendReviewToChannelOutput: true,     // Only append review footer when delivering via external channel
-  memoryGuard: {
-    enabled: true,
-    keyCategories: ['research_goal', 'key_conclusion', 'user_preference', 'methodology_decision'],
-  },
   courseCorrection: {
     enabled: true,
     deviationThreshold: 0.5,
@@ -43,15 +104,31 @@ export const DEFAULT_CONFIG: SupervisorConfig = {
     maxRegenerateAttempts: 3,
   },
   highRiskTools: ['exec', 'write', 'edit', 'send_notification', 'browser'],
+  dangerousToolPolicy: 'block',
+  // How long a high-risk tool call waits for the deep review before proceeding. Every
+  // high-risk tool pays this in the worst case, so it is tuned for interactive use, not
+  // for review completeness: on timeout the deep pass is skipped (fail-open, audited)
+  // while the deterministic danger rules — which need no model — still block instantly.
+  toolReviewGateMs: 4000,
+  grounding: {
+    networkPolicy: 'off',   // zero external requests by default (privacy)
+    verdictMode: 'flag',
+  },
 };
 
 // ── Review Results ─────────────────────────────────────────────────────
 
+/**
+ * Verdict of an output review (llm_output). Every field is ADVISORY: the reviewed
+ * message was already delivered, so nothing here withholds or rewrites it. The field
+ * names say so deliberately — `blocked`/`corrected` would assert an enforcement this
+ * path does not have (that belongs to `ToolReviewResult`, below).
+ */
 export interface ReviewResult {
-  blocked: boolean;               // Whether the output was blocked entirely
-  corrected: boolean;             // Whether correction was applied
-  correctedVersion?: string;      // The corrected version of the output (if corrected)
-  correctionNote?: string;        // Explanation of what was corrected
+  flagged: boolean;               // Reviewer flagged a serious violation (advisory — output already delivered)
+  hasSuggestion: boolean;         // Reviewer supplied an improved version (never applied)
+  suggestedVersion?: string;      // The improved output the reviewer would have written
+  suggestionNote?: string;        // Explanation of what the reviewer would change
   warnings: string[];             // Safety or quality warnings
   memoryAlerts: string[];         // Alerts about memory inconsistencies or loss
   deviationScore: number;         // 0-1, how much the output deviates from expected trajectory
@@ -72,29 +149,18 @@ export interface ConsistencyCheckResult {
   details: string[];              // Detailed descriptions of inconsistencies
 }
 
-export interface MemoryLossItem {
-  category: string;               // Category of lost memory (e.g., 'research_goal')
-  content: string;                // The actual content that was lost
-  importance: 'critical' | 'high' | 'medium';  // Importance level of lost memory
-}
-
-export interface MemoryItem {
-  category: string;               // Memory category for organization
-  summary: string;                // Concise summary of the memory
-  source: string;                 // Source of the memory (e.g., message_id, tool_call_id)
-  timestamp: number;              // When the memory was created/recorded
-}
-
 // ── Audit Log ──────────────────────────────────────────────────────────
 
 export type AuditLogType =
   | 'tool_review'         // Review of tool calls
   | 'output_review'       // Review of model outputs
   | 'consistency_check'   // Check for reasoning consistency
-  | 'memory_guard'        // Memory protection actions
   | 'course_correction'   // Course correction interventions
   | 'force_regenerate'    // Force regeneration on deviation
-  | 'session_analysis';   // End-of-session analysis
+  | 'approval'            // Human-in-the-loop approval lifecycle (requested → allowed/denied/timeout/cancelled)
+  | 'grounding'           // Citation existence check (exists / not_found / unverifiable)
+  | 'session_analysis'    // End-of-session analysis
+  | 'reviewer_health';    // Reviewer model availability at startup / config change (deep review degraded)
 
 export interface AuditLogEntry {
   id?: number;                    // Database primary key (auto-increment)
@@ -126,12 +192,15 @@ export interface TaskParsingResult {
 }
 
 export interface RegenerateHistoryEntry {
-  attempt: number;                 // Which regeneration attempt (1, 2, 3, ...)
-  timestamp: number;               // When the regeneration was triggered
-  deviationScore: number;          // The deviation score that triggered regeneration
-  originalOutputPreview: string;   // First 200 chars of the deviated output
+  attempt: number;                 // Which course correction (1, 2, 3, ...)
+  timestamp: number;               // When the correction was queued
+  deviationScore: number;          // The deviation score that triggered the correction
+  originalOutputPreview: string;   // First 200 chars of the drifted output
   correctionInstruction: string;   // The correction instruction that was injected
-  result: 'regenerating' | 'corrected' | 'max_reached';  // Outcome of this attempt
+  // The ONLY observable outcome. The drifted output was already delivered, and whether the
+  // model then honored the queued correction is never measured — so 'corrected' is not a
+  // state this plugin can truthfully record.
+  result: 'correction_queued';
 }
 
 export interface SessionState {
@@ -154,12 +223,9 @@ export interface SessionState {
   };
   regenerateAttempts: number;      // Number of regeneration attempts in this session
   regenerateHistory: RegenerateHistoryEntry[];  // History of regeneration attempts
-  lostMemorySummary?: string;      // Summary of memories lost during conversation compression
-  preCompactionMemory: MemoryItem[];  // Memory snapshots before conversation compaction
-  pendingReviewFooter?: string;    // Cached review footer from llm_output (deprecated: for backward compat)
-  pendingChannelReviewFooter?: string; // Cached channel-only review footer, waiting to be attached in message_sending when delivering to external channel
   lastReviewReport?: string;       // Most recent review report text (for Dashboard panel display)
   lastStaticSupervisorInjectAt?: number;  // Per-session debounce for static rules injection
+  groundingFindings?: GroundingFinding[]; // Cached citation existence results (deduped by raw)
 }
 
 // ── models.providers.* (aligned with Dashboard GatewayModelDef / openclaw.json) ──
@@ -167,6 +233,32 @@ export interface SessionState {
 /** API protocols the dual-model reviewer client implements (non-streaming completion). */
 export const SUPPORTED_REVIEWER_APIS = ['openai-completions', 'anthropic-messages'] as const;
 export type SupportedReviewerApi = (typeof SUPPORTED_REVIEWER_APIS)[number];
+
+/**
+ * Where the reviewer model comes from:
+ *  - 'explicit'    — `supervisorModel` is configured;
+ *  - 'inherited'   — `supervisorModel` is empty, so the MAIN model is used (deep review
+ *                    therefore spends extra main-model tokens);
+ *  - 'unavailable' — no usable reviewer model; deep review is degraded while the
+ *                    deterministic safety gate keeps running.
+ */
+export type ReviewerModelSource = 'explicit' | 'inherited' | 'unavailable';
+
+/** Reviewer-model readiness — one truth source for status/audit/logs. */
+export interface ReviewerReadiness {
+  /**
+   * Whether a deep-review call can be ATTEMPTED: the model reference resolves, its
+   * provider exists, the protocol is supported and credentials are present. This is a
+   * static config check, not a liveness probe — the endpoint can still reject the call
+   * (that failure is logged per call and fails open).
+   */
+  ready: boolean;
+  modelSource: ReviewerModelSource;
+  /** `supervisorModel || mainModel`, re-resolved on every config/provider/main-model change; '' when neither is set. */
+  effectiveModel: string;
+  /** Why deep review cannot run. Present iff `ready` is false. */
+  reason?: string;
+}
 
 /** One element of `models.providers.*.models[]` — same fields as main-model catalog. */
 export interface ModelsProviderModelDef {
@@ -227,7 +319,10 @@ export interface PluginApi {
   logger: PluginLogger;
   resolvePath: (input: string) => string;
   registerTool: (tool: unknown) => void;
-  registerGatewayMethod: (method: string, handler: unknown) => void;
+  registerGatewayMethod: (
+    method: string,
+    handler: (opts: GatewayRequestHandlerOptions) => Promise<void> | void,
+  ) => void;
   registerHttpRoute: (params: {
     path: string;
     handler: (req: unknown, res: unknown) => Promise<boolean | void> | boolean | void;
@@ -239,7 +334,18 @@ export interface PluginApi {
     start: (ctx: { stateDir: string; logger: PluginLogger }) => void | Promise<void>;
     stop?: (ctx: { stateDir: string; logger: PluginLogger }) => void | Promise<void>;
   }) => void;
-  on: (hookName: string, handler: (...args: unknown[]) => unknown, opts?: { priority?: number }) => void;
+  /**
+   * Register a hook handler. Typed by the REAL OpenClaw PluginHookHandlerMap so
+   * that each handler's (event, ctx) and return type are inferred per hook name —
+   * an OC contract change (renamed field, changed arg count) breaks compilation
+   * here instead of silently degrading at runtime. This is the compile-time gate
+   * the single-arg / wrong-field bug slipped through when `on` was untyped.
+   */
+  on: <K extends keyof PluginHookHandlerMap>(
+    hookName: K,
+    handler: PluginHookHandlerMap[K],
+    opts?: { priority?: number },
+  ) => void;
 }
 
 export interface PluginDefinition {
@@ -254,12 +360,15 @@ export interface PluginDefinition {
 
 export interface SupervisorStatus {
   enabled: boolean;        // Whether supervisor is currently active
-  reviewMode: string;      // Current review mode (off/filter-only/correct/full)
+  reviewMode: string;      // Current review mode (off/filter-only/correct)
   supervisorModel: string; // Currently configured supervisor model
   stats: {
     total: number;         // Total number of review operations performed
-    blocked: number;       // Number of outputs/tools blocked
-    corrected: number;     // Number of outputs/tools corrected
+    // Both counters come from the audit `action` column, and only the before_tool_call
+    // path can produce those actions — output review is advisory and always lands on
+    // 'warn'/'pass'. So neither counter ever includes a delivered assistant message.
+    blocked: number;       // Tool calls blocked (incl. denied approvals)
+    corrected: number;     // Tool calls whose parameters were rewritten before execution
     warnings: number;      // Number of warnings issued
   };
 }

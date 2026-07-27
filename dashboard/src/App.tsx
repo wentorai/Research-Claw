@@ -24,6 +24,8 @@ import ConfigRestartListener from './components/ConfigRestartListener';
 import ModelCatalogAligner from './components/ModelCatalogAligner';
 import JobsActivityListener from './components/JobsActivityListener';
 import PeriphCaptureListener from './components/PeriphCaptureListener';
+import PluginApprovalListener from './components/PluginApprovalListener';
+import SupervisorReviewListener from './components/SupervisorReviewListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
@@ -497,6 +499,8 @@ export default function App() {
       <ModelCatalogAligner />
       <JobsActivityListener />
       <PeriphCaptureListener />
+      <PluginApprovalListener />
+      <SupervisorReviewListener />
       <div
         style={{
           height: '100vh',

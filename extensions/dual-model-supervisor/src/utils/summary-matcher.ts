@@ -1,8 +1,8 @@
 /**
  * Summary Matcher — Shared utility for matching assistant content to MessageSummary.
  *
- * Used by ConsistencyChecker and MemoryGuardian to replace duplicated
- * `_findMatchingSummary` / `_findSummaryForContent` implementations.
+ * Used by ConsistencyChecker to replace duplicated content matching logic with
+ * structured MessageSummary values.
  */
 
 import type { MessageSummary } from '../core/types.js';

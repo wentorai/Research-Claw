@@ -100,7 +100,7 @@ export interface ApprovalCard {
   risk_level: 'low' | 'medium' | 'high';
   /** Structured details about the action (command args, file paths, etc.). */
   details?: Record<string, unknown>;
-  /** Maps to the exec.approval.requested event ID. */
+  /** Maps to a native exec.approval.requested or plugin.approval.requested event ID. */
   approval_id?: string;
 }
 

@@ -6,7 +6,8 @@
  * Purpose:  Ensure the RC project config contains all fields required by the
  *           current OC version.  Idempotent — safe to call on every startup.
  *
- * Usage:    node scripts/ensure-config.cjs <config-path> [<config-path-2> ...]
+ * Usage:    node scripts/ensure-config.cjs [--inherit-global-compaction]
+ *           <config-path> [<config-path-2> ...]
  *
  * Fixes applied (all idempotent):
  *   1. plugins.allow — OC 2026.3.12+ requires explicit trust list
@@ -22,12 +23,17 @@
  *  17. agents.defaults.compaction.maxHistoryShare — strip (defer to OC default 0.5)
  *  18. models.providers.<manual>.models[].contextWindow — raise to ≥ 64000 floor
  *  19. agents.defaults.compaction.reserveTokens/reserveTokensFloor — strip stale override
+ *  20. agents.defaults.compaction.customInstructions — add RC scientific default
  */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS = fs.readFileSync(
+  path.join(__dirname, '../config/research-compaction-instructions.txt'),
+  'utf8',
+).trim();
 
 // `browser` is a bundled OC plugin but the trust list is restrictive: when
 // plugins.allow is non-empty, a plugin absent from it is NOT enabled-by-config.
@@ -507,8 +513,13 @@ function ensureConfig(filePath) {
     // 17. Compaction history share — RC no longer exposes this knob and defers it
     //     to OpenClaw's default (0.5). Strip any value written by an older RC
     //     dashboard so existing users get the default behavior with no stale cap.
-    const compaction = c.agents?.defaults?.compaction;
-    if (compaction && typeof compaction === 'object' && compaction.maxHistoryShare !== undefined) {
+    let compaction = c.agents?.defaults?.compaction;
+    if (!compaction || typeof compaction !== 'object' || Array.isArray(compaction)) {
+      compaction = {};
+      c.agents.defaults.compaction = compaction;
+      changed = true;
+    }
+    if (compaction.maxHistoryShare !== undefined) {
       delete compaction.maxHistoryShare;
       changed = true;
     }
@@ -543,15 +554,27 @@ function ensureConfig(filePath) {
     // 19. Stale compaction reserve override — an older RC build briefly wrote
     //     reserveTokens/reserveTokensFloor; the dashboard no longer does and OC ignores
     //     them on the turn-1 precheck path anyway. Strip to keep the config clean.
-    if (compaction && typeof compaction === 'object') {
-      if (compaction.reserveTokens !== undefined) {
-        delete compaction.reserveTokens;
-        changed = true;
-      }
-      if (compaction.reserveTokensFloor !== undefined) {
-        delete compaction.reserveTokensFloor;
-        changed = true;
-      }
+    if (compaction.reserveTokens !== undefined) {
+      delete compaction.reserveTokens;
+      changed = true;
+    }
+    if (compaction.reserveTokensFloor !== undefined) {
+      delete compaction.reserveTokensFloor;
+      changed = true;
+    }
+
+    // 20. Scientific compaction default — use the same tracked prompt as the
+    // Dashboard. Preserve every non-empty user instruction byte-for-byte.
+    if (compaction.mode === undefined) {
+      compaction.mode = 'safeguard';
+      changed = true;
+    }
+    if (
+      typeof compaction.customInstructions !== 'string'
+      || compaction.customInstructions.trim().length === 0
+    ) {
+      compaction.customInstructions = RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS;
+      changed = true;
     }
   }
 
@@ -608,18 +631,75 @@ function ensureConfig(filePath) {
   return changed;
 }
 
-// CLI entry: process all paths passed as arguments
-const paths = process.argv.slice(2);
+function inheritGlobalCompaction(projectPath, globalPath) {
+  if (!fs.existsSync(projectPath) || !fs.existsSync(globalPath)) return false;
+
+  let projectConfig;
+  let globalConfig;
+  try {
+    projectConfig = JSON.parse(fs.readFileSync(projectPath, 'utf8'));
+    globalConfig = JSON.parse(fs.readFileSync(globalPath, 'utf8'));
+  } catch {
+    return false;
+  }
+
+  const globalInstructions =
+    globalConfig.agents?.defaults?.compaction?.customInstructions;
+  if (
+    typeof globalInstructions !== 'string'
+    || globalInstructions.trim().length === 0
+  ) {
+    return false;
+  }
+
+  const projectInstructions =
+    projectConfig.agents?.defaults?.compaction?.customInstructions;
+  const projectHasOwnInstructions =
+    typeof projectInstructions === 'string'
+    && projectInstructions.trim().length > 0
+    && projectInstructions !== RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS;
+  if (projectHasOwnInstructions) return false;
+
+  if (!projectConfig.agents) projectConfig.agents = {};
+  if (!projectConfig.agents.defaults) projectConfig.agents.defaults = {};
+  if (!projectConfig.agents.defaults.compaction) {
+    projectConfig.agents.defaults.compaction = {};
+  }
+  projectConfig.agents.defaults.compaction.customInstructions =
+    globalInstructions;
+
+  const out = JSON.stringify(projectConfig, null, 2) + '\n';
+  const tmp = projectPath + '.tmp.' + process.pid;
+  fs.writeFileSync(tmp, out);
+  fs.renameSync(tmp, projectPath);
+  return true;
+}
+
+// CLI entry: process all paths passed as arguments. The install-only flag lets
+// a pre-existing global user instruction replace the freshly copied RC
+// template default. Normal startup never performs this cross-config migration.
+const args = process.argv.slice(2);
+const inheritGlobal = args.includes('--inherit-global-compaction');
+const paths = args.filter(arg => arg !== '--inherit-global-compaction');
 if (paths.length === 0) {
-  console.error('Usage: node scripts/ensure-config.cjs <config-path> [...]');
+  console.error(
+    'Usage: node scripts/ensure-config.cjs [--inherit-global-compaction] <config-path> [...]',
+  );
+  process.exit(1);
+}
+if (inheritGlobal && paths.length < 2) {
+  console.error('--inherit-global-compaction requires project and global config paths');
   process.exit(1);
 }
 
-let totalChanged = 0;
+const changedPaths = new Set();
+if (inheritGlobal && inheritGlobalCompaction(paths[0], paths[1])) {
+  changedPaths.add(paths[0]);
+}
 for (const p of paths) {
-  if (ensureConfig(p)) totalChanged++;
+  if (ensureConfig(p)) changedPaths.add(p);
 }
 
-if (totalChanged > 0) {
-  console.log(`[ensure-config] Updated ${totalChanged} config file(s)`);
+if (changedPaths.size > 0) {
+  console.log(`[ensure-config] Updated ${changedPaths.size} config file(s)`);
 }
