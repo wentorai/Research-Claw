@@ -22,6 +22,10 @@ export interface Harness {
   logs: { info: string[]; warn: string[]; error: string[] };
   /** Events emitted through the real gateway request context's broadcast function. */
   broadcasts: Array<{ event: string; payload: unknown }>;
+  /** Exact SQLite path used by this harness instance. */
+  databasePath: string;
+  /** Whether the harness owns and removes the database path after the test. */
+  ownsDatabasePath: boolean;
   /**
    * Wait until `predicate()` is truthy (polling real state), or reject after
    * `timeoutMs`. This is a state-based completion condition — NOT a fixed sleep —
@@ -70,8 +74,10 @@ export async function loadPluginFresh(
   // finalizer is captured below so afterEach can close SQLite before deleting
   // the generated database and WAL sidecars. Restart/recovery tests pass an
   // explicit file path, which this harness never deletes.
-  const generatedDbPath = pluginConfig.dbPath === undefined;
-  const dbPath = pluginConfig.dbPath
+  const configuredDbPath =
+    typeof pluginConfig.dbPath === 'string' ? pluginConfig.dbPath : undefined;
+  const generatedDbPath = configuredDbPath === undefined;
+  const dbPath = configuredDbPath
     ?? path.join(os.tmpdir(), `rc-supervisor-test-${randomUUID()}.db`);
 
   const api = {
@@ -148,6 +154,8 @@ export async function loadPluginFresh(
     rpc,
     logs,
     broadcasts,
+    databasePath: dbPath,
+    ownsDatabasePath: generatedDbPath,
     async waitUntil(predicate, opts) {
       const timeoutMs = opts?.timeoutMs ?? 2000;
       const intervalMs = opts?.intervalMs ?? 5;
