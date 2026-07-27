@@ -191,7 +191,7 @@ export default function InputHistoryPopup({
               key={`tip-${idx}`}
               title={<span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxWidth: 400, display: 'block' }}>{text}</span>}
               placement="right"
-              overlayStyle={{ maxWidth: 420 }}
+              styles={{ root: { maxWidth: 420 } }}
               mouseEnterDelay={0.4}
             >
               {item}

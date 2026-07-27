@@ -321,7 +321,7 @@ export default function ProviderPickerModal({
       onCancel={onClose}
       footer={null}
       width={720}
-      destroyOnClose
+      destroyOnHidden
       styles={{ body: { paddingTop: 8, display: 'flex', flexDirection: 'column', maxHeight: 'calc(80vh - 110px)' } }}
     >
       <Input
@@ -404,4 +404,3 @@ export default function ProviderPickerModal({
     </Modal>
   );
 }
-

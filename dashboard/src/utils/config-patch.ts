@@ -1230,8 +1230,11 @@ export function buildSaveConfig(
     const existingSupervisorConfig = (existingSupervisorEntry?.config as Record<string, unknown> | undefined) ?? {};
 
     // Preserve existing supervisor config values when not explicitly overridden
-    const { memoryGuard: _withdrawnMemoryGuard, ...supportedSupervisorConfig } =
-      existingSupervisorConfig;
+    const {
+      memoryGuard: _withdrawnMemoryGuard,
+      appendReviewToChannelOutput: _withdrawnFooter,
+      ...supportedSupervisorConfig
+    } = existingSupervisorConfig;
     const requestedReviewMode =
       input.supervisorReviewMode ??
       (existingSupervisorConfig.reviewMode as string) ??

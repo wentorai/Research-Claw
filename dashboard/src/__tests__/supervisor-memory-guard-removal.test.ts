@@ -33,6 +33,7 @@ function legacyConfig() {
               enabled: true,
               keyCategories: ['research_goal'],
             },
+            appendReviewToChannelOutput: true,
             courseCorrection: {
               enabled: true,
               deviationThreshold: 0.5,
@@ -51,8 +52,8 @@ function supervisorConfig(config: Record<string, unknown>): Record<string, unkno
   return plugins.entries['dual-model-supervisor'].config;
 }
 
-describe('Dashboard withdraws Memory Guard honestly', () => {
-  it('migrates legacy full to correct and strips memoryGuard on the next save', () => {
+describe('Dashboard withdraws unsupported Supervisor capabilities honestly', () => {
+  it('migrates legacy full and strips Memory Guard/footer switches on the next save', () => {
     const saved = buildSaveConfig(legacyConfig(), {
       provider: 'custom',
       baseUrl: 'https://example.invalid/v1',
@@ -66,6 +67,7 @@ describe('Dashboard withdraws Memory Guard honestly', () => {
 
     expect(supervisor.reviewMode).toBe('correct');
     expect(supervisor).not.toHaveProperty('memoryGuard');
+    expect(supervisor).not.toHaveProperty('appendReviewToChannelOutput');
     expect((supervisor.courseCorrection as { enabled: boolean }).enabled).toBe(true);
   });
 

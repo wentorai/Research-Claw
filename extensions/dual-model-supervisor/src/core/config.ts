@@ -39,10 +39,11 @@ export function parseConfig(raw: Record<string, unknown> | undefined): Superviso
  * a plugin whose entry config fails that schema. A hand-edited openclaw.json therefore
  * never reaches this function with an out-of-range gate — the gateway refuses to start.
  *
- * What this closes is the plugin's own write path, which is subject to neither check.
+ * What this closes is the plugin's RPC input path, which reaches this parser before
+ * OpenClaw's transactional config writer validates the resulting file.
  * `rc.supervisor.config` filters its params through an allowlist and hands them straight
- * to parseConfig; the result becomes the live gate via setActiveConfig and is written to
- * openclaw.json by persistConfig's bare fs.writeFileSync. Before this clamp a single RPC
+ * to parseConfig; the result is then persisted through runtime.config.mutateConfigFile
+ * and becomes the live gate. Before this clamp a single RPC
  * call could both set the running gate to 999999999ms — every high-risk tool call waiting
  * ~11.6 days on the reviewer, since that value is still under setTimeout's 2^31-1 ceiling
  * and is not coerced down — and leave behind a config file that the next gateway start

@@ -61,6 +61,14 @@ const MIN_TITLE_LEN = 12;
 
 const DOI_RE = /\b10\.\d{4,9}\/[-._;()/:a-z0-9]+/gi;
 const ARXIV_LABELED_RE = /\barxiv:\s*(\d{4}\.\d{4,5})(v\d+)?/gi;
+/**
+ * Bibliographic identifiers that are widely printed as DOI-shaped links but
+ * are not reliably registered with doi.org/Crossref/OpenAlex. ACM exposes many
+ * proceedings records under 10.5555 (for example Attention Is All You Need),
+ * while all three public resolver paths return 404. A clean resolver miss is
+ * therefore not evidence of fabrication for this namespace.
+ */
+const NON_RESOLVING_BIBLIOGRAPHIC_DOI_PREFIXES = ['10.5555/'];
 
 function cleanDoi(doi: string): string {
   return doi.replace(/[.,;)\]]+$/, '');
@@ -306,6 +314,18 @@ async function doCheckExistence(c: Citation, policy: GroundingNetworkPolicy, tim
   }
 
   const anyErr = Object.values(sources).some((v) => v.startsWith('err'));
+  if (
+    c.doi
+    && sources.openalex_title === undefined
+    && NON_RESOLVING_BIBLIOGRAPHIC_DOI_PREFIXES.some((prefix) =>
+      c.doi!.toLowerCase().startsWith(prefix))
+  ) {
+    return {
+      verdict: 'unverifiable',
+      via: 'non-resolving-bibliographic-doi',
+      sources,
+    };
+  }
   return { verdict: anyErr ? 'unverifiable' : 'not_found', sources };
 }
 

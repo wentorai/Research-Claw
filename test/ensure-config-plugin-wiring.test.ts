@@ -94,6 +94,10 @@ describe('ensure-config.cjs — plugin wiring (browser + research-superpower)', 
     expect(
       plugins.load.paths.some((p: string) => p.endsWith('/extensions/research-superpower')),
     ).toBe(true);
+    expect(
+      plugins.load.paths.some((p: string) =>
+        p.endsWith('/.openclaw/extensions/research-plugins')),
+    ).toBe(true);
   });
 
   it('preserves the user-added telegram/discord trust entries', () => {
@@ -120,6 +124,10 @@ describe('ensure-config.cjs — plugin wiring (browser + research-superpower)', 
     expect(plugins.allow.filter((id: string) => id === 'research-superpower')).toHaveLength(1);
     expect(
       plugins.load.paths.filter((p: string) => p.endsWith('/extensions/research-superpower')),
+    ).toHaveLength(1);
+    expect(
+      plugins.load.paths.filter((p: string) =>
+        p.endsWith('/.openclaw/extensions/research-plugins')),
     ).toHaveLength(1);
   });
 });

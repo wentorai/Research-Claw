@@ -311,12 +311,51 @@ export interface PluginLogger {
   error: (message: string) => void;
 }
 
+export type RuntimeLlmComplete = (params: {
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  systemPrompt?: string;
+  signal?: AbortSignal;
+  purpose?: string;
+  agentId?: string;
+}) => Promise<{
+  text: string;
+  provider: string;
+  model: string;
+  agentId: string;
+  usage: Record<string, number | undefined>;
+  audit: {
+    caller: { kind: 'plugin' | 'context-engine' | 'host' | 'unknown'; id?: string };
+    purpose?: string;
+    sessionKey?: string;
+  };
+}>;
+
 export interface PluginApi {
   id: string;
   name: string;
   config?: Record<string, unknown>;
   pluginConfig?: Record<string, unknown>;
   logger: PluginLogger;
+  runtime: {
+    config: {
+      current: () => Readonly<Record<string, unknown>>;
+      mutateConfigFile: (params: {
+        afterWrite: { mode: 'auto' };
+        mutate: (draft: Record<string, unknown>) => void;
+      }) => Promise<{
+        path: string;
+        persistedHash: string | null;
+        afterWrite?: unknown;
+        followUp?: unknown;
+      }>;
+    };
+    llm?: {
+      complete: RuntimeLlmComplete;
+    };
+  };
   resolvePath: (input: string) => string;
   registerTool: (tool: unknown) => void;
   registerGatewayMethod: (

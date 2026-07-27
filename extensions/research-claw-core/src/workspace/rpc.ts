@@ -33,6 +33,35 @@ function runArgv(file: string, args: string[]): Promise<void> {
     execFile(file, args, (err) => (err ? rej(err) : res()));
   });
 }
+
+/**
+ * Resolve the platform desktop-open command without invoking a shell.
+ *
+ * Windows deliberately uses PowerShell's ShellExecute-backed Start-Process.
+ * `explorer.exe <file>` can successfully hand a file to its associated app and
+ * still exit non-zero, which made the Dashboard report a false failure. The
+ * PowerShell command text is constant and the untrusted path stays in `$args[0]`.
+ */
+export function desktopOpenCommand(
+  platform: NodeJS.Platform,
+  targetPath: string,
+): { file: string; args: string[] } {
+  if (platform === 'darwin') return { file: 'open', args: [targetPath] };
+  if (platform === 'win32') {
+    return {
+      file: 'powershell.exe',
+      args: [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        'Start-Process -FilePath $args[0]',
+        targetPath,
+      ],
+    };
+  }
+  return { file: 'xdg-open', args: [targetPath] };
+}
 import type { RegisterMethod } from '../types.js';
 
 /** Detect if running inside a Docker container. */
@@ -309,15 +338,9 @@ export function registerWorkspaceRpc(
           throw new Error(`Failed to open file: ${(firstErr as Error).message}`);
         }
       }
-    } else if (process.platform === 'win32') {
-      // explorer.exe launches a file with its default association and takes the
-      // path as a single argv element (no cmd.exe re-parse) — same safe pattern
-      // as openFolder below. Avoids the `cmd /c start` injection surface.
-      await runArgv('explorer.exe', [resolved]).catch((err) => {
-        throw new Error(`Failed to open file: ${err.message}`);
-      });
     } else {
-      await runArgv('xdg-open', [resolved]).catch((err) => {
+      const command = desktopOpenCommand(process.platform, resolved);
+      await runArgv(command.file, command.args).catch((err) => {
         throw new Error(`Failed to open file: ${err.message}`);
       });
     }
@@ -356,12 +379,7 @@ export function registerWorkspaceRpc(
     }
 
     // argv, no shell — the resolved dir path cannot be interpreted as a command.
-    const [file, args]: [string, string[]] =
-      process.platform === 'darwin'
-        ? ['open', [dir]]
-        : process.platform === 'win32'
-          ? ['explorer.exe', [dir]]
-          : ['xdg-open', [dir]];
+    const { file, args } = desktopOpenCommand(process.platform, dir);
 
     try {
       await runArgv(file, args);

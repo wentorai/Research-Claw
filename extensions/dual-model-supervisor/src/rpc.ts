@@ -28,7 +28,7 @@ export function registerSupervisorRpc(
   logger: PluginLogger,
   getSessionStates?: () => Map<string, import('./core/types.js').SessionState>,
   getConfiguredProviders?: () => ConfiguredProvider[],
-  persistConfig?: (cfg: SupervisorConfig) => void,
+  persistConfig?: (cfg: SupervisorConfig) => Promise<void>,
   getReviewStoreAvailable?: () => boolean,
   getReviewerReadiness?: () => ReviewerReadiness,
 ): void {
@@ -111,8 +111,8 @@ export function registerSupervisorRpc(
       const gateOverride = describeToolReviewGateOverride(filtered);
       if (gateOverride) logger.warn(`Supervisor config: ${gateOverride}`);
       const updated = parseConfig(merged);
+      await persistConfig?.(updated);
       setActiveConfig(updated);
-      persistConfig?.(updated);
       logger.info(`Supervisor config updated: mode=${updated.reviewMode}, model=${updated.supervisorModel}`);
       return { ok: true, config: updated };
     }
@@ -144,8 +144,8 @@ export function registerSupervisorRpc(
       enabled,
       reviewMode: enabled && current.reviewMode === 'off' ? 'correct' as const : current.reviewMode,
     };
+    await persistConfig?.(updated);
     setActiveConfig(updated);
-    persistConfig?.(updated);
     logger.info(`Supervisor ${enabled ? 'enabled' : 'disabled'}`);
     return { ok: true, enabled: updated.enabled, reviewMode: updated.reviewMode };
   });

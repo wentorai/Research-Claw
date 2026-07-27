@@ -154,7 +154,7 @@ export default function EditTagsModal({
         </Button>,
       ]}
       width={480}
-      destroyOnClose
+      destroyOnHidden
     >
       {/* Paper title */}
       <Text

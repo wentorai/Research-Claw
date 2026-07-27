@@ -24,6 +24,8 @@ export interface Harness {
   broadcasts: Array<{ event: string; payload: unknown }>;
   /** Exact SQLite path used by this harness instance. */
   databasePath: string;
+  /** Harness-owned OpenClaw config path used by runtime.config mutations. */
+  configPath: string;
   /** Whether the harness owns and removes the database path after the test. */
   ownsDatabasePath: boolean;
   /**
@@ -57,7 +59,27 @@ afterEach(() => {
 export async function loadPluginFresh(
   pluginConfig: Record<string, unknown>,
   globalConfig?: Record<string, unknown>,
-  opts?: { preserveRuntimeConfigHub?: boolean },
+  opts?: {
+    preserveRuntimeConfigHub?: boolean;
+    configMutationError?: Error;
+    runtimeLlmComplete?: (params: {
+      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      model?: string;
+      maxTokens?: number;
+      temperature?: number;
+      systemPrompt?: string;
+      signal?: AbortSignal;
+      purpose?: string;
+      agentId?: string;
+    }) => Promise<{
+      text: string;
+      provider: string;
+      model: string;
+      agentId: string;
+      usage: Record<string, number>;
+      audit: { caller: { kind: 'plugin'; id?: string }; purpose?: string };
+    }>;
+  },
 ): Promise<Harness> {
   if (!opts?.preserveRuntimeConfigHub) {
     const runtimeConfigKey = Symbol.for('research-claw.dual-model-supervisor.runtime-config.v1');
@@ -69,6 +91,24 @@ export async function loadPluginFresh(
   const hooks = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
   const rpc = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>();
   const broadcasts: Array<{ event: string; payload: unknown }> = [];
+  const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-supervisor-config-test-'));
+  const configDir = path.join(configRoot, 'config');
+  const configPath = path.join(configDir, 'openclaw.json');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(
+    configPath,
+    `${JSON.stringify({
+      plugins: {
+        entries: {
+          'dual-model-supervisor': {
+            enabled: true,
+            config: {},
+          },
+        },
+      },
+    }, null, 2)}\n`,
+    'utf8',
+  );
 
   // A random file path avoids PID-reuse collisions. The module's own exit
   // finalizer is captured below so afterEach can close SQLite before deleting
@@ -85,6 +125,31 @@ export async function loadPluginFresh(
     name: 'Dual Model Supervisor',
     config: globalConfig,
     pluginConfig: { ...pluginConfig, dbPath },
+    runtime: {
+      config: {
+        current: () => globalConfig ?? {},
+        mutateConfigFile: async ({
+          mutate,
+        }: {
+          afterWrite: { mode: 'auto' };
+          mutate: (draft: Record<string, unknown>) => void;
+        }) => {
+          if (opts?.configMutationError) throw opts.configMutationError;
+          const draft = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+          mutate(draft);
+          const tmpPath = `${configPath}.tmp`;
+          fs.writeFileSync(tmpPath, `${JSON.stringify(draft, null, 2)}\n`, 'utf8');
+          fs.renameSync(tmpPath, configPath);
+          return {
+            path: configPath,
+            persistedHash: null,
+          };
+        },
+      },
+      ...(opts?.runtimeLlmComplete
+        ? { llm: { complete: opts.runtimeLlmComplete } }
+        : {}),
+    },
     logger: {
       debug: () => {},
       info: (m: string) => logs.info.push(m),
@@ -139,6 +204,7 @@ export async function loadPluginFresh(
         fs.rmSync(`${dbPath}${suffix}`, { force: true });
       }
     }
+    fs.rmSync(configRoot, { recursive: true, force: true });
   });
 
   return {
@@ -155,6 +221,7 @@ export async function loadPluginFresh(
     logs,
     broadcasts,
     databasePath: dbPath,
+    configPath,
     ownsDatabasePath: generatedDbPath,
     async waitUntil(predicate, opts) {
       const timeoutMs = opts?.timeoutMs ?? 2000;

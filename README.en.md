@@ -11,7 +11,7 @@ You define the question. Research-Claw runs the lab. 24/7 on your machine. Every
 [![Version](https://img.shields.io/badge/version-v0.7.6-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
+[![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows_%7C_Linux-lightgrey?style=flat-square)](#)
 [![Skills](https://img.shields.io/badge/skills-433-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
 
 [🌐 wentor.ai](https://wentor.ai) · [🇨🇳 中文](README.md) · [📖 Docs](docs/00-reference-map.md) · [🪲 Issues](https://github.com/wentorai/Research-Claw/issues)
@@ -171,7 +171,7 @@ We built a purpose-designed Dashboard for academic workflows — the most comple
 | **Review** *(new)* | Structured paper critique with reviewer-verdict cards |
 | **Tasks** | Agent / Human task layers · 4-level priority · 48h deadline alerts |
 | **Monitors** | Keyword / author / journal tracking · Automation tasks · IM push |
-| **Quality Control** *(new)* | An independent reviewer model gates every answer (see below) |
+| **Quality Control** *(new)* | A separately configurable reviewer model audits answers asynchronously (see below) |
 | **Extensions** *(new)* | IM channels / skills / MCP management · WeChat QR login |
 | **Settings** | Setup Wizard · one-click API protocol probe · per-endpoint context-window tuning · all config in the browser |
 
@@ -283,8 +283,8 @@ Four layers of defense-in-depth. The first three are hard constraints enforced i
 
 | Platform | Method | Prerequisites |
 |:--|:--|:--|
-| macOS / Linux | One-click script (recommended) | Git · Node.js 22 (auto-installed) |
-| macOS / Linux | Manual install (source) | Git · Node.js 22+ · [pnpm](https://pnpm.io/installation) 9 |
+| macOS / Linux / WSL2 | One-click script (recommended) | Git · Node.js 22 (auto-installed) |
+| macOS / Linux / WSL2 | Manual install (source) | Git · Node.js 22+ · [pnpm](https://pnpm.io/installation) 9 |
 | macOS / Linux / Windows | Docker one-click | [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
 
 All platforms require an LLM API key (Anthropic Claude / OpenAI recommended).

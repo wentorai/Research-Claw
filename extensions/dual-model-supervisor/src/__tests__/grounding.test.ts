@@ -261,6 +261,30 @@ describe('checkExistence verdict branches (identifiers-only)', () => {
     mockFetch(() => ({ status: 404 }));
     expect((await checkExistence({ raw: 'x', doi: '10.9/fake' }, { networkPolicy: 'identifiers-only' })).verdict).toBe('not_found');
   });
+  it('does not false-flag ACM 10.5555 bibliographic identifiers that public DOI registries do not resolve', async () => {
+    mockFetch(() => ({ status: 404 }));
+    const result = await checkExistence(
+      { raw: '10.5555/3295222.3295349', doi: '10.5555/3295222.3295349' },
+      { networkPolicy: 'identifiers-only' },
+    );
+    expect(result.verdict).toBe('unverifiable');
+    expect(result.via).toBe('non-resolving-bibliographic-doi');
+  });
+  it('can reject a fabricated 10.5555 record when a structured title also cleanly misses', async () => {
+    mockFetch((url) => url.includes('title.search')
+      ? { status: 200, json: { results: [] } }
+      : { status: 404 });
+    const result = await checkExistence(
+      {
+        raw: '10.5555/9999999.9999999',
+        doi: '10.5555/9999999.9999999',
+        title: 'Self-Supervised Meta-Diffusion for Molecular Property Prediction',
+        provenance: 'structured',
+      },
+      { networkPolicy: 'full' },
+    );
+    expect(result.verdict).toBe('not_found');
+  });
   it('unverifiable (never false-flag) when a source errors', async () => {
     mockFetch((url) => (url.includes('openalex') ? { throw: true } : { status: 404 }));
     expect((await checkExistence({ raw: 'x', doi: '10.1/x' }, { networkPolicy: 'identifiers-only' })).verdict).toBe('unverifiable');

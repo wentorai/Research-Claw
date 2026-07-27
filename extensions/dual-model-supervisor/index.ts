@@ -22,7 +22,10 @@ import type {
   ConfiguredProvider,
 } from './src/core/types.js';
 import { parseConfig, isSupervisorActive, isCourseCorrectionActive } from './src/core/config.js';
-import { ReviewerClient } from './src/client/reviewer.js';
+import {
+  ReviewerClient,
+  describeReviewerUnavailableForUser,
+} from './src/client/reviewer.js';
 import { QuickChecker } from './src/hooks/quick-checker.js';
 import { OutputReviewer } from './src/hooks/output-reviewer.js';
 import { ToolReviewer } from './src/hooks/tool-reviewer.js';
@@ -69,15 +72,26 @@ const _sharedRuntimeConfig = runtimeGlobal[RUNTIME_CONFIG_KEY] ?? {
 };
 runtimeGlobal[RUNTIME_CONFIG_KEY] = _sharedRuntimeConfig;
 
+interface SharedReviewerHealthState {
+  byDatabasePath: Record<string, string>;
+}
+
+const REVIEWER_HEALTH_KEY = Symbol.for(
+  'research-claw.dual-model-supervisor.reviewer-health.v1',
+);
+const reviewerHealthGlobal = globalThis as typeof globalThis & {
+  [REVIEWER_HEALTH_KEY]?: SharedReviewerHealthState;
+};
+const _sharedReviewerHealth = reviewerHealthGlobal[REVIEWER_HEALTH_KEY] ?? {
+  byDatabasePath: {},
+};
+reviewerHealthGlobal[REVIEWER_HEALTH_KEY] = _sharedReviewerHealth;
+
 const _sessionStates = new Map<string, SessionState>();
 /** Hook registration is scoped to the host PluginApi/registry instance.
  *  An in-process gateway restart can reuse this evaluated module with a fresh
  *  registry, which must receive its own complete hook set. */
 const _hookRegistrationApis = new WeakSet<object>();
-/** Last reviewer-health state reported (log + audit), so re-registration and unrelated
- *  config saves do not re-emit the same line; a real state change always does. */
-let _reportedReviewerHealth = '';
-
 /** Fresh SessionState value (not stored). Used for both tracked sessions and
  *  ephemeral manual-review runs (which must NOT enter the session map). */
 function newSessionState(sessionId: string): SessionState {
@@ -112,11 +126,12 @@ function reportReviewerHealth(
   auditLog: AuditLogService,
   logger: PluginApi['logger'],
   cfg: SupervisorConfig,
+  databasePath: string,
 ): void {
   const r = client.getReadiness();
   const key = `${cfg.enabled}|${cfg.reviewMode}|${r.ready}|${r.modelSource}|${r.effectiveModel}|${r.reason ?? ''}`;
-  if (key === _reportedReviewerHealth) return;
-  _reportedReviewerHealth = key;
+  if (_sharedReviewerHealth.byDatabasePath[databasePath] === key) return;
+  _sharedReviewerHealth.byDatabasePath[databasePath] = key;
 
   if (!isSupervisorActive(cfg)) {
     logger.info(`[Supervisor] supervision OFF (enabled=${cfg.enabled}, mode=${cfg.reviewMode})`);
@@ -131,7 +146,7 @@ function reportReviewerHealth(
     return;
   }
 
-  const details = `Deep review unavailable (${r.reason}). Deterministic safety gate (quick check + dangerous tool policy) remains ACTIVE.`;
+  const details = describeReviewerUnavailableForUser();
   logger.warn(`[Supervisor] ${details}`);
   auditLog.record({
     sessionId: 'supervisor',
@@ -309,6 +324,9 @@ const plugin: PluginDefinition = {
     const mainModel = (globalCfg?.agents as Record<string, unknown>)?.defaults as Record<string, unknown>;
     const mainModelPrimary = (mainModel?.model as Record<string, unknown>)?.primary;
     const fallbackModel = typeof mainModelPrimary === 'string' ? mainModelPrimary : '';
+    const supervisorDbPath = resolveSupervisorDbPath(
+      api.pluginConfig as Record<string, unknown> | undefined,
+    );
 
     api.logger.info(`Dual Model Supervisor initializing (enabled=${cfg.enabled}, mode=${cfg.reviewMode})`);
 
@@ -323,9 +341,8 @@ const plugin: PluginDefinition = {
 
     if (!_initialized) {
       try {
-        const dbPath = resolveSupervisorDbPath(api.pluginConfig as Record<string, unknown> | undefined);
-        fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-        _db = new Database(dbPath);
+        fs.mkdirSync(path.dirname(supervisorDbPath), { recursive: true });
+        _db = new Database(supervisorDbPath);
         _db.pragma('journal_mode = WAL');
         _db.pragma('synchronous = FULL');
       } catch (dbErr) {
@@ -348,6 +365,7 @@ const plugin: PluginDefinition = {
         providers: mergedProviders,
         logger: api.logger,
         fallbackModel,
+        runtimeComplete: api.runtime.llm?.complete,
       });
 
       _quickChecker = new QuickChecker(cfg, api.logger);
@@ -397,7 +415,13 @@ const plugin: PluginDefinition = {
 
     // Reviewer-model availability is reported now (and again on every config change),
     // never inferred from silence.
-    reportReviewerHealth(reviewerClient, auditLog, api.logger, currentRuntimeConfig(cfg));
+    reportReviewerHealth(
+      reviewerClient,
+      auditLog,
+      api.logger,
+      currentRuntimeConfig(cfg),
+      supervisorDbPath,
+    );
 
     // ── Register database lifecycle service ───────────────────────
     api.registerService({
@@ -436,37 +460,54 @@ const plugin: PluginDefinition = {
     };
 
     // ── Config persistence callback ────────────────────────────────
-    const configPath = path.join(process.cwd(), 'config', 'openclaw.json');
-    const persistConfig = (newCfg: SupervisorConfig): void => {
-      try {
-        if (!fs.existsSync(configPath)) return;
-        const raw = fs.readFileSync(configPath, 'utf8');
-        const ocConfig = JSON.parse(raw);
-        if (!ocConfig.plugins) ocConfig.plugins = {};
-        if (!ocConfig.plugins.entries) ocConfig.plugins.entries = {};
-        if (!ocConfig.plugins.entries['dual-model-supervisor']) {
-          ocConfig.plugins.entries['dual-model-supervisor'] = {};
-        }
-        const existing = ocConfig.plugins.entries['dual-model-supervisor'].config || {};
-        const { memoryGuard: _withdrawnMemoryGuard, ...supportedExisting } = existing;
-        ocConfig.plugins.entries['dual-model-supervisor'].config = {
-          ...supportedExisting,  // preserve dbPath and other infra keys
-          enabled: newCfg.enabled,
-          supervisorModel: newCfg.supervisorModel,
-          reviewMode: newCfg.reviewMode,
-          courseCorrection: newCfg.courseCorrection,
-          highRiskTools: newCfg.highRiskTools,
-          dangerousToolPolicy: newCfg.dangerousToolPolicy,
-          toolReviewGateMs: newCfg.toolReviewGateMs,
-          grounding: newCfg.grounding,
-        };
-        const tmpPath = configPath + '.tmp';
-        fs.writeFileSync(tmpPath, JSON.stringify(ocConfig, null, 2) + '\n', 'utf8');
-        fs.renameSync(tmpPath, configPath);
-        api.logger.info('Supervisor config persisted to openclaw.json');
-      } catch (err) {
-        api.logger.warn(`Failed to persist supervisor config: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    const persistConfig = async (newCfg: SupervisorConfig): Promise<void> => {
+      const result = await api.runtime.config.mutateConfigFile({
+        afterWrite: { mode: 'auto' },
+        mutate: (ocConfig) => {
+          const plugins = (
+            ocConfig.plugins && typeof ocConfig.plugins === 'object'
+              ? ocConfig.plugins
+              : {}
+          ) as Record<string, unknown>;
+          const entries = (
+            plugins.entries && typeof plugins.entries === 'object'
+              ? plugins.entries
+              : {}
+          ) as Record<string, unknown>;
+          const pluginEntry = (
+            entries['dual-model-supervisor']
+            && typeof entries['dual-model-supervisor'] === 'object'
+              ? entries['dual-model-supervisor']
+              : {}
+          ) as Record<string, unknown>;
+          const existing = (
+            pluginEntry.config && typeof pluginEntry.config === 'object'
+              ? pluginEntry.config
+              : {}
+          ) as Record<string, unknown>;
+          const {
+            memoryGuard: _withdrawnMemoryGuard,
+            appendReviewToChannelOutput: _withdrawnFooter,
+            ...supportedExisting
+          } = existing;
+
+          pluginEntry.config = {
+            ...supportedExisting, // preserve dbPath and other infrastructure keys
+            enabled: newCfg.enabled,
+            supervisorModel: newCfg.supervisorModel,
+            reviewMode: newCfg.reviewMode,
+            courseCorrection: newCfg.courseCorrection,
+            highRiskTools: newCfg.highRiskTools,
+            dangerousToolPolicy: newCfg.dangerousToolPolicy,
+            toolReviewGateMs: newCfg.toolReviewGateMs,
+            grounding: newCfg.grounding,
+          };
+          entries['dual-model-supervisor'] = pluginEntry;
+          plugins.entries = entries;
+          ocConfig.plugins = plugins;
+        },
+      });
+      api.logger.info(`Supervisor config persisted: ${result.path}`);
     };
 
     registerSupervisorRpc(
@@ -475,7 +516,13 @@ const plugin: PluginDefinition = {
       () => currentRuntimeConfig(cfg),
       (newCfg: SupervisorConfig) => {
         publishRuntimeConfig(newCfg);
-        reportReviewerHealth(reviewerClient, auditLog, api.logger, newCfg);
+        reportReviewerHealth(
+          reviewerClient,
+          auditLog,
+          api.logger,
+          newCfg,
+          supervisorDbPath,
+        );
       },
       api.logger,
       () => _sessionStates,

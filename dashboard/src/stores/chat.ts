@@ -1249,10 +1249,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
       if (get().sessionKey !== sessionKey) return;
 
-      console.log('[Chat] sessions.usage totals:', result.totals);
+      const totals = result?.totals;
+      console.log('[Chat] sessions.usage totals:', totals);
       set({
-        tokensIn: result.totals?.input ?? 0,
-        tokensOut: result.totals?.output ?? 0,
+        tokensIn: totals?.input ?? 0,
+        tokensOut: totals?.output ?? 0,
       });
     } catch (err) {
       console.warn('[Chat] loadSessionUsage failed:', err);

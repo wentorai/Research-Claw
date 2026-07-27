@@ -653,7 +653,7 @@ chat image uploads so the agent's image tool can access them by file path.
 
 ### 4.9 `rc.ws.openExternal`
 
-Open a file with the system default application (macOS `open`, Windows `start`,
+Open a file with the system default application (macOS `open`, Windows PowerShell `Start-Process`,
 Linux `xdg-open`).
 
 - **Params:** `{ path: string }`

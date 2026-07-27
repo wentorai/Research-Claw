@@ -24,6 +24,7 @@
  *  18. models.providers.<manual>.models[].contextWindow — raise to ≥ 64000 floor
  *  19. agents.defaults.compaction.reserveTokens/reserveTokensFloor — strip stale override
  *  20. agents.defaults.compaction.customInstructions — add RC scientific default
+ *  21. dual-model-supervisor — remove withdrawn settings and validation placeholders
  */
 'use strict';
 
@@ -46,6 +47,7 @@ const RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS = fs.readFileSync(
 const REQUIRED_ALLOW = ['browser', 'research-claw-core', 'research-plugins', 'openclaw-weixin', 'dual-model-supervisor', 'research-superpower'];
 const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins', 'dual-model-supervisor', 'research-superpower'];
 const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin', 'extensions/dual-model-supervisor', 'extensions/research-superpower'];
+const RESEARCH_PLUGINS_PATH = path.join(os.homedir(), '.openclaw', 'extensions', 'research-plugins');
 const RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
 // Provenance install records for all RC plugins (eliminates "loaded without
 // install/load-path provenance" warnings from OC's plugin loader)
@@ -246,6 +248,10 @@ function ensureConfig(filePath) {
         c.plugins.load.paths.push('./' + dir);
         changed = true;
       }
+    }
+    if (!c.plugins.load.paths.includes(RESEARCH_PLUGINS_PATH)) {
+      c.plugins.load.paths.push(RESEARCH_PLUGINS_PATH);
+      changed = true;
     }
   }
 
@@ -507,6 +513,61 @@ function ensureConfig(filePath) {
     }
     if (c.plugins?.entries?.['claude-mem']) {
       delete c.plugins.entries['claude-mem'];
+      changed = true;
+    }
+
+    // 21. Supervisor lifecycle cleanup. These keys came from capabilities that were
+    //     withdrawn before v0.7.6 and must not survive an upgrade as dead controls.
+    //     `test/*` was used only by isolated acceptance fixtures; if it escaped into
+    //     a user's ignored project config it disables AI review while looking enabled.
+    //     Clear only that known fixture namespace. Never erase an operator's external
+    //     provider merely because the current project config does not define it.
+    const supervisorEntry = c.plugins?.entries?.['dual-model-supervisor'];
+    const supervisorConfig = supervisorEntry?.config;
+    if (
+      supervisorConfig
+      && typeof supervisorConfig === 'object'
+      && !Array.isArray(supervisorConfig)
+    ) {
+      if (supervisorConfig.memoryGuard !== undefined) {
+        delete supervisorConfig.memoryGuard;
+        changed = true;
+      }
+      if (supervisorConfig.appendReviewToChannelOutput !== undefined) {
+        delete supervisorConfig.appendReviewToChannelOutput;
+        changed = true;
+      }
+      if (supervisorConfig.reviewMode === 'full') {
+        supervisorConfig.reviewMode = 'correct';
+        changed = true;
+      }
+      if (
+        typeof supervisorConfig.supervisorModel === 'string'
+        && supervisorConfig.supervisorModel.startsWith('test/')
+      ) {
+        supervisorConfig.supervisorModel = '';
+        changed = true;
+      }
+    }
+    if (
+      supervisorEntry
+      && typeof supervisorEntry === 'object'
+      && !Array.isArray(supervisorEntry)
+      && (
+        !supervisorEntry.llm
+        || typeof supervisorEntry.llm !== 'object'
+        || Array.isArray(supervisorEntry.llm)
+        || supervisorEntry.llm.allowModelOverride !== true
+      )
+    ) {
+      supervisorEntry.llm = {
+        ...(supervisorEntry.llm
+          && typeof supervisorEntry.llm === 'object'
+          && !Array.isArray(supervisorEntry.llm)
+          ? supervisorEntry.llm
+          : {}),
+        allowModelOverride: true,
+      };
       changed = true;
     }
 

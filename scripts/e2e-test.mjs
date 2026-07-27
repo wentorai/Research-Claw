@@ -10,8 +10,8 @@
  * This replacement focuses on the startup chain that actually breaks RC in practice:
  *   1. gateway HTTP health
  *   2. dashboard root availability
- *   3. running listener uses the project config file
- *   4. project config can load research-claw-core successfully
+ *   3. the running gateway reports the RC plugins as loaded
+ *   4. a Research-Claw RPC responds through that gateway
  *   5. config contains the expected plugin entries / load paths
  *
  * Exit codes:
@@ -37,6 +37,10 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 const stats = { total: 0, passed: 0, failed: 0, skipped: 0 };
 const failures = [];
+
+function readProjectConfig() {
+  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+}
 
 function getFlag(name, defaultValue) {
   const idx = args.indexOf(name);
@@ -64,12 +68,6 @@ function fail(name, reason) {
   failures.push({ name, reason });
 }
 
-function skip(name, reason) {
-  stats.total++;
-  stats.skipped++;
-  log(`\x1b[33m○\x1b[0m ${name}: ${reason}`);
-}
-
 function runNodeCli(subcommand, extraEnv = {}) {
   return execFileSync(
     process.execPath,
@@ -87,12 +85,24 @@ function runNodeCli(subcommand, extraEnv = {}) {
   );
 }
 
-function runCommand(command, argv) {
-  return execFileSync(command, argv, {
-    cwd: PROJECT_ROOT,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+function gatewayCall(method) {
+  const cfg = readProjectConfig();
+  const token = getFlag('--token', cfg?.gateway?.auth?.token ?? '');
+  if (!token) throw new Error('gateway auth token is unavailable');
+  const raw = runNodeCli([
+    'gateway',
+    'call',
+    method,
+    '--url',
+    `ws://127.0.0.1:${PORT}`,
+    '--token',
+    token,
+    '--json',
+  ]);
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end < start) throw new Error(`${method} returned no JSON object`);
+  return JSON.parse(raw.slice(start, end + 1));
 }
 
 async function testHealthz() {
@@ -130,27 +140,24 @@ function testProjectConfigFile() {
   pass('Project config', CONFIG_PATH);
 }
 
-function testListenerConfigPath() {
+function testRuntimePlugins() {
   try {
-    const pidsRaw = runCommand('lsof', [`-tiTCP:${PORT}`, '-sTCP:LISTEN']).trim();
-    if (!pidsRaw) {
-      fail('Listener PID', `no process is listening on ${PORT}`);
-      return;
+    const health = gatewayCall('health');
+    const loaded = health?.plugins?.loaded;
+    if (!Array.isArray(loaded)) {
+      throw new Error('health.plugins.loaded is unavailable');
     }
-    const pid = pidsRaw.split('\n')[0].trim();
-    // Config files are read at startup and closed — they won't appear as open
-    // file descriptors in lsof -p output.  Check the process cwd instead:
-    // a gateway started from the project root will load config/openclaw.json.
-    const cwdInfo = runCommand('lsof', ['-p', pid, '-d', 'cwd', '-Fn']);
-    const cwdMatch = cwdInfo.match(/\nn(.*)/);
-    const processCwd = cwdMatch ? cwdMatch[1] : '';
-    if (processCwd.startsWith(PROJECT_ROOT)) {
-      pass('Listener config path', `pid ${pid} cwd is within project root`);
-      return;
-    }
-    fail('Listener config path', `pid ${pid} cwd "${processCwd}" is outside project root ${PROJECT_ROOT}`);
+    const required = [
+      'research-claw-core',
+      'dual-model-supervisor',
+      'research-superpower',
+      'research-plugins',
+    ];
+    const missing = required.filter((id) => !loaded.includes(id));
+    if (missing.length > 0) throw new Error(`missing runtime plugins: ${missing.join(', ')}`);
+    pass('Runtime plugins', required.join(', '));
   } catch (err) {
-    skip('Listener config path', err instanceof Error ? err.message : String(err));
+    fail('Runtime plugins', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -178,22 +185,15 @@ function testConfigPluginsSection() {
   }
 }
 
-function testPluginLoader() {
+function testProjectRpc() {
   try {
-    const out = runNodeCli(['plugins', 'list']);
-    verbose(out);
-    const normalized = out.replace(/\s+/g, ' ');
-    if (!normalized.includes('research -claw- core │ loaded') &&
-        !normalized.includes('research-claw-core') &&
-        !out.includes('Research-Claw Core registered')) {
-      throw new Error('research-claw-core did not appear as loaded');
+    const result = gatewayCall('rc.onboarding.status');
+    if (!result || typeof result !== 'object') {
+      throw new Error('rc.onboarding.status returned no object');
     }
-    if (!out.includes('Research-Claw Core registered')) {
-      throw new Error('research-claw-core loader output did not register gateway methods');
-    }
-    pass('Plugin loader', 'research-claw-core loads and registers in project config');
+    pass('Project RPC', 'rc.onboarding.status responds through the running gateway');
   } catch (err) {
-    fail('Plugin loader', err instanceof Error ? err.message : String(err));
+    fail('Project RPC', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -231,9 +231,9 @@ async function main() {
   testCorePluginBuild();
   await testHealthz();
   await testDashboardRoot();
-  testListenerConfigPath();
+  testRuntimePlugins();
   testConfigPluginsSection();
-  testPluginLoader();
+  testProjectRpc();
 
   console.log('\n╔══════════════════════════════════════════════════════════╗');
   console.log('║  Results                                                ║');

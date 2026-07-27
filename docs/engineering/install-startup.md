@@ -14,7 +14,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
 
 RC 把 OpenClaw 当 **npm 依赖**消费,**不是 fork**。全部定制走 config overlay + Plugin SDK + 极小 pnpm patch(~20 行/7 文件)。这决定了安装的几条特性:
 
-- **目标平台**:macOS(darwin arm64/x64)+ Windows(x64/arm64)。脚本也接受 Linux 以兼容 OC,但 Linux **非官方支持平台**。
+- **目标平台**:macOS(darwin arm64/x64)、Linux(x64/arm64)、WSL2,以及通过 Docker Desktop 运行的 Windows(x64/arm64)。原生 Windows 不直接运行 POSIX 安装器,使用 `scripts/install-docker.ps1`。
 - **运行时**:Node.js ≥ 22.12,pnpm ≥ 9.15;gateway 跑在 conda `openclaw` 环境(Node 22),**不是系统 Node**。
 - **脚本幂等**:`scripts/` 下脚本均 `set -euo pipefail`,跑两次结果一致、不损坏。
 

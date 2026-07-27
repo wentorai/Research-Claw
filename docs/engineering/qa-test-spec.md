@@ -320,7 +320,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 | F-17-04 | 工具调用审查 | exec/write/edit/send_notification/browser 等 |
 | F-17-05 | 方向纠正 | deviationThreshold 可配 |
 | F-17-06 | 研究约束连续性 | 每轮提示保留研究目标、目标结论和方法约束；不承诺压缩前保护或内容级丢失检测 |
-| F-17-07 | 强制重新生成 | 偏离后 regen，max attempts 可配 |
+| F-17-07 | 后续轮次纠偏 | 当前回答已交付；检测到偏离后仅向下一轮注入纠偏建议，最大尝试次数可配 |
 | F-17-08 | 异步审查结果交付 | DB 可用时持久化审计，并由 Dashboard 面板/RPC 查询；写入失败可观察 |
 | F-17-09 | 管控日志面板 | 展示持久化审计与统计；未知历史类型使用通用回退显示 |
 | F-17-10 | 研究目标解析 | goal + target conclusions 展示 |
@@ -580,7 +580,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 |---------|--------|------|----------|
 | TC-K-01 | P1 | 启用 supervisor + correct 模式 | 管控面板 status=on |
 | TC-K-02 | P1 | 触发 exec 高风险命令 | tool_review log，可能 block |
-| TC-K-03 | P1 | 主模型偏离研究目标 | course_correction 或 regen |
+| TC-K-03 | P1 | 主模型偏离研究目标 | 当前回答不被替换；下一轮收到 course_correction 注入，达到上限后不再重复 |
 | TC-K-04 | P2 | correct 模式下继续多轮研究对话 | 后续提示仍含研究目标、目标结论和方法约束；不产生专用压缩保护审计 |
 | TC-K-05 | P1 | 面板筛选 action=block | 仅显示拦截记录 |
 

@@ -13,9 +13,6 @@
  */
 
 import { readFileSync } from 'node:fs';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describeToolReviewGateOverride, parseConfig } from '../core/config.js';
 import { DEFAULT_CONFIG, TOOL_REVIEW_GATE_MAX_MS, TOOL_REVIEW_GATE_MIN_MS } from '../core/types.js';
@@ -33,7 +30,6 @@ const DEFAULT_GATE_CONFIG = {
 
 const CTX = { sessionKey: 'agent:main:c13' };
 const origFetch = globalThis.fetch;
-const origCwd = process.cwd();
 
 /** Records the AbortSignal of every request and never resolves — the caller must give up. */
 function installHangingFetch(): { calls: number; signals: AbortSignal[] } {
@@ -54,7 +50,6 @@ function installHangingFetch(): { calls: number; signals: AbortSignal[] } {
 afterEach(() => {
   vi.useRealTimers();
   (globalThis as { fetch: unknown }).fetch = origFetch;
-  process.chdir(origCwd);
   vi.restoreAllMocks();
 });
 
@@ -133,17 +128,10 @@ describe('C13 the default deep-review gate is 4 seconds', () => {
 
 describe('C13 the gate is configurable end to end', () => {
   it('a value saved through the RPC is persisted to openclaw.json and survives a restart', async () => {
-    // Real file round-trip: persistConfig writes `<cwd>/config/openclaw.json`.
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-c13-'));
-    fs.mkdirSync(path.join(tmp, 'config'));
-    const cfgPath = path.join(tmp, 'config', 'openclaw.json');
-    fs.writeFileSync(cfgPath, JSON.stringify({ plugins: { entries: { 'dual-model-supervisor': { config: { enabled: true } } } } }, null, 2));
-    process.chdir(tmp);
-
     const h = await loadPluginFresh(DEFAULT_GATE_CONFIG);
     await h.rpc.get('rc.supervisor.config')!({ toolReviewGateMs: 2000 });
 
-    const persisted = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as {
+    const persisted = JSON.parse(readFileSync(h.configPath, 'utf8')) as {
       plugins: { entries: { 'dual-model-supervisor': { config: { toolReviewGateMs?: number } } } };
     };
     const savedCfg = persisted.plugins.entries['dual-model-supervisor'].config;
@@ -258,15 +246,6 @@ describe('C13 the declared range is enforced by the production parser', () => {
   });
 
   it('persists the clamped gate, so the file it leaves behind is one OpenClaw still accepts', async () => {
-    // persistConfig writes openclaw.json with a bare fs.writeFileSync, bypassing OpenClaw's
-    // config-write validation. Before the clamp, an out-of-range RPC write produced a file
-    // that the next gateway start rejected outright — the RPC could brick the restart.
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-c13-range-'));
-    fs.mkdirSync(path.join(tmp, 'config'));
-    const cfgPath = path.join(tmp, 'config', 'openclaw.json');
-    fs.writeFileSync(cfgPath, JSON.stringify({ plugins: { entries: { 'dual-model-supervisor': { config: { enabled: true } } } } }, null, 2));
-    process.chdir(tmp);
-
     const h = await loadPluginFresh(DEFAULT_GATE_CONFIG);
     const res = (await h.rpc.get('rc.supervisor.config')!({ toolReviewGateMs: 999999999 })) as {
       config: { toolReviewGateMs: number };
@@ -275,7 +254,7 @@ describe('C13 the declared range is enforced by the production parser', () => {
     // The caller is told the truth about what was stored, not echoed its own request.
     expect(res.config.toolReviewGateMs).toBe(30000);
 
-    const persisted = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as {
+    const persisted = JSON.parse(readFileSync(h.configPath, 'utf8')) as {
       plugins: { entries: { 'dual-model-supervisor': { config: { toolReviewGateMs?: number } } } };
     };
     expect(persisted.plugins.entries['dual-model-supervisor'].config.toolReviewGateMs).toBe(30000);

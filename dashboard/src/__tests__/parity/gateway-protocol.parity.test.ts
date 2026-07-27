@@ -931,7 +931,7 @@ describe('Gateway protocol parity with OpenClaw', () => {
   // ─── Request-when-disconnected ────────────────────────────────────
 
   describe('Request guard — openclaw/ui/src/ui/gateway.ts:447-449', () => {
-    it('rejects requests when not connected', () => {
+    it('rejects requests when not connected', async () => {
       // OpenClaw reference: ui/src/ui/gateway.ts:447-449
       //   if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       //     return Promise.reject(new Error("gateway not connected"));
@@ -942,7 +942,7 @@ describe('Gateway protocol parity with OpenClaw', () => {
       //   }
       const client = createClient();
       // Not connected yet
-      expect(() => client.request('config.get')).rejects.toThrow(/not connected/i);
+      await expect(client.request('config.get')).rejects.toThrow(/not connected/i);
     });
   });
 

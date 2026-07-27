@@ -11,7 +11,7 @@
 [![Version](https://img.shields.io/badge/version-v0.7.6-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
+[![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows_%7C_Linux-lightgrey?style=flat-square)](#)
 [![Skills](https://img.shields.io/badge/skills-433-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
 
 [🌐 wentor.ai](https://wentor.ai) · [🇬🇧 English](README.en.md) · [📖 文档](docs/00-reference-map.md) · [🪲 问题反馈](https://github.com/wentorai/Research-Claw/issues)
@@ -173,7 +173,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 | **论文评审** *(新)* | 结构化拆解论文优缺点，生成评审结论卡片 |
 | **任务** | Agent / Human 任务分层 · 四级优先级 · 48h 截止日期预警 |
 | **监控** | 追踪关键词 / 学者 / 期刊 · 自动化任务配置 · IM 推送 |
-| **质量管控** *(新)* | 独立审稿模型为每条回答做质量门控（详见下文） |
+| **质量管控** *(新)* | 可独立配置的审稿模型异步复审回答（详见下文） |
 | **扩展** *(新)* | IM 通道 / 技能 / MCP 管理 · 微信扫码登录 |
 | **设置** | Setup Wizard · API 协议探针一键识别端点 · 端点级上下文窗口调参 · 全程浏览器配置 |
 
@@ -285,8 +285,8 @@ curl -fsSL https://wentor.ai/install.sh | bash
 
 | 平台 | 方案 | 依赖 |
 |:--|:--|:--|
-| macOS / Linux | 一键安装脚本（推荐） | Git · Node.js 22（均自动安装） |
-| macOS / Linux | 手动安装（源码） | Git · Node.js 22+ · [pnpm](https://pnpm.io/installation) 9 |
+| macOS / Linux / WSL2 | 一键安装脚本（推荐） | Git · Node.js 22（均自动安装） |
+| macOS / Linux / WSL2 | 手动安装（源码） | Git · Node.js 22+ · [pnpm](https://pnpm.io/installation) 9 |
 | macOS / Linux / Windows | Docker 一键安装 | [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
 
 所有平台均需 LLM API Key（推荐 Anthropic Claude / OpenAI，支持国内中转 API）。

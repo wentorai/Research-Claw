@@ -450,7 +450,7 @@ export default function LeftNav() {
       >
         {collapsed ? (
           <Tooltip title={t('project.switchProject')} placement="right">
-            <Dropdown open={dropdownOpen} onOpenChange={handleDropdownOpenChange} dropdownRender={sessionDropdownRender} trigger={['click']} placement="bottomLeft">
+            <Dropdown open={dropdownOpen} onOpenChange={handleDropdownOpenChange} popupRender={sessionDropdownRender} trigger={['click']} placement="bottomLeft">
               <Button
                 type="text"
                 icon={<AppstoreOutlined />}
@@ -460,7 +460,7 @@ export default function LeftNav() {
           </Tooltip>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Dropdown open={dropdownOpen} onOpenChange={handleDropdownOpenChange} dropdownRender={sessionDropdownRender} trigger={['click']} placement="bottomLeft">
+            <Dropdown open={dropdownOpen} onOpenChange={handleDropdownOpenChange} popupRender={sessionDropdownRender} trigger={['click']} placement="bottomLeft">
               <div
                 style={{
                   display: 'flex',
@@ -493,7 +493,7 @@ export default function LeftNav() {
                 </div>
               }
               placement="right"
-              overlayStyle={{ maxWidth: 280 }}
+              styles={{ root: { maxWidth: 280 } }}
             >
               <QuestionCircleOutlined
                 style={{
@@ -601,7 +601,7 @@ export default function LeftNav() {
         okText={t('common.ok', 'OK')}
         cancelText={t('common.cancel', 'Cancel')}
         centered
-        destroyOnClose
+        destroyOnHidden
       >
         <Input
           autoFocus

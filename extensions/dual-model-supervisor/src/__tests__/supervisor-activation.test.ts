@@ -17,7 +17,10 @@
  *    log + audit + `rc.supervisor.status` all carry the reason.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadPluginFresh } from './harness/plugin-harness.js';
 
@@ -106,11 +109,12 @@ describe('C12 activation does not depend on the reviewer model', () => {
     const r = (await h.fire('before_tool_call', RM_RF, CTX)) as { block?: boolean };
     expect(r.block).toBe(true); // deterministic gate is independent of the reviewer protocol
 
-    // Observable degrade: startup log + audit + status all carry the reason.
-    expect(h.logs.warn.some((l) => /unsupported/i.test(l))).toBe(true);
+    // Observable degrade: terminal/audit copy is actionable; status retains the
+    // structured technical reason for diagnostics.
+    expect(h.logs.warn.some((l) => /AI review is unavailable/i.test(l))).toBe(true);
     const health = (await auditEntries(h)).filter((e) => e.type === 'reviewer_health');
     expect(health.length).toBe(1);
-    expect(health[0].details).toMatch(/openai-chatgpt-responses/);
+    expect(health[0].details).toMatch(/Choose a valid reviewer model/i);
 
     const st = (await h.rpc.get('rc.supervisor.status')!({})) as {
       reviewerReady?: boolean;
@@ -226,6 +230,26 @@ describe('C12 a broken reviewer provider can never take the gate down', () => {
 });
 
 describe('C12 the degrade is reported once per distinct state', () => {
+  it('surfaces a config write failure and keeps the prior runtime config active', async () => {
+    const h = await loadPluginFresh(
+      INHERIT_CONFIG,
+      globalConfig(),
+      { configMutationError: new Error('disk is read-only') },
+    );
+
+    await expect(
+      h.rpc.get('rc.supervisor.config')!({ supervisorModel: 'ghost/model' }),
+    ).rejects.toThrow(/disk is read-only/);
+
+    const status = (await h.rpc.get('rc.supervisor.status')!({})) as {
+      supervisorModel?: string;
+    };
+    expect(status.supervisorModel).toBe('');
+    expect(h.logs.error).toContain(
+      'RPC rc.supervisor.config error: disk is read-only',
+    );
+  });
+
   it('unrelated config saves do not re-emit it, but a changed reason does', async () => {
     const h = await loadPluginFresh(INHERIT_CONFIG, globalConfig({ api: 'openai-chatgpt-responses' }));
     const health = async () => (await auditEntries(h)).filter((e) => e.type === 'reviewer_health');
@@ -243,7 +267,51 @@ describe('C12 the degrade is reported once per distinct state', () => {
     await h.rpc.get('rc.supervisor.config')!({ supervisorModel: 'ghost/model' });
     const rows = await health();
     expect(rows.length).toBe(2);
-    expect(rows.some((e) => /ghost/.test(e.details))).toBe(true);
+    const status = (await h.rpc.get('rc.supervisor.status')!({})) as {
+      reviewerUnavailableReason?: string;
+    };
+    expect(status.reviewerUnavailableReason).toMatch(/ghost/);
+  });
+
+  it('uses one human-readable warning across gateway and agent-runtime module loads', async () => {
+    const databasePath = join(
+      tmpdir(),
+      `rc-supervisor-health-${randomUUID()}.db`,
+    );
+    const config = {
+      ...INHERIT_CONFIG,
+      dbPath: databasePath,
+      supervisorModel: 'missing/reviewer',
+    };
+    try {
+      const gatewayLoad = await loadPluginFresh(config, globalConfig());
+      const agentRuntimeLoad = await loadPluginFresh(config, globalConfig());
+
+      expect(gatewayLoad.logs.warn).toHaveLength(1);
+      expect(gatewayLoad.logs.warn[0]).toContain('AI review is unavailable');
+      expect(gatewayLoad.logs.warn[0]).toContain(
+        'Dangerous-command protection remains active',
+      );
+      expect(gatewayLoad.logs.warn[0]).toContain(
+        'Choose a valid reviewer model in Supervisor settings',
+      );
+      expect(gatewayLoad.logs.warn[0]).not.toMatch(
+        /models\.providers|available:|deterministic safety gate|quick check/i,
+      );
+
+      expect(agentRuntimeLoad.logs.warn).toHaveLength(0);
+      const healthRows = (await auditEntries(agentRuntimeLoad)).filter(
+        (entry) => entry.type === 'reviewer_health',
+      );
+      expect(healthRows).toHaveLength(1);
+      expect(healthRows[0].details).not.toMatch(
+        /models\.providers|available:|deterministic safety gate|quick check/i,
+      );
+    } finally {
+      for (const suffix of ['', '-wal', '-shm']) {
+        rmSync(`${databasePath}${suffix}`, { force: true });
+      }
+    }
   });
 });
 
@@ -262,6 +330,78 @@ describe('C12 the manifest documents the inherit marker truthfully', () => {
 });
 
 describe('C12 status reports the model source honestly', () => {
+  it('inherits credentials from the OpenClaw runtime instead of requiring an inline apiKey', async () => {
+    const complete = vi.fn(async (_params: {
+      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      model?: string;
+      systemPrompt?: string;
+      purpose?: string;
+    }) => ({
+      text: JSON.stringify({ blocked: false }),
+      provider: 'mainprov',
+      model: 'main-model',
+      agentId: 'main',
+      usage: {},
+      audit: { caller: { kind: 'plugin' as const, id: 'dual-model-supervisor' } },
+    }));
+    const h = await loadPluginFresh(
+      INHERIT_CONFIG,
+      globalConfig({ apiKey: undefined }),
+      { runtimeLlmComplete: complete },
+    );
+
+    const status = (await h.rpc.get('rc.supervisor.status')!({})) as {
+      modelSource?: string;
+      reviewerReady?: boolean;
+      reviewerUnavailableReason?: string;
+    };
+    expect(status.modelSource).toBe('inherited');
+    expect(status.reviewerReady).toBe(true);
+    expect(status.reviewerUnavailableReason).toBeUndefined();
+
+    await h.fire(
+      'before_tool_call',
+      { toolName: 'exec', params: { command: 'ls -la' } },
+      CTX,
+    );
+
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(complete.mock.calls[0]?.[0]).toMatchObject({
+      purpose: 'dual-model-supervisor review',
+      systemPrompt: expect.any(String),
+      messages: [{ role: 'user', content: expect.any(String) }],
+    });
+    // Empty supervisorModel means true dynamic inheritance. Passing an explicit
+    // model override would freeze the relationship and require extra OC policy.
+    expect(complete.mock.calls[0]?.[0].model).toBeUndefined();
+  });
+
+  it('does not call a parseable but nonexistent provider "ready" merely because the runtime exists', async () => {
+    const complete = vi.fn(async (_params: {
+      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+    }) => ({
+      text: JSON.stringify({ blocked: false }),
+      provider: 'ghost',
+      model: 'reviewer',
+      agentId: 'main',
+      usage: {},
+      audit: { caller: { kind: 'plugin' as const, id: 'dual-model-supervisor' } },
+    }));
+    const h = await loadPluginFresh(
+      { ...INHERIT_CONFIG, supervisorModel: 'ghost/reviewer' },
+      globalConfig(),
+      { runtimeLlmComplete: complete },
+    );
+
+    const status = (await h.rpc.get('rc.supervisor.status')!({})) as {
+      reviewerReady?: boolean;
+      reviewerUnavailableReason?: string;
+    };
+    expect(status.reviewerReady).toBe(false);
+    expect(status.reviewerUnavailableReason).toMatch(/provider "ghost" not found/);
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it('inherited + usable → modelSource "inherited", effective model = main model, ready', async () => {
     const h = await loadPluginFresh(INHERIT_CONFIG, globalConfig());
     const st = (await h.rpc.get('rc.supervisor.status')!({})) as {

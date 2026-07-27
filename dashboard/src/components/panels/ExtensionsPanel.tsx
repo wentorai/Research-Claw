@@ -1063,7 +1063,7 @@ function QrLoginModal({ tokens }: { tokens: ReturnType<typeof getThemeTokens> })
       footer={null}
       centered
       width={360}
-      destroyOnClose
+      destroyOnHidden
     >
       <div style={{ textAlign: 'center', padding: '16px 0' }}>
         {qrLoginState === 'loading' && (
@@ -1562,7 +1562,7 @@ function PptTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
           <Tooltip
             title={t('extensions.ppt.formatTooltip', 'Canvas format determines the dimensions and aspect ratio of the generated content. Choose based on your use case.')}
             placement="right"
-            overlayStyle={{ maxWidth: 280 }}
+            styles={{ root: { maxWidth: 280 } }}
           >
             <QuestionCircleOutlined
               style={{ fontSize: 12, color: tokens.text.muted, cursor: 'help' }}

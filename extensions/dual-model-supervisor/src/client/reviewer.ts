@@ -6,11 +6,27 @@
  * `baseUrl` is used as the HTTP POST URL as stored in config (only trailing `/` trimmed); do not append paths here — match whatever the gateway / dashboard persists for that provider.
  */
 
-import type { ModelsProviderEntry, PluginLogger, ReviewerReadiness, SupervisorConfig } from '../core/types.js';
+import type {
+  ModelsProviderEntry,
+  PluginLogger,
+  ReviewerReadiness,
+  RuntimeLlmComplete,
+  SupervisorConfig,
+} from '../core/types.js';
 import { SUPPORTED_REVIEWER_APIS } from '../core/types.js';
 import { parseModelRef } from '../core/config.js';
 import type { ReviewerApiAdapter } from './api-adapters.js';
 import { resolveAdapterForReviewer } from './api-adapters.js';
+
+/**
+ * User-facing degradation copy. Keep the structured technical reason in
+ * `rc.supervisor.status.reviewerUnavailableReason`; terminal and audit surfaces
+ * should tell a person what still works and what they can do next.
+ */
+export function describeReviewerUnavailableForUser(): string {
+  return 'AI review is unavailable. Dangerous-command protection remains active. '
+    + 'Choose a valid reviewer model in Supervisor settings, or check its API key, balance, and provider settings.';
+}
 
 function hasProviderAuth(providerCfg: ModelsProviderEntry): boolean {
   if (providerCfg.apiKey) return true;
@@ -71,6 +87,11 @@ export interface ReviewerClientOptions {
   providers: Record<string, ModelsProviderEntry>;
   logger: PluginLogger;
   fallbackModel?: string;
+  /**
+   * Host-owned completion path. It resolves OpenClaw auth profiles, environment
+   * credentials and provider runtime auth exactly like the main agent.
+   */
+  runtimeComplete?: RuntimeLlmComplete;
 }
 
 export class ReviewerClient {
@@ -79,6 +100,7 @@ export class ReviewerClient {
   private logger: PluginLogger;
   /** Fallback model reference from main model config (`agents.defaults.model.primary`). */
   private fallbackModel: string;
+  private readonly runtimeComplete?: RuntimeLlmComplete;
   /** Cached adapter for the effective reviewer model; refreshed on config/provider updates. */
   private _adapter: ReviewerApiAdapter | null = null;
   /**
@@ -101,6 +123,7 @@ export class ReviewerClient {
     this.providers = opts.providers;
     this.logger = opts.logger;
     this.fallbackModel = opts.fallbackModel ?? '';
+    this.runtimeComplete = opts.runtimeComplete;
     this._resolveAdapter();
   }
 
@@ -160,6 +183,28 @@ export class ReviewerClient {
       return unavailable(`provider "${parsed.provider}" not found in models.providers (available: ${Object.keys(this.providers).join(', ') || 'none'})`);
     }
 
+    // Typed `string | undefined`, but openclaw.json is hand-editable and the plugin's
+    // `providers` block is not covered by configSchema — the value is genuinely unknown.
+    if (typeof providerCfg.baseUrl !== 'string' || !providerCfg.baseUrl.trim()) {
+      return unavailable(`invalid baseUrl: models.providers.${parsed.provider}.baseUrl must be a non-empty string for the reviewer model`);
+    }
+
+    // Setup Wizard normally stores credentials in OpenClaw's auth profile
+    // store, not inline in models.providers. The host completion runtime is the
+    // canonical path that can resolve those credentials. Structural provider
+    // validation still happens above so a typo such as ghost/reviewer is not
+    // advertised as ready merely because the runtime function exists.
+    if (this.runtimeComplete) {
+      return {
+        readiness: {
+          ready: true,
+          modelSource: configuredSource,
+          effectiveModel,
+        },
+        adapter: null,
+      };
+    }
+
     const adapter = resolveAdapterForReviewer(parsed.provider, providerCfg.api);
     if (!adapter) {
       return unavailable(
@@ -169,12 +214,6 @@ export class ReviewerClient {
 
     if (!hasProviderAuth(providerCfg)) {
       return unavailable(`missing credentials: provider "${parsed.provider}" has no apiKey and no Authorization header`);
-    }
-
-    // Typed `string | undefined`, but openclaw.json is hand-editable and the plugin's
-    // `providers` block is not covered by configSchema — the value is genuinely unknown.
-    if (typeof providerCfg.baseUrl !== 'string' || !providerCfg.baseUrl.trim()) {
-      return unavailable(`invalid baseUrl: models.providers.${parsed.provider}.baseUrl must be a non-empty string for the reviewer model`);
     }
 
     return { readiness: { ready: true, modelSource: configuredSource, effectiveModel }, adapter };
@@ -309,11 +348,36 @@ export class ReviewerClient {
       const key = `${readiness.effectiveModel}|${readiness.reason ?? ''}`;
       if (key !== this._loggedReadinessKey) {
         this._loggedReadinessKey = key;
-        this.logger.error(`[ReviewerClient] Deep review unavailable — ${readiness.reason}`);
+        this.logger.error(`[ReviewerClient] ${describeReviewerUnavailableForUser()}`);
       }
       return null;
     }
     this._loggedReadinessKey = '';
+
+    if (this.runtimeComplete) {
+      const result = await this.runtimeComplete({
+        messages: [{ role: 'user', content: userContent }],
+        // Empty supervisorModel means dynamic inheritance. Omitting `model`
+        // lets the host choose the current main model and auth profile.
+        ...(this.supervisorConfig.supervisorModel.trim()
+          ? { model: readiness.effectiveModel }
+          : {}),
+        systemPrompt,
+        temperature: 0,
+        purpose: 'dual-model-supervisor review',
+        signal,
+      });
+      if (!result.text.trim()) {
+        this.logger.error('Reviewer API returned empty content');
+        return null;
+      }
+      const parsedJson = parseJsonFromResponse(result.text);
+      if (parsedJson === null) {
+        this.logger.error('[ReviewerClient] Failed to parse JSON from response');
+        return null;
+      }
+      return parsedJson;
+    }
 
     // Non-null by construction: readiness.ready ⇒ model parses, provider exists with
     // auth + baseUrl, and the adapter resolved.

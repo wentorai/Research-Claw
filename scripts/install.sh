@@ -6,6 +6,9 @@
 # Usage:
 #   curl -fsSL https://wentor.ai/install.sh | bash
 #
+# Platforms: macOS, Linux, and WSL2 (run inside the Linux distribution).
+# Native Windows users should use scripts/install-docker.ps1 with Docker Desktop.
+#
 # Idempotent: first run = install, subsequent runs = update + start.
 # All configuration is handled in the browser via Setup Wizard.
 #
@@ -155,7 +158,7 @@ step 1 "Platform check"
 OS="$(uname -s)"
 case "$OS" in
   Darwin) RC_OS=mac ;;
-  Linux)  RC_OS=linux ;;
+  Linux)  RC_OS=linux ;; # Includes WSL2.
   *)      die "Unsupported OS: $OS. Use macOS or Linux." ;;
 esac
 info "Platform: $OS / $(uname -m)"
