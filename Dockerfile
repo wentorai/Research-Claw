@@ -115,6 +115,12 @@ RUN pnpm install --node-linker=hoisted
 # ── 源码 + 构建 ──────────────────────────────────────────────────────
 COPY . .
 
+# The Docker release includes ppt-master's runtime skill from the pinned
+# submodule, but .dockerignore excludes its repository history and examples.
+# Fail here instead of publishing an image whose PPT tools silently cannot run.
+RUN test -f ppt-master/skills/ppt-master/scripts/project_manager.py && \
+    test -f ppt-master/skills/ppt-master/scripts/svg_to_pptx.py
+
 RUN pnpm build
 
 # ── research-plugins (skills + indexes + agent tools via OC plugin) ───

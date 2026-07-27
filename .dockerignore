@@ -6,14 +6,23 @@ node_modules
 dashboard/dist
 extensions/*/dist
 
+# ppt-master is a populated git submodule in release checkouts. Ship only its
+# runtime skill, never its nested .git history, docs, examples, or local projects.
+ppt-master/**
+!ppt-master/skills/
+!ppt-master/skills/ppt-master/
+!ppt-master/skills/ppt-master/**
+
 # User config — deny by default; only the release template enters the image.
 config/**
 !config/openclaw.example.json
+!config/research-compaction-instructions.txt
 
 # User data — volume-mounted at runtime
 .research-claw
 workspace/**
 !workspace/.ResearchClaw/
+workspace/.ResearchClaw/**
 !workspace/.ResearchClaw/AGENTS.md
 !workspace/.ResearchClaw/HEARTBEAT.md
 !workspace/.ResearchClaw/SOUL.md.example

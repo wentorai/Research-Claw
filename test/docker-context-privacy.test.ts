@@ -15,15 +15,22 @@ describe('Docker build context excludes local runtime data by default', () => {
   it('deny-lists workspace and config trees, then reopens only release templates', () => {
     const rules = dockerIgnoreRules();
     const workspaceRules = rules.filter(
-      (rule) => rule === 'workspace/**' || rule.startsWith('!workspace/'),
+      (rule) =>
+        rule === 'workspace/**' ||
+        rule === 'workspace/.ResearchClaw/**' ||
+        rule.startsWith('!workspace/'),
     );
     const configRules = rules.filter(
       (rule) => rule === 'config/**' || rule.startsWith('!config/'),
+    );
+    const pptMasterRules = rules.filter(
+      (rule) => rule === 'ppt-master/**' || rule.startsWith('!ppt-master/'),
     );
 
     expect(workspaceRules).toEqual([
       'workspace/**',
       '!workspace/.ResearchClaw/',
+      'workspace/.ResearchClaw/**',
       '!workspace/.ResearchClaw/AGENTS.md',
       '!workspace/.ResearchClaw/HEARTBEAT.md',
       '!workspace/.ResearchClaw/SOUL.md.example',
@@ -36,6 +43,23 @@ describe('Docker build context excludes local runtime data by default', () => {
     expect(configRules).toEqual([
       'config/**',
       '!config/openclaw.example.json',
+      '!config/research-compaction-instructions.txt',
     ]);
+    expect(pptMasterRules).toEqual([
+      'ppt-master/**',
+      '!ppt-master/skills/',
+      '!ppt-master/skills/ppt-master/',
+      '!ppt-master/skills/ppt-master/**',
+    ]);
+  });
+
+  it('makes a missing ppt-master runtime fail the image build explicitly', () => {
+    const dockerfile = readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+    expect(dockerfile).toContain(
+      'test -f ppt-master/skills/ppt-master/scripts/project_manager.py',
+    );
+    expect(dockerfile).toContain(
+      'test -f ppt-master/skills/ppt-master/scripts/svg_to_pptx.py',
+    );
   });
 });
