@@ -8,6 +8,12 @@ CONFIG_VERSION_FILE=$CONFIG_DIR/.config-version
 IMAGE_VERSION="0.7.5"
 PORT=${PORT:-28789}
 
+# Entrypoint chatter discipline: the GATEWAY's own output stays full in
+# `docker logs` (that's the container's diagnostic channel — never filtered).
+# Only the entrypoint's OWN step detail is gated: dbg() lines show only with
+# RC_VERBOSE=1. Keeps a clean first screen without hiding gateway diagnostics.
+dbg() { [ -n "$RC_VERBOSE" ] && echo "$@" || true; }
+
 # --- One-time migration: v0.5.3 fixed volume mount from /root → /app ---
 # Earlier versions mounted rc-data at /root/.research-claw but the plugin
 # resolves dbPath to /app/.research-claw. Copy data to the correct path.
@@ -138,64 +144,11 @@ fi
 # Shared config cleanup: plugins.allow, discovery.mdns, stale entries, auth token
 node /app/scripts/ensure-config.cjs "$CONFIG_FILE" 2>/dev/null || true
 
-# Docker-specific config patches (not in ensure-config.cjs — Docker only)
-node -e "
-  const fs = require('fs');
-  const f = '$CONFIG_FILE';
-  const c = JSON.parse(fs.readFileSync(f, 'utf8'));
-  let changed = false;
-
-  // Gateway: ensure Docker-compatible settings
-  if (!c.gateway) c.gateway = {};
-  if (c.gateway.bind !== 'lan') { c.gateway.bind = 'lan'; changed = true; }
-  if (!c.gateway.controlUi) c.gateway.controlUi = {};
-  if (!c.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback) {
-    c.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true;
-    changed = true;
-  }
-  if (!c.gateway.controlUi.dangerouslyDisableDeviceAuth) {
-    c.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
-    changed = true;
-  }
-
-  // Set default gateway auth token if none exists.
-  // Never overwrite — respects user-customized tokens for remote deployments.
-  // Docker users override via: docker run -e OPENCLAW_GATEWAY_TOKEN=my-secret ...
-  if (!c.gateway.auth) c.gateway.auth = {};
-  if (!c.gateway.auth.token) {
-    c.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN || 'research-claw';
-    changed = true;
-  }
-  if (c.gateway.auth.mode && c.gateway.auth.mode !== 'token') {
-    c.gateway.auth.mode = 'token';
-    changed = true;
-  }
-
-  // Plugin dbPath: Docker volume rc-data mounts at /app/.research-claw.
-  // ensure-config.cjs normalizes dbPath to os.homedir() (/root in container),
-  // which is NOT on the volume — database would be lost on container recreation.
-  // Force the volume-backed path so data persists across upgrades.
-  const DOCKER_DB_PATH = '/app/.research-claw/library.db';
-  const DOCKER_SUPERVISOR_DB_PATH = '/app/.research-claw/supervisor.db';
-  const rcEntry = c.plugins?.entries?.['research-claw-core'];
-  if (rcEntry) {
-    if (!rcEntry.config) { rcEntry.config = {}; changed = true; }
-    if (rcEntry.config.dbPath !== DOCKER_DB_PATH) {
-      rcEntry.config.dbPath = DOCKER_DB_PATH;
-      changed = true;
-    }
-  }
-  const dmsEntry = c.plugins?.entries?.['dual-model-supervisor'];
-  if (dmsEntry) {
-    if (!dmsEntry.config) { dmsEntry.config = {}; changed = true; }
-    if (dmsEntry.config.dbPath !== DOCKER_SUPERVISOR_DB_PATH) {
-      dmsEntry.config.dbPath = DOCKER_SUPERVISOR_DB_PATH;
-      changed = true;
-    }
-  }
-
-  if (changed) { const o=JSON.stringify(c,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); }
-" 2>&1 || echo "[research-claw] WARNING: Config patch failed — gateway may not start correctly"
+# Docker-only config patch. File-log level is raised to info only when it is
+# missing/quieter; explicit debug/trace survives. Paths travel through argv,
+# never through interpolated JavaScript source.
+node /app/scripts/docker-config-patch.cjs "$CONFIG_FILE" 2>&1 || \
+  echo "[research-claw] WARNING: Config patch failed — gateway may not start correctly"
 
 # --- Resolve relative paths to absolute (prevents CWD drift during agent runs) ---
 # Agent process.chdir(workspace/) changes CWD; relative paths in config break.
@@ -239,7 +192,7 @@ node -e "
     cfg.plugins.load.paths.push(rp);
     const o = JSON.stringify(cfg, null, 2) + '\n', t = f + '.tmp.' + process.pid;
     fs.writeFileSync(t, o); fs.renameSync(t, f);
-    console.log('[research-claw] Added research-plugins to plugins.load.paths');
+    if (process.env.RC_VERBOSE) console.log('[research-claw] Added research-plugins to plugins.load.paths');
   }
 " 2>/dev/null || true
 
@@ -320,27 +273,21 @@ ART
 printf "${N}\n  ${B}科研龙虾 — AI-Powered Local Research Assistant${N}\n"
 printf "  ${D}https://wentor.ai${N}\n\n"
 
-echo "[research-claw] Starting gateway on port $PORT..."
-echo "[research-claw] Open dashboard: http://127.0.0.1:$PORT/?token=$OPENCLAW_GATEWAY_TOKEN"
-echo "[research-claw] Gateway token: $OPENCLAW_GATEWAY_TOKEN"
-echo "[research-claw] (Tip: set OPENCLAW_GATEWAY_TOKEN env var for a fixed token)"
+echo "[research-claw] Dashboard: http://127.0.0.1:$PORT/?token=$OPENCLAW_GATEWAY_TOKEN"
+dbg "[research-claw] Gateway token: $OPENCLAW_GATEWAY_TOKEN (override via -e OPENCLAW_GATEWAY_TOKEN=…)"
 
 # Ensure `openclaw` CLI and conda Python are available to agent's system.run commands.
 export PATH="/opt/miniforge3/bin:/app/node_modules/.bin:$PATH"
 
-# --- Detect scientific environment ---
-# Log what's available so users can verify in `docker logs`.
+# --- Detect scientific environment (verbose only; gateway log records the rest) ---
 if command -v python3 >/dev/null 2>&1; then
-  PY_VER="$(python3 --version 2>&1 | awk '{print $2}')"
-  echo "[research-claw] Python: $PY_VER (Miniforge3)"
+  dbg "[research-claw] Python: $(python3 --version 2>&1 | awk '{print $2}') (Miniforge3)"
 fi
-if [ -x /usr/bin/chromium ]; then
-  echo "[research-claw] Chromium: headless (OC browser tool)"
-fi
+[ -x /usr/bin/chromium ] && dbg "[research-claw] Chromium: headless (OC browser tool)"
 if [ -f /host/zotero/zotero.sqlite ]; then
-  echo "[research-claw] Zotero: detected at /host/zotero"
+  dbg "[research-claw] Zotero: detected at /host/zotero"
 elif [ -d /host/zotero ]; then
-  echo "[research-claw] Zotero: mount present but no database found (~/Zotero empty on host?)"
+  dbg "[research-claw] Zotero: mount present but no database found (~/Zotero empty on host?)"
 fi
 
 STOP=false
@@ -390,10 +337,15 @@ while true; do
     exit 0
   fi
 
+  if [ "$CODE" -ne 0 ]; then
+    echo "[research-claw] ✗ Gateway exited (code $CODE). If it keeps failing, capture:"
+    echo "[research-claw]     docker logs <container>                          (this output)"
+    echo "[research-claw]     /app/.research-claw/logs/openclaw.log            (full gateway log, on rc-data volume)"
+  fi
   # Interruptible sleep: if a stop signal arrives during the restart backoff,
   # kill the sleep so the top-of-loop STOP check fires immediately instead of
   # waiting out the full 3s (and never restart into a doomed gateway).
-  echo "[research-claw] Gateway exited (code $CODE) — restarting in 3s..."
+  echo "[research-claw] Restarting in 3s..."
   sleep 3 &
   wait "$!" 2>/dev/null
 done

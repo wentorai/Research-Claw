@@ -333,7 +333,11 @@ function ensureConfig(filePath) {
   if (!isGlobal && !c.plugins?.entries) {
     if (!c.plugins) c.plugins = {};
     c.plugins.entries = {
-      'research-claw-core': { enabled: true, config: { dbPath: RC_DB_PATH, autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' } },
+      'research-claw-core': {
+        enabled: true,
+        hooks: { allowConversationAccess: true },
+        config: { dbPath: RC_DB_PATH, autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' },
+      },
       'openclaw-weixin': { enabled: true },
       'dual-model-supervisor': { enabled: true },
       'research-superpower': { enabled: true },
@@ -463,11 +467,16 @@ function ensureConfig(filePath) {
       changed = true;
     }
 
-    const dmsEntry = c.plugins?.entries?.['dual-model-supervisor'];
-    if (dmsEntry && dmsEntry.hooks?.allowConversationAccess !== true) {
-      if (!dmsEntry.hooks) dmsEntry.hooks = {};
-      dmsEntry.hooks.allowConversationAccess = true;
-      changed = true;
+    // Typed hooks that inspect agent_end conversation/run metadata are blocked
+    // for non-bundled plugins unless this permission is explicit. Core needs it
+    // for runtime tools/skills reconciliation; DMS needs it for supervision.
+    for (const pluginId of ['research-claw-core', 'dual-model-supervisor']) {
+      const entry = c.plugins?.entries?.[pluginId];
+      if (entry && entry.hooks?.allowConversationAccess !== true) {
+        if (!entry.hooks) entry.hooks = {};
+        entry.hooks.allowConversationAccess = true;
+        changed = true;
+      }
     }
 
     // OC 2026.6.1: channel.commands is not in schema (feishu/qqbot/etc.)
@@ -564,6 +573,28 @@ function ensureConfig(filePath) {
   if (needsResetPolicy) {
     c.session.reset = { mode: 'idle', idleMinutes: RC_SESSION_IDLE_MINUTES };
     changed = true;
+  }
+
+  // N. Logging — quiet terminal, full persistent file log (project config only).
+  // Rationale: gateway INFO chatter on the terminal only confuses users who
+  // can't act on P1/P2 noise; the full detail belongs in a file we can ask
+  // them to send. consoleLevel=warn quiets stdout; level=info keeps the file
+  // complete; file=<persistent path> survives reboots (unlike /tmp).
+  // 3-state: inject when absent, fill missing keys, NEVER override user values.
+  if (!isGlobal) {
+    const LOG_DEFAULTS = {
+      level: 'info',
+      consoleLevel: 'warn',
+      file: '~/.research-claw/logs/openclaw.log',
+    };
+    if (!c.logging || typeof c.logging !== 'object' || Array.isArray(c.logging)) {
+      c.logging = { ...LOG_DEFAULTS };
+      changed = true;
+    } else {
+      for (const [k, v] of Object.entries(LOG_DEFAULTS)) {
+        if (c.logging[k] === undefined) { c.logging[k] = v; changed = true; }
+      }
+    }
   }
 
   // Write atomically (temp + rename) to prevent corruption on disk-full

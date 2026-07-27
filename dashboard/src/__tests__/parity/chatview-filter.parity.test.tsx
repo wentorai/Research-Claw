@@ -29,6 +29,8 @@ import {
   MIXED_HISTORY,
 } from '../../__fixtures__/gateway-payloads/ui-events';
 
+const gatewayMock = vi.hoisted(() => ({ state: 'connected' as string }));
+
 // ── Mock react-i18next ──────────────────────────────────────────────
 
 vi.mock('react-i18next', () => ({
@@ -53,7 +55,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../stores/gateway', () => ({
   useGatewayStore: (selector: Function) => {
-    const state = { client: null, state: 'disconnected' };
+    const state = { client: null, state: gatewayMock.state };
     return selector(state);
   },
 }));
@@ -69,9 +71,13 @@ beforeEach(() => {
     runId: null,
     sessionKey: 'main',
     lastError: null,
+    lastErrorMeta: null,
+    canContinue: false,
+    _lastSentDraft: null,
     tokensIn: 0,
     tokensOut: 0,
   });
+  gatewayMock.state = 'connected';
   useStagedWritingStore.setState({ job: null, restored: false });
 });
 
@@ -417,5 +423,107 @@ describe('ChatView error banner', () => {
     render(<ChatView />);
 
     expect(screen.queryByText('Connection lost')).not.toBeInTheDocument();
+  });
+
+  it('shows Resend for a foreground no-output failure even when only the visible user turn remains', () => {
+    useChatStore.setState({
+      messages: [{ role: 'user', text: '请检查监控任务', timestamp: 1 }],
+      lastError: 'Timed out',
+      lastErrorMeta: {
+        kind: 'timeout',
+        category: 'foreground-resend',
+        message: 'Timed out',
+        suggestion: null,
+        retryable: true,
+        raw: 'request timed out',
+      },
+      _lastSentDraft: null,
+    });
+
+    render(<ChatView />);
+
+    expect(screen.getByRole('button', { name: 'chat.resend' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'chat.openSettings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'chat.refreshHistory' })).not.toBeInTheDocument();
+  });
+
+  it('keeps Resend visible but disabled until the gateway reconnects', () => {
+    gatewayMock.state = 'disconnected';
+    useChatStore.setState({
+      messages: [{ role: 'user', text: 'retry me', timestamp: 1 }],
+      lastError: 'Network down',
+      lastErrorMeta: {
+        kind: 'network',
+        category: 'foreground-resend',
+        message: 'Network down',
+        suggestion: null,
+        retryable: true,
+        raw: 'ECONNREFUSED',
+      },
+    });
+
+    render(<ChatView />);
+
+    expect(screen.getByRole('button', { name: 'chat.resend' })).toBeDisabled();
+  });
+
+  it('shows settings/history only for configuration-fixable failures', () => {
+    useChatStore.setState({
+      lastError: 'Authentication failed',
+      lastErrorMeta: {
+        kind: 'auth',
+        category: 'config-fixable',
+        message: 'Authentication failed',
+        suggestion: 'Fix the API key',
+        retryable: false,
+        raw: 'HTTP 401',
+      },
+    });
+
+    render(<ChatView />);
+
+    expect(screen.getByRole('button', { name: 'chat.openSettings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'chat.refreshHistory' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'chat.resend' })).not.toBeInTheDocument();
+  });
+
+  it('shows New session for context overflow instead of settings or resend', () => {
+    useChatStore.setState({
+      lastError: 'Context overflow',
+      lastErrorMeta: {
+        kind: 'context_overflow',
+        category: 'unrecoverable',
+        message: 'Context overflow',
+        suggestion: null,
+        retryable: false,
+        raw: 'prompt too large',
+      },
+    });
+
+    render(<ChatView />);
+
+    expect(screen.getByRole('button', { name: 'chat.newSession' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'chat.openSettings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'chat.resend' })).not.toBeInTheDocument();
+  });
+
+  it('shows Continue only for a recoverable partial-output failure', () => {
+    useChatStore.setState({
+      lastError: 'Interrupted after partial output',
+      canContinue: true,
+      lastErrorMeta: {
+        kind: 'timeout',
+        category: 'foreground-continue',
+        message: 'Interrupted after partial output',
+        suggestion: null,
+        retryable: false,
+        raw: 'request timed out',
+      },
+    });
+
+    render(<ChatView />);
+
+    expect(screen.getByRole('button', { name: 'chat.continueRun' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'chat.resend' })).not.toBeInTheDocument();
   });
 });

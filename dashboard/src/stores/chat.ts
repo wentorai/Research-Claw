@@ -18,6 +18,7 @@ import { CHAT_IMAGE_DIR, appendReferenceBlock, dedupePaths, isImagePath } from '
 import { buildAutoLongTaskPrompt, detectLongTaskIntent, shouldPromoteLongTaskWithoutConfirmation } from '../utils/long-task';
 import i18n from '../i18n';
 import { sanitizeUserMessage, CRON_REMINDER_RE } from '../utils/sanitize-message';
+import { classifyRunFailure, type RunFailureInfo } from '../utils/run-failure';
 import { sanitizeAssistantMessage } from '../utils/sanitize-assistant-message';
 import { parseSlashCommand, executeSlashCommand } from '../utils/slash-commands';
 import {
@@ -72,8 +73,6 @@ const RECONNECT_STALE_MS = 15_000;
 /** Max age (ms) for a pending tool with no events before watchdog treats it as hung. */
 const WATCHDOG_TOOL_STALE_MS = 120_000;
 
-const CONTEXT_OVERFLOW_RE = /context overflow|prompt too large|too large for the model/i;
-
 type AgentFailureData = {
   phase?: string;
   error?: string;
@@ -86,11 +85,8 @@ type AgentFailureData = {
 };
 
 function formatRunFailureForUser(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return i18n.t('chat.runEndedNoOutput');
-  if (CONTEXT_OVERFLOW_RE.test(trimmed)) return i18n.t('chat.contextOverflow');
-  if (trimmed.startsWith('⚠️') || trimmed.startsWith('Error:')) return trimmed;
-  return trimmed;
+  // Classification (auth/network/timeout/rate_limit/…) lives in utils/run-failure.
+  return classifyRunFailure(raw).message;
 }
 
 function formatStructuredRunFailureForUser(data: AgentFailureData): string {
@@ -193,10 +189,16 @@ function startStaleStreamWatchdog(get: () => ChatState) {
       useChatStore.setState(clearActiveRunState());
       void useChatStore.getState().loadHistory().then(() => {
         if (detectRunEndedWithoutReply(useChatStore.getState().messages)) {
-          useChatStore.setState({ lastError: i18n.t('chat.runEndedNoOutput') });
+          useChatStore.setState({ lastError: i18n.t('chat.runEndedNoOutput'), lastErrorMeta: classifyRunFailure('') });
         } else {
           const message = i18n.t('chat.runStoppedAfterStaleStream');
-          useChatStore.setState({ lastError: message });
+          useChatStore.setState({
+            lastError: message,
+            lastErrorMeta: {
+              ...classifyRunFailure(message),
+              message,
+            },
+          });
           useUiStore.getState().addNotification({
             type: 'error',
             title: i18n.t('chat.runIssueNotificationTitle'),
@@ -435,6 +437,7 @@ export interface ChatInputRestore {
 }
 
 interface LastSentDraft extends ChatInputRestore {
+  references: string[];
   runId: string;
 }
 
@@ -475,39 +478,6 @@ function filterAbortedUserMessagesFromTranscript(
     out.push(m);
   }
   return { messages: out, suppressCounts: next };
-}
-
-function isEmptyAbortedAssistantMessage(message: ChatMessage): boolean {
-  if (message.role !== 'assistant') return false;
-  const stopReason = message.stopReason;
-  const errorCode = (message as { errorCode?: string }).errorCode;
-  const errorMessage = (message as { errorMessage?: string }).errorMessage ?? '';
-  const aborted =
-    stopReason === 'aborted'
-    || errorCode === '20'
-    || /aborted/i.test(errorMessage);
-  return aborted && extractText(message).trim().length === 0;
-}
-
-function removeEmptyAbortedTurns(messages: ChatMessage[]): ChatMessage[] {
-  const out: ChatMessage[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    const current = messages[i];
-    const next = messages[i + 1];
-    if (
-      current?.role === 'user'
-      && next
-      && isEmptyAbortedAssistantMessage(next)
-    ) {
-      // The dashboard removes optimistic user input when a run is aborted.
-      // If the gateway transcript later reloads the empty aborted turn, keep
-      // the UI consistent by dropping both the cancelled user and empty reply.
-      i += 1;
-      continue;
-    }
-    out.push(current);
-  }
-  return out;
 }
 
 function bumpAbortedUserSuppress(
@@ -559,6 +529,10 @@ interface ChatState {
   runId: string | null;
   sessionKey: string;
   lastError: string | null;
+  /** Structured diagnosis for the current lastError (kind / suggestion /
+   *  retryable / raw provider text). Always set and cleared TOGETHER with
+   *  lastError — a stale meta must never gate the Retry button. */
+  lastErrorMeta: RunFailureInfo | null;
   /** True after a non-user abort (gateway timeout / system stop) — gates the
    *  "continue" affordance (inline button + top banner). Cleared on the next
    *  send/continue or when the error is dismissed. */
@@ -619,6 +593,9 @@ interface ChatState {
   onGapDetected: () => void;
   setSessionKey: (key: string) => void;
   clearError: () => void;
+  /** Resend the last draft after a retryable failure — new run, new
+   *  idempotencyKey. No-op while a run is active or without a saved draft. */
+  retry: () => void;
   /** Resume after a timeout/system abort — sends a continuation instruction and
    *  clears canContinue. No-op if a run is already active. */
   continueRun: () => void;
@@ -640,6 +617,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   runId: null,
   sessionKey: 'main',
   lastError: null,
+  lastErrorMeta: null,
   canContinue: false,
   tokensIn: 0,
   tokensOut: 0,
@@ -676,7 +654,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   send: async (text: string, attachments?: ChatAttachment[], options?: { displayText?: string; references?: string[] }) => {
     const client = useGatewayStore.getState().client;
     if (!client || !client.isConnected) {
-      set({ lastError: i18n.t('chat.notConnected') });
+      set({ lastError: i18n.t('chat.notConnected'), lastErrorMeta: null });
       return;
     }
 
@@ -744,6 +722,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               runId: null,
               sending: false,
               lastError: null,
+              lastErrorMeta: null,
               _pendingGapReload: false,
               _pendingUserMsgs: [],
               _streamStartedAt: null,
@@ -761,7 +740,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           set((s) => ({ messages: [...s.messages, userMsg, sysMsg] }));
         }
       } catch (err) {
-        set({ lastError: err instanceof Error ? err.message : i18n.t('chat.commandFailed') });
+        set({ lastError: err instanceof Error ? err.message : i18n.t('chat.commandFailed'), lastErrorMeta: null });
       }
       return; // Don't send to agent
     }
@@ -796,22 +775,22 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             timestamp: Date.now(),
           };
           get().appendLocalMessage(userMessage);
-          set({ lastError: null });
+          set({ lastError: null, lastErrorMeta: null });
 
           if (staged.job && !isStagedWritingJobForSession(staged.job, currentSessionKey)) {
             if (writingIntent.mode === 'scan' || writingIntent.mode === 'resume') {
-              set({ lastError: i18n.t('stagedWriting.chatWrongSession') });
+              set({ lastError: i18n.t('stagedWriting.chatWrongSession'), lastErrorMeta: null });
               return;
             }
             if (staged.job.status === 'running') {
-              set({ lastError: i18n.t('stagedWriting.chatRunningOtherSession') });
+              set({ lastError: i18n.t('stagedWriting.chatRunningOtherSession'), lastErrorMeta: null });
               return;
             }
           }
 
           if (writingIntent.mode === 'scan') {
             if (!staged.job) {
-              set({ lastError: i18n.t('stagedWriting.chatNoJob') });
+              set({ lastError: i18n.t('stagedWriting.chatNoJob'), lastErrorMeta: null });
               return;
             }
             await staged.syncStageFiles();
@@ -820,23 +799,23 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
           if (writingIntent.mode === 'resume') {
             if (!staged.job) {
-              set({ lastError: i18n.t('stagedWriting.chatNoJob') });
+              set({ lastError: i18n.t('stagedWriting.chatNoJob'), lastErrorMeta: null });
               return;
             }
             if (staged.job.status === 'running') {
-              set({ lastError: i18n.t('stagedWriting.chatAlreadyRunning') });
+              set({ lastError: i18n.t('stagedWriting.chatAlreadyRunning'), lastErrorMeta: null });
               return;
             }
             const ok = await staged.resumeJob();
             if (!ok) {
               const afterJob = useStagedWritingStore.getState().job;
-              set({ lastError: afterJob?.lastError ?? i18n.t('stagedWriting.chatNoJob') });
+              set({ lastError: afterJob?.lastError ?? i18n.t('stagedWriting.chatNoJob'), lastErrorMeta: null });
             }
             return;
           }
 
           if (staged.job?.status === 'running') {
-            set({ lastError: i18n.t('stagedWriting.chatAlreadyRunning') });
+            set({ lastError: i18n.t('stagedWriting.chatAlreadyRunning'), lastErrorMeta: null });
             return;
           }
 
@@ -852,7 +831,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           });
           if (!ok) {
             const job = useStagedWritingStore.getState().job;
-            set({ lastError: job?.lastError ?? i18n.t('chat.sendFailed') });
+            set({ lastError: job?.lastError ?? i18n.t('chat.sendFailed'), lastErrorMeta: null });
           }
           return;
         }
@@ -894,7 +873,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           void useJobsStore.getState().loadJobs();
         } catch (err) {
           console.warn('[Chat] Long task auto-submit failed:', err);
-          set({ lastError: err instanceof Error ? err.message : i18n.t('chat.sendFailed') });
+          set({ lastError: err instanceof Error ? err.message : i18n.t('chat.sendFailed'), lastErrorMeta: null });
           return;
         }
       }
@@ -931,6 +910,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       messages: [...s.messages, userMessage],
       sending: true,
       lastError: null,
+      lastErrorMeta: null,
       canContinue: false,
       _userAbortedRunId: null,
       streamText: null,
@@ -939,6 +919,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       _lastSentDraft: {
         text: displayText,
         attachments: cloneAttachments(attachments),
+        references: [...refPaths],
         runId: localRunId,
       },
       inputRestore: null,
@@ -1077,6 +1058,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         runId: null,
         _streamStartedAt: null, _lastDeltaAt: null,
         lastError: err instanceof Error ? err.message : i18n.t('chat.sendFailed'),
+        lastErrorMeta: classifyRunFailure(
+          err instanceof Error ? err.message : i18n.t('chat.sendFailed'),
+        ),
       });
       useTaskFlowStore.getState().endRun(localRunId, 'error');
     }
@@ -1178,7 +1162,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // Strip system-injected context and channel relay attribution from user messages.
       // Uses unified sanitizeUserMessage() which handles all known injection patterns:
       // [Research-Claw] blocks, System: lines, channel attributions (ou_xxx:, [System:], etc.)
-      const cleaned = removeEmptyAbortedTurns(visible
+      const cleaned = visible
         .map((m) => {
           if (m.role !== 'user') return m;
           const rawText = extractText(m);
@@ -1188,7 +1172,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           // Only set text override; keep original content for image rendering
           return { ...m, text: stripped };
         })
-        .filter(Boolean) as ChatMessage[]);
+        .filter(Boolean) as ChatMessage[];
 
       const filtered = filterAbortedUserMessagesFromTranscript(
         cleaned,
@@ -1313,7 +1297,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       data?: AgentFailureData;
     };
 
-    if (evt.sessionKey && normalizeSessionKey(evt.sessionKey) !== normalizeSessionKey(get().sessionKey)) {
+    // Session-less agent errors can belong to cron, heartbeat, or another
+    // operator. They must never leak into whichever chat happens to be active.
+    if (
+      !evt.sessionKey
+      || normalizeSessionKey(evt.sessionKey) !== normalizeSessionKey(get().sessionKey)
+    ) {
       return;
     }
 
@@ -1341,6 +1330,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       ...clearActiveRunState(),
       sending: false,
       lastError: failureText,
+      lastErrorMeta: {
+        ...classifyRunFailure(String(evt.data?.reason ?? evt.data?.error ?? '')),
+        message: failureText,
+      },
     });
     void get().loadHistory();
   },
@@ -1424,7 +1417,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             void get().loadHistory().then(() => {
               // Don't classify as "no output" while we are mid-compaction/retry.
               if (!wasCompacting && detectRunEndedWithoutReply(get().messages)) {
-                set({ lastError: i18n.t('chat.runEndedNoOutput') });
+                set({ lastError: i18n.t('chat.runEndedNoOutput'), lastErrorMeta: classifyRunFailure('') });
               }
             });
             useTaskFlowStore.getState().endRun(runId, wasCompacting ? 'clear' : 'done');
@@ -1456,6 +1449,16 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         };
 
         if (event.runId === runId) {
+          // OC surface_error finals use the exact "Agent failed before reply"
+          // contract. A naked warning emoji is ordinary answer content. Such a
+          // final ENDS the run but is a
+          // failure: keep the draft for Retry, and classify here so the Alert
+          // appears deterministically — the follow-up agent-failure event may
+          // be dropped by its own guards once this final clears runId (race
+          // observed live: "⚠️ Agent failed before reply: Unknown model: …").
+          const isSurfacedFailure =
+            event.message.isError === true
+            || /^(?:⚠️\s*)?(?:embedded\s+)?agent failed before reply:/i.test(text.trimStart());
           set((s) => ({
             messages: [...s.messages, finalMsg],
             streaming: false,
@@ -1464,9 +1467,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             runId: null,
             _pendingUserMsgs: [],
             _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
-            _lastSentDraft: s._lastSentDraft?.runId === runId ? null : s._lastSentDraft,
+            _lastSentDraft:
+              s._lastSentDraft?.runId === runId && !isSurfacedFailure
+                ? null
+                : s._lastSentDraft,
           }));
-          useTaskFlowStore.getState().endRun(runId, 'done');
+          if (isSurfacedFailure) {
+            const surfacedFailure = classifyRunFailure(text);
+            set({ lastError: surfacedFailure.message, lastErrorMeta: surfacedFailure });
+            useTaskFlowStore.getState().endRun(runId, 'error');
+          } else {
+            useTaskFlowStore.getState().endRun(runId, 'done');
+          }
           // After a full conversation turn, refresh panel data
           // (the LLM may have used tools that modified library/tasks/workspace)
           console.log('[Chat] Run complete → refreshing panel stores');
@@ -1558,55 +1570,54 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // gateway timeout / system abort (same 'aborted' event, no tag). Only the latter
         // surfaces an error + "continue" affordance; user stops stay silent.
         const wasUserAbort = get()._userAbortedRunId !== null && get()._userAbortedRunId === runId;
-        const abortPatch = wasUserAbort
-          ? { _userAbortedRunId: null }
-          : { _userAbortedRunId: null, lastError: i18n.t('chat.runTimedOut'), canContinue: true };
-
-        // Match restore to client runId (idempotencyKey), not gateway event.runId.
-        const partialText = get().streamText;
-        if (partialText) {
-          const abortedMsg: ChatMessage = {
-            role: 'assistant',
-            text: partialText,
-            timestamp: Date.now(),
-          };
+        const partialText = get().streamText?.trim() ? get().streamText : null;
+        if (wasUserAbort) {
+          // Match restore to client runId (idempotencyKey), not gateway event.runId.
           set((s) => {
             const restore = buildAbortInputRestorePatch(s, runId);
+            const restoredMessages = restore?.messages ?? s.messages;
             return {
-              messages: [...(restore?.messages ?? s.messages), abortedMsg],
-              streaming: false,
-              compacting: false,
-              streamText: null,
-              runId: null,
-              _streamStartedAt: null,
-              _lastDeltaAt: null,
-              _reconnectedAt: null,
+              ...clearActiveRunState(),
               ...(restore ?? { _pendingUserMsgs: [] }),
-              ...abortPatch,
+              messages: partialText
+                ? [...restoredMessages, { role: 'assistant', text: partialText, timestamp: Date.now() }]
+                : restoredMessages,
+              _userAbortedRunId: null,
+              canContinue: false,
             };
           });
         } else {
-          set((s) => {
-            const restore = buildAbortInputRestorePatch(s, runId);
-            return {
-              streaming: false,
-              compacting: false,
-              streamText: null,
-              runId: null,
-              _streamStartedAt: null,
-              _lastDeltaAt: null,
-              _reconnectedAt: null,
-              ...(restore ?? { _pendingUserMsgs: [] }),
-              ...abortPatch,
-            };
-          });
+          const timeoutMessage = partialText
+            ? i18n.t('chat.runTimedOut')
+            : i18n.t('chat.runTimedOutNoOutput');
+          const failureInfo = {
+            ...classifyRunFailure('request timed out', undefined, {
+              origin: 'foreground',
+              hasPartialOutput: Boolean(partialText),
+            }),
+            message: timeoutMessage,
+            retryable: !partialText,
+          };
+          set((s) => ({
+            ...clearActiveRunState(),
+            messages: partialText
+              ? [...s.messages, { role: 'assistant', text: partialText, timestamp: Date.now() }]
+              : s.messages,
+            _pendingUserMsgs: [],
+            _userAbortedRunId: null,
+            lastError: timeoutMessage,
+            lastErrorMeta: failureInfo,
+            canContinue: Boolean(partialText),
+          }));
         }
         // Top-banner notification for timeout/system aborts (user stops stay silent).
         if (!wasUserAbort) {
           useUiStore.getState().addNotification({
             type: 'error',
             title: i18n.t('chat.runIssueNotificationTitle'),
-            body: i18n.t('chat.runTimedOut'),
+            body: partialText
+              ? i18n.t('chat.runTimedOut')
+              : i18n.t('chat.runTimedOutNoOutput'),
             dedupKey: `chat-run-timeout:${get().sessionKey}:${runId ?? 'unknown'}`,
             targetSessionKey: get().sessionKey,
           });
@@ -1625,13 +1636,24 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // Same triple-AND pattern as delta/aborted.
         if (event.runId && runId && event.runId !== runId) return;
 
-        set({
+        // Classify with the gateway's own errorKind first; free-text sniffing
+        // covers auth/network cases that upstream maps to "unknown".
+        const partialText = get().streamText?.trim() ? get().streamText : null;
+        const failureInfo = classifyRunFailure(
+          event.errorMessage ?? '',
+          event.errorKind,
+          { origin: 'foreground', hasPartialOutput: Boolean(partialText) },
+        );
+        set((s) => ({
           ...clearActiveRunState(),
+          messages: partialText
+            ? [...s.messages, { role: 'assistant', text: partialText, timestamp: Date.now() }]
+            : s.messages,
           _pendingUserMsgs: [],
-          lastError: event.errorMessage
-            ? formatRunFailureForUser(event.errorMessage)
-            : i18n.t('chat.runEndedNoOutput'),
-        });
+          lastError: failureInfo.message,
+          lastErrorMeta: failureInfo,
+          canContinue: failureInfo.category === 'foreground-continue',
+        }));
         // Deferred gap recovery
         if (get()._pendingGapReload) {
           set({ _pendingGapReload: false });
@@ -1658,6 +1680,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       runId: null,
       sending: false,
       lastError: null,
+      lastErrorMeta: null,
       tokensIn: 0,
       tokensOut: 0,
       _pendingGapReload: false,
@@ -1685,14 +1708,39 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   clearError: () => {
-    set({ lastError: null, canContinue: false });
+    set({ lastError: null, lastErrorMeta: null, canContinue: false });
   },
 
   continueRun: () => {
     // Guard: only resume when idle (no active run) and a continue is actually offered.
     if (get().streaming || get().sending || !get().canContinue) return;
-    set({ canContinue: false, lastError: null });
+    set({ canContinue: false, lastError: null, lastErrorMeta: null });
     void get().send(i18n.t('chat.continueInstruction'));
+  },
+
+  retry: () => {
+    const { streaming, sending, _lastSentDraft, messages } = get();
+    // Same idle guard as continueRun; a Retry during an active run would fork it.
+    if (streaming || sending) return;
+    const latestUserMessage = [...messages].reverse().find((message) =>
+      message.role === 'user'
+      && (Boolean(extractText(message).trim()) || Boolean(message.references?.length)),
+    );
+    const draft = _lastSentDraft ?? (latestUserMessage
+      ? {
+          text: extractText(latestUserMessage),
+          attachments: [] as ChatAttachment[],
+          references: [...(latestUserMessage.references ?? [])],
+          runId: '',
+        }
+      : null);
+    if (!draft) return;
+    set({ lastError: null, lastErrorMeta: null, canContinue: false });
+    // send() generates a fresh localRunId → fresh idempotencyKey: the failed
+    // attempt was never persisted, so this is a NEW run, not a duplicate.
+    void get().send(draft.text, draft.attachments, {
+      references: draft.references,
+    });
   },
 
   updateTokens: (input: number, output: number) => {

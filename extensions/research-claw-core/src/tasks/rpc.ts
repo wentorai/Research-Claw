@@ -170,307 +170,232 @@ export function registerTaskRpc(registerMethod: RegisterMethod, service: TaskSer
   // ── 1. rc.task.list ───────────────────────────────────────────────
 
   registerMethod('rc.task.list', async (params: Record<string, unknown>) => {
-    try {
-      const listParams: ListParams = {
-        offset: optionalNumber(params.offset, 'offset', 0),
-        limit: optionalNumber(params.limit, 'limit', 1, 200),
-        status: optionalEnum(params.status, 'status', VALID_STATUSES),
-        priority: optionalEnum(params.priority, 'priority', VALID_PRIORITIES),
-        task_type: optionalEnum(params.task_type, 'task_type', VALID_TASK_TYPES),
-        sort: optionalEnum(params.sort, 'sort', [...VALID_SORT_COLUMNS]),
-        direction: optionalEnum(params.direction, 'direction', [...VALID_DIRECTIONS]),
-        include_completed: optionalBoolean(params.include_completed, 'include_completed'),
-      };
+    const listParams: ListParams = {
+      offset: optionalNumber(params.offset, 'offset', 0),
+      limit: optionalNumber(params.limit, 'limit', 1, 200),
+      status: optionalEnum(params.status, 'status', VALID_STATUSES),
+      priority: optionalEnum(params.priority, 'priority', VALID_PRIORITIES),
+      task_type: optionalEnum(params.task_type, 'task_type', VALID_TASK_TYPES),
+      sort: optionalEnum(params.sort, 'sort', [...VALID_SORT_COLUMNS]),
+      direction: optionalEnum(params.direction, 'direction', [...VALID_DIRECTIONS]),
+      include_completed: optionalBoolean(params.include_completed, 'include_completed'),
+    };
 
-      return service.list(listParams);
-    } catch (err) {
-      if (err instanceof RpcValidationError) {
-        throw new Error(err.message);
-      }
-      throw err;
-    }
+    return service.list(listParams);
   });
 
   // ── 2. rc.task.get ────────────────────────────────────────────────
 
   registerMethod('rc.task.get', async (params: Record<string, unknown>) => {
-    try {
-      const id = requireString(params.id, 'id');
-      const taskWithDetails = service.get(id);
+    const id = requireString(params.id, 'id');
+    const taskWithDetails = service.get(id);
 
-      if (taskWithDetails === null) {
-        throw new Error(`Task not found: ${id}`);
-      }
-
-      return taskWithDetails;
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    if (taskWithDetails === null) {
+      throw new Error(`Task not found: ${id}`);
     }
+
+    return taskWithDetails;
   });
 
   // ── 3. rc.task.create ─────────────────────────────────────────────
 
   registerMethod('rc.task.create', async (params: Record<string, unknown>) => {
-    try {
-      const taskData = requireObject(params.task, 'task');
+    const taskData = requireObject(params.task, 'task');
 
-      const input: TaskInput = {
-        title: requireString(taskData.title, 'task.title'),
-        task_type: requireEnum(taskData.task_type, 'task.task_type', VALID_TASK_TYPES),
-        description: optionalString(taskData.description, 'task.description'),
-        priority: optionalEnum(taskData.priority, 'task.priority', VALID_PRIORITIES),
-        deadline: optionalString(taskData.deadline, 'task.deadline'),
-        parent_task_id: optionalString(taskData.parent_task_id, 'task.parent_task_id'),
-        related_paper_id: optionalString(taskData.related_paper_id, 'task.related_paper_id'),
-        related_file_path: optionalString(taskData.related_file_path, 'task.related_file_path'),
-        tags: optionalStringArray(taskData.tags, 'task.tags', 20),
-        notes: optionalString(taskData.notes, 'task.notes'),
-      };
+    const input: TaskInput = {
+      title: requireString(taskData.title, 'task.title'),
+      task_type: requireEnum(taskData.task_type, 'task.task_type', VALID_TASK_TYPES),
+      description: optionalString(taskData.description, 'task.description'),
+      priority: optionalEnum(taskData.priority, 'task.priority', VALID_PRIORITIES),
+      deadline: optionalString(taskData.deadline, 'task.deadline'),
+      parent_task_id: optionalString(taskData.parent_task_id, 'task.parent_task_id'),
+      related_paper_id: optionalString(taskData.related_paper_id, 'task.related_paper_id'),
+      related_file_path: optionalString(taskData.related_file_path, 'task.related_file_path'),
+      tags: optionalStringArray(taskData.tags, 'task.tags', 20),
+      notes: optionalString(taskData.notes, 'task.notes'),
+    };
 
-      return service.create(input, 'human');
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    return service.create(input, 'human');
   });
 
   // ── 4. rc.task.update ─────────────────────────────────────────────
 
   registerMethod('rc.task.update', async (params: Record<string, unknown>) => {
-    try {
-      const id = requireString(params.id, 'id');
-      const patchData = requireObject(params.patch, 'patch');
+    const id = requireString(params.id, 'id');
+    const patchData = requireObject(params.patch, 'patch');
 
-      const patch: TaskPatch = {};
+    const patch: TaskPatch = {};
 
-      if (patchData.title !== undefined) {
-        patch.title = requireString(patchData.title, 'patch.title');
-      }
-      if (patchData.description !== undefined) {
-        const desc = optionalNullableString(patchData.description, 'patch.description');
-        patch.description = desc === undefined ? undefined : desc;
-        if (patchData.description === null) patch.description = null;
-      }
-      if (patchData.task_type !== undefined) {
-        patch.task_type = requireEnum(patchData.task_type, 'patch.task_type', VALID_TASK_TYPES);
-      }
-      if (patchData.status !== undefined) {
-        patch.status = requireEnum(patchData.status, 'patch.status', VALID_STATUSES);
-      }
-      if (patchData.priority !== undefined) {
-        patch.priority = requireEnum(patchData.priority, 'patch.priority', VALID_PRIORITIES);
-      }
-      if (patchData.deadline !== undefined) {
-        const dl = optionalNullableString(patchData.deadline, 'patch.deadline');
-        patch.deadline = dl === undefined ? undefined : dl;
-        if (patchData.deadline === null) patch.deadline = null;
-      }
-      if (patchData.parent_task_id !== undefined) {
-        const pid = optionalNullableString(patchData.parent_task_id, 'patch.parent_task_id');
-        patch.parent_task_id = pid === undefined ? undefined : pid;
-        if (patchData.parent_task_id === null) patch.parent_task_id = null;
-      }
-      if (patchData.related_paper_id !== undefined) {
-        const rpid = optionalNullableString(patchData.related_paper_id, 'patch.related_paper_id');
-        patch.related_paper_id = rpid === undefined ? undefined : rpid;
-        if (patchData.related_paper_id === null) patch.related_paper_id = null;
-      }
-      if (patchData.related_file_path !== undefined) {
-        const rfp = optionalNullableString(patchData.related_file_path, 'patch.related_file_path');
-        patch.related_file_path = rfp === undefined ? undefined : rfp;
-        if (patchData.related_file_path === null) patch.related_file_path = null;
-      }
-      if (patchData.agent_session_id !== undefined) {
-        const asid = optionalNullableString(patchData.agent_session_id, 'patch.agent_session_id');
-        patch.agent_session_id = asid === undefined ? undefined : asid;
-        if (patchData.agent_session_id === null) patch.agent_session_id = null;
-      }
-      if (patchData.tags !== undefined) {
-        patch.tags = optionalStringArray(patchData.tags, 'patch.tags', 20);
-      }
-      if (patchData.notes !== undefined) {
-        const notes = optionalNullableString(patchData.notes, 'patch.notes');
-        patch.notes = notes === undefined ? undefined : notes;
-        if (patchData.notes === null) patch.notes = null;
-      }
-
-      return service.update(id, patch, 'human');
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    if (patchData.title !== undefined) {
+      patch.title = requireString(patchData.title, 'patch.title');
     }
+    if (patchData.description !== undefined) {
+      const desc = optionalNullableString(patchData.description, 'patch.description');
+      patch.description = desc === undefined ? undefined : desc;
+      if (patchData.description === null) patch.description = null;
+    }
+    if (patchData.task_type !== undefined) {
+      patch.task_type = requireEnum(patchData.task_type, 'patch.task_type', VALID_TASK_TYPES);
+    }
+    if (patchData.status !== undefined) {
+      patch.status = requireEnum(patchData.status, 'patch.status', VALID_STATUSES);
+    }
+    if (patchData.priority !== undefined) {
+      patch.priority = requireEnum(patchData.priority, 'patch.priority', VALID_PRIORITIES);
+    }
+    if (patchData.deadline !== undefined) {
+      const dl = optionalNullableString(patchData.deadline, 'patch.deadline');
+      patch.deadline = dl === undefined ? undefined : dl;
+      if (patchData.deadline === null) patch.deadline = null;
+    }
+    if (patchData.parent_task_id !== undefined) {
+      const pid = optionalNullableString(patchData.parent_task_id, 'patch.parent_task_id');
+      patch.parent_task_id = pid === undefined ? undefined : pid;
+      if (patchData.parent_task_id === null) patch.parent_task_id = null;
+    }
+    if (patchData.related_paper_id !== undefined) {
+      const rpid = optionalNullableString(patchData.related_paper_id, 'patch.related_paper_id');
+      patch.related_paper_id = rpid === undefined ? undefined : rpid;
+      if (patchData.related_paper_id === null) patch.related_paper_id = null;
+    }
+    if (patchData.related_file_path !== undefined) {
+      const rfp = optionalNullableString(patchData.related_file_path, 'patch.related_file_path');
+      patch.related_file_path = rfp === undefined ? undefined : rfp;
+      if (patchData.related_file_path === null) patch.related_file_path = null;
+    }
+    if (patchData.agent_session_id !== undefined) {
+      const asid = optionalNullableString(patchData.agent_session_id, 'patch.agent_session_id');
+      patch.agent_session_id = asid === undefined ? undefined : asid;
+      if (patchData.agent_session_id === null) patch.agent_session_id = null;
+    }
+    if (patchData.tags !== undefined) {
+      patch.tags = optionalStringArray(patchData.tags, 'patch.tags', 20);
+    }
+    if (patchData.notes !== undefined) {
+      const notes = optionalNullableString(patchData.notes, 'patch.notes');
+      patch.notes = notes === undefined ? undefined : notes;
+      if (patchData.notes === null) patch.notes = null;
+    }
+
+    return service.update(id, patch, 'human');
   });
 
   // ── 5. rc.task.complete ───────────────────────────────────────────
 
   registerMethod('rc.task.complete', async (params: Record<string, unknown>) => {
-    try {
-      const id = requireString(params.id, 'id');
-      const notes = optionalString(params.notes, 'notes');
+    const id = requireString(params.id, 'id');
+    const notes = optionalString(params.notes, 'notes');
 
-      return service.complete(id, notes, 'human');
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    return service.complete(id, notes, 'human');
   });
 
   // ── 6. rc.task.delete ─────────────────────────────────────────────
 
   registerMethod('rc.task.delete', async (params: Record<string, unknown>) => {
-    try {
-      const id = requireString(params.id, 'id');
-      service.delete(id);
-      return { ok: true, deleted: true, id };
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    const id = requireString(params.id, 'id');
+    service.delete(id);
+    return { ok: true, deleted: true, id };
   });
 
   // ── 7. rc.task.upcoming ───────────────────────────────────────────
 
   registerMethod('rc.task.upcoming', async (params: Record<string, unknown>) => {
-    try {
-      const hours = optionalNumber(params.hours, 'hours', 1, 720) ?? 48;
-      const tasks = service.upcoming(hours);
-      return { items: tasks, total: tasks.length, hours };
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    const hours = optionalNumber(params.hours, 'hours', 1, 720) ?? 48;
+    const tasks = service.upcoming(hours);
+    return { items: tasks, total: tasks.length, hours };
   });
 
   // ── 8. rc.task.overdue ────────────────────────────────────────────
 
   registerMethod('rc.task.overdue', async (_params: Record<string, unknown>) => {
-    try {
-      const tasks = service.overdue();
-      return { items: tasks, total: tasks.length };
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    const tasks = service.overdue();
+    return { items: tasks, total: tasks.length };
   });
 
   // ── 9. rc.task.link ───────────────────────────────────────────────
 
   registerMethod('rc.task.link', async (params: Record<string, unknown>) => {
-    try {
-      const taskId = requireString(params.task_id, 'task_id');
-      const paperId = requireString(params.paper_id, 'paper_id');
+    const taskId = requireString(params.task_id, 'task_id');
+    const paperId = requireString(params.paper_id, 'paper_id');
 
-      service.link(taskId, paperId);
-      return { ok: true, linked: true, task_id: taskId, paper_id: paperId };
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    service.link(taskId, paperId);
+    return { ok: true, linked: true, task_id: taskId, paper_id: paperId };
   });
 
   // ── 10. rc.task.linkFile ──────────────────────────────────────────
 
   registerMethod('rc.task.linkFile', async (params: Record<string, unknown>) => {
-    try {
-      const taskId = requireString(params.task_id, 'task_id');
-      const filePath = requireString(params.file_path, 'file_path');
+    const taskId = requireString(params.task_id, 'task_id');
+    const filePath = requireString(params.file_path, 'file_path');
 
-      service.linkFile(taskId, filePath, 'human');
-      return { ok: true, linked: true, task_id: taskId, file_path: filePath };
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    service.linkFile(taskId, filePath, 'human');
+    return { ok: true, linked: true, task_id: taskId, file_path: filePath };
   });
 
   // ── 11. rc.task.notes.add ─────────────────────────────────────────
 
   registerMethod('rc.task.notes.add', async (params: Record<string, unknown>) => {
-    try {
-      const taskId = requireString(params.task_id, 'task_id');
-      const content = requireString(params.content, 'content');
+    const taskId = requireString(params.task_id, 'task_id');
+    const content = requireString(params.content, 'content');
 
-      return service.addNote(taskId, content, 'human');
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    return service.addNote(taskId, content, 'human');
   });
 
   // ── 11. rc.cron.presets.list ──────────────────────────────────────
 
   registerMethod('rc.cron.presets.list', async (_params: Record<string, unknown>) => {
-    try {
-      const presets = service.cronPresetsList();
-      return { presets };
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    const presets = service.cronPresetsList();
+    return { presets };
   });
 
   // ── 12. rc.cron.presets.activate ──────────────────────────────────
 
   registerMethod('rc.cron.presets.activate', async (params: Record<string, unknown>) => {
-    try {
-      const presetId = requireString(params.preset_id, 'preset_id');
-      const config = optionalObject(params.config, 'config');
+    const presetId = requireString(params.preset_id, 'preset_id');
+    const config = optionalObject(params.config, 'config');
 
-      return service.cronPresetsActivate(presetId, config);
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    return service.cronPresetsActivate(presetId, config);
   });
 
   // ── 13. rc.cron.presets.deactivate ────────────────────────────────
 
   registerMethod('rc.cron.presets.deactivate', async (params: Record<string, unknown>) => {
-    try {
-      const presetId = requireString(params.preset_id, 'preset_id');
+    const presetId = requireString(params.preset_id, 'preset_id');
 
-      return service.cronPresetsDeactivate(presetId);
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    return service.cronPresetsDeactivate(presetId);
   });
 
   // ── 14. rc.cron.presets.setJobId ──────────────────────────────────
 
   registerMethod('rc.cron.presets.setJobId', async (params: Record<string, unknown>) => {
-    try {
-      const presetId = requireString(params.preset_id, 'preset_id');
-      const rawJobId = params.job_id;
-      const jobId = typeof rawJobId === 'string' ? rawJobId.trim() : '';
+    const presetId = requireString(params.preset_id, 'preset_id');
+    const rawJobId = params.job_id;
+    const jobId = typeof rawJobId === 'string' ? rawJobId.trim() : '';
 
-      return service.cronPresetsSetJobId(presetId, jobId);
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    return service.cronPresetsSetJobId(presetId, jobId);
   });
 
   // ── 15. rc.cron.presets.delete ──────────────────────────────────
 
   registerMethod('rc.cron.presets.delete', async (params: Record<string, unknown>) => {
-    try {
-      const presetId = requireString(params.preset_id, 'preset_id');
-      return service.cronPresetsDelete(presetId);
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    const presetId = requireString(params.preset_id, 'preset_id');
+    return service.cronPresetsDelete(presetId);
   });
 
   // ── 16. rc.cron.presets.restore ─────────────────────────────────
 
   registerMethod('rc.cron.presets.restore', async (params: Record<string, unknown>) => {
-    try {
-      const presetId = requireString(params.preset_id, 'preset_id');
-      return service.cronPresetsRestore(presetId);
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    const presetId = requireString(params.preset_id, 'preset_id');
+    return service.cronPresetsRestore(presetId);
   });
 
   // ── 17. rc.cron.presets.updateSchedule ──────────────────────────
 
   registerMethod('rc.cron.presets.updateSchedule', async (params: Record<string, unknown>) => {
-    try {
-      const presetId = requireString(params.preset_id, 'preset_id');
-      const schedule = requireString(params.schedule, 'schedule');
+    const presetId = requireString(params.preset_id, 'preset_id');
+    const schedule = requireString(params.schedule, 'schedule');
 
-      return service.cronPresetsUpdateSchedule(presetId, schedule);
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    return service.cronPresetsUpdateSchedule(presetId, schedule);
   });
 
   // ── 18. rc.notifications.pending ────────────────────────────────
@@ -479,48 +404,40 @@ export function registerTaskRpc(registerMethod: RegisterMethod, service: TaskSer
   // Dashboard polls this on connect, after chat turns, and on a 60s timer.
 
   registerMethod('rc.notifications.pending', async (params: Record<string, unknown>) => {
-    try {
-      const hours = optionalNumber(params.hours, 'hours', 1, 720) ?? 48;
-      const overdue = service.overdue();
-      const upcoming = service.upcoming(hours);
-      const custom = service.getUnreadNotifications(20);
+    const hours = optionalNumber(params.hours, 'hours', 1, 720) ?? 48;
+    const overdue = service.overdue();
+    const upcoming = service.upcoming(hours);
+    const custom = service.getUnreadNotifications(20);
 
-      return {
-        overdue: overdue.map((t) => ({
-          id: t.id,
-          title: t.title,
-          deadline: t.deadline,
-          priority: t.priority,
-        })),
-        upcoming: upcoming.map((t) => ({
-          id: t.id,
-          title: t.title,
-          deadline: t.deadline,
-          priority: t.priority,
-        })),
-        custom: custom.map((n) => ({
-          id: n.id,
-          type: n.type,
-          title: n.title,
-          body: n.body,
-          created_at: n.created_at,
-        })),
-        timestamp: new Date().toISOString(),
-      };
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    return {
+      overdue: overdue.map((t) => ({
+        id: t.id,
+        title: t.title,
+        deadline: t.deadline,
+        priority: t.priority,
+      })),
+      upcoming: upcoming.map((t) => ({
+        id: t.id,
+        title: t.title,
+        deadline: t.deadline,
+        priority: t.priority,
+      })),
+      custom: custom.map((n) => ({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        body: n.body,
+        created_at: n.created_at,
+      })),
+      timestamp: new Date().toISOString(),
+    };
   });
 
   // ── 18. rc.notifications.markRead ───────────────────────────────
 
   registerMethod('rc.notifications.markRead', async (params: Record<string, unknown>) => {
-    try {
-      const id = requireString(params.id, 'id');
-      service.markNotificationRead(id);
-      return { ok: true };
-    } catch (err) {
-      throw err instanceof RpcValidationError ? new Error(err.message) : err;
-    }
+    const id = requireString(params.id, 'id');
+    service.markNotificationRead(id);
+    return { ok: true };
   });
 }

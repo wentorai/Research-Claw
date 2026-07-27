@@ -54,6 +54,19 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * Flush the component's initial status request without relying on waitFor's
+ * one-second polling budget. Under the full Dashboard suite, CPU contention can
+ * delay React's effect scheduling even though the mocked RPC resolves
+ * immediately; awaiting act() follows the actual state transition instead.
+ */
+async function renderPlaudCardAfterInitialStatus(): Promise<void> {
+  await act(async () => {
+    render(<Wrapper><PlaudCard /></Wrapper>);
+    await Promise.resolve();
+  });
+}
+
+/**
  * CONFIG_GET snapshot WITH mcp.servers.plaud — "configured" state.
  * Source: mirrors config-responses.ts structure; mcp field added.
  */
@@ -918,8 +931,8 @@ describe('PlaudCard — daily recording report (F4 / P1-B1)', () => {
 
     mockRequest.mockResolvedValue(RC_PERIPH_PLAUD_STATUS_LOGGED_IN_RESPONSE);
 
-    render(<Wrapper><PlaudCard /></Wrapper>);
-    await waitFor(() => expect(screen.getByTestId('plaud-daily-report-btn')).toBeTruthy());
+    await renderPlaudCardAfterInitialStatus();
+    expect(screen.getByTestId('plaud-daily-report-btn')).toBeTruthy();
 
     await act(async () => { fireEvent.click(screen.getByTestId('plaud-daily-report-btn')); });
 
@@ -991,10 +1004,8 @@ describe('PlaudCard — configured derivation', () => {
     });
     mockRequest.mockResolvedValue(RC_PERIPH_PLAUD_STATUS_LOGGED_IN_RESPONSE);
 
-    render(<Wrapper><PlaudCard /></Wrapper>);
-    await waitFor(() => {
-      expect(screen.getByTestId('plaud-account-label')).toBeTruthy();
-    });
+    await renderPlaudCardAfterInitialStatus();
+    expect(screen.getByTestId('plaud-account-label')).toBeTruthy();
     expect(screen.queryByTestId('plaud-connect-btn')).toBeNull();
   });
 

@@ -43,6 +43,22 @@ import { registerSessionNamingRpc } from './src/session-naming/rpc.js';
 import { SessionNamingService } from './src/session-naming/service.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
+import { buildRpcErrorOutcome } from './src/rpc-error.js';
+import {
+  auditPluginActivation,
+  discoverPluginInputs,
+  findRecentStartupFailures,
+  resolveOpenClawStateDir,
+  type ProbeInput,
+} from './src/self-check/activation-probe.js';
+import {
+  auditRuntimeMounts,
+  readSessionPromptReport,
+  readSkillsCliReport,
+  runtimeMountAuditSkipReason,
+  selectModelVisibleEligibleSkills,
+  type RuntimeProbeConfigLike,
+} from './src/self-check/runtime-probe.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
@@ -314,6 +330,19 @@ let _jobSyncTimer: ReturnType<typeof setInterval> | null = null;
 let _lastJobSyncAt = 0;
 const JOB_SYNC_THROTTLE_MS = 3_000;
 const JOB_SYNC_INTERVAL_MS = 20_000;
+const _runtimeProbeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const _lastRuntimeProbeReportAt = new Map<string, number>();
+/** Agents already reconciled in this gateway process (see the once-per-lifetime note). */
+const _runtimeReconciledAgents = new Set<string>();
+/**
+ * Manifest-declared tools this process chose not to register, keyed by reason.
+ *
+ * `contracts.tools` must list every tool the plugin may register, so a tool
+ * registered behind a runtime condition is still declared unconditionally. The
+ * runtime mount audit reads that manifest, so it needs to be told which absences
+ * are deliberate — otherwise it reports our own decision as a mount failure.
+ */
+const _unregisteredDeclaredTools = new Map<string, string>();
 
 // ── Tool call probe state ─────────────────────────────────────────────
 // Caches Ollama tool-calling probe results per model string (30-min TTL).
@@ -1294,6 +1323,10 @@ const plugin: PluginDefinition = {
 
       if (!rpRoot) {
         api.logger.warn('[SkillSearch] research-plugins catalog.json not found — skill search disabled');
+        _unregisteredDeclaredTools.set(
+          'skill_search',
+          'research-plugins catalog.json not found, so skill search has nothing to search',
+        );
       } else {
         const indexedCount = initSkillIndex(rpRoot);
         api.logger.info(`[SkillSearch] Indexed ${indexedCount} skills from ${rpRoot}`);
@@ -1408,14 +1441,16 @@ const plugin: PluginDefinition = {
           const result = await handler(opts.params);
           opts.respond(true, result);
         } catch (err) {
-          // Handle both Error instances and plain ErrorShape objects from classifyError()
-          const message =
-            err instanceof Error
-              ? err.message
-              : typeof err === 'object' && err !== null && 'message' in err
-                ? String((err as { message: unknown }).message)
-                : String(err);
-          opts.respond(false, undefined, { code: 'PLUGIN_ERROR', message });
+          // Preserve the domain classification (classifyError → {code,message})
+          // instead of flattening to PLUGIN_ERROR, and record enough to trace
+          // the failure in the log file. Secret safety: log param KEYS only —
+          // never values (provider.upsert/setApiKey carry apiKey).
+          const paramKeys =
+            opts.params && typeof opts.params === 'object' ? Object.keys(opts.params) : [];
+          const outcome = buildRpcErrorOutcome(method, err, paramKeys);
+          if (outcome.level === 'error') api.logger.error(outcome.line);
+          else api.logger.warn(outcome.line);
+          opts.respond(false, undefined, { code: outcome.code, message: outcome.message });
         }
       });
     };
@@ -2017,6 +2052,178 @@ const plugin: PluginDefinition = {
     // Hooks MUST only be registered once — duplicate registration causes
     // handlers to fire multiple times per event.
     if (!_hooksRegistered) {
+    // Extends the probe's own config view rather than restating it: the tool
+    // projection shapes are subtle enough that a second hand-written copy would
+    // drift, and a drifted copy reads as "no projection configured".
+    type SelfCheckConfig = RuntimeProbeConfigLike & {
+      plugins?: { load?: { paths?: unknown } };
+      session?: { store?: unknown };
+    };
+
+    const getSelfCheckContext = (): {
+      root: string;
+      stateDir: string;
+      config: SelfCheckConfig;
+      plugins: ProbeInput[];
+    } => {
+      const resolved = api.resolvePath('.');
+      const startDir = typeof resolved === 'string' && resolved ? resolved : process.cwd();
+      const root = findGitRoot(startDir);
+      const stateDir = resolveOpenClawStateDir();
+      const config = api.runtime.config.current() as SelfCheckConfig;
+      const rawLoadPaths = config.plugins?.load?.paths;
+      const loadPaths = Array.isArray(rawLoadPaths)
+        ? rawLoadPaths.filter((item): item is string => typeof item === 'string')
+        : [];
+      return {
+        root,
+        stateDir,
+        config,
+        plugins: discoverPluginInputs({ projectRoot: root, stateDir, loadPaths }),
+      };
+    };
+
+    const notifySelfCheck = (title: string, message: string): void => {
+      try {
+        taskService.sendNotificationOnce('error', title, message);
+      } catch {
+        // Dashboard notification is best-effort; the warning log remains.
+      }
+    };
+
+    /**
+     * agent_end fires before OpenClaw persists systemPromptReport. Poll the
+     * requested session store briefly, then reconcile the new report against
+     * an independently enumerated skills CLI result.
+     */
+    const scheduleRuntimeReconciliation = (
+      hookContext: { sessionKey?: string; agentId?: string } | undefined,
+    ): void => {
+      const sessionKey = hookContext?.sessionKey;
+      if (!sessionKey) return;
+      const agentId = hookContext?.agentId?.trim() || 'main';
+      // Plugins register their tools once at gateway startup, so the
+      // manifest→mount contract is process-stable: one reconciliation per agent
+      // per gateway lifetime is enough. Re-auditing every turn would spawn a
+      // skills CLI subprocess and re-poll the session store on the hot path.
+      if (_runtimeReconciledAgents.has(agentId)) return;
+      const timerKey = `${agentId}:${sessionKey}`;
+      const priorTimer = _runtimeProbeTimers.get(timerKey);
+      if (priorTimer) clearTimeout(priorTimer);
+
+      let selfCheckContext: ReturnType<typeof getSelfCheckContext>;
+      try {
+        selfCheckContext = getSelfCheckContext();
+      } catch (error) {
+        api.logger.warn(
+          `[self-check] runtime probe setup failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
+      const skipReason = runtimeMountAuditSkipReason({
+        sessionKey,
+        agentId,
+        config: selfCheckContext.config,
+      });
+      if (skipReason) {
+        api.logger.debug?.(`[self-check] runtime reconciliation skipped: ${skipReason}`);
+        return;
+      }
+      const configuredStore =
+        typeof selfCheckContext.config.session?.store === 'string'
+          ? selfCheckContext.config.session.store
+          : undefined;
+      const baseline = readSessionPromptReport({
+        stateDir: selfCheckContext.stateDir,
+        agentId,
+        sessionKey,
+        configuredStore,
+      })?.generatedAt ?? 0;
+      const alreadyAudited = _lastRuntimeProbeReportAt.get(timerKey) ?? 0;
+      let attemptsRemaining = 20;
+
+      const poll = (): void => {
+        const report = readSessionPromptReport({
+          stateDir: selfCheckContext.stateDir,
+          agentId,
+          sessionKey,
+          configuredStore,
+        });
+        if (
+          !report ||
+          report.source !== 'run' ||
+          report.generatedAt <= baseline ||
+          report.generatedAt <= alreadyAudited
+        ) {
+          attemptsRemaining -= 1;
+          if (attemptsRemaining <= 0) {
+            _runtimeProbeTimers.delete(timerKey);
+            api.logger.warn(
+              `[self-check] runtime report unavailable after agent_end for ${sessionKey}; reconciliation skipped without blocking the run.`,
+            );
+            return;
+          }
+          const timer = setTimeout(poll, 250);
+          timer.unref?.();
+          _runtimeProbeTimers.set(timerKey, timer);
+          return;
+        }
+
+        _runtimeProbeTimers.delete(timerKey);
+        _lastRuntimeProbeReportAt.set(timerKey, report.generatedAt);
+        _runtimeReconciledAgents.add(agentId);
+        const entryPath = process.argv[1];
+        if (!entryPath || !fs.existsSync(entryPath)) {
+          api.logger.warn(
+            '[self-check] OpenClaw CLI entry is unavailable; runtime skills reconciliation skipped.',
+          );
+          return;
+        }
+        void readSkillsCliReport({
+          entryPath,
+          cwd: selfCheckContext.root,
+          agentId,
+          env: process.env,
+        })
+          .then((skillsReport) => {
+            // §W6 scopes tool reconciliation to Research-Claw's two product
+            // plugins. Other OpenClaw channel plugins may intentionally expose
+            // tools only under channel-specific policy.
+            const productPlugins = selfCheckContext.plugins.filter(
+              (pluginInput) =>
+                pluginInput.id === 'research-claw-core' ||
+                pluginInput.id === 'research-plugins',
+            );
+            for (const [tool, reason] of _unregisteredDeclaredTools) {
+              api.logger.info(`[self-check] ${tool} intentionally not registered: ${reason}`);
+            }
+            const findings = auditRuntimeMounts({
+              plugins: productPlugins,
+              systemPromptReport: report,
+              indexedSkillNames: selectModelVisibleEligibleSkills(skillsReport),
+              intentionallyUnregisteredTools: _unregisteredDeclaredTools.keys(),
+            });
+            for (const finding of findings) {
+              api.logger.warn(`[self-check] ${finding.message}`);
+              notifySelfCheck(finding.title, finding.message);
+            }
+            if (findings.length === 0) {
+              api.logger.info(
+                `[self-check] runtime reconciliation passed (${report.tools.entries.length} mounted tools, ${report.skills.entries.length} injected skills)`,
+              );
+            }
+          })
+          .catch((error) => {
+            api.logger.warn(
+              `[self-check] runtime skills probe failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+      };
+
+      const timer = setTimeout(poll, 250);
+      timer.unref?.();
+      _runtimeProbeTimers.set(timerKey, timer);
+    };
 
     // Hook 1: Inject research context into agent prompt
     //
@@ -2533,6 +2740,15 @@ const plugin: PluginDefinition = {
     });
     } // MEMORY_MODULE_ENABLED
 
+    // Runtime reconciliation must run independently of the optional memory
+    // module. It reads OpenClaw's post-run persisted systemPromptReport rather
+    // than trusting plugin declarations as evidence of actual mounts.
+    api.on('agent_end', (_event: unknown, context: unknown) => {
+      scheduleRuntimeReconciliation(
+        context as { sessionKey?: string; agentId?: string } | undefined,
+      );
+    });
+
     // Hook 6: Sync native cron schedule changes back to rc_cron_state.
     //
     // The agent may use OpenClaw's built-in cron management tools (e.g.
@@ -2751,6 +2967,43 @@ const plugin: PluginDefinition = {
         }
       } catch (err) {
         api.logger.warn(`[Heartbeat] Bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Startup self-check: silent-failure audit. Detects the v1.4.7-class gap
+      // where a plugin advertises tools but lacks the activation contract, so
+      // its tools silently never register. Also surfaces recent gateway
+      // startup_failed crash snapshots that otherwise pile up unseen.
+      // Fully guarded — a probe failure must never block gateway startup.
+      try {
+        const selfCheckContext = getSelfCheckContext();
+        const { discovered, stateDir } = {
+          discovered: selfCheckContext.plugins,
+          stateDir: selfCheckContext.stateDir,
+        };
+
+        const findings = auditPluginActivation(discovered);
+        for (const f of findings) {
+          api.logger.warn(`[self-check] ${f.message}`);
+          notifySelfCheck(`插件未正确加载:${f.id}`, f.message);
+        }
+
+        // Surface recent gateway startup_failed snapshots (last 24h) so crash
+        // loops don't stay invisible (real machines had 20+ pile up unseen).
+        try {
+          const recent = findRecentStartupFailures(stateDir);
+          if (recent.length > 0) {
+            const stabilityDir = path.join(stateDir, 'logs', 'stability');
+            const msg = `Found ${recent.length} gateway startup_failed snapshot(s) in the last 24h at ${stabilityDir} — the gateway crashed on a recent start.`;
+            api.logger.warn(`[self-check] ${msg}`);
+            notifySelfCheck('网关近期启动失败', msg);
+          }
+        } catch { /* stability scan is best-effort */ }
+
+        if (findings.length === 0) {
+          api.logger.info(`[self-check] plugin activation audit passed (${discovered.length} plugin(s))`);
+        }
+      } catch (err) {
+        api.logger.warn(`[self-check] probe error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
       }
     });
 

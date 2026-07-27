@@ -104,6 +104,13 @@ describe('ensure-config.cjs — plugin wiring (browser + research-superpower)', 
     expect(allow).toContain('discord');
   });
 
+  it('allows the core agent_end hook to read post-run conversation metadata', () => {
+    fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
+    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    const coreEntry = pluginsOf(configPath).entries['research-claw-core'];
+    expect(coreEntry.hooks?.allowConversationAccess).toBe(true);
+  });
+
   it('is idempotent — no duplicate allow / load.paths entries across two boots', () => {
     fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
     execFileSync('node', [ENSURE_CONFIG, configPath]);

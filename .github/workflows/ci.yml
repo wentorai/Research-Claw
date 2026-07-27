@@ -29,3 +29,10 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # Boot a real gateway on 28799 against a stub provider on 28801 and assert
+      # observable end state. Unit tests cannot prove that error classification,
+      # self-check reconciliation and cron model fallback survive the plugin
+      # boundary. The scripts share those ports, so they must stay sequential.
+      - name: Verify (end-to-end)
+        run: pnpm verify:e2e

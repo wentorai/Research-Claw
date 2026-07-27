@@ -157,8 +157,18 @@ export default function ChatView() {
   const clearError = useChatStore((s) => s.clearError);
   const canContinue = useChatStore((s) => s.canContinue);
   const continueRun = useChatStore((s) => s.continueRun);
+  const lastErrorMeta = useChatStore((s) => s.lastErrorMeta);
+  const retry = useChatStore((s) => s.retry);
+  const hasResendSource = useChatStore((s) =>
+    s._lastSentDraft !== null
+    || s.messages.some((message) =>
+      message.role === 'user'
+      && (Boolean(extractVisibleText(message).trim()) || Boolean(message.references?.length)),
+    ),
+  );
   const loadHistory = useChatStore((s) => s.loadHistory);
   const loadSessionUsage = useChatStore((s) => s.loadSessionUsage);
+  const createSession = useSessionsStore((s) => s.createSession);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
   const pendingTools = useToolStreamStore((s) => s.pendingTools);
@@ -668,26 +678,63 @@ export default function ChatView() {
               closable
               onClose={clearError}
               message={t('chat.runIssueTitle')}
-              description={lastError}
+              description={
+                <div>
+                  <div>{lastError}</div>
+                  {lastErrorMeta?.suggestion && (
+                    <div style={{ marginTop: 4, opacity: 0.85 }}>{lastErrorMeta.suggestion}</div>
+                  )}
+                  {lastErrorMeta?.raw && lastErrorMeta.raw !== lastError && (
+                    <details style={{ marginTop: 6 }}>
+                      <summary style={{ cursor: 'pointer', fontSize: 12, opacity: 0.7 }}>
+                        {t('chat.errorDetails')}
+                      </summary>
+                      <Text copyable code style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        {lastErrorMeta.raw}
+                      </Text>
+                    </details>
+                  )}
+                </div>
+              }
               action={
                 <Space size="small">
-                  {canContinue && (
+                  {lastErrorMeta?.category === 'foreground-continue' && canContinue && (
                     <Button type="primary" size="small" onClick={continueRun}>
                       {t('chat.continueRun')}
                     </Button>
                   )}
-                  <Button size="small" onClick={() => setRightPanelTab('settings')}>
-                    {t('chat.openSettings')}
-                  </Button>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      void loadHistory();
-                      void loadSessionUsage();
-                    }}
-                  >
-                    {t('chat.refreshHistory')}
-                  </Button>
+                  {lastErrorMeta?.category === 'foreground-resend' && hasResendSource && (
+                    <Button
+                      type="primary"
+                      size="small"
+                      onClick={retry}
+                      disabled={connState !== 'connected'}
+                      title={connState === 'connected' ? undefined : t('chat.resendWaitingConnection')}
+                    >
+                      {t('chat.resend')}
+                    </Button>
+                  )}
+                  {lastErrorMeta?.category === 'unrecoverable' && (
+                    <Button type="primary" size="small" onClick={() => { void createSession(); }}>
+                      {t('chat.newSession')}
+                    </Button>
+                  )}
+                  {lastErrorMeta?.category === 'config-fixable' && (
+                    <>
+                      <Button size="small" onClick={() => setRightPanelTab('settings')}>
+                        {t('chat.openSettings')}
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          void loadHistory();
+                          void loadSessionUsage();
+                        }}
+                      >
+                        {t('chat.refreshHistory')}
+                      </Button>
+                    </>
+                  )}
                 </Space>
               }
             />

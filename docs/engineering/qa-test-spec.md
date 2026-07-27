@@ -738,6 +738,31 @@ TC-A-01, TC-A-03, TC-A-04, TC-B-01, TC-C-01, TC-C-02, TC-C-14, TC-E-01, TC-E-02,
 
 **尚无组件级自动化：** `PaperReviewPanel.tsx`、`TaskFlowTimeline.tsx`（依赖手动 TC-P / TC-C-14）；`PeripheralsPanel.tsx` 真机行为依赖手动 TC-Q-*
 
+#### 真网关端到端校验（`pnpm verify:e2e`）
+
+单元测试证明不了「跨插件边界之后行为仍成立」，因此以下脚本各自拉起真实网关（端口 28799）与桩 provider（端口 28801），断言可观测终态。三者共用端口，必须串行；CI 在 `pnpm test` 之后执行同一条命令。
+
+| 脚本 | 断言 |
+|------|------|
+| `verify-rpc-error-classification.mjs` | 领域错误/带 code 错误走 warn 单行，未预期错误走 error + stack；错误文本中的密钥不外泄 |
+| `verify-runtime-self-check.mjs` | 启动自检与运行时挂载对账真实触发；缺失工具/被截断技能被识别；探针失败不阻塞运行 |
+| `verify-cron-deadline-fallback.mjs` | 定时任务主 provider 超时后真正切换到 fallback，用户主动取消不触发 fallback |
+
+`verify-docker-config.mjs` 需要 Docker 与已发布镜像，未纳入 CI；本地按需 `pnpm verify:docker`。
+
+#### 超时预算层级（新增用例必须遵守）
+
+CI runner 的核数远少于开发机，这些用例又都要冷启动子进程（diag.sh 每个产物起一个 node 脱敏进程；e2e 每次调用冷启动一次 OpenClaw CLI）。预算写反或写死太小，机器变慢就会被报成功能回归。
+
+- **外层测试上限 > 内层子进程上限**。反过来会在子进程还没用完自己的预算时先杀掉测试，表现为 `SIGTERM`（exit 143）之类的假失败。`test/diag-security.test.ts` 用 `DIAG_TEST_TIMEOUT_MS` / `DIAG_SUBPROCESS_TIMEOUT_MS` 两个常量把这层关系写死。
+- **轮询 deadline 必须由单次调用预算推导，不许写字面量**。两个数字只有相对关系才有意义：deadline ≤ 单次预算时，一次卡住的调用就吃光整个 deadline，看起来有重试其实一次都没重试过。两个 e2e 脚本统一用 `GATEWAY_CALL_TIMEOUT_MS` 与由它推导的 `POLL_DEADLINE_MS`。
+- **轮询循环必须容忍单次调用失败**，只允许总 deadline 判失败，并把最后一次错误带进报错信息；否则一次慢冷启动就会终止整轮验收。
+- **等待条件用相对量，不用绝对量**。`verify-cron-deadline-fallback.mjs` 曾用绝对请求数等待，而该阈值已被前一阶段满足，等待直接返回、导致后续断言打在尚未注册的 run 上。
+- **各场景的超时要相互隔离**。同一脚本内定时任务用短 deadline 触发 fallback，交互式 run 必须另配长 deadline，否则「用户取消不触发 fallback」这一断言会变成与 deadline 抢跑。
+- **临时目录只断言自己的文件前缀**，不要断言整个 `TMPDIR` 为空。Node 会把 `node-compile-cache` 等运行时产物写进同一目录，断言"空"实际在测运行时行为；CI 未设置 `NODE_DISABLE_COMPILE_CACHE`，这类断言必然失败。
+
+三套 vitest 配置统一 `testTimeout: 30_000`（root / dashboard / research-claw-core）。
+
 ---
 
 ## 四、已知缺口与说明
