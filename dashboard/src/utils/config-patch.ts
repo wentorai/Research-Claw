@@ -20,10 +20,14 @@ import {
 import { getPreset } from './provider-presets';
 import { findCatalogEntry } from './oc-catalog-align';
 import { getModelCatalogCache } from './catalog-cache';
+import scientificCompactionInstructionsRaw from '../../../config/research-compaction-instructions.txt?raw';
 
 /** Legacy sentinel value OpenClaw may return in redacted config snapshots. */
 export const REDACTED_SENTINEL = '__OPENCLAW_REDACTED__';
 const RC_DB_PATH_DEFAULT = '~/.research-claw/library.db';
+/** Single-source RC default; startup migration reads the same tracked text file. */
+export const RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS =
+  scientificCompactionInstructionsRaw.trim();
 
 export interface ConfigPatchInput {
   /** OpenClaw native provider key (e.g. 'zai', 'openai', 'anthropic') */
@@ -560,7 +564,10 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
     defaults: {
       workspace: './workspace',
       skipBootstrap: true,
-      compaction: { mode: 'safeguard' },
+      compaction: {
+        mode: 'safeguard',
+        customInstructions: RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS,
+      },
       thinkingDefault: 'medium',
       subagents: { announceTimeoutMs: 480000 },
       heartbeat: { every: '30m', lightContext: true, isolatedSession: true },
@@ -1119,6 +1126,13 @@ export function buildSaveConfig(
     delete compaction.reserveTokens;
     delete compaction.reserveTokensFloor;
     if (compaction.mode === undefined) compaction.mode = 'safeguard';
+    const existingInstructions = compaction.customInstructions;
+    if (
+      typeof existingInstructions !== 'string'
+      || existingInstructions.trim().length === 0
+    ) {
+      compaction.customInstructions = RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS;
+    }
 
     defaults.compaction = compaction;
   }

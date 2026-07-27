@@ -123,7 +123,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
 
 | ID | 命令 | 功能 |
 |----|------|------|
-| F-07-01 | `/compact` | 压缩会话上下文 |
+| F-07-01 | `/compact` | OpenClaw safeguard 压缩；无用户自定义时追加 RC 科研保真指令，已有非空 `customInstructions` 原样保留 |
 | F-07-02 | `/new` | 新建会话 |
 | F-07-03 | `/stop` | 停止当前 run |
 | F-07-04 | `/clear` | 清空聊天记录 |
@@ -468,7 +468,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
 | TC-C-01 | P0 | 发送「你好」 | 流式回复，Agent 状态 idle→streaming→idle |
 | TC-C-02 | P0 | `/new` | 新 session，历史清空 |
 | TC-C-03 | P0 | 长任务运行中点 Stop | run 中止，输入内容恢复 |
-| TC-C-04 | P1 | `/compact` | 返回成功，上下文压缩 |
+| TC-C-04 | P1 | 对含唯一目标、数值单位条件、方法参数、精确引用、负结果、未决问题和证据等级的 fixture 执行 `/compact` | 请求收到 RC 科研指令；摘要逐项保留 fixture 语义，不外推为普遍无损保证 |
 | TC-C-05 | P1 | `/model` 无参 | 显示当前模型 |
 | TC-C-06 | P1 | 上传 <5MB PNG | 附件预览，发送成功 |
 | TC-C-07 | P1 | 上传 >5MB 图片 | 拒绝并提示 |

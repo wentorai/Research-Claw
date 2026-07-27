@@ -1029,7 +1029,8 @@ if [ -f config/openclaw.json ]; then
   # Clean stale references + ensure OC 2026.6.1+ required fields.
   # Shared logic in ensure-config.cjs — also called by run.sh and docker-entrypoint.sh.
   GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
-  node scripts/ensure-config.cjs config/openclaw.json ${GLOBAL_CFG:+"$GLOBAL_CFG"} 2>/dev/null || true
+  node scripts/ensure-config.cjs --inherit-global-compaction \
+    config/openclaw.json ${GLOBAL_CFG:+"$GLOBAL_CFG"} 2>/dev/null || true
 fi
 
 # --- Patch gateway.bind for SSH/headless servers ---
