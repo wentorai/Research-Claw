@@ -1,0 +1,27 @@
+{
+  "models": {
+    "providers": {
+      "f7fake": {
+        "baseUrl": "http://127.0.0.1:18901/v1",
+        "apiKey": "fake-local-no-auth",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "fake-echo",
+            "name": "F7 Fake Echo",
+            "reasoning": false,
+            "input": ["text"],
+            "contextWindow": 128000,
+            "maxTokens": 4096,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "f7fake/fake-echo"
+    }
+  }
+}

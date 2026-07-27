@@ -15,8 +15,8 @@ import {
 } from './file-reference';
 
 describe('file-reference helpers', () => {
-  it('soft cap is 100MB', () => {
-    expect(MAX_REFERENCE_SIZE).toBe(100 * 1024 * 1024);
+  it('soft cap is 1GB (gateway streams to disk; server cap is 2GB)', () => {
+    expect(MAX_REFERENCE_SIZE).toBe(1024 * 1024 * 1024);
   });
 
   describe('isImagePath', () => {
@@ -68,10 +68,10 @@ describe('file-reference helpers', () => {
         expect(composerDropDestination(name, false)).toBe('sources/chat');
       }
     });
-    it('routes images (by extension or MIME) to sources/', () => {
-      expect(composerDropDestination('fig.png', false)).toBe('sources');
+    it('routes images (by extension or MIME) to the chat image dir', () => {
+      expect(composerDropDestination('fig.png', false)).toBe('sources/chat/images');
       // MIME says image even though the name has no image extension.
-      expect(composerDropDestination('camera-roll', true)).toBe('sources');
+      expect(composerDropDestination('camera-roll', true)).toBe('sources/chat/images');
     });
     it('provisional chip path for a non-image drop starts with sources/chat/', () => {
       const dest = composerDropDestination('data.csv', false);

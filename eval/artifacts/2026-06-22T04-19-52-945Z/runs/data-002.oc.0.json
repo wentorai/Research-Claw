@@ -1,0 +1,42 @@
+{
+  "taskId": "data-002",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-002-oc-0-1782102283923",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 3,
+    "toolCalls": 2,
+    "wallMs": 10054,
+    "tokens": {
+      "input": 376,
+      "output": 641,
+      "cacheRead": 89856,
+      "cacheWrite": 0,
+      "total": 90873,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "exec"
+  ],
+  "finalText": "**Pearson 相关系数 r = 0.7892**\n\n计算摘要：\n\n| 统计量 | 值 |\n|:---|---:|\n| 样本量 n | 20 |\n| x 均值 | 20.5 |\n| y 均值 | 46.15 |\n| Pearson r | **0.7892** |\n\nx 与 y 呈较强的正相关关系（r = 0.7892，四舍五入保留四位小数）。",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 0.7892±0.01 (pearson r between x and y); nums=[0.7892,20,20.5,46.15,0.7892,0.7892]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 6
+}

@@ -1,0 +1,44 @@
+{
+  "taskId": "lit-005",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-005-oc-0-1782068086442",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 5904,
+    "tokens": {
+      "input": 684,
+      "output": 444,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 60648,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_abstracts"
+  ],
+  "finalText": "该论文信息如下：\n\n| 项目 | 内容 |\n|:---|:---|\n| **DOI** | `10.1038/nature14539` |\n| **标题** | *Deep learning* |\n| **发表期刊** | Nature |\n| **发表年份** | 2015 |\n| **作者** | Yann LeCun, Yoshua Bengio, Geoffrey Hinton |\n| **被引次数** | 81,470+ |\n\n这是一篇深度学习领域的里程碑式综述论文，由三位图灵奖得主（LeCun、Bengio、Hinton）合著，系统阐述了深度学习的核心原理、技术进展与应用前景。至今被引已超 8 万次，是深度学习领域最具影响力的论文之一。\n\n```progress_card\n{\"type\":\"progress_card\",\"period\":\"lookup\",\"papers_read\":1,\"papers_added\":0,\"tasks_completed\":0,\"tasks_created\":0,\"highlights\":[\"查询 DOI 10.1038/nature14539 → Deep learning (Nature, 2015)\"]}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": false,
+        "evidence": "10.1038/nature14539`:BAD; 10.1038/nature14539:ok"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 4
+}

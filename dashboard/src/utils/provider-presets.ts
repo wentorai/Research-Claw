@@ -163,6 +163,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.moonshot.cn/v1',
     api: 'openai-completions',
     models: [
+      // K3 is thinking-only (supports_thinking_type "only" per /v1/models) —
+      // reasoning: true is mandatory or the idle watchdog kills it mid-think.
+      { id: 'kimi-k3', name: 'Kimi K3', reasoning: true, input: ['text', 'image'], contextWindow: 1_048_576, maxTokens: 131_072 },
       { id: 'kimi-k2.5', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 8_192 },
     ],
     urlPattern: /moonshot\.cn/i,
@@ -173,6 +176,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.moonshot.ai/v1',
     api: 'openai-completions',
     models: [
+      { id: 'kimi-k3', name: 'Kimi K3', reasoning: true, input: ['text', 'image'], contextWindow: 1_048_576, maxTokens: 131_072 },
       { id: 'kimi-k2.5', name: 'Kimi K2.5', input: ['text', 'image'], contextWindow: 256_000, maxTokens: 8_192 },
     ],
     urlPattern: /moonshot\.ai/i,

@@ -1,0 +1,66 @@
+{
+  "taskId": "lit-001",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-001-oc-0-1782090741839",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 8,
+    "toolCalls": 18,
+    "wallMs": 132818,
+    "tokens": {
+      "input": 57153,
+      "output": 7391,
+      "cacheRead": 411392,
+      "cacheWrite": 0,
+      "total": 475936,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_search",
+    "web_search",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "rp_abstracts",
+    "rp_search",
+    "rp_abstracts",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch"
+  ],
+  "finalText": "根据 Scopus + OpenAlex 的多轮检索结果，以下是 2020 年以来关于石墨烯电池（graphene battery）方向的 5 篇高被引综述论文，按引用量从高到低排列：\n\n---\n\n## 石墨烯电池高被引综述 Top 5 (2020+)\n\n### 1. Recent progress in graphene-based electrodes for flexible batteries\n- **作者：** Chunlong Dai, Guoqiang Sun, *et al.*\n- **年份：** 2020（Online: 2019）\n- **期刊：** *InfoMat*\n- **被引：** ~170 次\n- **DOI：** [10.1002/inf2.12039](https://doi.org/10.1002/inf2.12039)\n- **简介：** 系统总结了石墨烯基电极在各类柔性电池（锂/钠/锌/铝离子电池、锂硫电池、金属空气电池）中的最新进展。\n\n---\n\n### 2. Graphene-based lithium-ion battery anode materials manufactured by mechanochemical ball milling process: A review and perspective\n- **作者：** Shixiang Yu, Binbin Guo, Tianbiao Zeng, *et al.*\n- **年份：** 2022\n- **期刊：** *Composites Part B: Engineering*\n- **被引：** ~126 次\n- **DOI：** [10.1016/j.compositesb.2022.110232](https://doi.org/10.1016/j.compositesb.2022.110232)\n- **简介：** 聚焦机械化学球磨法制备石墨烯基锂离子电池负极材料，综述了制备工艺与电化学性能之间的关系。\n\n---\n\n### 3. Graphene-based interlayer for high-performance lithium–sulfur batteries: A review\n- **作者：** Yong Liu, Huijie Wei, Xiaoliang Zhai, *et al.*\n- **年份：** 2021\n- **期刊：** *Materials & Design*\n- **被引：** ~96 次\n- **DOI：** [10.1016/j.matdes.2021.110171](https://doi.org/10.1016/j.matdes.2021.110171)\n- **简介：** 全面总结了石墨烯基材料作为中间层在锂硫电池中的应用，涵盖物理/化学限域策略以提升循环性能。\n\n---\n\n### 4. A review study on the recent advances in developing the heteroatom-doped graphene and porous graphene as superior anode materials for Li-ion batteries\n- **作者：** Hamed Aghamohammadi, Nafiseh Hassanzadeh, Reza Eslami-Farsani\n- **年份：** 2021\n- **期刊：** *Ceramics International*\n- **被引：** ~90 次\n- **DOI：** [10.1016/j.ceramint.2021.05.048](https://doi.org/10.1016/j.ceramint.2021.05.048)\n- **简介：** 综述了杂原子掺杂石墨烯和多孔石墨烯作为锂离子电池负极材料的最新进展。\n\n---\n\n### 5. Review of Graphene in Cathode Materials for Lithium-Ion Batteries\n- **作者：** Xueye Chen, Yue Tian\n- **年份：** 2021\n- **期刊：** *Energy & Fuels* (ACS)\n- **被引：** ~76 次\n- **DOI：** [10.1021/acs.energyfuels.0c04191](https://doi.org/10.1021/acs.energyfuels.0c04191)\n- **简介：** 综述了石墨烯在锂离子电池正极材料（包括聚阴离子型材料）中的应用，涵盖石墨烯制备方法及与正极材料的复合策略。\n\n---\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Recent progress in graphene-based electrodes for flexible batteries\",\"authors\":[\"Chunlong Dai\",\"Guoqiang Sun\",\"et al.\"],\"year\":2020,\"doi\":\"10.1002/inf2.12039\",\"venue\":\"InfoMat\",\"cited_by\":170,\"tags\":[\"graphene\",\"flexible batteries\",\"review\",\"electrode materials\"]}\n```\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Graphene-based lithium-ion battery anode materials manufactured by mechanochemical ball milling process: A review and perspective\",\"authors\":[\"Shixiang Yu\",\"Binbin Guo\",\"Tianbiao Zeng\",\"et al.\"],\"year\":2022,\"doi\":\"10.1016/j.compositesb.2022.110232\",\"venue\":\"Composites Part B: Engineering\",\"cited_by\":126,\"tags\":[\"graphene\",\"Li-ion battery\",\"anode\",\"ball milling\",\"review\"]}\n```\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Graphene-based interlayer for high-performance lithium–sulfur batteries: A review\",\"authors\":[\"Yong Liu\",\"Huijie Wei\",\"Xiaoliang Zhai\",\"et al.\"],\"year\":2021,\"doi\":\"10.1016/j.matdes.2021.110171\",\"venue\":\"Materials & Design\",\"cited_by\":96,\"tags\":[\"graphene\",\"Li-S battery\",\"interlayer\",\"review\"]}\n```\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"A review study on the recent advances in developing the heteroatom-doped graphene and porous graphene as superior anode materials for Li-ion batteries\",\"authors\":[\"Hamed Aghamohammadi\",\"Nafiseh Hassanzadeh\",\"Reza Eslami-Farsani\"],\"year\":2021,\"doi\":\"10.1016/j.ceramint.2021.05.048\",\"venue\":\"Ceramics International\",\"cited_by\":90,\"tags\":[\"graphene\",\"Li-ion battery\",\"anode\",\"heteroatom doping\",\"review\"]}\n```\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Review of Graphene in Cathode Materials for Lithium-Ion Batteries\",\"authors\":[\"Xueye Chen\",\"Yue Tian\"],\"year\":2021,\"doi\":\"10.1021/acs.energyfuels.0c04191\",\"venue\":\"Energy & Fuels\",\"cited_by\":76,\"tags\":[\"graphene\",\"Li-ion battery\",\"cathode\",\"review\"]}\n```\n\n**备注：** \n- 引用数据来自 Scopus / OpenAlex，为截至 2026 年 6 月的近似值，实际引用量可能会有小幅波动。\n- 第 1 篇 OpenAlex 记录发表年为 2019（早期在线），Scopus 记为 2020（正式刊出），此处按 2020 年收录。\n- 5 篇均为明确标注 \"Review\" 的综述论文，覆盖了石墨烯在锂离子电池、锂硫电池及柔性电池中的正极、负极和中间层等多个方向。\n\n需要我将这些论文的 BibTeX 引用条目导出到 `sources/references/` 吗？或者需要进一步获取其中某篇的全文？",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_count",
+        "pass": true,
+        "evidence": "counted 33 (need >= 5)"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 7/3; 10.1002/inf2.12039:real; 10.1016/j.compositesb.2022.110232:real; 10.1016/j.matdes.2021.110171:real; 10.1016/j.ceramint.2021.05.048:real; 10.1021/acs.energyfuels.0c04191:real; \"paper_card\":NO; \"Recent progress in graphene-based electr\":real; \"Chunlong Dai\":NO"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": true,
+        "evidence": "10.1002/inf2.12039:ok; 10.1016/j.compositesb.2022.110232:ok; 10.1016/j.matdes.2021.110171:ok; 10.1016/j.ceramint.2021.05.048:ok; 10.1021/acs.energyfuels.0c04191:ok"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 27
+}

@@ -1,0 +1,44 @@
+{
+  "taskId": "cap-task-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-task-001-rc-0-1782106644334",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 4,
+    "toolCalls": 5,
+    "wallMs": 37335,
+    "tokens": {
+      "input": 1436,
+      "output": 2478,
+      "cacheRead": 123264,
+      "cacheWrite": 0,
+      "total": 127178,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "tasks/literature-review-draft.md"
+  ],
+  "toolNames": [
+    "write",
+    "cron",
+    "cron",
+    "cron",
+    "cron"
+  ],
+  "finalText": "好的，我来帮你创建这个科研任务。不过在此之前需要确认一个关键信息：\n\n**文献综述的具体研究主题是什么？** 比如是哪个领域、哪个具体课题？这会影响后续的文献搜索策略和任务分解。\n\n在你回复主题的同时，我先用两周截止日期（2026-07-06）把任务框架建起来：任务框架已创建。同时我帮你设两个自动提醒：任务已创建完成，以下是总结：\n\n---\n\n**任务：文献综述初稿**\n\n| 项目 | 详情 |\n|:-----|:-----|\n| 任务文件 | `tasks/literature-review-draft.md` |\n| 截止日期 | **2026年7月6日（周一）** |\n| 总周期 | 14 天 |\n| 提醒① | 6月29日 9:00 — 中期进度检查 |\n| 提醒② | 7月4日 9:00 — 截止前2天预警 |\n\n**六阶段计划：**\n\n| # | 阶段 | 时间 |\n|---|------|------|\n| 1 | 确定研究主题与关键词 | Day 1–2 |\n| 2 | 系统文献检索（多数据库） | Day 2–5 |\n| 3 | 文献筛选与质量评估 | Day 5–7 |\n| 4 | 精读核心文献、提取要点 | Day 7–10 |\n| 5 | 撰写初稿 | Day 10–13 |\n| 6 | 自查与修改 | Day 13–14 |\n\n---\n\n在启动之前，请告诉我：**这篇文献综述的具体研究主题是什么？** 有了主题我才能帮你做针对性的文献检索策略和关键词规划。",
+  "objective": null,
+  "historyLen": 10,
+  "capabilityProbes": [
+    {
+      "type": "task_created",
+      "observed": true,
+      "evidence": "effect:taskΔ=0 | toolset(task/cron/schedule):true | path=tool"
+    }
+  ],
+  "suite": "task"
+}

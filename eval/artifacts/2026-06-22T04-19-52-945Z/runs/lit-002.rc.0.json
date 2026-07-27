@@ -1,0 +1,46 @@
+{
+  "taskId": "lit-002",
+  "domain": "literature",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-002-rc-0-1782104963959",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 6,
+    "toolCalls": 8,
+    "wallMs": 61614,
+    "tokens": {
+      "input": 9742,
+      "output": 2142,
+      "cacheRead": 203264,
+      "cacheWrite": 0,
+      "total": 215148,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "web_fetch",
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch"
+  ],
+  "finalText": "数据已充分。以下是结果：\n\n---\n\n## 论文《Attention Is All You Need》\n\n| 项目 | 内容 |\n|:---|:---|\n| **第一作者** | **Ashish Vaswani** |\n| **发表年份** | **2017 年**（arXiv 提交于 2017-06-12；同年 12 月在 NeurIPS 2017 发表） |\n| **全部作者（共 8 位）** | Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, Illia Polosukhin |\n| **所属机构** | Google Brain |\n| **发表会议** | NeurIPS 2017 (Advances in Neural Information Processing Systems 30) |\n\n---\n\n### 可核验出处\n\n1. **arXiv 原文**  \n   - URL: https://arxiv.org/abs/1706.03762  \n   - arXiv ID: `1706.03762`  \n   - 第一作者 `<author>` 标签中 `Ashish Vaswani` 位列第一，`<published>` 为 `2017-06-12`。\n\n2. **NeurIPS 官方收录**  \n   - 该论文发表于 *Advances in Neural Information Processing Systems 30 (NIPS 2017)*，可通过 NeurIPS proceedings 查证：  \n     https://papers.nips.cc/paper/7181-attention-is-all-you-need\n\n3. **Google Scholar**  \n   - 搜索 \"Attention Is All You Need\" 即可找到该论文，显示作者列表与发表年份 2017，截至 2026 年引用已超 14 万次。\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Attention Is All You Need\",\"authors\":[\"Ashish Vaswani\",\"Noam Shazeer\",\"Niki Parmar\",\"Jakob Uszkoreit\",\"Llion Jones\",\"Aidan N. Gomez\",\"Lukasz Kaiser\",\"Illia Polosukhin\"],\"venue\":\"Advances in Neural Information Processing Systems (NeurIPS 2017)\",\"year\":2017,\"doi\":\"10.48550/arXiv.1706.03762\",\"url\":\"https://arxiv.org/abs/1706.03762\",\"arxiv_id\":\"1706.03762\",\"abstract_preview\":\"The dominant sequence transduction models are based on complex recurrent or convolutional neural networks... We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.\"}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 15
+}

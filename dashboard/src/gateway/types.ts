@@ -103,6 +103,11 @@ export interface ChatMessage {
   stopReason?: string;
   /** Non-image workspace files referenced by this user turn (rendered as chips). */
   references?: string[];
+  /**
+   * Dashboard-local marker (e.g. 'welcome') — only set by appendLocalMessage,
+   * never sent by the gateway. Survives the localStorage JSON round-trip.
+   */
+  localKind?: string;
 }
 
 export interface ChatAttachment {
@@ -119,7 +124,8 @@ export interface ChatAttachment {
 
 /**
  * A file reference attached to a composer message. Always resolves to a
- * workspace-relative path the sandboxed agent can read via workspace_read.
+ * workspace-relative path the agent can read via workspace_read (paths are
+ * workspace-scoped by the application layer, not an OS sandbox).
  * External files are ingested into the workspace first (status 'uploading'),
  * then referenced once ready.
  */
@@ -132,6 +138,9 @@ export interface ChatReference {
   size?: number;
   mimeType?: string;
   errorMsg?: string;
+  /** Retained ONLY while status is 'error' so retry can re-upload without a
+   *  re-drop; released on 'ready' (chips are cleared on send, bounding memory). */
+  file?: File;
 }
 
 // --- Bootstrap Config ---

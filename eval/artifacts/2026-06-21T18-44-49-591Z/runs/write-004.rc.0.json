@@ -1,0 +1,48 @@
+{
+  "taskId": "write-004",
+  "domain": "review-writing",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-004-rc-0-1782067563773",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 3,
+    "toolCalls": 3,
+    "wallMs": 36139,
+    "tokens": {
+      "input": 1095,
+      "output": 3480,
+      "cacheRead": 93440,
+      "cacheWrite": 0,
+      "total": 98015,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "rq.md"
+  ],
+  "toolNames": [
+    "read",
+    "exec",
+    "write"
+  ],
+  "finalText": "文件已写入 `rq.md`。以下是文档的概要：\n\n---\n\n### 研究问题与研究假设：社交媒体使用与青少年焦虑\n\n**研究问题** 共 5 组、14 个子问题，覆盖：\n\n| 组别 | 核心追问 |\n|:---|:---|\n| **RQ1** 主效应 | 使用强度与焦虑的总体关联及协变量控制后的稳健性 |\n| **RQ2** 使用模式 | 主动/被动使用差异；图像平台 vs. 文本平台的效应对比 |\n| **RQ3** 中介机制 | 上行社会比较、FOMO、睡眠质量、网络受欺凌四条中介路径 |\n| **RQ4** 调节因素 | 性别、年龄、自尊、社会支持、神经质的调节作用 |\n| **RQ5** 纵向/因果 | 纵向预测效应 + 双向因果关系 |\n\n**研究假设** 共 16 条（H1a–H5b），与 RQ 一一对应，每条附有理论依据及预期方向，并在文末以汇总表呈现。理论框架整合了社会比较理论、社会置换假说、FOMO 模型及睡眠中介模型。\n\n如需调整某个假设的理论依据、补充特定中介/调节变量，或按某个期刊格式重新编排，请告诉我。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "rq.md exists"
+      },
+      {
+        "type": "file_content_match",
+        "pass": true,
+        "evidence": "all present"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 7
+}

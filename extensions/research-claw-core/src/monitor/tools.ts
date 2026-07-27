@@ -31,10 +31,13 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
     name: 'monitor_create',
     description:
       'Create a new monitoring target. The source_type is a free-form category string ' +
-      '(e.g. "academic", "code", "feed", "web", "social", "report", "reminder", or any custom string). ' +
+      '(e.g. "academic", "code", "feed", "web", "social", "report", "reminder", "device", or any custom string). ' +
       'Well-known categories get rich default agent prompts with the Read\u2192Execute\u2192Write protocol. ' +
-      'The monitor is created disabled. After the user enables it in the dashboard, it will run ' +
-      'on the specified schedule and send notifications to the dashboard bell when new content is found.',
+      'For source_type "device" the target MUST be a peripheral device id returned by periph_list ' +
+      '(the registered uuid \u2014 NOT a browser mediaDeviceId, NOT a URL); call periph_list first to get the id. ' +
+      'The monitor is created disabled. Enable it with monitor_update(enabled=true) \u2014 while the dashboard ' +
+      'is online it automatically registers the backing cron job, and the monitor then runs on the specified ' +
+      'schedule and sends notifications to the dashboard bell when new content is found.',
     parameters: {
       type: 'object',
       properties: {
@@ -44,11 +47,11 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
         },
         source_type: {
           type: 'string',
-          description: 'Category of the data source (e.g. "academic", "code", "feed", "web", "social", "report", "reminder")',
+          description: 'Category of the data source (e.g. "academic", "code", "feed", "web", "social", "report", "reminder", "device")',
         },
         target: {
           type: 'string',
-          description: 'Target identifier: URL for feeds/webpages, "org/repo" for code, or empty for keyword-based sources',
+          description: 'Target identifier: URL for feeds/webpages, "org/repo" for code, peripheral device id from periph_list for device monitors, or empty for keyword-based sources',
         },
         filters: {
           type: 'object',
@@ -96,7 +99,7 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
           `ID: ${monitor.id}\n` +
           `Schedule: ${monitor.schedule}\n` +
           `Target: ${monitor.target || '(keyword-based)'}\n` +
-          `Status: disabled. Enable it in the dashboard to register the cron job.`,
+          `Status: disabled. Enable it with monitor_update(enabled=true); the dashboard auto-registers the cron job while online.`,
           monitor,
         );
       } catch (err) {
@@ -159,8 +162,11 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
     description:
       'Update an existing monitor configuration. Use this when the user asks to rename a monitor, ' +
       'change its schedule, target, filters, notification preference, or enable/disable state. ' +
-      'Schedule must be a 5-field cron expression. This updates the Research-Claw monitor record; ' +
-      'the dashboard reconciles the backing Gateway cron job after the monitor list reloads.',
+      'Setting enabled=true activates the monitor: while the dashboard is online it automatically ' +
+      'registers the backing Gateway cron job (no manual dashboard toggle needed). ' +
+      'For source_type "device" the target MUST be a peripheral device id returned by periph_list ' +
+      '(the registered uuid — NOT a browser mediaDeviceId, NOT a URL). ' +
+      'Schedule must be a 5-field cron expression.',
     parameters: {
       type: 'object',
       properties: {

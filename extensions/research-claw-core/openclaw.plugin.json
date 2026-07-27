@@ -61,7 +61,10 @@
       "job_start",
       "job_checkpoint",
       "job_status",
-      "job_finish"
+      "job_finish",
+      "periph_list",
+      "periph_camera_snap",
+      "periph_observe"
     ]
   },
   "configSchema": {
@@ -79,7 +82,13 @@
       },
       "defaultCitationStyle": {
         "type": "string",
-        "enum": ["apa", "mla", "chicago", "ieee", "bibtex"],
+        "enum": [
+          "apa",
+          "mla",
+          "chicago",
+          "ieee",
+          "bibtex"
+        ],
         "description": "Default citation format",
         "default": "apa"
       },

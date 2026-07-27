@@ -1,0 +1,44 @@
+{
+  "taskId": "data-003",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-003-oc-0-1782089980108",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 5,
+    "toolCalls": 4,
+    "wallMs": 22945,
+    "tokens": {
+      "input": 555,
+      "output": 665,
+      "cacheRead": 150656,
+      "cacheWrite": 0,
+      "total": 151876,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "exec",
+    "exec",
+    "process"
+  ],
+  "finalText": "对 `measurements.csv` 全部 20 条数据做 `y ~ x` 的 OLS 一元线性回归：\n\n**斜率: 2.3256**\n\n（截距 −1.5241, R² = 0.6228）",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 2.3256±0.01 (OLS slope of y on x); nums=[20,2.3256,1.5241,0.6228]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 10
+}

@@ -1,0 +1,22 @@
+{
+  "rcScores": {
+    "学术严谨性": 4,
+    "任务达成度": 5
+  },
+  "ocScores": {
+    "学术严谨性": 5,
+    "任务达成度": 5
+  },
+  "rcTotal": 9,
+  "ocTotal": 10,
+  "preferences": [
+    "oc",
+    "oc"
+  ],
+  "rcWins": 0,
+  "ocWins": 2,
+  "rationales": [
+    "两者均正确回答了第一作者为 Ashish Vaswani、发表年份为 2017，并提供了可核验的 arXiv 与 NeurIPS 来源。A 信息较充分，但包含一些与任务无关且未充分核验的附加内容，如引用次数、笼统机构表述等，严谨性略受影响。B 引用更聚焦，NeurIPS 官方链接更精确，整体学术严谨性略优。",
+    "两者均正确回答第一作者为 Ashish Vaswani、年份为 2017，并给出 arXiv 与 NeurIPS 可核验出处。A 的出处更直接、表述更聚焦且无明显多余或可疑信息；B 虽完成任务，但加入了较笼统的“所属机构 Google Brain”、Google Scholar 引用量等非必要且较难稳定核验的信息，严谨性略低。"
+  ]
+}

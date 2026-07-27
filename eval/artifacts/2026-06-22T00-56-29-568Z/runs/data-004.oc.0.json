@@ -1,0 +1,46 @@
+{
+  "taskId": "data-004",
+  "domain": "data-analysis",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-004-oc-0-1782090003088",
+  "errored": "turn timeout",
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 7,
+    "toolCalls": 6,
+    "wallMs": 300005,
+    "tokens": {
+      "input": 1604,
+      "output": 2883,
+      "cacheRead": 185600,
+      "cacheWrite": 0,
+      "total": 190087,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "update_plan",
+    "exec",
+    "update_plan",
+    "exec",
+    "exec"
+  ],
+  "finalText": "",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": false,
+        "evidence": "eda.md MISSING"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 14
+}

@@ -1,0 +1,26 @@
+{
+  "rcScores": {
+    "语言规范性": 5,
+    "学术性": 5,
+    "保真度": 4.5,
+    "任务达成度": 5
+  },
+  "ocScores": {
+    "语言规范性": 5,
+    "学术性": 5,
+    "保真度": 3,
+    "任务达成度": 4.5
+  },
+  "rcTotal": 19.5,
+  "ocTotal": 17.5,
+  "preferences": [
+    "rc",
+    "rc"
+  ],
+  "rcWins": 2,
+  "ocWins": 0,
+  "rationales": [
+    "A 的改写语法规范、表达正式，基本忠实于原意，仅加入“significantly”略有强化。B 语言和学术表达也较好，但将原文笼统的 battery performance 具体化为 battery capacity and cycling stability，增加了原文未提供的信息，保真度较低。",
+    "两者均有效纠正语法和表达问题，并达到期刊英文表达规范。A的表述较学术，但将“battery performance”具体化为“capacity and cycling stability”，引入了原文未提供的信息，保真度有所降低。B保持在“battery performance/performance degradation”层面，既规范又更忠实于原意，因此更优。"
+  ]
+}

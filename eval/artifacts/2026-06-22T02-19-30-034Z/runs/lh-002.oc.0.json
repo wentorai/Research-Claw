@@ -1,0 +1,61 @@
+{
+  "taskId": "lh-002",
+  "domain": "long-horizon",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lh-002-oc-0-1782095129211",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 8,
+    "toolCalls": 11,
+    "wallMs": 70172,
+    "tokens": {
+      "input": 10675,
+      "output": 3882,
+      "cacheRead": 283520,
+      "cacheWrite": 0,
+      "total": 298077,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "gnn-compare.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "```file_card\n{\"type\":\"file_card\",\"path\":\"gnn-compare.md\",\"size_bytes\":3238,\"action\":\"created\",\"description\":\"GNN 三篇代表性论文方法对比表\"}\n```\n\n---\n\n文件已写入工作区 `gnn-compare.md`。以下是对比结果摘要：\n\n## 三篇 GNN 代表性论文\n\n| | **GCN** | **GAT** | **GraphSAGE** |\n|:---|:---|:---|:---|\n| **作者** | Kipf & Welling | Veličković, Bengio 等 | Hamilton, Ying & Leskovec |\n| **会议** | ICLR 2017 | ICLR 2018 | NeurIPS 2017 |\n| **核心** | 谱域一阶卷积近似 | 多头自注意力 | 采样+聚合 (归纳式) |\n| **权重** | 固定（只依赖图结构） | 可学习注意力权重 | 可学习聚合函数 |\n| **归纳能力** | ❌ 直推式 | ✅ | ✅ 专门设计 |\n| **关键公式** | \\(\\tilde{D}^{-1/2}\\tilde{A}\\tilde{D}^{-1/2}HW\\) | \\(\\text{softmax}(\\text{LeakyReLU}(a^T[Wh_i\\|Wh_j]))\\) | \\(\\text{AGGREGATE}(\\{h_u\\}) + \\text{CONCAT}\\) |\n\n所有三篇论文均已通过 **arXiv 官方 API** 逐一验证标题、作者、摘要和发表会议，来源真实可靠。详细公式、聚合器对比和演进关系见文件。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "gnn-compare.md exists"
+      },
+      {
+        "type": "file_content_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "citation_real",
+        "pass": false,
+        "evidence": "resolved 0/3; \"GNN 三篇代表性论文方法对比表\":NO; \"Published as a conference paper at ICLR \":NO; \"To appear at ICLR 2018\":NO; \"Published in NIPS 2017\":NO"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 20
+}

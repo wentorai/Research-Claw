@@ -126,6 +126,24 @@ html, body {
   50% { box-shadow: 0 0 12px rgba(239, 68, 68, 0.8); }
 }
 
+/* Empty-state suggestion chips — click prefills the composer */
+.chat-suggestion-chip {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-family: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.chat-suggestion-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+  background: var(--surface-hover);
+}
+
 /* Chat input placeholder */
 .chat-textarea::placeholder {
   color: var(--text-tertiary);

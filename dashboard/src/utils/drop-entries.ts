@@ -29,6 +29,9 @@ export interface CollectedDrop {
   files: DroppedFile[];
   /** True when at least one dropped item was a directory (entries API was used). */
   hadDirectory: boolean;
+  /** True when webkitGetAsEntry was unavailable: dropped-FOLDER contents are
+   *  silently missing from `files` — callers should warn the user. */
+  entriesUnsupported?: boolean;
 }
 
 /** Bulk-confirmation thresholds (shared so composer and panel behave alike). */
@@ -123,11 +126,14 @@ export async function collectDroppedEntries(dt: DataTransfer): Promise<Collected
   }
 
   if (!supportsEntries) {
-    // Fallback: directory expansion unavailable — loose files only.
+    // Fallback: directory expansion unavailable — loose files only. Folder
+    // contents are LOST here; the flag lets callers warn instead of dropping
+    // them silently.
     const files = dt.files ? Array.from(dt.files) : [];
     return {
       files: files.map((file) => ({ file, relPath: file.name, rootDir: null })),
       hadDirectory: false,
+      entriesUnsupported: true,
     };
   }
 
@@ -143,6 +149,39 @@ export async function collectDroppedEntries(dt: DataTransfer): Promise<Collected
     }
   }
   return { files: out, hadDirectory };
+}
+
+export interface DropPolicyOptions {
+  /** Per-file size cap in bytes; larger files are skipped with one combined warning. */
+  maxFileSize: number;
+  warnOversize: (count: number, limitMb: number) => void;
+  /** Asked once when the batch exceeds MAX_DROP_FILES / MAX_DROP_TOTAL_BYTES. */
+  confirmBulk: (count: number, totalMb: number) => Promise<boolean>;
+}
+
+/**
+ * Shared drop policy for the composer and the Workspace panel: skip oversized
+ * files and gate very large batches behind a confirmation. Returns the files
+ * to upload ([] when nothing survives), or null when the user cancels.
+ */
+export async function applyDropPolicy(
+  collected: CollectedDrop,
+  opts: DropPolicyOptions,
+): Promise<DroppedFile[] | null> {
+  const all = collected.files;
+  if (all.length === 0) return [];
+  const oversized = all.filter((d) => d.file.size > opts.maxFileSize);
+  const kept = all.filter((d) => d.file.size <= opts.maxFileSize);
+  if (oversized.length > 0) {
+    opts.warnOversize(oversized.length, Math.round(opts.maxFileSize / (1024 * 1024)));
+  }
+  if (kept.length === 0) return kept;
+  const totalBytes = kept.reduce((sum, d) => sum + d.file.size, 0);
+  if (kept.length > MAX_DROP_FILES || totalBytes > MAX_DROP_TOTAL_BYTES) {
+    const ok = await opts.confirmBulk(kept.length, Math.round(totalBytes / (1024 * 1024)));
+    if (!ok) return null;
+  }
+  return kept;
 }
 
 /**

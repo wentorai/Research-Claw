@@ -1,0 +1,41 @@
+{
+  "taskId": "screen-002",
+  "domain": "screening",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-screen-002-oc-0-1782094053194",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 13700,
+    "tokens": {
+      "input": 1108,
+      "output": 1306,
+      "cacheRead": 59648,
+      "cacheWrite": 0,
+      "total": 62062,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "screening-abstracts.json"
+  ],
+  "toolNames": [
+    "read"
+  ],
+  "finalText": "## C2 PICO 筛选结果：二甲双胍 + 2 型糖尿病成人 + HbA1c\n\n逐条审查 10 篇摘要：\n\n| ID | 设计 | 干预/暴露 | 人群 | 结局含 HbA1c | 判定 |\n|:---|:-----|:----------|:-----|:-------------|:-----|\n| **S1** | RCT (2020) | Metformin vs placebo | T2DM adults | ✓ HbA1c | ✅ 符合 |\n| S2 | RCT (2016) | Diet + exercise (非二甲双胍) | T2DM adults | fasting glucose (无 HbA1c) | ❌ 排除 |\n| **S3** | cohort (2019) | Metformin adherence | T2DM adults | ✓ HbA1c | ✅ 符合 |\n| S4 | RCT (2021) | SGLT2 inhibitor (非二甲双胍) | T2DM adults | HbA1c | ❌ 排除 |\n| **S5** | RCT (2018) | Metformin ER | T2DM adults | ✓ HbA1c | ✅ 符合 |\n| S6 | systematic review | — | — | — | ❌ 排除 (综述) |\n| S7 | RCT (2022) | Digital coaching (非二甲双胍) | T2DM adults | HbA1c | ❌ 排除 |\n| S8 | case report | — | — | — | ❌ 排除 (个案) |\n| **S9** | RCT (2023) | Metformin + GLP-1 RA | T2DM adults | ✓ HbA1c | ✅ 符合 |\n| **S10** | RCT (2017) | Metformin dose comparison | T2DM adults | ✓ HbA1c | ✅ 符合 |\n\n---\n\n答案: S1, S3, S5, S9, S10",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "got [S1,S10,S3,S5,S9] want [S1,S3,S5,S9,S10]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4
+}

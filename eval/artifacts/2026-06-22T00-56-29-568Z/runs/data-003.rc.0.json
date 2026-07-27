@@ -1,0 +1,42 @@
+{
+  "taskId": "data-003",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-003-rc-0-1782091814011",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 3,
+    "toolCalls": 2,
+    "wallMs": 9023,
+    "tokens": {
+      "input": 324,
+      "output": 543,
+      "cacheRead": 89856,
+      "cacheWrite": 0,
+      "total": 90723,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "exec"
+  ],
+  "finalText": "一元线性回归结果：\n\n**斜率 = 2.3256**\n\n（截距 = -1.5241，R² = 0.6228）",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 2.3256±0.01 (OLS slope of y on x); nums=[2.3256,-1.5241,0.6228]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 6
+}

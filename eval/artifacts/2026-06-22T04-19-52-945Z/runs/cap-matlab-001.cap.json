@@ -1,0 +1,7 @@
+{
+  "taskId": "cap-matlab-001",
+  "side": "rc",
+  "suite": "matlab",
+  "skipped": true,
+  "reason": "matlab not installed"
+}

@@ -128,6 +128,85 @@ describe('WorkspaceService', () => {
       expect(content).toBe('custom content\n');
     });
 
+    // Onboarding-complete self-heal: OC's workspaceBootstrapPending checks the
+    // ROOT BOOTSTRAP.md's existence, so a residual script (old completion flow
+    // wrote only the .done sentinel) plus the rebuilt root symlink would
+    // re-trigger onboarding every session. migratePromptFiles must retire it.
+    describe('BOOTSTRAP.md retirement when .done exists', () => {
+      it('removes residual .ResearchClaw/BOOTSTRAP.md and the root symlink', async () => {
+        const rcDir = path.join(tmpDir, '.ResearchClaw');
+        fs.mkdirSync(rcDir, { recursive: true });
+        fs.writeFileSync(path.join(rcDir, 'BOOTSTRAP.md'), '# old onboarding script\n');
+        fs.writeFileSync(path.join(rcDir, 'BOOTSTRAP.md.done'), '');
+        fs.symlinkSync(
+          path.join('.ResearchClaw', 'BOOTSTRAP.md'),
+          path.join(tmpDir, 'BOOTSTRAP.md'),
+        );
+
+        svc = new WorkspaceService(makeConfig(tmpDir));
+        await svc.init();
+
+        expect(fs.existsSync(path.join(rcDir, 'BOOTSTRAP.md'))).toBe(false);
+        expect(fs.lstatSync(path.join(tmpDir, 'BOOTSTRAP.md'), { throwIfNoEntry: false })).toBeUndefined();
+        expect(fs.existsSync(path.join(rcDir, 'BOOTSTRAP.md.done'))).toBe(true);
+      });
+
+      it('consolidates a root-level .done first, then retires the residue', async () => {
+        const rcDir = path.join(tmpDir, '.ResearchClaw');
+        fs.mkdirSync(rcDir, { recursive: true });
+        fs.writeFileSync(path.join(rcDir, 'BOOTSTRAP.md'), '# old onboarding script\n');
+        // Old save-only completion flow: sentinel written at the workspace root.
+        fs.writeFileSync(path.join(tmpDir, 'BOOTSTRAP.md.done'), '');
+
+        svc = new WorkspaceService(makeConfig(tmpDir));
+        await svc.init();
+
+        expect(fs.existsSync(path.join(rcDir, 'BOOTSTRAP.md.done'))).toBe(true);
+        expect(fs.existsSync(path.join(tmpDir, 'BOOTSTRAP.md.done'))).toBe(false);
+        expect(fs.existsSync(path.join(rcDir, 'BOOTSTRAP.md'))).toBe(false);
+        expect(fs.lstatSync(path.join(tmpDir, 'BOOTSTRAP.md'), { throwIfNoEntry: false })).toBeUndefined();
+      });
+
+      it('retires a pre-migration real root BOOTSTRAP.md when .done exists', async () => {
+        fs.writeFileSync(path.join(tmpDir, 'BOOTSTRAP.md'), '# very old layout\n');
+        fs.writeFileSync(path.join(tmpDir, 'BOOTSTRAP.md.done'), '');
+
+        svc = new WorkspaceService(makeConfig(tmpDir));
+        await svc.init();
+
+        expect(fs.lstatSync(path.join(tmpDir, 'BOOTSTRAP.md'), { throwIfNoEntry: false })).toBeUndefined();
+        expect(fs.existsSync(path.join(tmpDir, '.ResearchClaw', 'BOOTSTRAP.md.done'))).toBe(true);
+      });
+
+      it('leaves an in-progress onboarding (no .done) fully intact', async () => {
+        const rcDir = path.join(tmpDir, '.ResearchClaw');
+        fs.mkdirSync(rcDir, { recursive: true });
+        fs.writeFileSync(path.join(rcDir, 'BOOTSTRAP.md'), '# onboarding in progress\n');
+
+        svc = new WorkspaceService(makeConfig(tmpDir));
+        await svc.init();
+
+        expect(fs.existsSync(path.join(rcDir, 'BOOTSTRAP.md'))).toBe(true);
+        // Root path re-linked so OC can still trigger the onboarding flow.
+        const rootStat = fs.lstatSync(path.join(tmpDir, 'BOOTSTRAP.md'), { throwIfNoEntry: false });
+        expect(rootStat?.isSymbolicLink()).toBe(true);
+      });
+
+      it('is idempotent across restarts', async () => {
+        const rcDir = path.join(tmpDir, '.ResearchClaw');
+        fs.mkdirSync(rcDir, { recursive: true });
+        fs.writeFileSync(path.join(rcDir, 'BOOTSTRAP.md'), '# residue\n');
+        fs.writeFileSync(path.join(rcDir, 'BOOTSTRAP.md.done'), '');
+
+        svc = new WorkspaceService(makeConfig(tmpDir));
+        await svc.init();
+        await svc.init();
+
+        expect(fs.existsSync(path.join(rcDir, 'BOOTSTRAP.md'))).toBe(false);
+        expect(fs.existsSync(path.join(rcDir, 'BOOTSTRAP.md.done'))).toBe(true);
+      });
+    });
+
     it('migrates legacy uploads/ into sources/', async () => {
       fs.mkdirSync(path.join(tmpDir, 'uploads'), { recursive: true });
       fs.writeFileSync(path.join(tmpDir, 'uploads', 'paper.pdf'), 'pdf');

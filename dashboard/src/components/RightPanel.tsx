@@ -21,6 +21,7 @@ const ExtensionsPanel = lazy(() => import('./panels/ExtensionsPanel'));
 const SettingsPanel = lazy(() => import('./panels/SettingsPanel'));
 const SupervisorPanel = lazy(() => import('./panels/SupervisorPanel'));
 const PaperReviewPanel = lazy(() => import('./panels/PaperReviewPanel'));
+const PeripheralsPanel = lazy(() => import('./panels/PeripheralsPanel'));
 
 const TAB_TITLE_KEYS: Record<PanelTab, string> = {
   library: 'library.title',
@@ -29,6 +30,7 @@ const TAB_TITLE_KEYS: Record<PanelTab, string> = {
   tasks: 'tasks.title',
   jobs: 'jobs.title',
   monitor: 'monitor.title',
+  peripherals: 'periph.title',
   supervisor: 'supervisor.title',
   extensions: 'extensions.title',
   settings: 'settings.title',
@@ -48,6 +50,8 @@ function PanelContent({ tab }: { tab: PanelTab }) {
       return <JobsPanel />;
     case 'monitor':
       return <MonitorPanel />;
+    case 'peripherals':
+      return <PeripheralsPanel />;
     case 'supervisor':
       return <SupervisorPanel />;
     case 'extensions':

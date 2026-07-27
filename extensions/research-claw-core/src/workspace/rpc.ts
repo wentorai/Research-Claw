@@ -1,9 +1,11 @@
 /**
- * workspace/rpc — 11 Gateway WS RPC Handlers
+ * workspace/rpc — Gateway WS RPC handlers (13 rc.ws.* methods)
  *
- * Registers rc.ws.tree, rc.ws.read, rc.ws.save, rc.ws.history, rc.ws.diff,
- * rc.ws.restore, rc.ws.delete, rc.ws.saveImage, rc.ws.openExternal,
- * rc.ws.openFolder, and rc.ws.move as gateway WebSocket RPC methods.
+ * Registers rc.ws.tree, rc.ws.exists, rc.ws.read, rc.ws.save, rc.ws.history,
+ * rc.ws.diff, rc.ws.restore, rc.ws.delete, rc.ws.saveImage,
+ * rc.ws.openExternal, rc.ws.openFolder, rc.ws.mkdir, and rc.ws.move as
+ * gateway WebSocket RPC methods. (Recount `registerMethod('rc.ws.` when
+ * editing — stale totals in comments have caused real bugs.)
  *
  * rc.ws.upload is HTTP-only (POST /rc/upload) and is NOT registered here.
  * It should be registered as an HTTP route in the plugin entry point (index.ts).
@@ -12,10 +14,25 @@
  * are caught and re-thrown for the gateway framework to handle.
  */
 
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { WorkspaceService } from './service.js';
+
+/**
+ * Run a desktop-open command via execFile (argv array, NO shell). The resolved
+ * workspace path is passed as a single argv element straight to CreateProcess/
+ * execve — never through a shell interpreter — so shell metacharacters in a
+ * filename (POSIX `x$(touch pwn).txt`, Windows `x & calc.exe & y.pdf`) are
+ * inert. This closes the command-injection surface that exec(string) had.
+ * IMPORTANT: never route these through `cmd.exe /c` — cmd re-parses its command
+ * line and `&`/`|`/`%VAR%` would re-open the injection even under execFile.
+ */
+function runArgv(file: string, args: string[]): Promise<void> {
+  return new Promise((res, rej) => {
+    execFile(file, args, (err) => (err ? rej(err) : res()));
+  });
+}
 import type { RegisterMethod } from '../types.js';
 
 /** Detect if running inside a Docker container. */
@@ -83,7 +100,7 @@ function mapError(err: unknown): never {
 // ---------------------------------------------------------------------------
 
 /**
- * Register the 7 workspace WS RPC methods with the gateway.
+ * Register the 13 workspace WS RPC methods with the gateway.
  *
  * @param registerMethod - Function to register a gateway RPC method
  * @param service        - WorkspaceService instance to delegate operations to
@@ -125,8 +142,8 @@ export function registerWorkspaceRpc(
   });
 
   // -----------------------------------------------------------------------
-  // 2b. rc.ws.exists — Check whether a workspace file exists
-  //     params: { path: string }
+  // 2b. rc.ws.exists — Check whether a workspace path exists
+  //     params: { path: string } → { exists, type?: 'file' | 'directory' }
   // -----------------------------------------------------------------------
   registerMethod('rc.ws.exists', async (params: Record<string, unknown>) => {
     try {
@@ -257,9 +274,11 @@ export function registerWorkspaceRpc(
     const filePath = requireString(params, 'path');
     if (!wsRoot) throw new Error('Workspace root not configured');
 
-    // Resolve and validate path stays within workspace
-    const resolved = path.resolve(wsRoot, filePath);
-    if (!resolved.startsWith(path.resolve(wsRoot) + path.sep) && resolved !== path.resolve(wsRoot)) {
+    // Symlink-aware containment (path-guard via service), same error shape as before
+    let resolved: string;
+    try {
+      resolved = service.resolvePath(filePath);
+    } catch {
       throw Object.assign(new Error('Path escapes workspace root'), { code: -32001 });
     }
 
@@ -275,19 +294,15 @@ export function registerWorkspaceRpc(
       };
     }
 
-    const quoted = JSON.stringify(resolved);
-    const run = (cmd: string) =>
-      new Promise<void>((res, rej) => exec(cmd, (err) => (err ? rej(err) : res())));
-
     if (process.platform === 'darwin') {
       try {
-        await run(`open ${quoted}`);
+        await runArgv('open', [resolved]);
       } catch (firstErr) {
         // Fallback: open with default text editor (handles .tex, .bib, .r, etc.)
         // Only for files — `open -t` doesn't work on directories.
         const ext = path.extname(resolved);
         if (ext) {
-          await run(`open -t ${quoted}`).catch(() => {
+          await runArgv('open', ['-t', resolved]).catch(() => {
             throw new Error(`Failed to open file: ${(firstErr as Error).message}`);
           });
         } else {
@@ -295,11 +310,14 @@ export function registerWorkspaceRpc(
         }
       }
     } else if (process.platform === 'win32') {
-      await run(`start "" ${quoted}`).catch((err) => {
+      // explorer.exe launches a file with its default association and takes the
+      // path as a single argv element (no cmd.exe re-parse) — same safe pattern
+      // as openFolder below. Avoids the `cmd /c start` injection surface.
+      await runArgv('explorer.exe', [resolved]).catch((err) => {
         throw new Error(`Failed to open file: ${err.message}`);
       });
     } else {
-      await run(`xdg-open ${quoted}`).catch((err) => {
+      await runArgv('xdg-open', [resolved]).catch((err) => {
         throw new Error(`Failed to open file: ${err.message}`);
       });
     }
@@ -315,9 +333,11 @@ export function registerWorkspaceRpc(
     const filePath = requireString(params, 'path');
     if (!wsRoot) throw new Error('Workspace root not configured');
 
-    // Resolve and validate path stays within workspace
-    const resolved = path.resolve(wsRoot, filePath);
-    if (!resolved.startsWith(path.resolve(wsRoot) + path.sep) && resolved !== path.resolve(wsRoot)) {
+    // Symlink-aware containment (path-guard via service), same error shape as before
+    let resolved: string;
+    try {
+      resolved = service.resolvePath(filePath);
+    } catch {
       throw Object.assign(new Error('Path escapes workspace root'), { code: -32001 });
     }
 
@@ -335,18 +355,20 @@ export function registerWorkspaceRpc(
       };
     }
 
-    const cmd = process.platform === 'darwin'
-      ? `open ${JSON.stringify(dir)}`
-      : process.platform === 'win32'
-        ? `explorer ${JSON.stringify(dir)}`
-        : `xdg-open ${JSON.stringify(dir)}`;
+    // argv, no shell — the resolved dir path cannot be interpreted as a command.
+    const [file, args]: [string, string[]] =
+      process.platform === 'darwin'
+        ? ['open', [dir]]
+        : process.platform === 'win32'
+          ? ['explorer.exe', [dir]]
+          : ['xdg-open', [dir]];
 
-    return new Promise<{ ok: boolean }>((resolve, reject) => {
-      exec(cmd, (err) => {
-        if (err) reject(new Error(`Failed to open folder: ${err.message}`));
-        else resolve({ ok: true });
-      });
-    });
+    try {
+      await runArgv(file, args);
+      return { ok: true };
+    } catch (err) {
+      throw new Error(`Failed to open folder: ${(err as Error).message}`);
+    }
   });
 
   // -----------------------------------------------------------------------

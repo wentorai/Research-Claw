@@ -1,0 +1,41 @@
+{
+  "taskId": "data-005",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-005-oc-0-1782090303107",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 6740,
+    "tokens": {
+      "input": 246,
+      "output": 485,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 60251,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read"
+  ],
+  "finalText": "Group A 的 y 列数据为：27, 31, 26, 39, 65, 38, 51, 55, 50, 85（共 10 行）。\n\n计算过程：\n\n$$\n\\frac{27 + 31 + 26 + 39 + 65 + 38 + 51 + 55 + 50 + 85}{10} = \\frac{467}{10} = 46.70\n$$\n\n**结果：46.70**",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 46.7±0.1 (mean of y where group==A); nums=[27,31,26,39,65,38,51,55,50,85,10,27]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4
+}

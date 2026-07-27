@@ -1,0 +1,44 @@
+{
+  "taskId": "lit-005",
+  "domain": "literature",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-005-rc-0-1782068152954",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 7085,
+    "tokens": {
+      "input": 719,
+      "output": 520,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 60759,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_abstracts"
+  ],
+  "finalText": "## 论文信息\n\n| 项目 | 内容 |\n|:---|:---|\n| **DOI** | `10.1038/nature14539` |\n| **标题** | Deep Learning |\n| **期刊** | *Nature* |\n| **发表年份** | 2015 |\n| **引用量** | 81,470+ |\n\n这就是著名的深度学习\"三巨头\"——**Yann LeCun、Yoshua Bengio 和 Geoffrey Hinton** 于 2015 年在 *Nature* 上发表的深度学习综述论文。该文系统阐述了深度学习的核心原理、关键突破（卷积网络、循环网络、无监督学习等），并展望了其在计算机视觉、语音识别、自然语言处理等领域的前景，是深度学习领域的里程碑式文献。\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Deep Learning\",\"authors\":[\"Yann LeCun\",\"Yoshua Bengio\",\"Geoffrey Hinton\"],\"venue\":\"Nature\",\"year\":2015,\"doi\":\"10.1038/nature14539\",\"cited_by\":81470,\"oa_status\":\"green\",\"read_status\":\"unread\"}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": false,
+        "evidence": "10.1038/nature14539`:BAD; 10.1038/nature14539:ok"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 4
+}

@@ -1,0 +1,20 @@
+{
+  "runId": "2026-06-22T02-19-30-034Z",
+  "args": {
+    "tasks": "cw-001,lh-001,lh-002",
+    "sides": "rc,oc",
+    "repeats": "1",
+    "no-judge": true
+  },
+  "headTasks": [
+    "cw-001",
+    "lh-001",
+    "lh-002"
+  ],
+  "capTasks": [],
+  "sides": [
+    "rc",
+    "oc"
+  ],
+  "at": "2026-06-22T02:34:28.482Z"
+}

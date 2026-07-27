@@ -12,12 +12,14 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import {
+  DEFAULT_GITIGNORE,
   type CommitEntry,
   type GitFileStatus,
   type GitTracker,
   type GitTrackerConfig,
   createGitTracker,
 } from './git-tracker.js';
+import { resolveWithinRoot, validateRelPath } from './path-guard.js';
 
 // ---------------------------------------------------------------------------
 // Error codes (JSON-RPC server error space)
@@ -41,6 +43,10 @@ const WS_FILE_TOO_LARGE = -32003;
 const WS_COMMIT_NOT_FOUND = -32004;
 const WS_FILE_NOT_IN_COMMIT = -32005;
 const WS_WRITE_FAILED = -32008;
+/** Destination already exists and the caller demanded exclusive creation
+ *  (non-overwrite upload). Distinct code so the /rc/upload handler can retry
+ *  (rename mode) or return 409 (fail mode) without a fragile message match. */
+export const WS_FILE_EXISTS = -32009;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -280,72 +286,10 @@ const HIDDEN_ROOT_ENTRIES = new Set([
   'MEMORY.md',
   // OS/tool artifacts
   '.DS_Store', 'Thumbs.db', '.gitignore',
+  // Streaming-upload staging dir (see workspace/multipart.ts)
+  '.uploads-tmp',
 ]);
 
-const DEFAULT_GITIGNORE = `# Research-Claw workspace — auto-generated
-# Large binary files (managed by size guard)
-*.zip
-*.tar.gz
-*.tgz
-*.rar
-*.7z
-*.iso
-*.dmg
-*.exe
-*.dll
-*.so
-*.dylib
-*.o
-*.obj
-
-# Temporary files
-*.tmp
-*.swp
-*.swo
-*~
-*.log
-*.pid
-*.seed
-.DS_Store
-Thumbs.db
-
-# Media (large)
-*.mp4
-*.avi
-*.mov
-*.mkv
-*.mp3
-*.wav
-*.flac
-
-# Python artifacts
-__pycache__/
-*.pyc
-.venv/
-.ipynb_checkpoints/
-
-# R artifacts
-.Rhistory
-.RData
-
-# Node
-node_modules/
-
-# Editor state
-.vscode/
-.idea/
-
-# Large data (user can remove lines to track specific files)
-*.h5
-*.hdf5
-*.parquet
-*.sqlite
-*.db
-
-# Environment / secrets
-.env
-.env.*
-`;
 
 // ---------------------------------------------------------------------------
 // WorkspaceService
@@ -370,97 +314,24 @@ export class WorkspaceService {
    * path contains `..`, starts with `/`, or contains null bytes.
    */
   private validatePath(p: string): void {
-    if (!p || typeof p !== 'string') {
-      throw new WorkspaceError(
-        'Invalid path: path must be a non-empty string.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
-    }
-
-    if (p.includes('\0')) {
-      throw new WorkspaceError(
-        'Invalid path: null bytes are not allowed.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
-    }
-
-    if (path.isAbsolute(p) || p.startsWith('/') || p.startsWith('\\')) {
-      throw new WorkspaceError(
-        'Invalid path: absolute paths are not allowed.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
-    }
-
-    // Normalize and check for traversal
-    const normalized = path.normalize(p);
-    if (normalized.startsWith('..') || normalized.includes(`${path.sep}..`)) {
-      throw new WorkspaceError(
-        'Invalid path: directory traversal is not allowed.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
-    }
-
-    // Also check the raw string for `..` segments (covers mixed separators)
-    const segments = p.replace(/\\/g, '/').split('/');
-    if (segments.some((s) => s === '..')) {
-      throw new WorkspaceError(
-        'Invalid path: directory traversal is not allowed.',
-        WS_PATH_TRAVERSAL,
-        { path: p },
-      );
+    try {
+      validateRelPath(p);
+    } catch (e) {
+      throw new WorkspaceError((e as Error).message, WS_PATH_TRAVERSAL, { path: p });
     }
   }
 
   /**
    * Resolve a relative path to an absolute path within the workspace.
    * Also checks for symlink escapes on existing paths and their parent dirs.
+   * (Implementation lives in path-guard.ts — the single containment source.)
    */
   resolvePath(relativePath: string): string {
-    this.validatePath(relativePath);
-    const resolved = path.resolve(this.root, relativePath);
-
-    // Double-check the resolved path is still within workspace root
-    if (resolved !== this.root && !resolved.startsWith(this.root + path.sep)) {
-      throw new WorkspaceError(
-        'Invalid path: resolved path escapes workspace root.',
-        WS_PATH_TRAVERSAL,
-        { path: relativePath },
-      );
-    }
-
-    // Symlink escape guard: walk up from resolved path to workspace root,
-    // checking the first existing ancestor via fs.realpathSync(). This catches
-    // symlinks at any depth (e.g. workspace/a → /tmp/x/, write to a/b/c.txt).
     try {
-      const realRoot = fs.realpathSync(this.root);
-      let checkPath = resolved;
-      while (checkPath !== realRoot && checkPath !== path.dirname(checkPath)) {
-        try {
-          const real = fs.realpathSync(checkPath);
-          if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
-            throw new WorkspaceError(
-              'Invalid path: resolves outside workspace root via symlink.',
-              WS_PATH_TRAVERSAL,
-              { path: relativePath },
-            );
-          }
-          break; // Found existing path within bounds — safe
-        } catch (e) {
-          if (e instanceof WorkspaceError) throw e;
-          // ENOENT: path doesn't exist yet, check parent
-          checkPath = path.dirname(checkPath);
-        }
-      }
+      return resolveWithinRoot(this.root, relativePath);
     } catch (e) {
-      if (e instanceof WorkspaceError) throw e;
-      // If realpath on root fails, skip symlink check entirely
+      throw new WorkspaceError((e as Error).message, WS_PATH_TRAVERSAL, { path: relativePath });
     }
-
-    return resolved;
   }
 
   // -----------------------------------------------------------------------
@@ -491,6 +362,9 @@ export class WorkspaceService {
 
     // Migrate legacy uploads/ → sources/ (idempotent)
     await this.migrateUploadsToSources();
+
+    // Sweep stale streaming-upload temp files (crashed/aborted uploads)
+    await this.cleanupStaleUploadTmp();
 
     // Create default .gitignore if it does not exist
     const gitignorePath = path.join(this.root, '.gitignore');
@@ -538,7 +412,42 @@ export class WorkspaceService {
   private async migratePromptFiles(): Promise<void> {
     const rcDir = path.join(this.root, '.ResearchClaw');
 
+    // Consolidate the onboarding sentinel FIRST (the agent writes it at the
+    // root — see BOOTSTRAP.md.example completion) so the retirement check
+    // below sees a canonical .done regardless of where it was written.
+    const doneSrc = path.join(this.root, 'BOOTSTRAP.md.done');
+    const doneDest = path.join(rcDir, 'BOOTSTRAP.md.done');
+    try {
+      await fsp.access(doneDest, fs.constants.F_OK);
+    } catch {
+      try {
+        await fsp.access(doneSrc, fs.constants.F_OK);
+        await fsp.rename(doneSrc, doneDest);
+      } catch {
+        // Neither exists
+      }
+    }
+    // Positive-evidence check (NOT bootstrapDoneExists, whose fail-safe-true
+    // direction would be wrong for a deletion decision).
+    const bootstrapDone = fs.existsSync(doneDest) || fs.existsSync(doneSrc);
+
     for (const filename of RELOCATABLE_PROMPT_FILES) {
+      if (filename === 'BOOTSTRAP.md' && bootstrapDone) {
+        // Onboarding is complete — retire every BOOTSTRAP.md entry instead of
+        // relinking it. OC's workspaceBootstrapPending checks the ROOT file's
+        // existence (independently of the bootstrap hook's content blanking),
+        // so a residual script + rebuilt root symlink would re-trigger
+        // onboarding every session for users who completed via the old
+        // save-only flow. The script holds no user state; removal is safe.
+        for (const staleBootstrap of [path.join(this.root, filename), path.join(rcDir, filename)]) {
+          try {
+            await fsp.rm(staleBootstrap, { force: true });
+          } catch {
+            // ignore — the bootstrap hook still blanks the entry per-turn
+          }
+        }
+        continue;
+      }
       const rootPath = path.join(this.root, filename);
       const destPath = path.join(rcDir, filename);
 
@@ -576,20 +485,6 @@ export class WorkspaceService {
 
       // Canonical copy now lives in .ResearchClaw/ — point the root path at it.
       await this.linkRootToSubdir(filename);
-    }
-
-    // Also handle BOOTSTRAP.md.done (renamed after first-run onboarding)
-    const doneSrc = path.join(this.root, 'BOOTSTRAP.md.done');
-    const doneDest = path.join(rcDir, 'BOOTSTRAP.md.done');
-    try {
-      await fsp.access(doneDest, fs.constants.F_OK);
-    } catch {
-      try {
-        await fsp.access(doneSrc, fs.constants.F_OK);
-        await fsp.rename(doneSrc, doneDest);
-      } catch {
-        // Neither exists
-      }
     }
   }
 
@@ -958,11 +853,13 @@ export class WorkspaceService {
   // exists — rc.ws.exists
   // -----------------------------------------------------------------------
 
-  /** Lightweight existence check for polling (avoids noisy read errors in logs). */
-  async exists(filePath: string): Promise<{ exists: boolean }> {
+  /** Lightweight existence check for polling and upload pre-flight (avoids
+   *  noisy read errors in logs). `type` distinguishes file vs directory so
+   *  pre-flight checks can catch file-vs-directory collisions. */
+  async exists(filePath: string): Promise<{ exists: boolean; type?: 'file' | 'directory' }> {
     try {
       const stat = await fsp.stat(this.resolvePath(filePath));
-      return { exists: stat.isFile() };
+      return { exists: true, type: stat.isDirectory() ? 'directory' : 'file' };
     } catch {
       return { exists: false };
     }
@@ -1163,6 +1060,134 @@ export class WorkspaceService {
       commit_hash: commitHash,
       is_new: isNew,
     };
+  }
+
+  /**
+   * Move an already-written temp file (from the streaming upload parser) into
+   * the workspace, then run the identical git-tracking path as save().
+   *
+   * `opts.overwrite` controls the collision behaviour:
+   * - false (default): EXCLUSIVE create via fsp.link — if the destination
+   *   already exists the link throws EEXIST, surfaced as WS_FILE_EXISTS. This
+   *   is atomic, so two concurrent uploads racing for the same name cannot both
+   *   "win" a stat-then-rename (the previous fsp.rename silently clobbered).
+   *   On EEXIST the tmp file is LEFT in place so the caller can retry a new name.
+   * - true: fsp.rename clobber (the caller explicitly chose overwrite).
+   * The tmp file is consumed on success and removed on non-EEXIST failure.
+   */
+  async saveFromTempFile(
+    tmpAbsPath: string,
+    filePath: string,
+    commitMessage?: string,
+    opts?: { overwrite?: boolean },
+  ): Promise<{
+    path: string;
+    size: number;
+    committed: boolean;
+    commit_hash?: string;
+    is_new: boolean;
+  }> {
+    const fullPath = this.resolvePath(filePath);
+
+    const parentDir = path.dirname(fullPath);
+    await fsp.mkdir(parentDir, { recursive: true });
+
+    // Check if file already exists (for commit message prefix)
+    let isNew = true;
+    try {
+      await fsp.access(fullPath, fs.constants.F_OK);
+      isNew = false;
+    } catch {
+      // File does not exist — it is new
+    }
+
+    if (opts?.overwrite) {
+      try {
+        await fsp.rename(tmpAbsPath, fullPath);
+      } catch (err) {
+        try {
+          await fsp.unlink(tmpAbsPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+        throw new WorkspaceError(
+          `Failed to write file: ${(err as Error).message}`,
+          WS_WRITE_FAILED,
+          { path: filePath },
+        );
+      }
+    } else {
+      // Exclusive create: link fails atomically if the dest already exists.
+      try {
+        await fsp.link(tmpAbsPath, fullPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+          // Leave tmp in place so the handler can retry another name.
+          throw new WorkspaceError(`Destination already exists: ${filePath}`, WS_FILE_EXISTS, { path: filePath });
+        }
+        try {
+          await fsp.unlink(tmpAbsPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+        throw new WorkspaceError(
+          `Failed to write file: ${(err as Error).message}`,
+          WS_WRITE_FAILED,
+          { path: filePath },
+        );
+      }
+      // dest and tmp now share an inode — drop the tmp name.
+      try {
+        await fsp.unlink(tmpAbsPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
+    const fileStat = await fsp.stat(fullPath);
+
+    let committed = false;
+    let commitHash: string | undefined;
+    if (this.tracker) {
+      this.tracker.invalidateStatusCache();
+      try {
+        const prefix = isNew ? 'Add' : 'Update';
+        const message = commitMessage ?? `${prefix}: ${path.basename(filePath)}`;
+        const result = await this.tracker.commitFile(filePath, message);
+        committed = result.committed;
+        commitHash = result.hash;
+      } catch {
+        // Git failure is non-fatal for save operations
+      }
+    }
+
+    return {
+      path: filePath,
+      size: fileStat.size,
+      committed,
+      commit_hash: commitHash,
+      is_new: isNew,
+    };
+  }
+
+  /** Remove `.uploads-tmp/` entries older than one hour (crashed uploads). */
+  private async cleanupStaleUploadTmp(): Promise<void> {
+    const tmpDir = path.join(this.root, '.uploads-tmp');
+    try {
+      const entries = await fsp.readdir(tmpDir);
+      const cutoff = Date.now() - 60 * 60 * 1000;
+      for (const name of entries) {
+        const full = path.join(tmpDir, name);
+        try {
+          const stat = await fsp.stat(full);
+          if (stat.mtimeMs < cutoff) await fsp.unlink(full);
+        } catch {
+          // Entry vanished or unreadable — skip.
+        }
+      }
+    } catch {
+      // Staging dir does not exist yet — nothing to sweep.
+    }
   }
 
   // -----------------------------------------------------------------------

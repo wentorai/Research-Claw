@@ -1,0 +1,42 @@
+{
+  "taskId": "screen-002",
+  "domain": "screening",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-screen-002-oc-0-1782103129338",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 2,
+    "wallMs": 15036,
+    "tokens": {
+      "input": 5860,
+      "output": 1279,
+      "cacheRead": 59648,
+      "cacheWrite": 0,
+      "total": 66787,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "screening-abstracts.json"
+  ],
+  "toolNames": [
+    "read",
+    "read"
+  ],
+  "finalText": "## C2 PICO 筛选分析\n\n按 C2 标准逐条审查：\n\n| ID | 设计 | 干预/暴露 | 人群 | 结局含 HbA1c | 判断 |\n|:---|:---|:---|:---|:---|:---|\n| S1 | RCT ✓ | 二甲双胍 vs 安慰剂 ✓ | T2DM 成人 ✓ | HbA1c ✓ | **纳入** |\n| S2 | RCT ✓ | 生活方式干预 ✗ | T2DM 成人 ✓ | 空腹血糖 ✗ | 排除 |\n| S3 | cohort ✓ | 二甲双胍 ✓ | T2DM 成人 ✓ | HbA1c ✓ | **纳入** |\n| S4 | RCT ✓ | SGLT2 抑制剂 ✗ | T2DM 成人 ✓ | HbA1c ✓ | 排除 |\n| S5 | RCT ✓ | 二甲双胍缓释片 ✓ | T2DM 成人 ✓ | HbA1c ✓ | **纳入** |\n| S6 | systematic review ✗ | — | — | — | 排除（非原始研究） |\n| S7 | RCT ✓ | 智能手机应用 ✗ | T2DM 成人 ✓ | HbA1c ✓ | 排除 |\n| S8 | case report ✗ | — | — | — | 排除（非原始研究） |\n| S9 | RCT ✓ | 二甲双胍+GLP-1激动剂 ✓ | T2DM 成人 ✓ | HbA1c ✓ | **纳入** |\n| S10 | RCT ✓ | 二甲双胍剂量比较 ✓ | T2DM 成人 ✓ | HbA1c ✓ | **纳入** |\n\n**排除原因汇总：** S2（非二甲双胍干预）、S4（SGLT2 抑制剂）、S6（系统综述，非原始研究）、S7（数字应用）、S8（个案报告，非原始研究）。\n\n答案: S1, S3, S5, S9, S10",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "got [S1,S10,S3,S5,S9] want [S1,S3,S5,S9,S10]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 5
+}

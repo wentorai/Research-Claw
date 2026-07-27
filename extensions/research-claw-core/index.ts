@@ -5,9 +5,9 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 53 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job)
- *   - 92 WS RPC methods + 2 HTTP routes = 94 interface methods
- *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* = 92 WS; POST /rc/upload + GET /rc/download = 2 HTTP)
+ *   - 56 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job + 3 periph)
+ *   - 137 WS RPC methods + 3 HTTP routes = 140 interface methods
+ *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* + rc.onboarding.* + rc.periph.* = 137 WS; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
  *   - 10 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×3, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  *   - 1 session monitoring service (automatic memory extraction)
@@ -29,9 +29,11 @@ import { TaskService } from './src/tasks/service.js';
 import { createTaskTools } from './src/tasks/tools.js';
 import { registerTaskRpc } from './src/tasks/rpc.js';
 import { HeartbeatService } from './src/tasks/heartbeat.js';
-import { WorkspaceService, type WorkspaceConfig } from './src/workspace/service.js';
+import { WorkspaceService, WorkspaceError, WS_FILE_EXISTS, type WorkspaceConfig } from './src/workspace/service.js';
 import { createWorkspaceTools } from './src/workspace/tools.js';
 import { registerWorkspaceRpc } from './src/workspace/rpc.js';
+import { finderStyleName, normalizeConflictMode, resolveUploadConflict } from './src/workspace/upload-conflict.js';
+import { parseMultipartToTemp, type StreamedUpload } from './src/workspace/multipart.js';
 import { MonitorService } from './src/monitor/service.js';
 import { registerMonitorRpc } from './src/monitor/rpc.js';
 import { createMonitorTools } from './src/monitor/tools.js';
@@ -67,6 +69,15 @@ import { JobService } from './src/jobs/service.js';
 import { createJobTools } from './src/jobs/tools.js';
 import { registerJobRpc } from './src/jobs/rpc.js';
 import { syncOpenClawSubagentJobs } from './src/jobs/openclaw-sync.js';
+import { registerOnboardingRpc } from './src/onboarding/rpc.js';
+import { bootstrapDoneExists } from './src/onboarding/bootstrap-done.js';
+import { PeriphService } from './src/periph/service.js';
+import { periphBridge } from './src/periph/bridge.js';
+import { registerPeriphRpc, RTSP_PREVIEW_ROUTE } from './src/periph/rpc.js';
+import { createPeriphTools } from './src/periph/tools.js';
+import { PlaudManager } from './src/periph/plaud.js';
+import { RtspPreviewManager, PREVIEW_PLAYLIST_NAME } from './src/periph/rtsp-preview.js';
+import { resolveWithinRoot } from './src/workspace/path-guard.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -172,6 +183,129 @@ let _memoryService: InstanceType<typeof MemoryService> | null = null;
 let _claudeMemSyncService: ClaudeMemSyncService | null = null;
 let _reviewService: PaperReviewService | null = null;
 let _jobService: JobService | null = null;
+let _periphService: PeriphService | null = null;
+
+// ── Plaud MCP manager ──────────────────────────────────────────────────────
+// Real mini stdio MCP client. Construction is pure (no process spawns until a
+// tool call), so a module-level singleton is safe; it is instantiated in the
+// init block below to keep all periph wiring together.
+let _plaudManager: PlaudManager | null = null;
+
+// ── RTSP→HLS live-preview manager (§15 v1.3 场景③ H1-H6) ─────────────────────
+// Owns on-demand ffmpeg transmux sessions (RTSP→HLS) for the dashboard live
+// preview. Process-level singleton: the idle sweep + all live sessions must
+// survive runtime teardown/reload like the other periph singletons. Its
+// destroy() (kill all ffmpeg + clean temp dirs) is wired to the research-claw-db
+// service stop() below so a real gateway shutdown leaves no orphan processes.
+let _rtspPreviewManager: RtspPreviewManager | null = null;
+
+/**
+ * Minimal session lookup surface the RTSP→HLS route handler needs. Kept as a
+ * narrow interface (not the whole manager) so the route factory is unit/E2E
+ * testable against a real manager OR a fake, without dragging in ffmpeg.
+ */
+interface RtspPreviewRouteDeps {
+  getByToken: (sessionToken: string) => { dir: string } | null;
+  touch: (sessionToken: string) => boolean;
+  /** Symlink-aware path guard (H3). Defaults to resolveWithinRoot. */
+  resolveWithinRoot?: (root: string, rel: string) => string;
+  /** Playlist file name (H3 content-type branch). Defaults to PREVIEW_PLAYLIST_NAME. */
+  playlistName?: string;
+}
+
+/**
+ * Build the GET /rc/rtsp-preview/<token>/<file> request handler (§15 v1.3 场景③
+ * H3/H4). Extracted from the inline registerHttpRoute closure so a REAL http
+ * end-to-end test can mount the EXACT same logic against a real http.Server,
+ * backed by a real transmux session — proving the path guard rejects `..`
+ * traversal / null-byte / bad-ext and serves a real playlist/segment on the
+ * happy path. The gateway auth layer (auth:'gateway' → 401 for missing token)
+ * is applied by OpenClaw ahead of this handler; it is exercised separately in
+ * the E2E harness which reproduces the same Bearer check.
+ */
+export function createRtspPreviewRouteHandler(deps: RtspPreviewRouteDeps) {
+  const guard = deps.resolveWithinRoot ?? resolveWithinRoot;
+  const playlist = deps.playlistName ?? PREVIEW_PLAYLIST_NAME;
+  return async function rtspPreviewRouteHandler(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<boolean> {
+    if (req.method !== 'GET') {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: { code: 'METHOD_NOT_ALLOWED', message: 'GET only' } }));
+      return true;
+    }
+
+    try {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      // Strip the route prefix → `<token>/<file>`. pathname is already
+      // percent-decoded by URL for the most part; decode defensively.
+      let rel = decodeURIComponent(url.pathname);
+      if (rel.startsWith(RTSP_PREVIEW_ROUTE)) rel = rel.slice(RTSP_PREVIEW_ROUTE.length);
+      rel = rel.replace(/^\/+/, ''); // drop leading slash(es)
+
+      const slash = rel.indexOf('/');
+      const sessionToken = slash === -1 ? rel : rel.slice(0, slash);
+      const file = slash === -1 ? '' : rel.slice(slash + 1);
+
+      if (!sessionToken || !file) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'BAD_REQUEST', message: 'token and file required' } }));
+        return true;
+      }
+
+      const session = deps.getByToken(sessionToken);
+      if (!session) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'NO_SESSION', message: 'No such preview session' } }));
+        return true;
+      }
+
+      // Extension allowlist: only the playlist + its transport segments.
+      if (!/\.(m3u8|ts)$/.test(file)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'FORBIDDEN_EXT', message: 'Only .m3u8/.ts served' } }));
+        return true;
+      }
+
+      // Path guard (H3): contain `file` within the session dir (symlink-aware).
+      let resolved: string;
+      try {
+        resolved = guard(session.dir, file);
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'PATH_ESCAPE', message: 'Path escapes session dir' } }));
+        return true;
+      }
+
+      const stat = await fs.promises.stat(resolved).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'NOT_FOUND', message: 'Segment not found' } }));
+        return true;
+      }
+
+      // A successful, authenticated hit keeps the session alive (H1) so an
+      // actively-watched preview is not swept out from under the player.
+      deps.touch(sessionToken);
+
+      const isPlaylist = file.endsWith('.m3u8') || file === playlist;
+      res.writeHead(200, {
+        'Content-Type': isPlaylist ? 'application/vnd.apple.mpegurl' : 'video/mp2t',
+        'Content-Length': stat.size,
+        // Live segments must never be cached by intermediaries.
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      });
+      fs.createReadStream(resolved).pipe(res);
+      return true;
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: { code: 'PREVIEW_FAILED', message: String(err) } }));
+      return true;
+    }
+  };
+}
+
 // Server-side jobs sync loop: keeps OpenClaw subagent jobs and stale-detection
 // fresh even when no dashboard is polling, and coalesces all sync triggers
 // (RPC + timer) behind one throttle so the synchronous transcript sweep never
@@ -908,6 +1042,9 @@ const RESEARCH_CLAW_AGENT_TOOLS = [
   'job_checkpoint',
   'job_status',
   'job_finish',
+  'periph_list',
+  'periph_camera_snap',
+  'periph_observe',
 ];
 
 const plugin: PluginDefinition = {
@@ -958,10 +1095,20 @@ const plugin: PluginDefinition = {
         autoTrackGit: cfg.autoTrackGit ?? true,
         commitDebounceMs: cfg.workspace?.commitDebounceMs ?? 5000,
         maxGitFileSize: cfg.workspace?.maxGitFileSize ?? 10_485_760,
-        maxUploadSize: cfg.workspace?.maxUploadSize ?? 0,
+        // Default 2GB: uploads stream to disk (O(1) memory), so the cap is a
+        // sanity bound for a local workbench, not a memory guard.
+        maxUploadSize: cfg.workspace?.maxUploadSize ?? 2_147_483_648,
         gitAuthorName: cfg.workspace?.gitAuthorName ?? 'Research-Claw',
         gitAuthorEmail: cfg.workspace?.gitAuthorEmail ?? 'research-claw@wentor.ai',
       };
+      _periphService = new PeriphService(_dbManager.db, { workspaceRoot: _wsConfig.root });
+      _plaudManager = new PlaudManager();
+      _rtspPreviewManager = new RtspPreviewManager();
+      try {
+        _periphService.ensurePeriphGitignore();
+      } catch (err) {
+        console.warn('[periph] ensurePeriphGitignore failed (non-fatal):', err instanceof Error ? err.message : String(err));
+      }
       _wsService = new WorkspaceService(_wsConfig);
       _reviewService = new PaperReviewService(_dbManager.db, _wsService);
       _pptService = new PptService({
@@ -1082,11 +1229,18 @@ const plugin: PluginDefinition = {
         }
       },
       stop() {
-        // No-op: process-scoped singletons survive runtime teardown (see note above).
+        // Process-scoped singletons survive runtime teardown (see note above).
+        // EXCEPTION (§15 场景③ H1): RTSP→HLS preview sessions each hold a live
+        // ffmpeg child + a temp dir. On a real gateway shutdown we MUST kill them
+        // and clean up, otherwise orphan ffmpeg processes and HLS segment dirs
+        // leak. destroy() is idempotent and never throws.
+        if (_rtspPreviewManager) {
+          void _rtspPreviewManager.destroy();
+        }
       },
     });
 
-    // ── 4. Register tools (53 total) ─────────────────────────────────
+    // ── 4. Register tools (56 total) ─────────────────────────────────
     // Tool registration is runtime-scoped in OpenClaw. The same plugin module
     // may be reused across discovery, gateway, hot-reload, and agent-runtime
     // passes, but each pass receives a fresh api/registry. Keep stateful
@@ -1108,6 +1262,9 @@ const plugin: PluginDefinition = {
       api.registerTool(tool);
     }
     for (const tool of createJobTools(jobService)) {
+      api.registerTool(tool);
+    }
+    for (const tool of createPeriphTools(_periphService!, periphBridge, { workspaceRoot: wsConfig.root })) {
       api.registerTool(tool);
     }
 
@@ -1244,6 +1401,9 @@ const plugin: PluginDefinition = {
         params: Record<string, unknown>;
         respond: (ok: boolean, payload?: unknown, error?: { code: string; message: string }) => void;
       }) => {
+        if ((opts as any)?.context) {
+          periphBridge.adoptContext((opts as any).context);
+        }
         try {
           const result = await handler(opts.params);
           opts.respond(true, result);
@@ -1261,7 +1421,7 @@ const plugin: PluginDefinition = {
     };
     registerLiteratureRpc(registerMethod, litService);   // 33 methods
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
-    registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
+    registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 13 methods (recount rpc.ts when editing)
     registerMonitorRpc(registerMethod, monitorService);   // 12 methods
     registerJobRpc(registerMethod, jobService, {
       syncOpenClawSubagents: throttledJobSync,
@@ -1275,6 +1435,15 @@ const plugin: PluginDefinition = {
       setApiKey: (provider, apiKey) => setApiKeyProfile(provider, apiKey),
       clearApiKey: (provider) => clearApiKeyProfile(provider),
     });
+    // First-run detection for the dashboard welcome card. Getters read the
+    // module singletons so a pass where init has not happened fails safe
+    // (firstRun=false) instead of crashing.
+    registerOnboardingRpc(registerMethod, {
+      getWorkspaceRoot: () => _wsConfig?.root ?? null,
+      getLitService: () => _litService,
+      getTaskService: () => _taskService,
+    }); // 1 method
+    registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!, _rtspPreviewManager!); // 14 methods
 
     if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
     const memoryService = _memoryService;
@@ -1603,8 +1772,14 @@ const plugin: PluginDefinition = {
           return true;
         }
 
+        let parsed: StreamedUpload | null = null;
         try {
-          const { file, destination } = await parseMultipartUpload(req, wsConfig.maxUploadSize);
+          // Streaming parse: file bytes land in <root>/.uploads-tmp/ (O(1) memory).
+          parsed = await parseMultipartToTemp(req, {
+            maxSize: wsConfig.maxUploadSize,
+            tmpDir: path.join(wsConfig.root, '.uploads-tmp'),
+          });
+          const { file, destination, onConflict } = parsed;
 
           if (!file) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1612,10 +1787,13 @@ const plugin: PluginDefinition = {
             return true;
           }
 
-          // Sanitize destination: resolve and verify it stays within workspace root
-          const destDir = destination || 'sources';
-          const resolvedDest = path.resolve(wsConfig.root, destDir);
-          if (!resolvedDest.startsWith(path.resolve(wsConfig.root) + path.sep) && resolvedDest !== path.resolve(wsConfig.root)) {
+          // Sanitize destination via the symlink-aware guard (path-guard through
+          // service). '.' selects the workspace root; absent defaults to sources.
+          const destDir = destination === '.' ? '' : (destination || 'sources');
+          let resolvedDest: string;
+          try {
+            resolvedDest = wsService.resolvePath(destDir || '.');
+          } catch {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: { code: 'UPLOAD_INVALID_PATH', message: 'Invalid destination path' } }));
             return true;
@@ -1632,20 +1810,80 @@ const plugin: PluginDefinition = {
             return true;
           }
 
-          const destPath = `${destDir}/${safeFilename}`;
-          const result = await wsService.save(destPath, file.data, `Upload: ${safeFilename} to ${destDir}`);
+          // Conflict policy (handler-level only — save() keeps overwrite-as-Update
+          // semantics for editor saves / image saves / agent tools). Default 'fail'
+          // returns 409 instead of silently replacing an existing file. Emitted
+          // inline, NOT thrown: the catch below would misclassify it as a 500.
+          const mode = normalizeConflictMode(onConflict);
+          const conflict = await resolveUploadConflict(resolvedDest, safeFilename, mode);
+          if (conflict.action === 'conflict') {
+            res.writeHead(409, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              ok: false,
+              error: {
+                code: 'UPLOAD_FILE_EXISTS',
+                message: `Already exists: ${destDir ? `${destDir}/` : ''}${safeFilename}`,
+                path: `${destDir ? `${destDir}/` : ''}${safeFilename}`,
+                existing: conflict.existing,
+              },
+            }));
+            return true;
+          }
+
+          // The write below is atomic-exclusive (unless overwrite), so a
+          // concurrent upload racing for the same name cannot silently clobber:
+          // the loser gets WS_FILE_EXISTS and we either re-pick a slot (rename)
+          // or 409 (fail). resolveUploadConflict's stat is only the fast path.
+          let finalName = conflict.fileName;
+          let renamed = conflict.renamed;
+          let result: Awaited<ReturnType<typeof wsService.saveFromTempFile>> | null = null;
+          for (let attempt = 2; ; attempt++) {
+            const destPath = destDir ? `${destDir}/${finalName}` : finalName;
+            try {
+              result = await wsService.saveFromTempFile(
+                file.tmpPath,
+                destPath,
+                `Upload: ${finalName} to ${destDir || '/'}`,
+                { overwrite: mode === 'overwrite' },
+              );
+              break;
+            } catch (e) {
+              if (e instanceof WorkspaceError && e.code === WS_FILE_EXISTS) {
+                if (mode === 'rename' && attempt < 1002) {
+                  finalName = finderStyleName(safeFilename, attempt);
+                  renamed = true;
+                  continue;
+                }
+                // fail mode (or exhausted rename slots) lost the race
+                res.writeHead(409, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  ok: false,
+                  error: {
+                    code: 'UPLOAD_FILE_EXISTS',
+                    message: `Already exists: ${destDir ? `${destDir}/` : ''}${finalName}`,
+                    path: `${destDir ? `${destDir}/` : ''}${finalName}`,
+                    existing: 'file',
+                  },
+                }));
+                return true;
+              }
+              throw e;
+            }
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             ok: true,
             file: {
-              name: safeFilename,
+              name: finalName,
               path: result.path,
               type: 'file',
               size: result.size,
               mime_type: file.mimeType,
               modified_at: new Date().toISOString(),
               git_status: result.committed ? 'committed' : 'untracked',
+              is_new: result.is_new,
+              renamed,
             },
           }));
           return true;
@@ -1658,6 +1896,17 @@ const plugin: PluginDefinition = {
             error: { code: isTooLarge ? 'UPLOAD_TOO_LARGE' : 'UPLOAD_WRITE_FAILED', message },
           }));
           return true;
+        } finally {
+          // Remove the staging file on every path that did not consume it via
+          // rename (409 conflict, 400s, write failures). ENOENT after a
+          // successful rename is the normal case.
+          if (parsed?.file) {
+            try {
+              await fs.promises.unlink(parsed.file.tmpPath);
+            } catch {
+              // Already consumed or gone — fine.
+            }
+          }
         }
       },
     });
@@ -1683,8 +1932,13 @@ const plugin: PluginDefinition = {
             return true;
           }
 
-          const resolved = path.resolve(wsConfig.root, filePath);
-          if (!resolved.startsWith(path.resolve(wsConfig.root) + path.sep) && resolved !== path.resolve(wsConfig.root)) {
+          // Symlink-aware containment (path-guard via service) — this is a
+          // user-controlled READ path, so the prefix-only check was a real gap
+          // (workspace-internal `ln -s /etc evil` could read outside).
+          let resolved: string;
+          try {
+            resolved = wsService.resolvePath(filePath);
+          } catch {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: { code: 'PATH_ESCAPE', message: 'Path escapes workspace root' } }));
             return true;
@@ -1736,6 +1990,27 @@ const plugin: PluginDefinition = {
           return true;
         }
       },
+    });
+
+    // ── 6c. Register HTTP route: GET /rc/rtsp-preview/<token>/<file> ──
+    // Serves the HLS playlist + .ts segments for a live RTSP→HLS preview session
+    // (§15 v1.3 场景③ H3). Reuses the SAME gateway auth token as /rc/download
+    // (auth:'gateway' → Bearer / x-openclaw-password), so an unauthenticated
+    // request is rejected before this handler runs.
+    //
+    // Path guard (H3): the requested <file> is contained to the session's temp
+    // dir via resolveWithinRoot (symlink-aware realpath walk) — a `..` traversal
+    // or a symlink escape is rejected. Only .m3u8 / .ts extensions are served.
+    // Credentials (H4): the URL carries only the random sessionToken; the RTSP
+    // user:pass never appears in the path/playlist/segment names.
+    api.registerHttpRoute({
+      path: RTSP_PREVIEW_ROUTE,
+      auth: 'gateway',
+      match: 'prefix',
+      handler: createRtspPreviewRouteHandler({
+        getByToken: (token) => _rtspPreviewManager?.getByToken(token) ?? null,
+        touch: (token) => _rtspPreviewManager?.touch(token) ?? false,
+      }),
     });
 
     // ── 7. Register hooks ─────────────────────────────────────────────
@@ -2508,8 +2783,20 @@ const plugin: PluginDefinition = {
         const rcDir = path.join(ctx.workspaceDir, '.ResearchClaw');
         if (!fs.existsSync(rcDir)) return;
 
+        // .done sentinel defense: the loading layer historically never checked
+        // BOOTSTRAP.md.done, so residual BOOTSTRAP.md (or its root symlink)
+        // re-ran onboarding for users who had already completed it.
+        const bootstrapDone = bootstrapDoneExists(ctx.workspaceDir);
+
         ctx.bootstrapFiles = ctx.bootstrapFiles.map((file) => {
           if (!RELOCATABLE_FILES.has(file.name)) return file;
+
+          // With the sentinel present, never inject BOOTSTRAP content — blank
+          // the entry using OC's missing-file shape ({name, path, missing:true},
+          // no content) so hasBootstrapFileContent() stays false.
+          if (file.name === 'BOOTSTRAP.md' && bootstrapDone) {
+            return { name: file.name, path: file.path, missing: true };
+          }
 
           const rcPath = path.join(rcDir, file.name);
           try {
@@ -2524,7 +2811,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (53 tools, 122 WS RPC + 2 HTTP = 124 interfaces, 9 hooks, 1 session monitoring service)');
+    api.logger.info('Research-Claw Core registered (56 tools, 137 WS RPC + 3 HTTP = 140 interfaces, 9 hooks, 1 session monitoring service)');
     _hooksRegistered = true;
     }
   },
@@ -2532,101 +2819,3 @@ const plugin: PluginDefinition = {
 
 export default plugin;
 
-// ── Multipart upload parser ────────────────────────────────────────────
-
-interface UploadedFile {
-  filename: string;
-  data: Buffer;
-  mimeType: string;
-}
-
-async function parseMultipartUpload(
-  req: IncomingMessage,
-  maxSize: number,
-): Promise<{ file: UploadedFile | null; destination: string }> {
-  const contentType = req.headers['content-type'] ?? '';
-  const boundaryMatch = contentType.match(/boundary=(.+?)(?:;|$)/);
-  if (!boundaryMatch) {
-    throw new Error('Missing multipart boundary');
-  }
-
-  // Unquote boundary if quoted per RFC 2046
-  let boundary = boundaryMatch[1];
-  if (boundary.startsWith('"') && boundary.endsWith('"')) {
-    boundary = boundary.slice(1, -1);
-  }
-  const chunks: Buffer[] = [];
-  let totalSize = 0;
-
-  await new Promise<void>((resolve, reject) => {
-    req.on('data', (chunk: Buffer) => {
-      totalSize += chunk.length;
-      if (maxSize > 0 && totalSize > maxSize) {
-        req.destroy();
-        reject(new Error('UPLOAD_TOO_LARGE'));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', resolve);
-    req.on('error', reject);
-  });
-
-  const rawBody = Buffer.concat(chunks);
-  const boundaryBuf = Buffer.from(`--${boundary}`);
-
-  // Split raw body by boundary, preserving binary data
-  const partBuffers: Buffer[] = [];
-  let searchStart = 0;
-  while (searchStart < rawBody.length) {
-    const idx = rawBody.indexOf(boundaryBuf, searchStart);
-    if (idx === -1) {
-      partBuffers.push(rawBody.subarray(searchStart));
-      break;
-    }
-    if (idx > searchStart) {
-      partBuffers.push(rawBody.subarray(searchStart, idx));
-    }
-    searchStart = idx + boundaryBuf.length;
-  }
-
-  let file: UploadedFile | null = null;
-  let destination = '';
-
-  for (const partBuf of partBuffers) {
-    // Find header/body separator (\r\n\r\n)
-    const separator = Buffer.from('\r\n\r\n');
-    const headerEnd = partBuf.indexOf(separator);
-    if (headerEnd === -1) continue;
-
-    // Parse headers as UTF-8 to correctly handle non-ASCII filenames
-    const headers = partBuf.subarray(0, headerEnd).toString('utf-8');
-
-    // Extract body as raw Buffer, strip trailing \r\n
-    let bodyBuf = partBuf.subarray(headerEnd + 4);
-    if (bodyBuf.length >= 2 && bodyBuf[bodyBuf.length - 2] === 0x0d && bodyBuf[bodyBuf.length - 1] === 0x0a) {
-      bodyBuf = bodyBuf.subarray(0, bodyBuf.length - 2);
-    }
-
-    const trimmedHeaders = headers.trim();
-    if (trimmedHeaders === '' || trimmedHeaders === '--') continue;
-
-    const nameMatch = headers.match(/name="([^"]+)"/);
-    const filenameMatch = headers.match(/filename="([^"]+)"/);
-    const ctMatch = headers.match(/Content-Type:\s*(.+?)(?:\r\n|$)/i);
-
-    if (!nameMatch) continue;
-
-    if (nameMatch[1] === 'file' && filenameMatch) {
-      file = {
-        filename: filenameMatch[1],
-        data: bodyBuf,
-        mimeType: ctMatch?.[1]?.trim() ?? 'application/octet-stream',
-      };
-    } else if (nameMatch[1] === 'destination') {
-      destination = bodyBuf.toString('utf-8').trim();
-    }
-  }
-
-  return { file, destination };
-}

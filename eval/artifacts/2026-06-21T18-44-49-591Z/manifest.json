@@ -1,0 +1,19 @@
+{
+  "runId": "2026-06-21T18-44-49-591Z",
+  "args": {
+    "tasks": "data-001,if-001,write-004",
+    "sides": "rc,oc",
+    "repeats": "1"
+  },
+  "headTasks": [
+    "data-001",
+    "if-001",
+    "write-004"
+  ],
+  "capTasks": [],
+  "sides": [
+    "rc",
+    "oc"
+  ],
+  "at": "2026-06-21T18:47:30.130Z"
+}

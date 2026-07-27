@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import i18n from '../i18n';
 import type { CheckUpdatesPayload } from '../types/app-updates';
+import type { ChatAttachment } from '../gateway/types';
 import { useGatewayStore } from './gateway';
 
 import {
@@ -16,7 +17,7 @@ import { playNotificationSound } from '../utils/notification-sound';
 
 export type { ConfigPanelPlacement };
 
-export type PanelTab = 'library' | 'workspace' | 'review' | 'tasks' | 'jobs' | 'monitor' | 'supervisor' | 'extensions' | 'settings';
+export type PanelTab = 'library' | 'workspace' | 'review' | 'tasks' | 'jobs' | 'monitor' | 'peripherals' | 'supervisor' | 'extensions' | 'settings';
 
 export type AgentStatus = 'idle' | 'thinking' | 'compacting' | 'tool_running' | 'streaming' | 'error' | 'disconnected';
 
@@ -62,7 +63,7 @@ const NOTIFICATION_SOUND_STORAGE = 'rc-notification-sound';
 const APP_UPDATE_LAST_CHECK_STORAGE = 'rc-app-update-last-check-at';
 const APP_UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
-const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'review', 'tasks', 'jobs', 'monitor', 'supervisor', 'extensions', 'settings']);
+const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'review', 'tasks', 'jobs', 'monitor', 'peripherals', 'supervisor', 'extensions', 'settings']);
 
 function loadPanelTab(): PanelTab {
   try {
@@ -201,6 +202,9 @@ interface UiState {
   /** One-shot prefill for chat input (e.g. Skill Workshop handoff). */
   chatInputPrefill: string | null;
 
+  /** One-shot attachment prefill for chat composer (e.g. peripherals photo → composer). */
+  chatAttachmentPrefill: ChatAttachment[] | null;
+
   setRightPanelTab: (tab: PanelTab) => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
@@ -230,6 +234,7 @@ interface UiState {
   setCronSessionsFolded: (folded: boolean) => void;
   setNotificationSoundEnabled: (enabled: boolean) => void;
   setChatInputPrefill: (text: string | null) => void;
+  setChatAttachmentPrefill: (atts: ChatAttachment[] | null) => void;
 }
 
 const _initNotifications = loadNotifications();
@@ -252,8 +257,10 @@ export const useUiStore = create<UiState>()((set, get) => ({
   appUpdateInfo: null,
   appUpdateRunning: false,
   chatInputPrefill: null,
+  chatAttachmentPrefill: null,
 
   setChatInputPrefill: (text) => set({ chatInputPrefill: text }),
+  setChatAttachmentPrefill: (atts) => set({ chatAttachmentPrefill: atts }),
 
   setRightPanelTab: (tab: PanelTab) => {
     try { localStorage.setItem(PANEL_TAB_STORAGE, tab); } catch { /* non-fatal */ }

@@ -3,13 +3,16 @@
  * menu, and the chat send pipeline.
  *
  * A "reference" is always a WORKSPACE-RELATIVE path (e.g. "sources/chat/data.csv").
- * The agent is sandboxed to the workspace, so only relative paths it can reach
- * via workspace_read are ever injected into the prompt.
+ * Agent file tools are workspace-scoped (application-layer path enforcement;
+ * deployment-level isolation comes from running the whole product in Docker),
+ * so only relative paths reachable via workspace_read are injected into prompts.
  */
 
-/** Client-side soft cap for ingesting external files (memory protection: the
- *  gateway's multipart parser buffers the whole upload in memory). */
-export const MAX_REFERENCE_SIZE = 100 * 1024 * 1024; // 100MB
+/** Client-side soft cap for ingesting external files. The gateway streams
+ *  uploads to disk (O(1) memory) with its own 2GB default cap
+ *  (workspace.maxUploadSize) — this front gate just keeps accidental
+ *  huge drops from tying up the UI. */
+export const MAX_REFERENCE_SIZE = 1024 * 1024 * 1024; // 1GB
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|avif)$/i;
 
@@ -17,11 +20,19 @@ const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|avif)$/i;
  *  the sources/ root curated. Folder drops nest under a timestamped root. */
 export const CHAT_DROP_DIR = 'sources/chat';
 
+/** Chat-originated images (drop / paste / attach button / vision attachments).
+ *  Separate subdir so screenshots don't mix with document drops. Only NEW
+ *  ingests land here — existing files are never moved. */
+export const CHAT_IMAGE_DIR = 'sources/chat/images';
+
 /** Destination for a loose file dropped into the chat composer: images go to
- *  the sources/ root (they also ride inline as vision attachments); everything
+ *  the chat image dir (they also ride inline as vision attachments); everything
  *  else lands in the chat inbox. */
-export function composerDropDestination(name: string, isImageMime: boolean): 'sources' | typeof CHAT_DROP_DIR {
-  return isImagePath(name) || isImageMime ? 'sources' : CHAT_DROP_DIR;
+export function composerDropDestination(
+  name: string,
+  isImageMime: boolean,
+): typeof CHAT_IMAGE_DIR | typeof CHAT_DROP_DIR {
+  return isImagePath(name) || isImageMime ? CHAT_IMAGE_DIR : CHAT_DROP_DIR;
 }
 
 /** True when a path/filename looks like an image by extension. */
@@ -41,8 +52,9 @@ export function safeUploadName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+/, '') || 'file';
 }
 
-/** Timestamp-prefixed name to avoid collisions on ingest (gateway rejects
- *  overwrites). Mirrors the existing image naming `${ts}-${safeName}`. */
+/** Timestamp-prefixed name that makes composer ingests collision-free up
+ *  front (uploads default to onConflict:'fail', so a duplicate name would 409
+ *  rather than overwrite). Mirrors the existing image naming `${ts}-${safeName}`. */
 export function timestampedUploadName(name: string, now: number): string {
   return `${now}-${safeUploadName(name)}`;
 }

@@ -5,7 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
 import { useToolStreamStore } from '../../stores/tool-stream';
-import { useConfigStore, primaryModelSupportsVision, imageModelSupportsVision } from '../../stores/config';
+import { useConfigStore, imageModelSupportsVision } from '../../stores/config';
+import { useVisionSupport } from '../../hooks/useVisionSupport';
 import type { ChatAttachment, ChatReference } from '../../gateway/types';
 import SlashCommandMenu, { useSlashCommandMenu } from './SlashCommandMenu';
 import ReferenceMenu, { useReferenceMenu } from './ReferenceMenu';
@@ -18,6 +19,7 @@ import { resizeComposerInput } from '../../utils/composer-input';
 import { uploadFileToWorkspace } from '../../gateway/upload';
 import {
   CHAT_DROP_DIR,
+  CHAT_IMAGE_DIR,
   MAX_REFERENCE_SIZE,
   basenameOf,
   composerDropDestination,
@@ -26,11 +28,10 @@ import {
   timestampedUploadName,
 } from '../../utils/file-reference';
 import {
+  applyDropPolicy,
   collectDroppedEntries,
   mapWithConcurrency,
   splitRelPath,
-  MAX_DROP_FILES,
-  MAX_DROP_TOTAL_BYTES,
   UPLOAD_CONCURRENCY,
   type CollectedDrop,
   type DroppedFile,
@@ -77,6 +78,8 @@ export default function MessageInput() {
   const connState = useGatewayStore((s) => s.state);
   const chatInputPrefill = useUiStore((s) => s.chatInputPrefill);
   const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
+  const chatAttachmentPrefill = useUiStore((s) => s.chatAttachmentPrefill);
+  const setChatAttachmentPrefill = useUiStore((s) => s.setChatAttachmentPrefill);
 
   const inputHistory = useInputHistory();
   const [historyPopupOpen, setHistoryPopupOpen] = useState(false);
@@ -89,13 +92,24 @@ export default function MessageInput() {
   const isConnected = connState === 'connected';
   const hasReadyReference = references.some((r) => r.status === 'ready');
 
-  // Re-evaluate vision capability when the model/provider config changes so the
-  // attach-time hint appears/disappears as the user switches models.
+  // §13.5 (SPEC:417-419): the composer hint MUST share the vision resolver with
+  // the send pipeline (chat.ts:995 resolveVisionSupport). Using the config-primary
+  // -only primaryModelSupportsVision() here mis-fired under a session /model
+  // override (config primary=vision but the active session is text-only → hint
+  // hidden while chat.ts still routes to /image degradation, and vice-versa).
+  // useVisionSupport() is the session-aware, reactive wrapper over the same pure
+  // resolver, so composer and pipeline can never disagree.
   const gatewayConfig = useConfigStore((s) => s.gatewayConfig);
+  const vision = useVisionSupport();
+  // Show the soft hint only on an AUTHORITATIVE text-only verdict (matches the
+  // send pipeline's `supportsImage === false` degradation trigger; `true` and
+  // 'unknown' are fail-open → no blocking hint). A dedicated /image vision model
+  // (imageModel) is a config-level escape hatch that can still read the image, so
+  // its presence suppresses the hint.
   const attachNoVisionModel =
     attachments.length > 0
     && Boolean(gatewayConfig)
-    && !primaryModelSupportsVision()
+    && vision.supportsImage === false
     && !imageModelSupportsVision();
   const canSend =
     (text.trim().length > 0 || attachments.length > 0 || hasReadyReference) && isConnected && !sending;
@@ -167,6 +181,17 @@ export default function MessageInput() {
       el.selectionStart = el.selectionEnd = el.value.length;
     });
   }, [chatInputPrefill, setChatInputPrefill]);
+
+  // Peripherals panel / other panels can push attachments into the composer (append semantics)
+  useEffect(() => {
+    if (!chatAttachmentPrefill) return;
+    const prefill = chatAttachmentPrefill;
+    setAttachments((prev) => [...prev, ...prefill]);
+    setChatAttachmentPrefill(null);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  }, [chatAttachmentPrefill, setChatAttachmentPrefill]);
 
   const handleRefresh = useCallback(async () => {
     const beforeCount = useChatStore.getState().messages.length;
@@ -258,7 +283,7 @@ export default function MessageInput() {
   /** Ingest an external (host) file into the workspace, tracking its upload
    *  state as a chip. Always uses a timestamped name to avoid collisions. */
   const ingestExternalFile = useCallback(
-    async (file: File, destination: 'sources' | typeof CHAT_DROP_DIR) => {
+    async (file: File, destination: typeof CHAT_DROP_DIR | typeof CHAT_IMAGE_DIR) => {
       if (file.size > MAX_REFERENCE_SIZE) {
         message.warning(
           t('chat.refTooLarge', {
@@ -311,10 +336,12 @@ export default function MessageInput() {
           reader.readAsDataURL(file);
         }
       } catch (err) {
+        // Retain the File on the errored chip so retry can re-upload without a
+        // re-drop (released again once the retry succeeds).
         setReferences((prev) =>
           prev.map((r) =>
             r.id === id
-              ? { ...r, status: 'error', errorMsg: err instanceof Error ? err.message : String(err) }
+              ? { ...r, status: 'error', errorMsg: err instanceof Error ? err.message : String(err), file }
               : r,
           ),
         );
@@ -381,43 +408,42 @@ export default function MessageInput() {
    *  fan out: loose files → individual chips, folders → one folder chip each. */
   const ingestDroppedEntries = useCallback(
     async (collected: CollectedDrop) => {
-      const all = collected.files;
-      if (all.length === 0) return;
-
-      // Skip oversized single files (memory-protection cap) — one combined warning.
-      const oversized = all.filter((d) => d.file.size > MAX_REFERENCE_SIZE);
-      const kept = all.filter((d) => d.file.size <= MAX_REFERENCE_SIZE);
-      if (oversized.length > 0) {
+      if (collected.entriesUnsupported) {
         message.warning(
-          t('chat.dropSkippedLarge', {
-            count: oversized.length,
-            limit: Math.round(MAX_REFERENCE_SIZE / (1024 * 1024)),
-            defaultValue: '{{count}} file(s) over {{limit}}MB were skipped',
+          t('chat.dropEntriesUnsupported', {
+            defaultValue: 'This browser cannot expand dropped folders — only loose files were picked up',
           }),
         );
       }
-      if (kept.length === 0) return;
-
-      // Confirm large batches before uploading everything.
-      const totalBytes = kept.reduce((sum, d) => sum + d.file.size, 0);
-      if (kept.length > MAX_DROP_FILES || totalBytes > MAX_DROP_TOTAL_BYTES) {
-        const ok = await new Promise<boolean>((resolve) => {
-          modal.confirm({
-            title: t('chat.dropBulkTitle', { defaultValue: 'Upload many files?' }),
-            content: t('chat.dropBulkContent', {
-              count: kept.length,
-              size: Math.round(totalBytes / (1024 * 1024)),
-              defaultValue: 'This drop contains {{count}} files (~{{size}}MB). Upload all of them?',
+      // Shared drop policy: skip oversized files, confirm very large batches.
+      const kept = await applyDropPolicy(collected, {
+        maxFileSize: MAX_REFERENCE_SIZE,
+        warnOversize: (count, limit) =>
+          message.warning(
+            t('chat.dropSkippedLarge', {
+              count,
+              limit,
+              defaultValue: '{{count}} file(s) over {{limit}}MB were skipped',
             }),
-            okText: t('chat.dropBulkConfirm', { defaultValue: 'Upload all' }),
-            cancelText: t('common.cancel', 'Cancel'),
-            centered: true,
-            onOk: () => resolve(true),
-            onCancel: () => resolve(false),
-          });
-        });
-        if (!ok) return;
-      }
+          ),
+        confirmBulk: (count, size) =>
+          new Promise<boolean>((resolve) => {
+            modal.confirm({
+              title: t('chat.dropBulkTitle', { defaultValue: 'Upload many files?' }),
+              content: t('chat.dropBulkContent', {
+                count,
+                size,
+                defaultValue: 'This drop contains {{count}} files (~{{size}}MB). Upload all of them?',
+              }),
+              okText: t('chat.dropBulkConfirm', { defaultValue: 'Upload all' }),
+              cancelText: t('common.cancel', { defaultValue: 'Cancel' }),
+              centered: true,
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+            });
+          }),
+      });
+      if (!kept || kept.length === 0) return;
 
       // Loose files keep the existing per-file behavior (images → vision thumbnail).
       const looseFiles = kept.filter((d) => d.rootDir === null);
@@ -442,12 +468,43 @@ export default function MessageInput() {
   );
 
   const retryReference = useCallback(
-    (id: string) => {
-      // Errored chips carry no File handle; the simplest robust recovery is to
-      // drop the chip and ask the user to re-drop. Keep UX honest about that.
-      removeReference(id);
+    async (id: string) => {
+      const ref = references.find((r) => r.id === id);
+      // Folder chips (and legacy chips) carry no File handle — the honest
+      // recovery there is still remove-and-redrop.
+      if (!ref?.file) {
+        removeReference(id);
+        return;
+      }
+      const file = ref.file;
+      // Re-upload to the chip's existing provisional path (stable name).
+      const slash = ref.path.lastIndexOf('/');
+      const destination = slash > 0 ? ref.path.slice(0, slash) : 'sources';
+      const uploadName = slash > 0 ? ref.path.slice(slash + 1) : ref.path;
+      setReferences((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, status: 'uploading', errorMsg: undefined } : r)),
+      );
+      try {
+        const result = await uploadFileToWorkspace(file, destination, uploadName);
+        setReferences((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? { ...r, path: result.path, status: 'ready', size: result.size, mimeType: result.mime_type, file: undefined }
+              : r,
+          ),
+        );
+        wsPathsLoadedRef.current = false;
+      } catch (err) {
+        setReferences((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? { ...r, status: 'error', errorMsg: err instanceof Error ? err.message : String(err) }
+              : r,
+          ),
+        );
+      }
     },
-    [removeReference],
+    [references, removeReference],
   );
 
   // Lazily load the workspace file list for the `@` mention menu.
@@ -499,7 +556,7 @@ export default function MessageInput() {
         e.preventDefault();
         // Ingest into the workspace so pasted images get a chip + thumbnail,
         // matching the external-drop flow (consistency with R3).
-        for (const file of imageFiles) void ingestExternalFile(file, 'sources');
+        for (const file of imageFiles) void ingestExternalFile(file, CHAT_IMAGE_DIR);
       }
     },
     [ingestExternalFile],
@@ -819,7 +876,7 @@ export default function MessageInput() {
           hidden
           onChange={(e) => {
             if (e.target.files) {
-              for (const file of Array.from(e.target.files)) void ingestExternalFile(file, 'sources');
+              for (const file of Array.from(e.target.files)) void ingestExternalFile(file, CHAT_IMAGE_DIR);
             }
             e.target.value = '';
           }}

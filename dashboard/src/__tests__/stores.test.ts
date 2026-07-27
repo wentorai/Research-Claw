@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { useConfigStore } from '../stores/config';
+import { useUiStore } from '../stores/ui';
+import { useChatStore } from '../stores/chat';
 
-// Reset stores between tests by re-importing
-// Zustand stores persist as singletons, so we use store.setState for reset
+// Store modules are imported during collection, outside the per-test 5s timeout.
+// Dynamic imports inside each test made the first chat assertion time out under
+// full-suite worker contention even though the assertion itself is synchronous.
+// Zustand stores persist as singletons, so individual tests reset the fields
+// they mutate with store.setState.
 
 describe('configStore', () => {
   beforeEach(() => {
@@ -9,7 +15,6 @@ describe('configStore', () => {
   });
 
   it('default theme is dark', async () => {
-    const { useConfigStore } = await import('../stores/config');
     useConfigStore.setState({ theme: 'dark', locale: 'zh-CN', bootState: 'pending' });
     const state = useConfigStore.getState();
     expect(state.theme).toBe('dark');
@@ -17,21 +22,18 @@ describe('configStore', () => {
   });
 
   it('setTheme updates state and localStorage', async () => {
-    const { useConfigStore } = await import('../stores/config');
     useConfigStore.getState().setTheme('light');
     expect(useConfigStore.getState().theme).toBe('light');
     expect(localStorage.getItem('rc-theme')).toBe('light');
   });
 
   it('evaluateConfig sets needs_setup when no config and retries exhausted', async () => {
-    const { useConfigStore } = await import('../stores/config');
     useConfigStore.setState({ gatewayConfig: null, _configRetryCount: 5 });
     useConfigStore.getState().evaluateConfig();
     expect(useConfigStore.getState().bootState).toBe('needs_setup');
   });
 
   it('evaluateConfig sets ready when config is valid', async () => {
-    const { useConfigStore } = await import('../stores/config');
     useConfigStore.setState({
       gatewayConfig: {
         agents: { defaults: { model: { primary: 'rc/gpt-4o' } } },
@@ -45,19 +47,16 @@ describe('configStore', () => {
 
 describe('uiStore', () => {
   it('default agent status is disconnected', async () => {
-    const { useUiStore } = await import('../stores/ui');
     expect(useUiStore.getState().agentStatus).toBe('disconnected');
   });
 
   it('toggleLeftNav flips collapsed state', async () => {
-    const { useUiStore } = await import('../stores/ui');
     const initial = useUiStore.getState().leftNavCollapsed;
     useUiStore.getState().toggleLeftNav();
     expect(useUiStore.getState().leftNavCollapsed).toBe(!initial);
   });
 
   it('setRightPanelWidth clamps between 320-480', async () => {
-    const { useUiStore } = await import('../stores/ui');
     useUiStore.getState().setRightPanelWidth(200);
     expect(useUiStore.getState().rightPanelWidth).toBe(320);
 
@@ -69,21 +68,18 @@ describe('uiStore', () => {
   });
 
   it('setConfigPanelHeight clamps and persists', async () => {
-    const { useUiStore } = await import('../stores/ui');
     useUiStore.getState().setConfigPanelHeight(100);
     expect(useUiStore.getState().configPanelHeight).toBe(200);
     expect(localStorage.getItem('rc-config-panel-height')).toBe('200');
   });
 
   it('setConfigPanelPlacement persists', async () => {
-    const { useUiStore } = await import('../stores/ui');
     useUiStore.getState().setConfigPanelPlacement('bottom');
     expect(useUiStore.getState().configPanelPlacement).toBe('bottom');
     expect(localStorage.getItem('rc-config-panel-placement')).toBe('bottom');
   });
 
   it('addNotification increments unreadCount', async () => {
-    const { useUiStore } = await import('../stores/ui');
     useUiStore.setState({ notifications: [], unreadCount: 0 });
     useUiStore.getState().addNotification({ type: 'system', title: 'Test' });
     expect(useUiStore.getState().unreadCount).toBe(1);
@@ -91,7 +87,6 @@ describe('uiStore', () => {
   });
 
   it('markAllNotificationsRead sets unreadCount to 0', async () => {
-    const { useUiStore } = await import('../stores/ui');
     useUiStore.setState({ notifications: [], unreadCount: 0 });
     useUiStore.getState().addNotification({ type: 'system', title: 'A' });
     useUiStore.getState().addNotification({ type: 'system', title: 'B' });
@@ -101,7 +96,6 @@ describe('uiStore', () => {
   });
 
   it('setAgentStatus updates status', async () => {
-    const { useUiStore } = await import('../stores/ui');
     useUiStore.getState().setAgentStatus('thinking');
     expect(useUiStore.getState().agentStatus).toBe('thinking');
   });
@@ -109,13 +103,11 @@ describe('uiStore', () => {
 
 describe('chatStore', () => {
   it('initial state has empty messages', async () => {
-    const { useChatStore } = await import('../stores/chat');
     expect(useChatStore.getState().messages).toEqual([]);
     expect(useChatStore.getState().streaming).toBe(false);
   });
 
   it('handleChatEvent delta appends to streamText', async () => {
-    const { useChatStore } = await import('../stores/chat');
     useChatStore.setState({ runId: 'run-1', streaming: true, streamText: '' });
 
     useChatStore.getState().handleChatEvent({
@@ -129,7 +121,6 @@ describe('chatStore', () => {
   });
 
   it('handleChatEvent final adds message and clears streaming', async () => {
-    const { useChatStore } = await import('../stores/chat');
     useChatStore.setState({ runId: 'run-1', streaming: true, streamText: 'Hello', messages: [] });
 
     useChatStore.getState().handleChatEvent({
@@ -147,7 +138,6 @@ describe('chatStore', () => {
   });
 
   it('handleChatEvent filters NO_REPLY', async () => {
-    const { useChatStore } = await import('../stores/chat');
     useChatStore.setState({ runId: 'run-1', messages: [] });
 
     useChatStore.getState().handleChatEvent({
@@ -161,7 +151,6 @@ describe('chatStore', () => {
   });
 
   it('handleChatEvent error sets lastError', async () => {
-    const { useChatStore } = await import('../stores/chat');
     useChatStore.setState({ runId: 'run-1', streaming: true });
 
     useChatStore.getState().handleChatEvent({
@@ -176,7 +165,6 @@ describe('chatStore', () => {
   });
 
   it('clearError resets lastError', async () => {
-    const { useChatStore } = await import('../stores/chat');
     useChatStore.setState({ lastError: 'some error' });
     useChatStore.getState().clearError();
     expect(useChatStore.getState().lastError).toBeNull();

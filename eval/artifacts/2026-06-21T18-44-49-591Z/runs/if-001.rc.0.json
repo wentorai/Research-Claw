@@ -1,0 +1,37 @@
+{
+  "taskId": "if-001",
+  "domain": "instruction-following",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-if-001-rc-0-1782067561324",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 1,
+    "toolCalls": 0,
+    "wallMs": 2422,
+    "tokens": {
+      "input": 178,
+      "output": 109,
+      "cacheRead": 29568,
+      "cacheWrite": 0,
+      "total": 29855,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [],
+  "finalText": "- 确定研究问题与范围\n- 系统检索相关文献\n- 筛选并评估文献质量\n- 提取与整合关键信息\n- 撰写综述并反复修订",
+  "objective": {
+    "results": [
+      {
+        "type": "format_constraint",
+        "pass": true,
+        "evidence": "all constraints met"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 2
+}

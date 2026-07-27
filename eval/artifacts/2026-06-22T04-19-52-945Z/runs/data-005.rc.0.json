@@ -1,0 +1,42 @@
+{
+  "taskId": "data-005",
+  "domain": "data-analysis",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-data-005-rc-0-1782103915565",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 3,
+    "toolCalls": 2,
+    "wallMs": 9360,
+    "tokens": {
+      "input": 337,
+      "output": 538,
+      "cacheRead": 89856,
+      "cacheWrite": 0,
+      "total": 90731,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "measurements.csv"
+  ],
+  "toolNames": [
+    "read",
+    "exec"
+  ],
+  "finalText": "计算结果如下：\n\n- **筛选条件**：`group = A`，共 10 行\n- **y 列值**：27, 31, 26, 39, 65, 38, 51, 55, 50, 85\n- **平均值**：**46.70**",
+  "objective": {
+    "results": [
+      {
+        "type": "numeric_tolerance",
+        "pass": true,
+        "evidence": "expected 46.7±0.1 (mean of y where group==A); nums=[10,27,31,26,39,65,38,51,55,50,85,46.7]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 6
+}

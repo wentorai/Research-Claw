@@ -1,0 +1,48 @@
+{
+  "taskId": "lit-002",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-002-oc-0-1782090888066",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 8,
+    "toolCalls": 10,
+    "wallMs": 51878,
+    "tokens": {
+      "input": 13613,
+      "output": 3198,
+      "cacheRead": 285952,
+      "cacheWrite": 0,
+      "total": 302763,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch"
+  ],
+  "finalText": "查询结果如下，多个独立信源交叉验证一致：\n\n---\n\n## 论文信息\n\n- **标题：** Attention Is All You Need\n- **第一作者：** **Ashish Vaswani**（Google Brain）\n- **发表年份：** **2017 年**\n- **会议：** NeurIPS 2017（31st Conference on Neural Information Processing Systems, Long Beach, CA）\n- **全体作者（8人）：** Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, Illia Polosukhin\n- **arXiv ID：** 1706.03762（2017-06-12 首次提交）\n\n---\n\n## 可核验出处\n\n| 信源 | 链接 | 核验内容 |\n|:---|:---|:---|\n| **NeurIPS 2017 官方论文集** | https://papers.nips.cc/paper_files/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html | 第 7181 号论文，收录于 NeurIPS 2017 |\n| **arXiv 预印本** | https://arxiv.org/abs/1706.03762 | 第一作者 Vaswani，提交日期 2017-06-12，8 位作者完整列出 |\n| **Crossref 元数据** | DOI 检索（Crossref API） | first-author: Ashish Vaswani, affiliation: Google Brain |\n| **OpenAlex** | openalex.org ID W2626778328 | 8 位作者, 第一作者 Ashish Vaswani |\n\n```paper_card\n{\n  \"type\": \"paper_card\",\n  \"title\": \"Attention Is All You Need\",\n  \"authors\": [\"Ashish Vaswani\", \"Noam Shazeer\", \"Niki Parmar\", \"Jakob Uszkoreit\", \"Llion Jones\", \"Aidan N. Gomez\", \"Łukasz Kaiser\", \"Illia Polosukhin\"],\n  \"venue\": \"NeurIPS 2017\",\n  \"year\": 2017,\n  \"url\": \"https://arxiv.org/abs/1706.03762\",\n  \"arxiv_id\": \"1706.03762\",\n  \"abstract_preview\": \"We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.\",\n  \"tags\": [\"transformer\", \"attention\", \"deep learning\", \"NLP\", \"foundational\"]\n}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 19
+}

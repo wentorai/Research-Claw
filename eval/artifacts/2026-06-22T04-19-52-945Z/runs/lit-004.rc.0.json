@@ -1,0 +1,60 @@
+{
+  "taskId": "lit-004",
+  "domain": "literature",
+  "track": "B",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-004-rc-0-1782105087024",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 13,
+    "toolCalls": 22,
+    "wallMs": 136752,
+    "tokens": {
+      "input": 39922,
+      "output": 7817,
+      "cacheRead": 668800,
+      "cacheWrite": 0,
+      "total": 716539,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "LLM_Alignment_Survey_2026.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "rp_search",
+    "web_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "web_search",
+    "web_search",
+    "update_plan",
+    "web_search",
+    "web_search",
+    "web_fetch",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "```progress_card\n{\"type\":\"progress_card\",\"period\":\"session\",\"papers_read\":0,\"papers_added\":0,\"tasks_completed\":0,\"tasks_created\":0,\"highlights\":[\"完成 LLM Alignment 研究脉络梳理：检索 4 个数据库 120+ 条文献记录\",\"确认 7 大研究方向与 40+ 篇代表性工作\",\"输出综述报告至 LLM_Alignment_Survey_2026.md (9.8KB)\"]}\n```\n\n---\n\n## LLM Alignment 研究脉络总结\n\n报告已保存至 `LLM_Alignment_Survey_2026.md`，核心脉络如下：\n\n### 七大研究方向\n\n| 方向 | 核心问题 | 里程碑 |\n|:--|:--|:--|\n| **1. RLHF 范式** | 如何用人类偏好训练对齐模型？ | InstructGPT (2022) 建立 SFT→RM→PPO 三阶段流水线 |\n| **2. DPO 家族** | 能否跳过奖励模型直接优化？ | DPO (2023 NeurIPS) → ORPO/SimPO/KTO/GRPO 快速迭代 |\n| **3. 宪法 AI** | 如何实现价值观层面的对齐？ | Constitutional AI (2022, Anthropic) — AI 自我批判与修正 |\n| **4. 可扩展监督** | 当 AI 超越人类该如何监督？ | Weak-to-Strong Generalization (2024, OpenAI) |\n| **5. 机制可解释性** | 模型内部如何实现对齐？ | 激活工程/稀疏自编码器/电路分析 (2024-2026) |\n| **6. 奖励建模** | 奖励信号的可靠性如何保证？ | 过优化缩放定律 + 弹性重置 (2023 NeurIPS) |\n| **7. 红队测试** | 如何系统性地发现漏洞？ | 多轮自动攻击 + 对抗对齐 (2024-2025) |\n\n### 10 个核心开放问题\n\n1. 奖励信号的稀疏性与脆弱性\n2. 安全对齐的「脆弱性悖论」（微调即破坏）\n3. 超人类智能的监督难题\n4. 机制可解释性的工程化落地\n5. 对齐税 (Alignment Tax) 的系统性消除\n6. 从「偏好对齐」到「价值观对齐」的跃迁\n7. 对齐评估基准的标准化\n8. 自对齐与自动化对齐（无人类标注）\n9. 对齐的「验证」难题（黑箱测试不足）\n10. 开源模型的对齐责任分配\n\n### 核心技术演化方向\n\n**RLHF (4 模型 → 高成本)** → **DPO (2 模型)** → **ORPO/SimPO (1 模型)** → **GRPO (纯 RL + 组内信号)** 的简化趋势明显。DeepSeek-R1 证明纯 RL 即可涌现推理能力，暗示未来对齐可能走向「弱人类监督 + 强自对齐」的范式。",
+  "objective": null,
+  "historyLen": 36,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

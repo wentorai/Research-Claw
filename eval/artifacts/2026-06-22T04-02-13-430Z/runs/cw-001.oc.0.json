@@ -1,0 +1,57 @@
+{
+  "taskId": "cw-001",
+  "domain": "complex-writing",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cw-001-oc-0-1782100935126",
+  "errored": "turn timeout",
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 6,
+    "toolCalls": 9,
+    "wallMs": 300002,
+    "tokens": {
+      "input": 10624,
+      "output": 1963,
+      "cacheRead": 204800,
+      "cacheWrite": 0,
+      "total": 217387,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "rp_search",
+    "rp_fulltext",
+    "rp_fulltext"
+  ],
+  "finalText": "",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": false,
+        "evidence": "paper.md MISSING"
+      },
+      {
+        "type": "file_content_match",
+        "pass": false,
+        "evidence": "paper.md missing"
+      },
+      {
+        "type": "citation_real",
+        "pass": false,
+        "evidence": "resolved 0/1; "
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 16
+}

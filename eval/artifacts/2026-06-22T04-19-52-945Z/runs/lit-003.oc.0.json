@@ -1,0 +1,50 @@
+{
+  "taskId": "lit-003",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-003-oc-0-1782102906826",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 2,
+    "wallMs": 23675,
+    "tokens": {
+      "input": 4032,
+      "output": 1530,
+      "cacheRead": 59648,
+      "cacheWrite": 0,
+      "total": 65210,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_search",
+    "web_search"
+  ],
+  "finalText": "## 近五年 CRISPR 脱靶效应研究论文（3篇）\n\n以下是从检索结果中筛选的 3 篇高影响力论文，均发表于 2021–2026 年：\n\n---\n\n### 1. 染色质环境与脱靶效应的机制研究（2026，原始研究）\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Decoding the role of chromatin context in the off-target effects of CRISPR gene editing with EGOLD\",\"authors\":[\"(Cell Discovery 作者团队)\"],\"venue\":\"Cell Discovery\",\"year\":2026,\"doi\":\"10.1038/s41421-026-00889-2\",\"abstract_preview\":\"开发了 EGOLD 方法（内源性全基因组脱靶文库检测），对 17 种碱基编辑工具进行高通量脱靶检测，共发现 2,145,592 个脱靶事件。发现脱靶效应在开放染色质区域的发生频率显著高于封闭染色质区域，并利用机器学习显著提升了脱靶预测准确性。\",\"tags\":[\"CRISPR\",\"off-target\",\"chromatin\",\"EGOLD\",\"machine learning\"]}\n```\n\n**亮点**：提出了全新的 EGOLD 方法，首次系统揭示了染色质环境对 CRISPR 脱靶效应的调控作用，并提供机器学习预测工具。\n\n---\n\n### 2. CRISPR 脱靶效应综述：检测方法与临床安全性（2023，综述）\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Beyond the promise: evaluating and mitigating off-target effects in CRISPR gene editing for safer therapeutics\",\"authors\":[\"(Frontiers in Bioengineering and Biotechnology 作者团队)\"],\"venue\":\"Frontiers in Bioengineering and Biotechnology\",\"year\":2023,\"doi\":\"10.3389/fbioe.2023.1339189\",\"abstract_preview\":\"综述了 CRISPR 系统意外脱靶和靶点内变异（小插入/缺失、染色体易位、倒位、大片段缺失等）的检测方法，讨论了各方法的优势与局限性，并提出了在监管框架下进行 CRISPR 治疗临床前风险评估的策略。\",\"tags\":[\"CRISPR\",\"off-target\",\"therapeutics\",\"safety\",\"regulatory\"],\"oa_pdf_url\":\"https://www.frontiersin.org/articles/10.3389/fbioe.2023.1339189/pdf?isPublishedV2=False\"}\n```\n\n**亮点**：聚焦临床转化安全性，总结 GUIDE-seq、CIRCLE-seq、DISCOVER-seq 等方法，引用 62 次，开放获取。\n\n---\n\n### 3. CRISPR/Cas9 脱靶效应技术进展综述（2023，高引综述）\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Off-target effects in CRISPR/Cas9 gene editing\",\"authors\":[\"(Frontiers in Bioengineering and Biotechnology 作者团队)\"],\"venue\":\"Frontiers in Bioengineering and Biotechnology\",\"year\":2023,\"doi\":\"10.3389/fbioe.2023.1143157\",\"abstract_preview\":\"综述了 CRISPR/Cas9 脱靶效应的检测与预测方法，涵盖 GUIDE-seq、CIRCLE-seq、DISCOVER-seq、GUIDE-tag 等技术，讨论了高精度 Cas9 变体（如 eSpCas9、HypaCas9、SpCas9-HF1）在降低脱靶方面的进展及基因治疗面临的挑战。\",\"tags\":[\"CRISPR/Cas9\",\"off-target\",\"detection methods\",\"high-fidelity variants\",\"gene therapy\"],\"cited_by\":510,\"oa_pdf_url\":\"https://www.frontiersin.org/articles/10.3389/fbioe.2023.1143157/pdf\"}\n```\n\n**亮点**：该领域引用量最高的综述之一（510 次），系统梳理了脱靶检测技术和工程化高保真 Cas9 变体的研究进展。\n\n---\n\n### 小结\n\n| # | 标题 | 年份 | DOI | 类型 |\n|---|------|------|-----|------|\n| 1 | Decoding the role of chromatin context... (EGOLD) | 2026 | `10.1038/s41421-026-00889-2` | 原始研究 |\n| 2 | Beyond the promise: evaluating and mitigating... | 2023 | `10.3389/fbioe.2023.1339189` | 综述 |\n| 3 | Off-target effects in CRISPR/Cas9 gene editing | 2023 | `10.3389/fbioe.2023.1143157` | 综述 |\n\n三篇论文分别覆盖了脱靶效应的**机制基础**（染色质环境调控）、**检测方法学**（GUIDE-seq、CIRCLE-seq 等）和**临床安全评估**三个关键维度，均为开放获取或可通过机构访问获取全文。",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_count",
+        "pass": false,
+        "evidence": "counted 0 (need >= 3)"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 7/3; 10.1038/s41421-026-00889-2:real; 10.3389/fbioe.2023.1339189:real; 10.3389/fbioe.2023.1339189/pdf?isPublishedV2=False:NO; 10.3389/fbioe.2023.1143157:real; 10.3389/fbioe.2023.1143157/pdf:NO; \"Decoding the role of chromatin context i\":real; \"(Cell Discovery 作者团队)\":NO; \"Cell Discovery\":real"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": false,
+        "evidence": "10.1038/s41421-026-00889-2:ok; 10.3389/fbioe.2023.1339189:ok; 10.3389/fbioe.2023.1339189/pdf?isPublishedV2=False:BAD; 10.3389/fbioe.2023.1143157:ok; 10.3389/fbioe.2023.1143157/pdf:BAD"
+      }
+    ],
+    "success": false
+  },
+  "historyLen": 5
+}

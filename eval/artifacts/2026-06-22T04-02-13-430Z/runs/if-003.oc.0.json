@@ -1,0 +1,37 @@
+{
+  "taskId": "if-003",
+  "domain": "instruction-following",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-if-003-oc-0-1782101802806",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 1,
+    "toolCalls": 0,
+    "wallMs": 27008,
+    "tokens": {
+      "input": 52,
+      "output": 138,
+      "cacheRead": 29696,
+      "cacheWrite": 0,
+      "total": 29886,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [],
+  "finalText": "Overfitting occurs when a machine learning model learns the training data too well, capturing noise and random fluctuations rather than the underlying signal. As a result, the model performs exceptionally on seen examples but fails to generalize to unseen data, producing poor predictive accuracy in real-world applications. Regularization, cross-validation, and early stopping are common techniques used to mitigate this problem by constraining model complexity.",
+  "objective": {
+    "results": [
+      {
+        "type": "format_constraint",
+        "pass": true,
+        "evidence": "all constraints met"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 2
+}

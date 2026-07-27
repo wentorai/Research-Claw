@@ -1,0 +1,51 @@
+{
+  "taskId": "cap-claudecode-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-claudecode-001-rc-0-1782092887081",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 8,
+    "toolCalls": 7,
+    "wallMs": 37357,
+    "tokens": {
+      "input": 1495,
+      "output": 876,
+      "cacheRead": 246400,
+      "cacheWrite": 0,
+      "total": 248771,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "hello.py"
+  ],
+  "toolNames": [
+    "read",
+    "exec",
+    "exec",
+    "process",
+    "process",
+    "process",
+    "read"
+  ],
+  "finalText": "Claude Code 已安装 (v2.1.176)，使用 print 模式执行任务：Claude Code 已完成。验证结果：完成。Claude Code 已在工作区创建 `hello.py`，内容为 `print('hello')`，运行输出 `hello`。",
+  "objective": null,
+  "historyLen": 16,
+  "capabilityProbes": [
+    {
+      "type": "external_software_invoked",
+      "observed": true,
+      "evidence": "software=claude, execTool=true, mention=true"
+    },
+    {
+      "type": "skill_invoked",
+      "observed": true,
+      "evidence": "matched=[claude-code], skillSearchTool=false"
+    }
+  ],
+  "suite": "claude-code"
+}

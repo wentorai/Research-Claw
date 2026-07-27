@@ -1,0 +1,51 @@
+{
+  "taskId": "write-002",
+  "domain": "review-writing",
+  "track": "B",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-002-rc-0-1782105352877",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 8,
+    "toolCalls": 13,
+    "wallMs": 118760,
+    "tokens": {
+      "input": 26350,
+      "output": 8440,
+      "cacheRead": 334080,
+      "cacheWrite": 0,
+      "total": 368870,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "diffusion_models_image_generation_review.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "rp_search",
+    "web_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "小综述已完成，全文约 **3000 字（中文）**、**30 篇参考文献**，已保存至工作区。\n\n```progress_card\n{\"type\":\"progress_card\",\"period\":\"2026-06-22 session\",\"papers_read\":0,\"papers_added\":0,\"tasks_completed\":0,\"tasks_created\":0,\"highlights\":[\"完成「扩散模型在图像生成中的应用」学术小综述撰写\",\"通过 Scopus + OpenAlex 检索 40 篇论文，筛选 30 篇高影响力文献\",\"覆盖 DDPM → Score-SDE → LDM/Stable Diffusion → DALL·E 2/Imagen → SDXL 完整发展脉络\",\"涵盖 6 个应用方向：文生图、可控编辑、超分辨率、风格迁移、3D 生成、视频生成\"]}\n```\n\n```file_card\n{\"type\":\"file_card\",\"path\":\"diffusion_models_image_generation_review.md\",\"size_bytes\":12839,\"created\":\"2026-06-22T13:15:00+08:00\",\"modified\":\"2026-06-22T13:15:00+08:00\",\"content_type\":\"text/markdown\",\"encoding\":\"utf-8\"}\n```\n\n---\n\n### 综述结构概览\n\n| 章节 | 核心内容 |\n|:---|:---|\n| **§1 引言** | 从 GAN 的局限切入，梳理扩散模型从 Sohl-Dickstein (2015) 到 LDM (2022) 的四次范式跨越 |\n| **§2 理论基础** | DDPM 的数学原理、Score-SDE 统一框架（VP/VE SDE + 概率流 ODE）、CFG 无分类器引导机制 |\n| **§3 关键突破** | LDM/Stable Diffusion、DALL·E 2 / Imagen / 大模型结合、DDIM → DPM-Solver → LCM 加速路线 |\n| **§4 应用生态** | 文生图、ControlNet 可控生成、图像编辑/修复/超分、风格迁移与 LoRA 微调 |\n| **§5 挑战与展望** | 推理效率、精确可控性、安全伦理（数据记忆/深度伪造/版权）、3D 与视频生成扩展 |\n| **§6 结语** | 成功三要素总结 + 未来三大主旋律判断 |\n\n参考文献覆盖 2015–2026 年，核心论文均标注 Scopus 引用量（如 LDM 16763 次、DDPM Beat GANs 7706 次），确保引用的权威性。文件路径：`workspace/diffusion_models_image_generation_review.md`，可直接用于论文 Related Work 或组会报告。",
+  "objective": null,
+  "historyLen": 22,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

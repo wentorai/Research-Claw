@@ -344,24 +344,56 @@ elif [ -d /host/zotero ]; then
 fi
 
 STOP=false
-trap 'STOP=true' INT TERM
+GW_PID=""
+# Docker delivers stop signals to PID1 ONLY — with the gateway in the
+# foreground, bash defers the trap until the child exits (which it never
+# does), and `docker stop` ends in SIGKILL after the grace period. Forward
+# the signal to the gateway ourselves so shutdown (and the farewell) run.
+trap 'STOP=true; [ -n "$GW_PID" ] && kill -TERM "$GW_PID" 2>/dev/null' INT TERM
+# Run start for the farewell usage overview (mirrors run.sh).
+export RC_RUN_START_EPOCH=$(date +%s)
 
 while true; do
+  # A stop signal that lands while GW_PID is empty (crash-restart sleep or
+  # proxy-start window) sets STOP=true but has nothing to forward to — bail
+  # before starting a new gateway, else we'd spawn one that never sees the
+  # already-delivered signal and hangs until SIGKILL (the very failure this
+  # forwarding logic exists to prevent).
+  if [ "$STOP" = "true" ]; then
+    bash /app/scripts/farewell.sh || true
+    exit 0
+  fi
+
   # MiniMax OAuth (sk-cp-...) compatibility proxy (no-op unless configured).
   node /app/scripts/minimax-oauth-proxy.mjs >/tmp/research-claw-minimax-oauth-proxy.log 2>&1 &
   PROXY_PID=$!
 
   OPENCLAW_CONFIG_PATH=$CONFIG_FILE \
     node /app/node_modules/openclaw/dist/entry.js \
-    gateway run --allow-unconfigured --auth token --port $PORT --bind lan --force
+    gateway run --allow-unconfigured --auth token --port $PORT --bind lan --force &
+  GW_PID=$!
+  wait "$GW_PID"
   CODE=$?
+  if [ "$STOP" = "true" ]; then
+    # First wait was interrupted by the trap (returns 128+sig) — wait again
+    # so the gateway finishes its graceful shutdown before we continue.
+    wait "$GW_PID" 2>/dev/null
+  fi
+  GW_PID=""
 
   kill "$PROXY_PID" >/dev/null 2>&1 || true
 
   if [ "$STOP" = "true" ]; then
+    # Same farewell screen as run.sh (farewell.sh auto-detects docker via
+    # /.dockerenv; without a TTY it degrades to plain text).
+    bash /app/scripts/farewell.sh || true
     exit 0
   fi
 
+  # Interruptible sleep: if a stop signal arrives during the restart backoff,
+  # kill the sleep so the top-of-loop STOP check fires immediately instead of
+  # waiting out the full 3s (and never restart into a doomed gateway).
   echo "[research-claw] Gateway exited (code $CODE) — restarting in 3s..."
-  sleep 3
+  sleep 3 &
+  wait "$!" 2>/dev/null
 done

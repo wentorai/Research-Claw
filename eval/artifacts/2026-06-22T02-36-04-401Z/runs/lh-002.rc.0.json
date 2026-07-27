@@ -1,0 +1,71 @@
+{
+  "taskId": "lh-002",
+  "domain": "long-horizon",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lh-002-rc-0-1782095889088",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 10,
+    "toolCalls": 14,
+    "wallMs": 110666,
+    "tokens": {
+      "input": 15985,
+      "output": 4907,
+      "cacheRead": 402816,
+      "cacheWrite": 0,
+      "total": 423708,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "gnn-compare.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_abstracts",
+    "rp_cite",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "```file_card\n{\"type\":\"file_card\",\"path\":\"gnn-compare.md\",\"size\":\"3316 bytes\",\"action\":\"created\",\"format\":\"markdown\",\"description\":\"GNN 三篇代表性论文方法对比表\"}\n```\n\n已完成。文件 `gnn-compare.md` 已写入工作区，选择了 GNN 领域三篇最具代表性的奠基工作：\n\n| 论文 | 方法 | DOI |\n|:------|:-----|:----|\n| **GCN** (Kipf & Welling, 2017), ICLR | 谱域一阶近似图卷积 | `10.48550/arXiv.1609.02907` |\n| **GAT** (Veličković et al., 2018), ICLR | 多头掩码自注意力聚合 | `10.48550/arXiv.1710.10903` |\n| **GraphSAGE** (Hamilton et al., 2017), NeurIPS | 邻域采样 + 可配置聚合函数 | `10.48550/arXiv.1706.02216` |\n\n对比维度涵盖：聚合方式、归纳/转导能力、权重分配、计算复杂度、适用场景、主要局限等共 12 项。每篇的 DOI 均可通过 `doi.org` 直接解析到原文。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "gnn-compare.md exists"
+      },
+      {
+        "type": "file_content_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 3/3; 10.48550/arXiv.1609.02907:real; 10.48550/arXiv.1710.10903:real; 10.48550/arXiv.1706.02216:real"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 25,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

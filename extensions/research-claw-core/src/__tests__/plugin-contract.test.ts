@@ -24,6 +24,52 @@ describe('research-claw-core plugin contracts', () => {
     expect(runtimeTools).toContain('monitor_collect_candidates');
   });
 
+  // The HLS/upload/download route tests stand up their OWN http.Server with a
+  // hand-written Bearer gate. That proves the handler behaves behind a gate — it
+  // canNOT prove the PRODUCTION route asked OpenClaw for one. `auth:'gateway'`
+  // is what makes OpenClaw run its Bearer / x-openclaw-password check before the
+  // handler; drop it and every route silently becomes anonymous while all the
+  // route tests stay green. So assert it on the real register() call.
+  it('registers every HTTP route behind gateway auth', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-plugin-http-auth-'));
+    const routes: Array<{ path?: string; auth?: string; match?: string }> = [];
+    await plugin.register?.({
+      id: 'research-claw-core',
+      name: 'Research-Claw Core',
+      pluginConfig: { dbPath: path.join(root, 'library.db') },
+      logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      runtime: {
+        config: {
+          current: () => ({}),
+          mutateConfigFile: async () => ({ path: '', persistedHash: null }),
+        },
+      },
+      resolvePath: (input: string) => (path.isAbsolute(input) ? input : path.join(root, input)),
+      registerTool: () => {},
+      registerGatewayMethod: () => {},
+      registerHttpRoute: (route: unknown) => {
+        routes.push(route as { path?: string; auth?: string; match?: string });
+      },
+      registerService: () => {},
+      on: () => {},
+      registerHook: () => {},
+    } as never);
+
+    // Exactly the three documented in index.ts's header comment — a new route
+    // slipping in unauthenticated fails here.
+    expect(routes.map((r) => r.path).sort()).toEqual([
+      '/rc/download',
+      '/rc/rtsp-preview',
+      '/rc/upload',
+    ]);
+    for (const route of routes) {
+      expect(route.auth, `route ${route.path} must be gateway-authenticated`).toBe('gateway');
+    }
+    // The HLS route serves <token>/<file> under its prefix, so it must be a
+    // prefix match; the other two are single endpoints.
+    expect(routes.find((r) => r.path === '/rc/rtsp-preview')?.match).toBe('prefix');
+  });
+
   it('registers agent tools on every plugin register pass', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-plugin-contract-'));
     const dbPath = path.join(root, 'library.db');

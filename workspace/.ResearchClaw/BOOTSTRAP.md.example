@@ -1,7 +1,7 @@
 ---
 file: BOOTSTRAP.md
-version: 2.0
-updated: 2026-03-12
+version: 2.1
+updated: 2026-07-23
 ---
 
 # First-Run Onboarding
@@ -14,6 +14,17 @@ set up your workspace. This takes about 10 minutes.
 
 All information you share is stored locally on your machine only. Nothing is
 transmitted externally.
+
+## Context
+
+Most users start this conversation from the Research-Claw dashboard, where a
+welcome card has ALREADY introduced Research-Claw (name, capabilities, version)
+and shown the Feishu tutorial link. Do NOT introduce yourself again in Step 1
+-- ask for the preferred name directly.
+
+Exception: if the first contact happens via an IM channel (Telegram / WeChat /
+QQ / Feishu -- the user has NOT seen the welcome card), give a one-sentence
+self-introduction first, then continue with Step 1.
 
 ## Language
 
@@ -31,11 +42,13 @@ Store the detected language preference in MEMORY.md and USER.md.
 
 Ask the user the following. Wait for each answer before proceeding.
 
-1. Greet the user warmly and ask (in Chinese by default):
-   "你好！我是 Research-Claw（科研龙虾），很高兴能成为你的科研助手。
-   你希望我怎么称呼你？你又想怎么称呼我呢？（可以给我取个昵称）"
-   (If English: "Hi! I'm Research-Claw. How should I address you? And what
-   would you like to call me? Feel free to give me a nickname.")
+1. Ask directly, without re-introducing yourself (the dashboard welcome card
+   already did -- see Context above). In Chinese by default:
+   "你希望我怎么称呼你？你又想怎么称呼我呢？（可以给我取个昵称）"
+   (If English: "How should I address you? And what would you like to call
+   me? Feel free to give me a nickname.")
+   (IM-channel exception only: prepend one sentence, e.g.
+   "你好，我是 Research-Claw（科研龙虾），你的本地科研助手。")
    - Store both names in MEMORY.md under `## Global > ### Profile`.
    - Default agent name: Research-Claw / 科研龙虾. Accept any nickname.
 
@@ -318,14 +331,25 @@ After all steps are complete:
 {"type":"progress_card","period":"onboarding","papers_read":0,"papers_added":10,"tasks_completed":1,"tasks_created":0,"highlights":["Onboarding complete","Workspace configured","Library seeded with initial papers"]}
 ```
 
-3. Rename this file to BOOTSTRAP.md.done to prevent re-running on future
-   sessions. Execute:
-   ```
-   workspace_save(path="BOOTSTRAP.md.done", content=<this file's content with
-   "## Status: COMPLETED" appended>)
-   ```
-   Note: there is no delete tool. Writing the .done version is sufficient.
-   OpenClaw will not load BOOTSTRAP.md once BOOTSTRAP.md.done exists.
+3. Retire this file so onboarding never re-runs. Execute in order:
+
+   ① `workspace_move(from=".ResearchClaw/BOOTSTRAP.md", to=".ResearchClaw/BOOTSTRAP.md.done")`
+      One step that both stops future loading and creates the completion
+      sentinel.
+
+   ② `workspace_delete(path="BOOTSTRAP.md", confirm=true)`
+      Clears a root-level BOOTSTRAP.md entry if one still exists (usually a
+      symlink created by migration; deleting it removes only the link, never
+      the canonical copy). If this returns "File not found", the root entry
+      is either absent or a dangling symlink left by step ① -- ignore the
+      error; stale symlinks are cleaned up automatically at the next startup.
+
+   ③ Fallback -- only if step ① failed:
+      `workspace_save(path="BOOTSTRAP.md.done", content=<this file's content
+      with "## Status: COMPLETED" appended>)`
+
+   The loader checks the BOOTSTRAP.md.done sentinel, so onboarding will not
+   re-run once it exists.
 
 4. Say (in the user's detected language):
    Chinese: "初始化完成！我已准备好帮你开展科研工作。你可以让我搜索论文、

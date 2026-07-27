@@ -48,6 +48,47 @@ describe('uploadFileToWorkspace', () => {
     expect((body.get('file') as File).name).toBe('123-paper.pdf');
   });
 
+  it('serializes onConflict into the FormData when provided', async () => {
+    const fetchSpy = mockFetch(() => ({
+      ok: true,
+      status: 200,
+      json: { ok: true, file: { name: 'paper (2).pdf', path: 'sources/paper (2).pdf', type: 'file', size: 3, mime_type: 'application/pdf', modified_at: '', git_status: '', renamed: true } },
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const result = await uploadFileToWorkspace(file, 'sources', undefined, 'rename');
+    expect(result.renamed).toBe(true);
+    const body = (fetchSpy.mock.calls[0][1] as RequestInit).body as FormData;
+    expect(body.get('onConflict')).toBe('rename');
+  });
+
+  it('omits onConflict from the FormData by default (fail-closed on the gateway)', async () => {
+    const fetchSpy = mockFetch(() => ({
+      ok: true,
+      status: 200,
+      json: { ok: true, file: { name: 'paper.pdf', path: 'sources/paper.pdf', type: 'file', size: 3, mime_type: 'application/pdf', modified_at: '', git_status: '' } },
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await uploadFileToWorkspace(file, 'sources');
+    const body = (fetchSpy.mock.calls[0][1] as RequestInit).body as FormData;
+    expect(body.get('onConflict')).toBeNull();
+  });
+
+  it('surfaces 409 UPLOAD_FILE_EXISTS as an UploadError', async () => {
+    const fetchSpy = mockFetch(() => ({
+      ok: false,
+      status: 409,
+      json: { ok: false, error: { code: 'UPLOAD_FILE_EXISTS', message: 'Already exists: sources/paper.pdf' } },
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await expect(uploadFileToWorkspace(file, 'sources')).rejects.toMatchObject({
+      code: 'UPLOAD_FILE_EXISTS',
+      status: 409,
+    });
+  });
+
   it('throws an UploadError carrying status/code on non-2xx', async () => {
     const fetchSpy = mockFetch(() => ({
       ok: false,

@@ -1,0 +1,68 @@
+{
+  "taskId": "lit-001",
+  "domain": "literature",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-001-rc-0-1782104858039",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 9,
+    "toolCalls": 13,
+    "wallMs": 100897,
+    "tokens": {
+      "input": 62995,
+      "output": 7108,
+      "cacheRead": 507648,
+      "cacheWrite": 0,
+      "total": 577751,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "rp_abstracts",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch"
+  ],
+  "finalText": "以下是 2020 年及以后关于**石墨烯电池**的高引用综述论文（按引用数排序），数据来源于 Scopus + OpenAlex：\n\n---\n\n## 5 篇高引用石墨烯电池综述论文\n\n| # | 标题 | 作者 | 年份 | 被引 | DOI |\n|:--|:-----|:-----|:----:|:----:|:----|\n| 1 | **Graphene-based interlayer for high-performance lithium–sulfur batteries: A review** | Yong Liu, Huijie Wei, Xiaoliang Zhai, Fei Wang, Xinyuan Ren, Yi Xiong et al. | 2021 | ~96 | `10.1016/j.matdes.2021.110171` |\n| 2 | **A review study on the recent advances in developing the heteroatom-doped graphene and porous graphene as superior anode materials for Li-ion batteries** | Hamed Aghamohammadi, Nafiseh Hassanzadeh, Reza Eslami-Farsani | 2021 | ~90 | `10.1016/j.ceramint.2021.05.048` |\n| 3 | **Nanostructured graphene materials utilization in fuel cells and batteries: A review** | Shahzad Hossain, Abdalla M. Abdalla, Suleyha B.H. Suhaili, Imtiaz Kamal, Shabana P.S. Shaikh, Mohamed M.K. Dawood, Abul K. Azad | 2020 | ~74 | `10.1016/j.est.2020.101386` |\n| 4 | **Synthesis and characterization of graphene and its composites for Lithium-Ion battery applications: A comprehensive review** | L. Syam Sundar, M. Amin Mir, M. Waqar Ashraf, Faramarz Djavanroodi | 2023 | ~45 | `10.1016/j.aej.2023.07.044` |\n| 5 | **A review of graphene-decorated LiFePO₄ cathode materials for lithium-ion batteries** | Jing Geng, Shuchao Zhang, Xixi Hu, Wenqin Ling, Xiaoxiao Peng, Shenglin Zhong, Fangan Liang, Zhengguang Zou | 2022 | ~44 | `10.1007/s11581-022-04679-0` |\n\n---\n\n### 简要说明\n\n- **第1篇**（Materials & Design, 2021）聚焦石墨烯基中间层在锂硫电池中的应用，涵盖物理/化学限域策略，是该子方向较有代表性的综述。\n- **第2篇**（Ceramics International, 2021）系统总结了杂原子掺杂石墨烯和多孔石墨烯作为锂离子电池负极材料的最新进展。\n- **第3篇**（Journal of Energy Storage, 2020）综述覆盖面较广，涵盖石墨烯纳米结构在燃料电池及多种电池体系中的应用。\n- **第4篇**（Alexandria Engineering Journal, 2023）综合性较强，涵盖石墨烯及其复合材料的合成、表征及LIB应用。\n- **第5篇**（Ionics, 2022）专门讨论石墨烯修饰的 LiFePO₄ 正极材料，适合关注正极材料方向的读者。\n\n> 注：上述引用数为 Scopus / OpenAlex 综合参考值，实际引用数以各数据库最新数据为准。由于\"石墨烯电池\"是较窄的交叉领域，专门以\"graphene battery review\"为题的综述引用量通常在 50–100 区间。更广泛题材（如\"Carbon-Based Electrodes for Energy Storage\"）的综述引用数可达 300+（如 *Advanced Science* 2023, 379 引），但其主题不限于石墨烯电池。如需扩展搜索范围，请告知。",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_count",
+        "pass": true,
+        "evidence": "counted 5 (need >= 5)"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 5/3; 10.1016/j.matdes.2021.110171:real; 10.1016/j.ceramint.2021.05.048:real; 10.1016/j.est.2020.101386:real; 10.1016/j.aej.2023.07.044:real; 10.1007/s11581-022-04679-0:real"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": true,
+        "evidence": "10.1016/j.matdes.2021.110171:ok; 10.1016/j.ceramint.2021.05.048:ok; 10.1016/j.est.2020.101386:ok; 10.1016/j.aej.2023.07.044:ok; 10.1007/s11581-022-04679-0:ok"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 23,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

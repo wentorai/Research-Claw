@@ -283,7 +283,16 @@ function validateCron(expr: string): boolean {
 
 // ── Default agent prompt for a category ───────────────────────────────
 
-function defaultAgentPrompt(category: string, filters: Record<string, unknown>): string {
+/**
+ * @param deviceKind - rc_periph_devices.kind for source_type='device' monitors
+ *                     (F4: audio-recorder gets the transcript-digest template;
+ *                     camera and unknown/missing devices get the vision template).
+ */
+function defaultAgentPrompt(
+  category: string,
+  filters: Record<string, unknown>,
+  deviceKind?: string,
+): string {
   const protocol =
     'EXECUTION PROTOCOL (mandatory, follow every step):\n' +
     'Tool boundary: Use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only. Do not call read, task_flow_stage, workspace_* or other task/workspace tools for scheduled monitor runs.\n' +
@@ -327,11 +336,91 @@ function defaultAgentPrompt(category: string, filters: Record<string, unknown>):
         'TASK: Check the target social media account/hashtag for new posts.\n' +
         'Use collected candidates from the core collector layer. Extract noteworthy updates.\n' +
         'Fallback only when collector fingerprints are unavailable: use social:{platform}:{post_id}.';
+    case 'device':
+      // F4: audio-recorder (Plaud) — 取转写→汇总→落笔记→通知,不抓帧不走 collector。
+      if (deviceKind === 'audio-recorder') {
+        // monitor_report 的真实 schema 是 (monitor_id, results[], fingerprints[]),
+        // 没有 title 参数(monitor/tools.ts)。日报=交付物,始终产出正文推送。
+        // fingerprints 用录音稳定标识去重,避免每天重复处理旧录音。
+        return '你是录音笔定时汇总代理。目标设备 ID: {target}。本监控 ID: {monitor_id}。\n' +
+          '1. 调用 monitor_get_context({"monitor_id": "{monitor_id}"}) 读取 memory.seen(已处理录音的 fingerprint),用于跳过旧录音。\n' +
+          '2. 调用 plaud__list_files 获取最近录音列表。对每个文件取稳定 fingerprint(优先文件 id/唯一标识,其次 文件名+起始时间)。仅保留 fingerprint 不在 memory.seen 中的新录音。若无新录音:periph_observe 记录 kind=\'check\'、verdict=\'ok\'、summary=\'无新录音\'、monitor_id=\'{monitor_id}\',然后 monitor_report({"monitor_id":"{monitor_id}","results":[],"fingerprints":[]}) 结束。\n' +
+          '3. 对每条新录音调用 plaud__get_transcript 获取转写。若某条工具返回错误,记录并跳过该条,不要中断整轮。\n' +
+          '4. 汇总转写要点(主题、关键结论、待办),调用 workspace_save 保存到 outputs/plaud/daily-YYYY-MM-DD.md(YYYY-MM-DD 用当天日期;当天文件已存在则读取后追加,不要覆盖历史)。\n' +
+          '5. 调用 periph_observe 记录 kind=\'check\'、verdict=\'ok\'、summary=一句话中文汇总、monitor_id=\'{monitor_id}\'。\n' +
+          '6. 调用 monitor_report({"monitor_id":"{monitor_id}","results":[每条新录音一项{"title":录音主题}],"fingerprints":[每条新录音的稳定 fingerprint]}) 上报;fingerprints 用于去重,确保同一录音不被重复处理。\n' +
+          '7. 调用 send_notification 通知用户日报已生成,内容含设备名与要点摘要。\n' +
+          '不要调用 periph_camera_snap(该设备不是摄像头),不要调用 monitor_collect_candidates。\n' +
+          '汇总要求: 提取每段录音的主题、关键结论与待办事项。';
+      }
+      // 第 8 步的静音语义用 NO_REPLY,不用"空正文"。这不是风格选择:
+      // OpenClaw 对两者的处理完全不同。normalizeSilentReplyText
+      // (run-delivery.runtime-B0hfxpBW.js:29-54)把 NO_REPLY 识别成"刻意静音",
+      // 投递腿直接走 finishSilentReplyDelivery(:444),run 记录 status=ok;
+      // 而真正的空回复会先被 embedded agent 的空响应检测拦下(retry 一次
+      // visible-answer continuation,即每轮多烧一次模型调用),仍为空则判
+      // incomplete turn,整轮 status=error、summary 变成
+      // "⚠️ Agent couldn't generate a response. Please try again."。
+      // 后果是正常轮次全部进 error 历史 —— 用户看到的是一台每 30 分钟报错一次的监控。
+      // 两条路径在真 gateway 上实测过(scripts/f7-delivery-routes.sh 的 R2/R3):
+      //   R2 空正文  → status=error deliveryStatus=not-delivered summary="⚠️ Agent couldn't…"
+      //   R3 NO_REPLY → status=ok    deliveryStatus=not-delivered summary=""
+      // 两者都不推渠道(IRC 旁听端零消息),但只有 R3 的运行历史是干净的。
+      return '你是外设定时查证代理。目标设备 ID: {target}。本监控 ID: {monitor_id}。\n' +
+        '0. 调用 periph_list 检查 camera_bridge.online。online=false 时:调用 periph_observe 记录 kind=\'check\'、verdict=\'missed\'、summary=\'摄像头桥离线,Dashboard 未打开\'、monitor_id=\'{monitor_id}\',然后 monitor_report({"monitor_id":"{monitor_id}","results":[],"fingerprints":[]}) 上报空结果,结束,**不要**指示用户操作。online=true 才继续。\n' +
+        '1. 调用 periph_camera_snap({"device_id":"{target}","purpose":"scheduled check","monitor_id":"{monitor_id}"}) 抓取当前帧。\n' +
+        '2. 若抓帧失败(missed/error):调用 periph_observe 记录 kind=\'check\'、verdict=\'missed\'、summary=失败原因、monitor_id=\'{monitor_id}\',然后 monitor_report({"monitor_id":"{monitor_id}","results":[],"fingerprints":[]}) 上报空结果,结束。\n' +
+        '3. 若抓帧成功:根据下方"查证要求"分析画面(若你无法直接看到图像,调用 image 工具读取 frame_path 获取画面描述后再分析)。\n' +
+        '4. 调用 periph_observe 记录 kind=\'check\':一切正常 verdict=\'ok\';发现异常 verdict=\'alert\';无法判断 verdict=\'unverified\'。summary 用一句话中文写明结论,frame_path 传抓到的帧,monitor_id=\'{monitor_id}\'。\n' +
+        '5. 调用 monitor_report({"monitor_id":"{monitor_id}","results":[{"title":结论一句话,"verdict":本轮verdict}],"fingerprints":[本次抓帧的 frame_path,保证每轮唯一]});monitor_report 的真实参数只有 monitor_id/results/fingerprints/summary,没有 title 顶层参数,title 放在 results 项内。\n' +
+        '6. 仅当 verdict=\'alert\' 时调用 send_notification 通知用户,内容含设备名与异常描述。\n' +
+        '7. 若本轮 verdict=\'unverified\':调用 monitor_get_context 读取 memory.notes;若 notes 已含 vision-unverified-notified 则跳过提醒;若 notes 显示上一轮结论也是 unverified,调用 send_notification 发送一次性提醒告知用户视觉查证未生效(可能未配置图像模型 imageModel),并用 monitor_note 在 notes 中追加 vision-unverified-notified;否则仅用 monitor_note 记录本轮 unverified。\n' +
+        '8. 最终回复(本轮最后一条消息的正文)决定是否推送到通知渠道。**仅当本轮 verdict=\'alert\' 时**,输出一句简短中文异常说明作为最终回复;其余情况(ok/unverified/missed)最终回复**必须且只能是 NO_REPLY**(不带引号、不加任何其他字符,也不要输出空白),不要输出任何总结、确认或客套话。这样正常轮不会打扰用户,异常轮才推送(铃铛提醒已由上面的 send_notification 步骤单独处理)。\n' +
+        '查证要求: {check_prompt 或 "描述画面中正在发生什么,判断是否存在异常。"}';
     default:
       return protocol +
         'TASK: Execute the monitoring task through the core collector layer and analyze the collected candidates.\n' +
         'Use collector fingerprints for each distinct finding whenever available.';
   }
+}
+
+/**
+ * Detect the historical device-monitor template (审计#4 / F7 迁移半).
+ *
+ * The v1 device template (commit b9deba9) predates three fixes now baked into
+ * defaultAgentPrompt('device', …):
+ *   - no {monitor_id} threading (observations couldn't be traced to a monitor);
+ *   - a wrong monitor_report schema — "monitor_report 上报本轮结果(title=…)" —
+ *     but the real tool takes (monitor_id, results[], fingerprints[]) with title
+ *     living *inside* a results item (monitor/tools.ts), never a top-level arg;
+ *   - no F7-b step 8 (empty final reply unless verdict=alert).
+ *
+ * We key on stable substrings that are unique to a superseded camera template and
+ * ABSENT from the current one, so custom user prompts and the already-migrated
+ * template both correctly return false. Every clause requires the header
+ * "你是外设定时查证代理" so a user-authored prompt for some other device is never
+ * touched.
+ *
+ * v1 (commit b9deba9) — the broken schema line "monitor_report 上报本轮结果(title="
+ *   (the real tool takes results[]; the current template emits
+ *   monitor_report({"monitor_id":…}) instead).
+ *
+ * v2 — step 8 told the agent to leave the final reply EMPTY on ok/unverified/missed
+ *   ("必须留空"). Proven wrong on a real gateway: an empty final reply is not
+ *   OpenClaw's silence mechanism, it is an incomplete turn — the run ends
+ *   status=error with summary "⚠️ Agent couldn't generate a response. Please try
+ *   again." after burning a retry, so a healthy camera monitor logs an error on
+ *   every normal round. The current template says NO_REPLY, which
+ *   normalizeSilentReplyText treats as a deliberate silent reply
+ *   (run-delivery.runtime-B0hfxpBW.js:29-54) → status=ok, nothing delivered.
+ *   Evidence: scripts/f7-delivery-routes.sh routes R2 (empty) vs R3 (NO_REPLY).
+ */
+function isLegacyDeviceAgentPrompt(prompt: string): boolean {
+  if (!prompt.includes('你是外设定时查证代理')) return false;
+  return (
+    prompt.includes('monitor_report 上报本轮结果(title=') ||
+    prompt.includes('最终回复**必须留空**')
+  );
 }
 
 function isLegacyDefaultAgentPrompt(prompt: string): boolean {
@@ -404,9 +493,10 @@ export class MonitorService {
    * protocol signature exactly enough to be unsafe for collector-first runs.
    */
   repairLegacyDefaultPrompts(): number {
-    const rows = this.db.prepare('SELECT id, source_type, filters, agent_prompt FROM rc_monitors').all() as Array<{
+    const rows = this.db.prepare('SELECT id, source_type, target, filters, agent_prompt FROM rc_monitors').all() as Array<{
       id: string;
       source_type: string;
+      target: string;
       filters: string;
       agent_prompt: string;
     }>;
@@ -420,9 +510,22 @@ export class MonitorService {
     let changed = 0;
     const updateAll = this.db.transaction(() => {
       for (const row of rows) {
-        if (!isLegacyDefaultAgentPrompt(row.agent_prompt || '')) continue;
+        const prompt = row.agent_prompt || '';
         let filters: Record<string, unknown> = {};
         try { filters = JSON.parse(row.filters) as Record<string, unknown>; } catch { /* keep empty */ }
+
+        // Device monitors use a separate template family; regenerate with the
+        // device's kind (audio-recorder → plaud digest, else camera vision).
+        // Only rewrites the historical default — custom prompts and the current
+        // template both fail isLegacyDeviceAgentPrompt(), so they're left alone.
+        if (isLegacyDeviceAgentPrompt(prompt)) {
+          const kind = this.periphDeviceKind(row.target) ?? 'camera';
+          stmt.run(defaultAgentPrompt('device', filters, kind), row.id);
+          changed += 1;
+          continue;
+        }
+
+        if (!isLegacyDefaultAgentPrompt(prompt)) continue;
         stmt.run(defaultAgentPrompt(row.source_type, filters), row.id);
         changed += 1;
       }
@@ -474,7 +577,11 @@ export class MonitorService {
 
     const id = randomUUID();
     const filters = input.filters ?? {};
-    const prompt = input.agent_prompt?.trim() || defaultAgentPrompt(input.source_type, filters);
+    // F4: device 监控的默认模板按设备 kind 分支 — 建立时按 target 查 periph 设备。
+    const deviceKind =
+      input.source_type.trim() === 'device' ? this.periphDeviceKind(input.target) : undefined;
+    const prompt =
+      input.agent_prompt?.trim() || defaultAgentPrompt(input.source_type, filters, deviceKind);
     // Creating a monitor only persists its RC definition. The dashboard
     // registers the backing gateway cron job when the user enables it.
     // Defaulting to enabled here creates a false "running" state with no
@@ -497,6 +604,20 @@ export class MonitorService {
     );
 
     return this.get(id);
+  }
+
+  /**
+   * Resolve a device monitor target to its rc_periph_devices.kind.
+   * Returns undefined when the target is empty/unknown or the table is
+   * missing (pre-v16 DB) — callers then fall back to the camera template.
+   */
+  private periphDeviceKind(target?: string): string | undefined {
+    if (!target?.trim()) return undefined;
+    try {
+      const row = this.db.prepare('SELECT kind FROM rc_periph_devices WHERE id = ?').get(target.trim()) as
+        { kind: string } | undefined;
+      return row?.kind;
+    } catch { return undefined; }
   }
 
   update(id: string, patch: MonitorPatch): Monitor {

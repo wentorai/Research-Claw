@@ -1,0 +1,54 @@
+{
+  "taskId": "lh-003",
+  "domain": "long-horizon",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lh-003-oc-0-1782090560225",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 9,
+    "toolCalls": 14,
+    "wallMs": 181551,
+    "tokens": {
+      "input": 121179,
+      "output": 11594,
+      "cacheRead": 579968,
+      "cacheWrite": 0,
+      "total": 712741,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "qec-landscape.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "update_plan",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "`qec-landscape.md` 已完成，写入工作区 (21.5 KB)。以下是文档结构概要：\n\n---\n\n### 量子纠错研究全景 — 十大章节\n\n| 章节 | 要点 |\n|:---|:---|\n| **1. 引言** | QEC 核心问题、关键指标 (码距、阈值、开销、break-even) |\n| **2. 理论基础** | Knill-Laflamme 条件、Stabilizer 形式、阈值定理、CSS 构造 |\n| **3. 码族 (六大类)** | CSS/Stabilizer → 拓扑码 (Toric/Surface/Color/3D STC/Fracton) → **qLDPC** (BB codes, Lifted Product, Tanner codes) → **Bosonic** (GKP, Cat, Binomial, Squeezed Cat, Spherical) → 级联方案 → 非稳定子 & 近似 QEC |\n| **4. 容错协议** | Shor/Steane/Knill EC、**Flag Qubit**、**Single-Shot QEC**、Magic State Distillation、Code Switching |\n| **5. 解码器** | MWPM / Union-Find / RG / BP+OSD / Sweep Rule / CNN/RNN/Transformer/RL / 低温忆阻器神经解码器 |\n| **6. 实验进展** | Google Willow (**below-threshold QEC**), IBM BB codes, Zuchongzhi 魔态, Innsbruck 离子阱容错通用门, Yale Bosonic codes, 关键里程碑时间线 |\n| **7. 阈值汇总** | 各码/噪声模型/解码器对应的阈值 (code capacity, phenomenological, circuit-level) |\n| **8. 里程碑论文** | 6 篇奠基性论文 + 15 篇近期 (2018-2025) 里程碑 |\n| **9. 开放挑战** | 开销、解码速度、真实噪声模型、通用逻辑门、硬件连接性、理论前沿 |\n| **10. 趋势展望** | Surface→qLDPC 范式转移、Bosonic-DV Hybrid、硬软协同设计、从纠错到容错计算、新平台 |\n\n共引用 **20 篇精选核心文献**，均有 DOI 可验证。所有数据来自 Scopus/OpenAlex/arXiv 实时检索，引用数为检索快照。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "qec-landscape.md exists"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 24
+}

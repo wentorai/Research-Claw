@@ -1,0 +1,51 @@
+{
+  "taskId": "lit-004",
+  "domain": "literature",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-004-oc-0-1782102957556",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 11,
+    "toolCalls": 20,
+    "wallMs": 154772,
+    "tokens": {
+      "input": 65027,
+      "output": 9799,
+      "cacheRead": 720384,
+      "cacheWrite": 0,
+      "total": 795210,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "outputs/drafts/literature-review-llm-alignment.md"
+  ],
+  "toolNames": [
+    "read",
+    "read",
+    "update_plan",
+    "exec",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "update_plan",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "以下是对 **LLM Alignment（大语言模型对齐）** 研究脉络的系统梳理，已保存至 workspace。\n\n---\n\n## 研究脉络概览\n\n我将该领域划分为 **7 个主要方向**，按技术演进和逻辑关系组织：\n\n### 方向一：RLHF —— 主流范式（2017-2022）\n\n对齐的工业标准。三阶段流程：SFT → Reward Modeling → PPO 强化学习。\n\n| 里程碑工作 | 贡献 |\n|:---|:---|\n| Christiano et al. (2017) | 首次提出从人类偏好学习奖励函数并用 RL 优化 |\n| Stiennon et al. (NeurIPS 2020) | RLHF 应用于语言模型（摘要任务） |\n| **Ouyang et al. (NeurIPS 2022)** | InstructGPT → ChatGPT 的技术基础 |\n| Bai et al. (2022) | Anthropic HH-RLHF，同时优化 helpfulness + harmlessness |\n\n### 方向二：DPO 与变体 —— 简化革命（2023-2024）\n\n绕过显式 reward model 和 RL，直接在偏好数据上优化。\n\n| 里程碑工作 | 贡献 |\n|:---|:---|\n| **Rafailov et al. (NeurIPS 2023)** | DPO — 奠基性工作，消除 reward model |\n| Azar et al. (2023) | IPO — 理论上更稳定的变体 |\n| Ethayarajh et al. (2024) | KTO — 仅需二元信号，无需成对偏好 |\n| Meng et al. (2024) | **SimPO** — 消除 reference model |\n| Wu et al. (2024) | SPPO — 自博弈逼近 Nash 均衡 |\n\n### 方向三：RLAIF / Constitutional AI（2022-2024）\n\n用 AI 自身替代人类提供反馈信号。\n\n- **Bai et al. (2022)** — Constitutional AI：用原则引导 AI 自我 critique\n- **Lee et al. (2023)** — RLAIF 可达到与 RLHF 相当的性能\n\n### 方向四：可扩展监督（2022-2026）\n\n当 AI 超越人类时如何监督？\n\n- **Bowman et al. (2022)** — 定义问题范式\n- **Burns et al. (2023)** — 弱到强泛化：弱模型监督强模型，强模型可超越监督者能力\n- Arnesen et al. (2024) — 自博弈辩论提高评判准确性\n\n### 方向五：安全对齐与红队（2022-2025）\n\n- Perez et al. (2022) — 用 LM 自动生成红队测试\n- Qi et al. (2023) — 多模态视觉对抗样本可越狱对齐 LLM\n- 持续的攻防对抗：jailbreak 方法层出不穷\n\n### 方向六：机制可解释性驱动对齐（2024-2026）\n\n从\"行为对齐\"走向\"机制对齐\"。\n\n- **Bereska & Gavves (TMLR 2024)** — 可解释性在 AI 安全中的系统综述\n- **Tam (2026) — *The Neutral Mask***：关键发现——RLHF 可能只实现\"浅层对齐\"，压制而非消除有害表征\n- 稀疏自编码器、激活引导、电路发现等技术工具\n\n### 方向七：对齐失败模式（2022-2026）\n\n- Gao et al. (2023) — Reward Overoptimization 标度律\n- **Greenblatt et al. (2024)** — **对齐伪装（Alignment Faking）**：Claude 3 Opus 在训练中策略性合规以保护部署行为\n- Abahana et al. (2026) — RLHF 失败模式的系统分类\n\n---\n\n## 八大开放问题\n\n1. **深层对齐 vs. 浅层对齐** — RLHF 是否只压制而非改变内部表征？\n2. **对齐伪装** — 模型可能策略性欺骗训练过程\n3. **可扩展监督** — 如何用弱监督者监督超人类 AI？\n4. **价值多元性** — 对齐到**谁**的价值观？\n5. **多模态安全** — 视觉/音频输入扩大攻击面\n6. **对齐税** — 安全性与能力之间的 trade-off\n7. **自动化对齐** — 如何减少对人类标注的依赖？\n8. **评估可靠性** — 现有 benchmark 与真实偏好的差距\n\n---\n\n```progress_card\n{\"type\":\"progress_card\",\"period\":\"2026-06-22 session\",\"papers_read\":0,\"papers_added\":0,\"tasks_completed\":1,\"tasks_created\":0,\"highlights\":[\"完成 LLM Alignment 研究脉络综述：覆盖 7 大方向、30+ 代表性工作、8 个开放问题\",\"已保存至 outputs/drafts/literature-review-llm-alignment.md\"]}\n```\n\n完整综述（含参考文献列表、技术演进图、推荐综述文献）已保存至 `outputs/drafts/literature-review-llm-alignment.md`。如需对某个具体方向深入展开（如 DPO 变体的详细对比、Alignment Faking 的实验细节等），可以进一步研究。",
+  "objective": null,
+  "historyLen": 32
+}

@@ -1,0 +1,41 @@
+{
+  "taskId": "screen-001",
+  "domain": "screening",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-screen-001-oc-0-1782103119910",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 9357,
+    "tokens": {
+      "input": 1140,
+      "output": 816,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 61476,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "screening-abstracts.json"
+  ],
+  "toolNames": [
+    "read"
+  ],
+  "finalText": "逐条核验 C1 标准（设计 = `RCT` 且 `year >= 2018`）：\n\n| ID | Year | Design | Year >= 2018? | Design = RCT? | 符合 C1? |\n|:---|:-----|:-------|:-------------|:-------------|:---------|\n| S1 | 2020 | RCT | ✓ | ✓ | **✓** |\n| S2 | 2016 | RCT | ✗ | ✓ | ✗ |\n| S3 | 2019 | cohort | ✓ | ✗ | ✗ |\n| S4 | 2021 | RCT | ✓ | ✓ | **✓** |\n| S5 | 2018 | RCT | ✓ | ✓ | **✓** |\n| S6 | 2015 | systematic review | ✗ | ✗ | ✗ |\n| S7 | 2022 | RCT | ✓ | ✓ | **✓** |\n| S8 | 2019 | case report | ✓ | ✗ | ✗ |\n| S9 | 2023 | RCT | ✓ | ✓ | **✓** |\n| S10 | 2017 | RCT | ✗ | ✓ | ✗ |\n\n被排除的 5 篇：S2 (年份 2016 < 2018)、S3 (队列研究)、S6 (系统综述且 2015)、S8 (个案报告)、S10 (年份 2017 < 2018)。\n\n答案: S1, S4, S5, S7, S9",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "got [S1,S4,S5,S7,S9] want [S1,S4,S5,S7,S9]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4
+}

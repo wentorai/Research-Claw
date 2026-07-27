@@ -22,6 +22,16 @@ export interface Session {
   lastInteractionAt?: number;
   sessionId?: string;
   kind?: string;
+  /**
+   * Runtime-merged model provider for this session (OC session-utils.ts:2186-2187).
+   * Present when the session has an active model override; null/undefined otherwise.
+   */
+  modelProvider?: string | null;
+  /**
+   * Runtime-merged model id for this session (OC session-utils.ts:2186-2187).
+   * Present when the session has an active model override; null/undefined otherwise.
+   */
+  model?: string | null;
 }
 
 /** Fields supported by OC sessions.patch RPC (aligned with OC controllers/sessions.ts). */
@@ -31,6 +41,12 @@ export interface SessionPatchFields {
   fastMode?: boolean | null;
   verboseLevel?: string | null;
   reasoningLevel?: string | null;
+  /**
+   * Session model override. `model: null` clears the /model override and falls
+   * back to the config default (OC sessions-patch.ts:517-534 → applyModelOverride
+   * with isDefault:true). Used by the vision hint's "clear override" action (P1-V2).
+   */
+  model?: string | null;
 }
 
 interface SessionsState {
@@ -51,8 +67,15 @@ interface SessionsState {
   /** Auto-name a default-labelled session from its first exchange (at most once). */
   autoNameSession: (key: string) => Promise<void>;
   renameSession: (key: string, label: string) => Promise<void>;
-  /** General-purpose session patch (aligned with OC sessions.patch — supports all fields). */
-  patchSession: (key: string, fields: SessionPatchFields) => Promise<void>;
+  /**
+   * General-purpose session patch (aligned with OC sessions.patch — supports all fields).
+   *
+   * Resolves `true` only when the gateway accepted the patch; `false` when the
+   * gateway is not connected or sessions.patch was rejected. Callers surface the
+   * outcome to the user, so a swallowed failure must not be indistinguishable
+   * from success.
+   */
+  patchSession: (key: string, fields: SessionPatchFields) => Promise<boolean>;
   isMainSession: (key: string) => boolean;
   refreshActiveSessionStale: () => void;
   acknowledgeStaleSessionSend: (key: string) => void;
@@ -305,9 +328,11 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     }
   },
 
-  patchSession: async (key: string, fields: SessionPatchFields) => {
+  patchSession: async (key: string, fields: SessionPatchFields): Promise<boolean> => {
     const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
+    // Not connected → nothing was sent. Report it as a failure rather than
+    // resolving like a successful patch.
+    if (!client?.isConnected) return false;
     try {
       await client.request('sessions.patch', { key, ...fields });
       // Update local label if changed
@@ -318,8 +343,11 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
           ),
         }));
       }
+      return true;
     } catch {
-      // Patch failed
+      // Gateway rejected the patch (validation error / METHOD_NOT_FOUND /
+      // transport timeout). The caller must be able to tell the user.
+      return false;
     }
   },
 

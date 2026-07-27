@@ -1,0 +1,67 @@
+{
+  "taskId": "lh-003",
+  "domain": "long-horizon",
+  "track": "B",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lh-003-rc-0-1782104673577",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 10,
+    "toolCalls": 20,
+    "wallMs": 184357,
+    "tokens": {
+      "input": 50914,
+      "output": 10331,
+      "cacheRead": 537216,
+      "cacheWrite": 0,
+      "total": 598461,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "qec-landscape.md"
+  ],
+  "toolNames": [
+    "read",
+    "read",
+    "update_plan",
+    "web_search",
+    "web_search",
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_search",
+    "web_fetch",
+    "web_search",
+    "web_search",
+    "web_fetch",
+    "update_plan",
+    "write",
+    "update_plan"
+  ],
+  "finalText": "好的，这是一个相当全面的文献调研任务。我将按照三阶段推进：**搜索 → 分析 → 撰写**。先从多个数据库并行搜索量子纠错的核心文献。材料已充分搜集，现在进入第二阶段——按主题聚类分析并撰写研究全景文档。研究全景文档已写入 `qec-landscape.md`（15KB），覆盖八大核心方向。\n\n---\n\n```progress_card\n{\"type\":\"progress_card\",\"period\":\"session\",\"papers_read\":0,\"papers_added\":0,\"tasks_completed\":1,\"tasks_created\":1,\"highlights\":[\"完成量子纠错(QEC)研究全景文档(15KB)，覆盖8大方向: 表面码/色码/qLDPC/玻色子码/解码器/容错操作/实验平台/开放挑战\",\"搜索跨7个数据源: web_search ×6, rp_search, web_fetch ×3，提取了Google Willow、Riverlane 2025调查、Harvard中性原子等关键里程碑\",\"文档包含10个章节、4个对比表格、里程碑时间线(2023-2029)、产业路线图和19项开放挑战\",\"核心文献: 表面码阈值突破(Google Willow/Nature 2024)、qLDPC理论突破(Panteleev-Kalachev/Dinur 2022-2025)、AlphaQubit解码器(DeepMind/Nature 2024)\"]}\n```\n\n```file_card\n{\"type\":\"file_card\",\"path\":\"qec-landscape.md\",\"size_bytes\":15054,\"format\":\"markdown\",\"description\":\"量子纠错(Quantum Error Correction)研究全景——主要编码体系、解码器、容错操作、实验平台、产业路线图与开放挑战\",\"written_at\":\"2026-06-22T05:06:00+08:00\"}\n```\n\n---\n\n**文档结构概览：**\n\n| 章节 | 内容 |\n|:-----|:-----|\n| §1-2 | 理论基础（稳定子形式、阈值定理、CSS 构造） |\n| §3.1 | **表面码** — 工业标准，Google Willow 首个阈值以下突破 |\n| §3.2 | 色码 — 横向 Clifford 门优势 |\n| §3.3 | **qLDPC 码** — 后表面码方向，常数速率+线性距离，产业迅速布局 |\n| §3.4 | **玻色子码** — 猫码/GKP码，硬件效率极高 |\n| §4 | 解码器 — MWPM/Union-Find/AlphaQubit/ML 解码器对比 |\n| §5 | 容错逻辑操作 — Magic State 蒸馏、Lattice Surgery、Eastin-Knill 定理 |\n| §6 | 实验平台对比 + 里程碑时间线 (2023-2029) |\n| §7 | 错误缓解 vs 错误纠正 |\n| §8 | 产业路线图 + 国家战略 + 软件生态 |\n| §9 | **19 项开放挑战** — 分理论、解码、逻辑操作、系统工程、跨学科 |\n| §10 | 精选参考文献（按重要度标注） |\n\n如果你需要进一步深入某个子方向（比如 qLDPC 码的构造细节、解码器的技术对比、或特定平台的实验进展），我可以继续扩充。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "qec-landscape.md exists"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 31,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": true,
+      "evidence": "matched=[survey-sop], skillSearchTool=false"
+    }
+  ]
+}

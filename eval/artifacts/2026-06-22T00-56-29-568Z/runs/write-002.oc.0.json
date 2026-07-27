@@ -1,0 +1,45 @@
+{
+  "taskId": "write-002",
+  "domain": "review-writing",
+  "track": "B",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-002-oc-0-1782091284993",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 10,
+    "toolCalls": 14,
+    "wallMs": 107835,
+    "tokens": {
+      "input": 40898,
+      "output": 7476,
+      "cacheRead": 558848,
+      "cacheWrite": 0,
+      "total": 607222,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "diffusion_models_review.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "rp_abstracts",
+    "web_fetch",
+    "web_fetch",
+    "rp_abstracts",
+    "web_fetch",
+    "update_plan",
+    "write",
+    "update_plan",
+    "read",
+    "update_plan"
+  ],
+  "finalText": "小综述已完成，保存在 `diffusion_models_review.md`。以下是内容概览：\n\n```file_card\n{\"type\":\"file_card\",\"id\":\"diffusion_models_review\",\"path\":\"diffusion_models_review.md\",\"bytes\":9060,\"created\":\"2026-06-22T01:22:10Z\",\"format\":\"markdown\"}\n```\n\n---\n\n**综述结构：**\n\n| 章节 | 内容 |\n|:---|:---|\n| **§1 引言** | 扩散模型的背景与崛起 |\n| **§2 基础理论与方法** | DDPM（Ho et al., 2020）→ Score-based SDE（Song et al., 2021）→ Improved DDPM（Nichol & Dhariwal, 2021） |\n| **§3 关键方法演进** | LDM潜在空间压缩 → CFG无分类器引导 → ControlNet可控生成 → DiT扩散变换器 |\n| **§4 大规模系统** | DALL-E 2（2286引用）、Imagen（2106引用）、Stable Diffusion系列（SD→SDXL→SD3） |\n| **§5 高效采样** | DDIM、一致性模型、整流流等加速方法 |\n| **§6 应用/挑战/展望** | 应用场景、推理效率、版权伦理、架构转型趋势 |\n\n**共引用16篇文献**，全部来自本次检索的arXiv/OpenAlex/Scopus真实数据，含公式推导和具体实验指标（FID/IS等）。约9000字节，APA 7th格式。",
+  "objective": null,
+  "historyLen": 25
+}

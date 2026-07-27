@@ -15,11 +15,41 @@ import {
   RC_MONITOR_TOGGLE_ENABLED,
   RC_MONITOR_TOGGLE_DISABLED,
   CRON_ADD_RESPONSE,
+  CHANNELS_STATUS_NO_BOUND,
+  NO_CHANNEL_DELIVERY,
 } from '../__fixtures__/gateway-payloads/monitor-responses';
 
 // ── Mock gateway client ──────────────────────────────────────────────────
+//
+// Method-aware queued mock. F7 added a `channels.status` round-trip inside the
+// cron registration path (notify=true); a purely positional mockResolvedValueOnce
+// chain would have that call consume the wrong queued value. Instead each method
+// keeps its own FIFO queue (last entry repeats), and `channels.status` defaults
+// to CHANNELS_STATUS_NO_BOUND (no bound external channel → mode:none).
 
 const mockRequest = vi.fn();
+
+// Per-method response queues; last value repeats when exhausted.
+let _queues: Record<string, unknown[]> = {};
+
+function queueResponse(method: string, ...values: unknown[]) {
+  _queues[method] = [...(_queues[method] ?? []), ...values];
+}
+
+function installMethodRouter() {
+  _queues = {};
+  mockRequest.mockImplementation((method: string) => {
+    const q = _queues[method];
+    if (q && q.length > 0) {
+      const value = q.length > 1 ? q.shift() : q[0];
+      return value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
+    }
+    if (method === 'channels.status') return Promise.resolve(CHANNELS_STATUS_NO_BOUND);
+    if (method === 'rc.monitor.list') return Promise.resolve(RC_MONITOR_LIST_RESPONSE);
+    // Fallback for trailing/unlisted calls so a stray reload never throws.
+    return Promise.resolve({ ok: true });
+  });
+}
 
 function setConnected(connected: boolean) {
   useGatewayStore.setState({
@@ -31,7 +61,8 @@ function setConnected(connected: boolean) {
 beforeEach(() => {
   vi.clearAllMocks();
   resetMonitorReconciled();
-  useMonitorStore.setState({ monitors: [], loading: false, loaded: false });
+  useMonitorStore.setState({ monitors: [], loading: false, loaded: false, error: null });
+  installMethodRouter();
   setConnected(true);
 });
 
@@ -39,7 +70,10 @@ beforeEach(() => {
 
 describe('loadMonitors', () => {
   it('fetches monitors from rc.monitor.list and stores them', async () => {
-    mockRequest.mockResolvedValueOnce(RC_MONITOR_LIST_RESPONSE);
+    queueResponse('rc.monitor.list', RC_MONITOR_LIST_RESPONSE);
+    // Unparseable cron.list shape → reconcile no-ops (extractCronJobs → null),
+    // isolating this test to the load path.
+    queueResponse('cron.list', {});
 
     await useMonitorStore.getState().loadMonitors();
 
@@ -66,7 +100,7 @@ describe('loadMonitors', () => {
   });
 
   it('handles RPC errors gracefully', async () => {
-    mockRequest.mockRejectedValueOnce(new Error('network'));
+    queueResponse('rc.monitor.list', new Error('network'));
 
     await useMonitorStore.getState().loadMonitors();
 
@@ -84,21 +118,23 @@ describe('loadMonitors', () => {
       gateway_job_id: CRON_ADD_RESPONSE.id,
     };
 
-    mockRequest
-      .mockResolvedValueOnce({ items: [missingJobMonitor], total: 1 })
-      .mockResolvedValueOnce({ jobs: [] })
-      .mockResolvedValueOnce(CRON_ADD_RESPONSE)
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ items: [repairedMonitor], total: 1 });
+    queueResponse('rc.monitor.list', { items: [missingJobMonitor], total: 1 }, { items: [repairedMonitor], total: 1 });
+    queueResponse('cron.list', { jobs: [] });
+    queueResponse('cron.add', CRON_ADD_RESPONSE);
+    queueResponse('rc.monitor.setJobId', { ok: true });
+    // channels.status defaults to CHANNELS_STATUS_NO_BOUND → mode:none.
 
     await useMonitorStore.getState().loadMonitors();
 
-    expect(mockRequest).toHaveBeenCalledWith('cron.list', {});
+    // cron.list is paged: the RPC schema caps limit at 100 and a limit-less call
+    // silently truncates at 200 (listPage, server-cron:1968), which would make
+    // every monitor past the cut look orphaned and get re-registered.
+    expect(mockRequest).toHaveBeenCalledWith('cron.list', { limit: 100, offset: 0 });
     expect(mockRequest).toHaveBeenCalledWith('cron.add', expect.objectContaining({
       name: '[rc-monitor] arXiv Daily Digest',
       sessionKey: 'cron:rc-monitor:arxiv-daily',
       sessionTarget: 'isolated',
-      delivery: { mode: 'none', channel: 'last' },
+      delivery: NO_CHANNEL_DELIVERY,
       payload: expect.objectContaining({
         kind: 'agentTurn',
         message: expect.stringContaining('MONITOR_ID: arxiv-daily'),
@@ -129,28 +165,28 @@ describe('loadMonitors', () => {
       gateway_job_id: 'gw-job-001',
     };
 
-    mockRequest
-      .mockResolvedValueOnce({ items: [monitor], total: 1 })
-      .mockResolvedValueOnce({
-        jobs: [
-          {
-            id: 'gw-job-001',
-            name: '[rc-monitor] arXiv Daily Digest',
-            sessionKey: 'cron:rc-monitor:arxiv-daily',
-            schedule: { kind: 'cron', expr: monitor.schedule },
-            payload: {},
-            state: { lastRunStatus: 'success' },
-          },
-          {
-            id: 'gw-job-duplicate',
-            name: '[rc-monitor] arXiv Daily Digest',
-            sessionKey: 'cron:rc-monitor:arxiv-daily',
-            schedule: { kind: 'cron', expr: monitor.schedule },
-            payload: {},
-            state: { lastRunStatus: 'success' },
-          },
-        ],
-      });
+    queueResponse('rc.monitor.list', { items: [monitor], total: 1 });
+    queueResponse('cron.list', {
+      jobs: [
+        {
+          id: 'gw-job-001',
+          name: '[rc-monitor] arXiv Daily Digest',
+          sessionKey: 'cron:rc-monitor:arxiv-daily',
+          schedule: { kind: 'cron', expr: monitor.schedule },
+          payload: {},
+          state: { lastRunStatus: 'success' },
+        },
+        {
+          id: 'gw-job-duplicate',
+          name: '[rc-monitor] arXiv Daily Digest',
+          sessionKey: 'cron:rc-monitor:arxiv-daily',
+          schedule: { kind: 'cron', expr: monitor.schedule },
+          payload: {},
+          state: { lastRunStatus: 'success' },
+        },
+      ],
+    });
+    queueResponse('cron.remove', { ok: true });
 
     await useMonitorStore.getState().loadMonitors();
 
@@ -164,22 +200,22 @@ describe('loadMonitors', () => {
       gateway_job_id: 'gw-job-001',
     };
 
-    mockRequest
-      .mockResolvedValueOnce({ items: [monitor], total: 1 })
-      .mockResolvedValueOnce({
-        jobs: [{
-          id: 'gw-job-001',
-          name: '[rc-monitor] arXiv Daily Digest',
-          sessionKey: 'cron:rc-monitor:arxiv-daily',
-          schedule: { kind: 'cron', expr: monitor.schedule },
-          payload: { kind: 'agentTurn', message: 'old' },
-          state: { lastRunStatus: 'success' },
-        }],
-      })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce(CRON_ADD_RESPONSE)
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ items: [{ ...monitor, gateway_job_id: CRON_ADD_RESPONSE.id }], total: 1 });
+    queueResponse('rc.monitor.list',
+      { items: [monitor], total: 1 },
+      { items: [{ ...monitor, gateway_job_id: CRON_ADD_RESPONSE.id }], total: 1 });
+    queueResponse('cron.list', {
+      jobs: [{
+        id: 'gw-job-001',
+        name: '[rc-monitor] arXiv Daily Digest',
+        sessionKey: 'cron:rc-monitor:arxiv-daily',
+        schedule: { kind: 'cron', expr: monitor.schedule },
+        payload: { kind: 'agentTurn', message: 'old' },
+        state: { lastRunStatus: 'success' },
+      }],
+    });
+    queueResponse('cron.remove', { ok: true });
+    queueResponse('cron.add', CRON_ADD_RESPONSE);
+    queueResponse('rc.monitor.setJobId', { ok: true });
 
     await useMonitorStore.getState().loadMonitors();
 
@@ -196,20 +232,21 @@ describe('loadMonitors', () => {
       gateway_job_id: 'gw-disabled-monitor',
     };
 
-    mockRequest
-      .mockResolvedValueOnce({ items: [disabled], total: 1 })
-      .mockResolvedValueOnce({
-        jobs: [{
-          id: 'gw-disabled-monitor',
-          name: '[rc-monitor] GitHub Release Tracker',
-          sessionKey: 'cron:rc-monitor:github-releases',
-          schedule: { kind: 'cron', expr: disabled.schedule },
-          payload: { kind: 'agentTurn', message: 'stale', timeoutSeconds: 900 },
-          state: { lastRunStatus: 'success' },
-        }],
-      })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ items: [{ ...disabled, gateway_job_id: null }], total: 1 });
+    queueResponse('rc.monitor.list',
+      { items: [disabled], total: 1 },
+      { items: [{ ...disabled, gateway_job_id: null }], total: 1 });
+    queueResponse('cron.list', {
+      jobs: [{
+        id: 'gw-disabled-monitor',
+        name: '[rc-monitor] GitHub Release Tracker',
+        sessionKey: 'cron:rc-monitor:github-releases',
+        schedule: { kind: 'cron', expr: disabled.schedule },
+        payload: { kind: 'agentTurn', message: 'stale', timeoutSeconds: 900 },
+        state: { lastRunStatus: 'success' },
+      }],
+    });
+    queueResponse('cron.remove', { ok: true });
+    queueResponse('rc.monitor.setJobId', { ok: true });
 
     await useMonitorStore.getState().loadMonitors();
 
@@ -218,6 +255,8 @@ describe('loadMonitors', () => {
       id: 'github-releases',
       job_id: '',
     });
+    // Disabled monitor never announces → no channels.status round-trip.
+    expect(mockRequest).not.toHaveBeenCalledWith('channels.status', expect.anything());
   });
 });
 
@@ -228,59 +267,70 @@ describe('toggleMonitor', () => {
     useMonitorStore.setState({ monitors: [...RC_MONITOR_LIST_RESPONSE.items], loaded: true });
   });
 
-  it('enables a monitor: toggle → cron.add → setJobId → reload', async () => {
-    // 1. rc.monitor.toggle returns updated monitor
-    mockRequest.mockResolvedValueOnce(RC_MONITOR_TOGGLE_ENABLED);
-    // 2. cron.add returns job
-    mockRequest.mockResolvedValueOnce(CRON_ADD_RESPONSE);
-    // 3. rc.monitor.setJobId
-    mockRequest.mockResolvedValueOnce({ ok: true });
-    // 4. reload: rc.monitor.list
-    mockRequest.mockResolvedValueOnce(RC_MONITOR_LIST_RESPONSE);
+  it('enables a monitor: toggle → channels.status → cron.add → setJobId → reload', async () => {
+    queueResponse('rc.monitor.toggle', RC_MONITOR_TOGGLE_ENABLED);
+    queueResponse('cron.add', CRON_ADD_RESPONSE);
+    queueResponse('rc.monitor.setJobId', { ok: true });
+    queueResponse('rc.monitor.list', RC_MONITOR_LIST_RESPONSE);
+    queueResponse('cron.list', {}); // reload reconcile no-ops
 
     await useMonitorStore.getState().toggleMonitor('github-releases', true);
 
-    // Verify RPC call sequence
+    // Verify RPC sequence: registration now consults channels.status (F7) to
+    // derive the delivery target before cron.add.
     expect(mockRequest).toHaveBeenNthCalledWith(1, 'rc.monitor.toggle', { id: 'github-releases', enabled: true });
-    expect(mockRequest).toHaveBeenNthCalledWith(2, 'cron.add', expect.objectContaining({
+    expect(mockRequest).toHaveBeenNthCalledWith(2, 'channels.status', {});
+    expect(mockRequest).toHaveBeenNthCalledWith(3, 'cron.add', expect.objectContaining({
       name: '[rc-monitor] GitHub Release Tracker',
       sessionKey: 'cron:rc-monitor:github-releases',
       sessionTarget: 'isolated',
-      delivery: { mode: 'none', channel: 'last' },
+      // Default fixture = no bound external channel → announce/last fallback.
+      delivery: NO_CHANNEL_DELIVERY,
       payload: expect.objectContaining({
         kind: 'agentTurn',
         message: expect.stringContaining('MONITOR_ID: github-releases'),
         timeoutSeconds: 900,
       }),
     }));
-    expect(mockRequest.mock.calls[1][1]).not.toHaveProperty('message');
-    expect(mockRequest).toHaveBeenNthCalledWith(3, 'rc.monitor.setJobId', {
+    const cronAddCall = mockRequest.mock.calls.find((c) => c[0] === 'cron.add');
+    expect(cronAddCall?.[1]).not.toHaveProperty('message');
+    expect(mockRequest).toHaveBeenNthCalledWith(4, 'rc.monitor.setJobId', {
       id: 'github-releases',
       job_id: CRON_ADD_RESPONSE.id,
     });
   });
 
-  it('disables a monitor: cron.remove → toggle → setJobId(clear) → reload', async () => {
-    // 1. rc.monitor.toggle
-    mockRequest.mockResolvedValueOnce(RC_MONITOR_TOGGLE_DISABLED);
-    // 2. cron.remove (arxiv-daily has gateway_job_id)
-    // Actually: toggle returns the already-disabled monitor, store checks gateway_job_id from the RETURNED monitor
-    // The returned monitor has gateway_job_id: null (already cleared), so cron.remove is skipped
-    // But we need to handle the case where it still has a job_id
-    // Let's test with a monitor that has a gateway_job_id
-    mockRequest.mockReset();
+  it('reports cron registration failure without rolling back persisted enabled state', async () => {
+    queueResponse('rc.monitor.toggle', RC_MONITOR_TOGGLE_ENABLED);
+    queueResponse('cron.add', {});
 
+    const result = await useMonitorStore.getState().toggleMonitor('github-releases', true);
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'cron registration failed: cron-add-missing-id',
+    });
+    const monitor = useMonitorStore.getState().monitors
+      .find((item) => item.id === 'github-releases');
+    expect(monitor?.enabled).toBe(true);
+    expect(monitor?.gateway_job_id).toBeNull();
+    expect(useMonitorStore.getState().error).toBe(
+      'cron registration failed: cron-add-missing-id',
+    );
+    // No immediate reload: that would invoke F1 reconciliation and hide the
+    // initiating action's failure before the UI can report it.
+    expect(mockRequest).not.toHaveBeenCalledWith('rc.monitor.list', expect.anything());
+  });
+
+  it('disables a monitor: toggle → cron.remove → setJobId(clear) → reload', async () => {
     const monitorWithJob = { ...RC_MONITOR_LIST_RESPONSE.items[0] }; // arxiv-daily, has gw-job-001
     useMonitorStore.setState({ monitors: [monitorWithJob], loaded: true });
 
-    // 1. rc.monitor.toggle
-    mockRequest.mockResolvedValueOnce({ ...monitorWithJob, enabled: false });
-    // 2. cron.remove
-    mockRequest.mockResolvedValueOnce({ ok: true });
-    // 3. rc.monitor.setJobId (clear)
-    mockRequest.mockResolvedValueOnce({ ok: true });
-    // 4. reload
-    mockRequest.mockResolvedValueOnce({ items: [{ ...monitorWithJob, enabled: false, gateway_job_id: null }], total: 1 });
+    queueResponse('rc.monitor.toggle', { ...monitorWithJob, enabled: false });
+    queueResponse('cron.remove', { ok: true });
+    queueResponse('rc.monitor.setJobId', { ok: true });
+    queueResponse('rc.monitor.list', { items: [{ ...monitorWithJob, enabled: false, gateway_job_id: null }], total: 1 });
+    queueResponse('cron.list', {}); // reload reconcile no-ops
 
     await useMonitorStore.getState().toggleMonitor('arxiv-daily', false);
 
@@ -292,7 +342,13 @@ describe('toggleMonitor', () => {
   it('applies optimistic update before RPC completes', async () => {
     let resolveToggle: (v: unknown) => void;
     const togglePromise = new Promise((r) => { resolveToggle = r; });
-    mockRequest.mockReturnValueOnce(togglePromise);
+    // Defer only the toggle (router unwraps the queued thenable via
+    // Promise.resolve); the disable path's cron.remove/setJobId/reload follow.
+    queueResponse('rc.monitor.toggle', togglePromise);
+    queueResponse('cron.remove', { ok: true });
+    queueResponse('rc.monitor.setJobId', { ok: true });
+    queueResponse('rc.monitor.list', RC_MONITOR_LIST_RESPONSE);
+    queueResponse('cron.list', {});
 
     // Start: arxiv-daily is enabled=true
     expect(useMonitorStore.getState().monitors[0].enabled).toBe(true);
@@ -305,7 +361,6 @@ describe('toggleMonitor', () => {
 
     // Resolve the RPC so the toggle completes and cleans up _inflightOps
     resolveToggle!(RC_MONITOR_TOGGLE_DISABLED);
-    mockRequest.mockResolvedValueOnce(RC_MONITOR_LIST_RESPONSE); // reload
     await p;
   });
 });
@@ -319,8 +374,8 @@ describe('deleteMonitor', () => {
 
   it('removes gateway job and deletes from DB', async () => {
     // arxiv-daily has gateway_job_id='gw-job-001'
-    mockRequest.mockResolvedValueOnce({ ok: true }); // cron.remove
-    mockRequest.mockResolvedValueOnce({ ok: true, deleted: 'arxiv-daily' }); // rc.monitor.delete
+    queueResponse('cron.remove', { ok: true });
+    queueResponse('rc.monitor.delete', { ok: true, deleted: 'arxiv-daily' });
 
     await useMonitorStore.getState().deleteMonitor('arxiv-daily');
 
@@ -333,7 +388,7 @@ describe('deleteMonitor', () => {
 
   it('skips cron.remove when no gateway_job_id', async () => {
     // github-releases has no gateway_job_id
-    mockRequest.mockResolvedValueOnce({ ok: true, deleted: 'github-releases' }); // rc.monitor.delete
+    queueResponse('rc.monitor.delete', { ok: true, deleted: 'github-releases' });
 
     await useMonitorStore.getState().deleteMonitor('github-releases');
 
@@ -350,10 +405,10 @@ describe('runMonitor', () => {
   });
 
   it('triggers cron.run with gateway_job_id', async () => {
-    mockRequest
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce(RC_MONITOR_LIST_RESPONSE)
-      .mockResolvedValueOnce({ jobs: [{ id: 'gw-job-001', state: { lastRunStatus: 'success' } }] });
+    queueResponse('cron.run', { ok: true });
+    queueResponse('rc.monitor.list', RC_MONITOR_LIST_RESPONSE);
+    // Unparseable cron.list → reload reconcile no-ops.
+    queueResponse('cron.list', {});
 
     await useMonitorStore.getState().runMonitor('arxiv-daily');
 
@@ -385,17 +440,18 @@ describe('updateMonitor', () => {
       gateway_job_id: null,
     };
 
-    mockRequest.mockResolvedValueOnce(updated); // rc.monitor.update
-    mockRequest.mockResolvedValueOnce(CRON_ADD_RESPONSE); // cron.add
-    mockRequest.mockResolvedValueOnce({ ok: true }); // setJobId
-    mockRequest.mockResolvedValueOnce({ items: [{ ...updated, gateway_job_id: CRON_ADD_RESPONSE.id }], total: 1 }); // reload
+    queueResponse('rc.monitor.update', updated);
+    queueResponse('cron.add', CRON_ADD_RESPONSE);
+    queueResponse('rc.monitor.setJobId', { ok: true });
+    queueResponse('rc.monitor.list', { items: [{ ...updated, gateway_job_id: CRON_ADD_RESPONSE.id }], total: 1 });
+    queueResponse('cron.list', {}); // reload reconcile no-ops
 
     await useMonitorStore.getState().updateMonitor('arxiv-daily', { schedule: '*/5 * * * *' });
 
     expect(mockRequest).toHaveBeenCalledWith('cron.add', expect.objectContaining({
       schedule: { kind: 'cron', expr: '*/5 * * * *' },
       sessionKey: 'cron:rc-monitor:arxiv-daily',
-      delivery: { mode: 'none', channel: 'last' },
+      delivery: NO_CHANNEL_DELIVERY, // F7: notify=true but no routable channel → mode:none
       payload: expect.objectContaining({
         message: expect.stringContaining('MONITOR_ID: arxiv-daily'),
         timeoutSeconds: 900,
@@ -420,21 +476,19 @@ describe('updateMonitor', () => {
       check_count: monitor.check_count + 1,
     };
 
-    mockRequest
-      .mockResolvedValueOnce({ items: [monitor], total: 1 })
-      .mockResolvedValueOnce({
-        jobs: [{
-          id: 'gw-job-001',
-          state: {
-            lastRunAtMs: Date.parse('2026-03-18T07:00:00.000Z'),
-            lastRunStatus: 'error',
-            lastErrorReason: 'timeout',
-            lastError: 'Error: LLM idle timeout',
-          },
-        }],
-      })
-      .mockResolvedValueOnce({ ok: true, monitor: refreshed })
-      .mockResolvedValueOnce({ items: [refreshed], total: 1 });
+    queueResponse('rc.monitor.list', { items: [monitor], total: 1 }, { items: [refreshed], total: 1 });
+    queueResponse('cron.list', {
+      jobs: [{
+        id: 'gw-job-001',
+        state: {
+          lastRunAtMs: Date.parse('2026-03-18T07:00:00.000Z'),
+          lastRunStatus: 'error',
+          lastErrorReason: 'timeout',
+          lastError: 'Error: LLM idle timeout',
+        },
+      }],
+    });
+    queueResponse('rc.monitor.reportError', { ok: true, monitor: refreshed });
 
     await useMonitorStore.getState().loadMonitors();
 
@@ -452,19 +506,18 @@ describe('updateMonitor', () => {
       last_error: 'Gateway cron run error (timeout): Error: LLM idle timeout',
     };
 
-    mockRequest
-      .mockResolvedValueOnce({ items: [monitor], total: 1 })
-      .mockResolvedValueOnce({
-        jobs: [{
-          id: 'gw-job-001',
-          state: {
-            lastRunAtMs: Date.parse('2026-03-18T07:00:00.000Z'),
-            lastRunStatus: 'error',
-            lastErrorReason: 'timeout',
-            lastError: 'Error: LLM idle timeout',
-          },
-        }],
-      });
+    queueResponse('rc.monitor.list', { items: [monitor], total: 1 });
+    queueResponse('cron.list', {
+      jobs: [{
+        id: 'gw-job-001',
+        state: {
+          lastRunAtMs: Date.parse('2026-03-18T07:00:00.000Z'),
+          lastRunStatus: 'error',
+          lastErrorReason: 'timeout',
+          lastError: 'Error: LLM idle timeout',
+        },
+      }],
+    });
 
     await useMonitorStore.getState().loadMonitors();
 

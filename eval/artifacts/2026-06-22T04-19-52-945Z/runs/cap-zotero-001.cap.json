@@ -1,0 +1,56 @@
+{
+  "taskId": "cap-zotero-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-zotero-001-rc-0-1782106681760",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 19,
+    "toolCalls": 19,
+    "wallMs": 124401,
+    "tokens": {
+      "input": 31431,
+      "output": 7363,
+      "cacheRead": 958848,
+      "cacheWrite": 0,
+      "total": 997642,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "read",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "gateway",
+    "gateway",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec"
+  ],
+  "finalText": "根据 Search SOP 的指引，我先尝试调用 Research-Claw 的 Zotero 检测工具。找到了 Zotero 数据库（~1MB）。让我直接查询 SQLite 来获取条目数量和详细信息。SQLite 数据库为空。让我检查 Zotero 是否正在运行，尝试通过 Local API 和 Web API 获取数据。Zotero 未运行，Local API 不可用。让我检查 Web API 配置。配置中有 Zotero Web API（User ID: 20005784）。让我通过 Web API 查询云端 Zotero 文献库。让我也检查 Research-Claw 的 library.db，以及 EndNote 的情况。---\n\n## 检测结果报告\n\n| 检测项 | 状态 | 详情 |\n|:------|:-----|:-----|\n| **Zotero SQLite（本地）** | ⚠️ 空库 | `~/Zotero/zotero.sqlite` 存在（~1MB），但 **0 条文献记录** |\n| **Zotero Local API** | ❌ 不可用 | Zotero 未运行，localhost:23119 无响应 |\n| **Zotero Web API** | ❌ 密钥失效 | `ZOTERO_API_KEY` 为占位符 `__OPENCLAW_REDACTED__`，API 返回 403 |\n| **Research-Claw Library** | ✅ 已连接 | 当前 1 篇文献（来源：EndNote） |\n| **EndNote** | ✅ 可检测 | `~/Documents/My EndNote Library.enl` 存在 |\n\n### 当前 Library 中唯一文献\n\n```\nReCAP: Recursive Context-Aware Reasoning and Planning \nfor Large Language Model Agents (2025)\n作者: Zhenyu Zhang, Tianyi Chen, Weiran Xu, Alex Pentland, Jiaxin Pei\n来源: endnote_import | 状态: unread\n```\n\n### 结论\n\n**Zotero 文献库目前为空（0 条记录）**。这是一个全新安装的 Zotero，尚未添加任何文献。此外：\n\n1. **Web API 密钥需重新配置** — 当前 `ZOTERO_API_KEY` 是占位符而非真实密钥。你需要在 [zotero.org/settings/keys](https://www.zotero.org/settings/keys) 生成一个新密钥并更新配置。\n2. **MEMORY.md 记录已过时** — 其中记录的 \"6 items\"（2026-03-25）可能来自之前的 Library 状态，现已不适用。\n\n需要我帮你修复 Zotero API 密钥配置，或者从 EndNote 导入文献吗？",
+  "objective": null,
+  "historyLen": 39,
+  "capabilityProbes": [
+    {
+      "type": "zotero_touched",
+      "observed": true,
+      "evidence": "tools=[read,exec,exec,exec,exec,exec,exec,exec,gateway,gateway,exec,exec,exec,exec,exec,exec,exec,exec,exec], mentionsZotero=true"
+    }
+  ],
+  "suite": "zotero"
+}

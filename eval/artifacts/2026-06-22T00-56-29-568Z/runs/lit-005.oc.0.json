@@ -1,0 +1,44 @@
+{
+  "taskId": "lit-005",
+  "domain": "literature",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lit-005-oc-0-1782091140444",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 7658,
+    "tokens": {
+      "input": 678,
+      "output": 510,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 60708,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "rp_abstracts"
+  ],
+  "finalText": "根据查询结果，DOI `10.1038/nature14539` 对应以下论文信息：\n\n| 项目 | 内容 |\n|:---|:---|\n| **标题** | *Deep learning* |\n| **发表期刊** | **Nature** |\n| **发表年份** | **2015** |\n| **作者** | Yann LeCun, Yoshua Bengio, Geoffrey Hinton |\n| **引用量** | 81,470+ |\n\n这是深度学习领域著名的三位图灵奖得主（LeCun、Bengio、Hinton）合著的综述论文，发表于 Nature 2015 年第 521 卷，是该领域引用量最高的经典文献之一。\n\n```paper_card\n{\"type\":\"paper_card\",\"title\":\"Deep learning\",\"authors\":[\"Yann LeCun\",\"Yoshua Bengio\",\"Geoffrey Hinton\"],\"venue\":\"Nature\",\"year\":2015,\"doi\":\"10.1038/nature14539\",\"abstract_preview\":\"Deep learning review by three Turing Award winners, covering supervised, unsupervised, and reinforcement learning, convolutional networks, recurrent networks, and their applications.\",\"cited_by\":81470,\"oa_status\":\"green\",\"oa_landing\":\"https://hal.science/hal-04206682\",\"tags\":[\"deep learning\",\"survey\",\"neural networks\"]}\n```",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "doi_resolves",
+        "pass": true,
+        "evidence": "10.1038/nature14539:ok"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4
+}

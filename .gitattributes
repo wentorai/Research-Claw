@@ -6,3 +6,9 @@
 *.mjs text eol=lf
 Dockerfile text eol=lf
 docker-compose.yml text eol=lf
+
+# pnpm patch files ARE unified diffs: context lines are "<space-marker><tab>code",
+# which `git diff --check` flags as "space before tab". That is inherent to the
+# diff format for tab-indented context, not a real whitespace defect. Disable the
+# whitespace check for *.patch ONLY (source files keep full whitespace checking).
+*.patch -whitespace

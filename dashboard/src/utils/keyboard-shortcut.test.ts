@@ -1,15 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-  isAbortChatShortcut,
-  isMacCommandCAbort,
   isAbortGenerationShortcut,
   isEscapeAbortShortcut,
   abortChatShortcutLabel,
-  isMacOS,
   type ShortcutKeyEvent,
 } from './keyboard-shortcut';
 
-function keyEvent(overrides: Partial<ShortcutKeyEvent>): ShortcutKeyEvent {
+function keyEvent(overrides: Partial<ShortcutKeyEvent> = {}): ShortcutKeyEvent {
   return {
     key: 'c',
     code: 'KeyC',
@@ -26,83 +23,62 @@ describe('isEscapeAbortShortcut', () => {
     expect(isEscapeAbortShortcut(keyEvent({ key: 'Escape', code: '' }))).toBe(true);
   });
 
-  it('rejects Escape with modifiers', () => {
+  it('rejects Escape with any modifier', () => {
     expect(isEscapeAbortShortcut(keyEvent({ key: 'Escape', ctrlKey: true }))).toBe(false);
+    expect(isEscapeAbortShortcut(keyEvent({ key: 'Escape', metaKey: true }))).toBe(false);
+    expect(isEscapeAbortShortcut(keyEvent({ key: 'Escape', altKey: true }))).toBe(false);
+    expect(isEscapeAbortShortcut(keyEvent({ key: 'Escape', shiftKey: true }))).toBe(false);
   });
 });
 
-describe('isAbortChatShortcut', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('accepts Ctrl+C on Windows', () => {
-    vi.stubGlobal('navigator', { platform: 'Win32', userAgent: 'Windows NT 10.0' });
-    expect(isAbortChatShortcut(keyEvent({ ctrlKey: true }))).toBe(true);
-  });
-
-  it('accepts Control+C on macOS via getModifierState', () => {
-    vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Macintosh; Intel Mac OS X' });
-    expect(
-      isAbortChatShortcut(
-        keyEvent({ ctrlKey: false, getModifierState: (k) => k === 'Control' }),
-      ),
-    ).toBe(true);
-  });
-
-  it('accepts Command+. on macOS', () => {
-    vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Mac OS X' });
-    expect(isAbortChatShortcut(keyEvent({ key: '.', code: 'Period', metaKey: true }))).toBe(true);
-  });
-});
-
-describe('isMacCommandCAbort', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('accepts Command+C when textarea has no selection', () => {
-    vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Mac OS X' });
-    const textarea = document.createElement('textarea');
-    textarea.value = 'hello';
-    textarea.selectionStart = textarea.selectionEnd = 5;
-    expect(isMacCommandCAbort(keyEvent({ metaKey: true }), textarea)).toBe(true);
-  });
-});
-
-describe('isAbortGenerationShortcut', () => {
+describe('isAbortGenerationShortcut — Escape ONLY', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
   it('accepts Escape on any platform', () => {
     vi.stubGlobal('navigator', { platform: 'Win32', userAgent: '' });
-    expect(isAbortGenerationShortcut(keyEvent({ key: 'Escape' }), null)).toBe(true);
+    expect(isAbortGenerationShortcut(keyEvent({ key: 'Escape', code: '' }))).toBe(true);
+    vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Mac OS X' });
+    expect(isAbortGenerationShortcut(keyEvent({ key: 'Escape', code: '' }))).toBe(true);
+  });
+
+  // Regression guards: these combos used to abort and collided with copy
+  // (the selection guard only covered input/textarea targets, so copying
+  // streamed assistant text killed the run). They must NEVER abort again.
+  it('does NOT abort on Ctrl+C (Windows/Linux copy)', () => {
+    vi.stubGlobal('navigator', { platform: 'Win32', userAgent: 'Windows NT 10.0' });
+    expect(isAbortGenerationShortcut(keyEvent({ ctrlKey: true }))).toBe(false);
+  });
+
+  it('does NOT abort on macOS Control+C via getModifierState', () => {
+    vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Mac OS X' });
+    expect(
+      isAbortGenerationShortcut(
+        keyEvent({ ctrlKey: false, getModifierState: (k) => k === 'Control' }),
+      ),
+    ).toBe(false);
+  });
+
+  it('does NOT abort on macOS Command+C (copy)', () => {
+    vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Mac OS X' });
+    expect(isAbortGenerationShortcut(keyEvent({ metaKey: true }))).toBe(false);
+  });
+
+  it('does NOT abort on macOS Command+.', () => {
+    vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Mac OS X' });
+    expect(
+      isAbortGenerationShortcut(keyEvent({ key: '.', code: 'Period', metaKey: true })),
+    ).toBe(false);
+  });
+
+  it('does NOT abort on a plain "c" keypress', () => {
+    expect(isAbortGenerationShortcut(keyEvent())).toBe(false);
   });
 });
 
 describe('abortChatShortcutLabel', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('includes Esc on macOS', () => {
-    vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Mac OS X' });
-    expect(abortChatShortcutLabel()).toContain('Esc');
-  });
-});
-
-describe('isMacOS', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('uses userAgentData.platform when present', () => {
-    vi.stubGlobal('navigator', {
-      platform: '',
-      userAgent: '',
-      userAgentData: { platform: 'macOS' },
-    });
-    expect(isMacOS()).toBe(true);
+  it('shows exactly Esc on all platforms (hover copy must match the listener)', () => {
+    expect(abortChatShortcutLabel()).toBe('Esc');
   });
 });

@@ -69,6 +69,14 @@ async function fetchOllamaModels(
   }
 }
 
+/**
+ * Provider/model preselected for a first-time user. The model is pinned
+ * explicitly — do NOT rely on models[0] of the preset (deepseek lists
+ * v4-flash first).
+ */
+export const WIZARD_DEFAULT_PROVIDER = 'deepseek';
+export const WIZARD_DEFAULT_MODEL = 'deepseek-v4-pro';
+
 export default function SetupWizard() {
   const { t } = useTranslation();
   const client = useGatewayStore((s) => s.client);
@@ -77,12 +85,16 @@ export default function SetupWizard() {
   const gatewayConfig = useConfigStore((s) => s.gatewayConfig);
 
   // --- Text endpoint (initialize from default provider preset) ---
-  const defaultPreset = getPreset('zai');
-  const [provider, setProvider] = useState('zai');
+  const defaultPreset = getPreset(WIZARD_DEFAULT_PROVIDER);
+  const [provider, setProvider] = useState(WIZARD_DEFAULT_PROVIDER);
   const [baseUrl, setBaseUrl] = useState(defaultPreset.baseUrl);
   const [api, setApi] = useState<ProviderPreset['api']>(defaultPreset.api);
   const [apiKey, setApiKey] = useState('');
-  const [textModel, setTextModel] = useState(defaultPreset.models[0]?.id ?? '');
+  const [textModel, setTextModel] = useState(
+    defaultPreset.models.find((m) => m.id === WIZARD_DEFAULT_MODEL)?.id
+      ?? defaultPreset.models[0]?.id
+      ?? '',
+  );
 
   // --- Vision ---
   const [visionEnabled, setVisionEnabled] = useState(false);

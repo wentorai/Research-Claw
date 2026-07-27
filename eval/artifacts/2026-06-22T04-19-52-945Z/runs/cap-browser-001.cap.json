@@ -1,0 +1,45 @@
+{
+  "taskId": "cap-browser-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-browser-001-rc-0-1782105708512",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 4,
+    "toolCalls": 3,
+    "wallMs": 32642,
+    "tokens": {
+      "input": 3026,
+      "output": 1292,
+      "cacheRead": 123392,
+      "cacheWrite": 0,
+      "total": 127710,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "read",
+    "browser",
+    "browser"
+  ],
+  "finalText": "CNKI 检索完成。以「机器学习」为关键词，共找到 **164,725** 条结果（第 1/300 页）。前 3 条如下：\n\n---\n\n**1. 基于 TabPFN 的汽油辛烷值预测与模型可解释性**\n- 作者：李亚洁; 王文春; 李炜\n- 期刊：化工学报 | 日期：2026-06-22（网络首发）\n- 来源：期刊\n\n**2. 人才结构、产业复杂度与经济可持续增长——基于双重机器学习的因果推断**\n- 作者：汪小龙\n- 期刊：天津市教科院学报 | 日期：2026-06-22（网络首发）\n- 来源：期刊\n\n**3. 基于机器学习的煤与生物质混燃灰熔融性预测与结渣倾向评价**\n- 作者：朱轶铭; 韩硕; 马智铎; 李彦龙; 杨天华\n- 期刊：工程热物理学报 | 日期：2026-06-22（网络首发）\n- 来源：期刊\n\n---\n\n三条均为当天网络首发文献，覆盖化工、经济、能源三个方向，反映了机器学习跨学科应用的活跃度。需要进一步查看某篇详情或调整检索条件吗？",
+  "objective": null,
+  "historyLen": 8,
+  "capabilityProbes": [
+    {
+      "type": "browser_invoked",
+      "observed": true,
+      "evidence": "tools=[read,browser,browser]"
+    },
+    {
+      "type": "skill_invoked",
+      "observed": true,
+      "evidence": "matched=[cnki-search], skillSearchTool=false"
+    }
+  ],
+  "suite": "browser"
+}

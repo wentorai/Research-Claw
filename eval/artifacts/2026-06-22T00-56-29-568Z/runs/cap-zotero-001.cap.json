@@ -1,0 +1,68 @@
+{
+  "taskId": "cap-zotero-001",
+  "domain": "capability",
+  "track": "capability",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-cap-zotero-001-rc-0-1782093111614",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 13,
+    "toolCalls": 28,
+    "wallMs": 61526,
+    "tokens": {
+      "input": 11070,
+      "output": 4470,
+      "cacheRead": 514816,
+      "cacheWrite": 0,
+      "total": 530356,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "monitors/arxiv-cs-ai/history.md",
+    "monitors/arxiv-cs-ai/latest.json"
+  ],
+  "toolNames": [
+    "web_fetch",
+    "web_fetch",
+    "gateway",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec"
+  ],
+  "finalText": "## Zotero 文献库检测报告\n\n对 Zotero 文献库进行了全方位检测，结果如下：\n\n| 检测路径 | 状态 | 条目数 |\n|:---|:---|:---|\n| **本地 SQLite 数据库** (`~/Zotero/zotero.sqlite`) | 数据库存在，但为空 | **0** |\n| **Zotero Web API** (User ID: 20005784) | API Key 失效 (HTTP 403) | 无法访问 |\n| **Zotero 本地 API** (localhost:23119) | Zotero 应用未运行 | 无法访问 |\n| **Zotero 存储目录** (`~/Zotero/storage/`) | 不存在 | — |\n\n**结论：** 当前 Zotero 是一个空库——数据库文件存在但其中没有任何文献条目、无收藏集、无标签。Zotero 应用未在后台运行，且已配置的 Web API Key 已失效。\n\n---\n\n### 同时发现\n\n你的 **EndNote 文献库** (`~/Documents/My EndNote Library.enl`) 中有 **1 条**文献记录，可以访问。\n\n---\n\n### 建议下一步\n\n1. **如需使用 Zotero Web API**：前往 [zotero.org/settings/keys](https://www.zotero.org/settings/keys) 重新生成 API Key，然后更新配置中的 `ZOTERO_API_KEY`。\n2. **如 Zotero 文献在其他位置**：请告知实际的数据目录路径，我可以重新扫描。\n3. **如要导入 EndNote 的 1 条记录**：我可以直接读取并导入到 Research-Claw 的 Library 中。\n\n需要我执行哪一项？",
+  "objective": null,
+  "historyLen": 42,
+  "capabilityProbes": [
+    {
+      "type": "zotero_touched",
+      "observed": true,
+      "evidence": "tools=[web_fetch,web_fetch,gateway,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec,exec], mentionsZotero=true"
+    }
+  ],
+  "suite": "zotero"
+}

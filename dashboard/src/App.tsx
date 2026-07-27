@@ -10,6 +10,7 @@ import { useGatewayStore } from './stores/gateway';
 import { useChatStore } from './stores/chat';
 import { useUiStore, type PanelTab } from './stores/ui';
 import { useSessionsStore, MAIN_SESSION_KEY } from './stores/sessions';
+import { useOnboardingStore } from './stores/onboarding';
 import ErrorBoundary from './components/ErrorBoundary';
 import TopBar from './components/TopBar';
 import LeftNav from './components/LeftNav';
@@ -22,6 +23,7 @@ import PaperReviewRunListener from './components/PaperReviewRunListener';
 import ConfigRestartListener from './components/ConfigRestartListener';
 import ModelCatalogAligner from './components/ModelCatalogAligner';
 import JobsActivityListener from './components/JobsActivityListener';
+import PeriphCaptureListener from './components/PeriphCaptureListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
@@ -216,8 +218,14 @@ export default function App() {
       if (persistedKey && persistedKey !== MAIN_SESSION_KEY) {
         useChatStore.getState().setSessionKey(persistedKey);
       }
-      loadHistory();
-      useSessionsStore.getState().loadSessions();
+      const historyPromise = loadHistory();
+      const sessionsPromise = useSessionsStore.getState().loadSessions();
+      // First-run probe runs in parallel; the welcome decision needs history +
+      // sessions resolved too, so it waits for all three (fail-safe on errors).
+      const onboardingPromise = useOnboardingStore.getState().fetchStatus();
+      void Promise.all([historyPromise, sessionsPromise, onboardingPromise]).then(() => {
+        useOnboardingStore.getState().markProbesReady();
+      });
       setAgentStatus('idle');
       // Initial notification check
       useUiStore.getState().checkNotifications();
@@ -234,6 +242,15 @@ export default function App() {
       useChatStore.getState().loadSessionUsage();
     }
   }, [bootState, connState]);
+
+  // First-run welcome: decide only after boot probes resolved AND the app shell
+  // is up (if the setup wizard is showing, this defers until bootState turns ready).
+  const onboardingProbesReady = useOnboardingStore((s) => s.probesReady);
+  useEffect(() => {
+    if (bootState === 'ready' && connState === 'connected' && onboardingProbesReady) {
+      useOnboardingStore.getState().maybeShowWelcome();
+    }
+  }, [bootState, connState, onboardingProbesReady]);
 
   // Page visibility resume: check tick liveness to detect zombie connections.
   // Chrome throttles background tab timers to ≥1min, so the tick watchdog
@@ -372,6 +389,12 @@ export default function App() {
                       id="rc-token-input"
                       placeholder={t('boot.tokenPlaceholder')}
                       onPressEnter={(e) => {
+                        // IME composition guard (CJK input). rc-input derives
+                        // onPressEnter straight from keydown with no composition
+                        // guard, and this handler navigates the whole page away —
+                        // an Enter that merely confirms an IME candidate would
+                        // discard whatever the user had typed so far.
+                        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                         const val = (e.target as HTMLInputElement).value.trim();
                         if (val) {
                           window.location.href = `${window.location.pathname}?token=${encodeURIComponent(val)}`;
@@ -473,6 +496,7 @@ export default function App() {
       <ConfigRestartListener />
       <ModelCatalogAligner />
       <JobsActivityListener />
+      <PeriphCaptureListener />
       <div
         style={{
           height: '100vh',

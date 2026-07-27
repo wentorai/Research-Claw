@@ -1,0 +1,41 @@
+{
+  "taskId": "screen-001",
+  "domain": "screening",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-screen-001-rc-0-1782105232412",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 2,
+    "toolCalls": 1,
+    "wallMs": 7464,
+    "tokens": {
+      "input": 1128,
+      "output": 610,
+      "cacheRead": 59520,
+      "cacheWrite": 0,
+      "total": 61258,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "screening-abstracts.json"
+  ],
+  "toolNames": [
+    "read"
+  ],
+  "finalText": "逐条对照 C1 标准（`design == \"RCT\"` 且 `year >= 2018`）：\n\n| id | year | design | 判定 |\n|:---|:-----|:-------|:-----|\n| S1 | 2020 | RCT | ✅ |\n| S2 | 2016 | RCT | ❌ year < 2018 |\n| S3 | 2019 | cohort | ❌ 非 RCT |\n| S4 | 2021 | RCT | ✅ |\n| S5 | 2018 | RCT | ✅ |\n| S6 | 2015 | systematic review | ❌ 非 RCT |\n| S7 | 2022 | RCT | ✅ |\n| S8 | 2019 | case report | ❌ 非 RCT |\n| S9 | 2023 | RCT | ✅ |\n| S10 | 2017 | RCT | ❌ year < 2018 |\n\n答案: S1, S4, S5, S7, S9",
+  "objective": {
+    "results": [
+      {
+        "type": "answer_match",
+        "pass": true,
+        "evidence": "got [S1,S4,S5,S7,S9] want [S1,S4,S5,S7,S9]"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 4
+}

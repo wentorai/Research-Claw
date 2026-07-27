@@ -1,0 +1,71 @@
+{
+  "taskId": "lh-002",
+  "domain": "long-horizon",
+  "track": "A",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-lh-002-rc-0-1782104049299",
+  "errored": "turn timeout",
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 9,
+    "toolCalls": 14,
+    "wallMs": 620023,
+    "tokens": {
+      "input": 14117,
+      "output": 4818,
+      "cacheRead": 299904,
+      "cacheWrite": 0,
+      "total": 318839,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "gnn-compare.md"
+  ],
+  "toolNames": [
+    "update_plan",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "rp_search",
+    "rp_search",
+    "rp_search",
+    "web_fetch",
+    "web_fetch",
+    "web_fetch",
+    "rp_abstracts",
+    "rp_abstracts",
+    "update_plan",
+    "write"
+  ],
+  "finalText": "",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "gnn-compare.md exists"
+      },
+      {
+        "type": "file_content_match",
+        "pass": true,
+        "evidence": "all present"
+      },
+      {
+        "type": "citation_real",
+        "pass": true,
+        "evidence": "resolved 3/3; 10.48550/arXiv.1609.02907:real; 10.48550/arXiv.1710.10903:real; 10.48550/arXiv.1706.02216:real"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 24,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": false,
+      "evidence": "matched=[], skillSearchTool=false"
+    }
+  ]
+}

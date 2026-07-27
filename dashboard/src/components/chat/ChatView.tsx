@@ -20,6 +20,7 @@ import { normalizeSessionKey } from '../../utils/session-key';
 import { fmtActivityRow, safeStringifyDetail } from '../../utils/activity-log';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
+import WelcomeCard from './WelcomeCard';
 import ToolActivityStream from './ToolActivityStream';
 import TaskFlowTimeline from './TaskFlowTimeline';
 import StagedWritingTimeline from './StagedWritingTimeline';
@@ -39,6 +40,15 @@ const { Text } = Typography;
  * and still generous (~3-4 lines). The "New messages below" pill covers the gap.
  */
 const NEAR_BOTTOM_THRESHOLD = 150;
+
+/** Empty-state suggestion chips — clicking prefills the composer (never auto-sends). */
+const SUGGESTION_CHIP_KEYS = [
+  'searchRecent',
+  'readPdf',
+  'writeSurvey',
+  'setupMonitor',
+  'whatCanYouDo',
+] as const;
 
 function extractVisibleText(msg: ChatMessage): string {
   if (msg.text) return msg.text;
@@ -150,6 +160,7 @@ export default function ChatView() {
   const loadHistory = useChatStore((s) => s.loadHistory);
   const loadSessionUsage = useChatStore((s) => s.loadSessionUsage);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
+  const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
   const pendingTools = useToolStreamStore((s) => s.pendingTools);
   const activityLog = useToolStreamStore((s) => s.activityLog);
   const clearActivityLog = useToolStreamStore((s) => s.clearActivityLog);
@@ -453,6 +464,31 @@ export default function ChatView() {
                 style={{ fontSize: 48, color: 'var(--text-tertiary)', opacity: 0.5 }}
               />
               <Text type="secondary">{t('chat.empty')}</Text>
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  justifyContent: 'center',
+                  gap: 8,
+                  maxWidth: 620,
+                  marginTop: 4,
+                  padding: '0 24px',
+                }}
+              >
+                {SUGGESTION_CHIP_KEYS.map((key) => {
+                  const chipText = t(`chat.suggestions.${key}`);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className="chat-suggestion-chip"
+                      onClick={() => setChatInputPrefill(chipText)}
+                    >
+                      {chipText}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -465,7 +501,11 @@ export default function ChatView() {
 
           {messages.map((msg, idx) => (
             <React.Fragment key={idx}>
-              {msg.role === 'user' ? (
+              {msg.localKind === 'welcome' ? (
+                // Synthetic first-run welcome — rich hero card instead of the
+                // plain bubble (the fallback text stays unrendered).
+                <WelcomeCard />
+              ) : msg.role === 'user' ? (
                 <div
                   ref={(el) => {
                     userElRefs.current[idx] = el;

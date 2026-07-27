@@ -1,0 +1,45 @@
+{
+  "taskId": "write-002",
+  "domain": "review-writing",
+  "track": "B",
+  "side": "rc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-002-rc-0-1782092674557",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 7,
+    "toolCalls": 9,
+    "wallMs": 55455,
+    "tokens": {
+      "input": 29913,
+      "output": 3798,
+      "cacheRead": 297600,
+      "cacheWrite": 0,
+      "total": 331311,
+      "cost": 0
+    }
+  },
+  "producedFiles": [],
+  "toolNames": [
+    "read",
+    "read",
+    "update_plan",
+    "rp_search",
+    "rp_cite",
+    "rp_abstracts",
+    "rp_search",
+    "rp_search",
+    "rp_abstracts"
+  ],
+  "finalText": "材料收集完毕。下面整理关键文献并制定大纲。\n\n---\n\n## Phase 1 -- 材料审查与大纲\n\n### 核心文献清单\n\n| # | 论文 | 年份 | 核心贡献 | Citations |\n|:--|:-----|:----|:---------|:----------|\n| 1 | Sohl-Dickstein et al. \"Deep Unsupervised Learning using Nonequilibrium Thermodynamics\" | 2015 | 扩散模型原始构想 | ~1,400 |\n| 2 | Song & Ermon. \"Generative Modeling by Estimating Gradients of the Data Distribution\" | 2019 | Score-based 生成模型 | ~990 |\n| 3 | Ho et al. \"Denoising Diffusion Probabilistic Models\" (DDPM) | 2020 | 奠基性工作，扩散与去噪桥接 | ~5,600 |\n| 4 | Song et al. \"Score-Based Generative Modeling through SDEs\" | 2021 | SDE 统一框架 | ~1,270 |\n| 5 | Nichol & Dhariwal. \"Improved DDPM\" | 2021 | 对数似然提升 + 加速采样 | ~410 |\n| 6 | Dhariwal & Nichol. \"Diffusion Models Beat GANs on Image Synthesis\" | 2021 | Classifier guidance, 首次超越 GAN | ~2,170 |\n| 7 | Ho & Salimans. \"Classifier-Free Diffusion Guidance\" | 2022 | CFG: 无需外部分类器的引导 | ~740 |\n| 8 | Rombach et al. \"Latent Diffusion Models\" (Stable Diffusion) | 2022 | 潜空间扩散, 大幅降低计算成本 | ~720 |\n| 9 | Ramesh et al. \"DALL-E 2\" (CLIP Latents) | 2022 | CLIP 嵌入 + 层级条件生成 | ~2,290 |\n| 10 | Saharia et al. \"Imagen\" | 2022 | T5 语言模型 + 扩散, 卓越写实度 | ~2,110 |\n| 11 | Peebles & Xie. \"DiT\" (Scalable Diffusion Transformers) | 2023 | Transformer 替代 U-Net 骨干 | 重要 |\n| 12 | Podell et al. \"SDXL\" | 2023 | 三倍 UNet 规模, 高分辨率合成 | ~310 |\n| 13 | Chen et al. \"PixArt-α\" | 2023 | 高效 Transformer 扩散模型训练 | 重要 |\n| 14 | Esser et al. \"Stable Diffusion 3\" (Rectified Flow) | 2024 | Rectified flow + 多模态 Transformer | ~86 |\n| 15 | Cao et al. \"扩散模型图像生成综述\" (AI Review) | 2025 | 最新综合调查 | ~57 |\n\n### 大纲\n\n| 节 | 核心要点 | 引用 |\n|:---|:--------|:-----|\n| 1. 引言 | 生成模型演进: GAN → VAE → AR → Diffusion; 扩散模型的独特优势 | [1][3][6] |\n| 2. 理论基础 | 正向扩散+反向去噪; DDPM; Score-based + SDE 统一; 原理对比 | [1][3][4] |\n| 3. 关键技术进步 | 加速采样; Classifier Guidance → CFG; Latent Diffusion (潜空间压缩) | [5][6][7][8] |\n| 4. 大规模文生图系统 | DALL-E 2, Imagen, Stable Diffusion, SDXL, SD3; 架构对比 | [8][9][10][12][14] |\n| 5. 架构演进 | U-Net → DiT → Rectified Flow; 可扩展性 | [11][12][13][14] |\n| 6. 应用前沿 | 可控生成, 图像编辑, 超分辨率, 3D 生成, 视频 | [15], 近期文献 |\n| 7. 挑战与展望 | 推理效率, 版权/隐私, 评估标准, 可控性, 视频生成 | [15] |\n\n> 预估字数: 中文约 2500–3500 字。所有引用均为经 API 验证的真实论文。\n\n请确认大纲或提出修改，我将进入初稿撰写。",
+  "objective": null,
+  "historyLen": 17,
+  "capabilityProbes": [
+    {
+      "type": "skill_invoked",
+      "observed": true,
+      "evidence": "matched=[writing-sop], skillSearchTool=false"
+    }
+  ]
+}

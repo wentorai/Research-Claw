@@ -1,0 +1,50 @@
+{
+  "taskId": "write-004",
+  "domain": "review-writing",
+  "track": "A",
+  "side": "oc",
+  "rep": 0,
+  "sessionKey": "agent:main:eval-write-004-oc-0-1782103471868",
+  "errored": null,
+  "metrics": {
+    "userTurns": 1,
+    "agentTurns": 5,
+    "toolCalls": 5,
+    "wallMs": 65120,
+    "tokens": {
+      "input": 8904,
+      "output": 3949,
+      "cacheRead": 173440,
+      "cacheWrite": 0,
+      "total": 186293,
+      "cost": 0
+    }
+  },
+  "producedFiles": [
+    "rq.md"
+  ],
+  "toolNames": [
+    "rp_search",
+    "web_search",
+    "web_fetch",
+    "write",
+    "read"
+  ],
+  "finalText": "文件已写入工作区 `rq.md`。以下是核心内容概览：\n\n---\n\n### 五个研究问题（RQ1–RQ5）\n\n| 问题 | 核心关注点 |\n|:---|:---|\n| **RQ1** | 使用强度（时长/频率/多样性）与焦虑的剂量–反应关系 |\n| **RQ2** | 中介机制：社会比较、睡眠、自尊、FoMO、社交外表焦虑 |\n| **RQ3** | 调节因素：性别、年龄、平台类型、使用模式、线下社会支持 |\n| **RQ4** | 问题性使用（PSMU）vs. 一般性使用的差异效应 |\n| **RQ5** | 双向因果关系：强化螺旋模型 vs. 社会补偿假设 |\n\n### 五组研究假设（H1–H5）\n\n- **H1**（3个子假设）：使用强度与焦虑正相关\n- **H2**（5个子假设）：五条中介路径（社会比较、睡眠、自尊、FoMO、外表焦虑）\n- **H3**（5个子假设）：五个调节变量（性别差异、年龄阶段、平台类型、主动/被动使用、线下支持缓冲）\n- **H4**（2个子假设）：问题性使用效应更强，适度使用可能呈 U 形曲线\n- **H5**（3个子假设）：T1→T2 与 T2→T1 双向路径均显著\n\n### 文献支撑\n\n假设均基于 2020–2026 年系统综述与实证研究，包括 *Cyberpsychology, Behavior, and Social Networking*（Piteo et al., 2024）、*Current Psychology*（Şahin & Öztürk, 2022）、APA（2023）健康咨询文件等，文末附完整参考文献列表。",
+  "objective": {
+    "results": [
+      {
+        "type": "artifact_exists",
+        "pass": true,
+        "evidence": "rq.md exists"
+      },
+      {
+        "type": "file_content_match",
+        "pass": true,
+        "evidence": "all present"
+      }
+    ],
+    "success": true
+  },
+  "historyLen": 11
+}
