@@ -8,7 +8,7 @@
 
 你做导师，科研龙虾做团队。24/7 本地运行，一切产出专属于你。
 
-[![Version](https://img.shields.io/badge/version-v0.7.5-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
+[![Version](https://img.shields.io/badge/version-v0.7.6-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
@@ -177,11 +177,11 @@ curl -fsSL https://wentor.ai/install.sh | bash
 | **扩展** *(新)* | IM 通道 / 技能 / MCP 管理 · 微信扫码登录 |
 | **设置** | Setup Wizard · API 协议探针一键识别端点 · 端点级上下文窗口调参 · 全程浏览器配置 |
 
-技术规格：React 18 + Vite 6 + Ant Design 5 + Zustand 5，中英双语（1024 i18n keys），1557 单元测试，TypeScript 零报错，响应式支持桌面 / 平板 / 浮窗三种模式。
+技术规格：React 18 + Vite 6 + Ant Design 5 + Zustand 5，中英双语，2200+ Dashboard 测试，TypeScript 零报错，响应式支持桌面 / 平板 / 浮窗三种模式。
 
 ### 质量管控：给你的 AI 配一个审稿人
 
-科研最怕「一本正经地胡说」。**质量管控**让一个独立的审稿模型在主模型给出回答后做二次把关——发现编造引用、逻辑漏洞或答非所问时，要求重写后再呈现给你。支持 **auto / manual / off** 三档，审稿模型可独立配置端点与协议，与主模型完全解耦。
+科研最怕「一本正经地胡说」。**质量管控**会异步复审主模型的回答，把发现、建议修正和审计状态持久化到 Supervisor 面板；它不会阻塞或悄悄替换已经发出的回答。危险工具另有同步确定性安全规则与有界深审，确认危险时可直接阻断或请求人工审批。审稿模型可独立配置，也可继承主模型；引用存在性联网核验默认关闭，需要用户主动开启。
 
 ---
 

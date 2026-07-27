@@ -296,7 +296,7 @@ const plugin: PluginDefinition = {
   id: 'dual-model-supervisor',
   name: 'Dual Model Supervisor',
   description: 'Dual-model supervision: course correction, safety filtering, and persistent audit',
-  version: '0.1.0',
+  version: '0.2.0',
 
   register(api: PluginApi) {
     const cfg = parseConfig(api.pluginConfig as Record<string, unknown> | undefined);

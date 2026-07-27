@@ -157,10 +157,39 @@ function getConfigSaveButton(): HTMLElement {
     ?? saveButtons[0];
 }
 
-// Save is gated on changes, so the enable re-render must commit before we click —
-// otherwise under load the click can land on a still-disabled button (a no-op).
+/**
+ * Drain the SettingsPanel initialization RPC cascade without depending on
+ * waitFor's one-second wall-clock budget. Several effects issue follow-up
+ * requests after their predecessors resolve; under a busy full-suite worker,
+ * polling the button can time out even though every mocked request is already
+ * resolved.
+ */
+async function settleSettingsRequests(mockRequest: ReturnType<typeof vi.fn>): Promise<void> {
+  await act(async () => {
+    let processed = 0;
+    for (let pass = 0; pass < 12; pass += 1) {
+      const batch = mockRequest.mock.results
+        .slice(processed)
+        .map((result) => result.value)
+        .filter((value): value is Promise<unknown> => value instanceof Promise);
+      processed = mockRequest.mock.results.length;
+      await Promise.allSettled(batch);
+      await Promise.resolve();
+      if (processed === mockRequest.mock.results.length) {
+        await Promise.resolve();
+        if (processed === mockRequest.mock.results.length) return;
+      }
+    }
+    throw new Error('SettingsPanel initialization RPC cascade did not settle');
+  });
+}
+
+// Save is gated on changes, so the enable re-render must commit before we click.
 async function clickConfigSaveButton(): Promise<void> {
-  await waitFor(() => expect(getConfigSaveButton()).toBeEnabled());
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(getConfigSaveButton()).toBeEnabled();
   fireEvent.click(getConfigSaveButton());
 }
 
@@ -270,6 +299,7 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     await waitFor(() => {
       expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
     });
+    await settleSettingsRequests(mockRequest);
     // Dirty the form so the Save button is enabled (Save is gated on changes).
     fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
     await clickConfigSaveButton();
@@ -308,6 +338,7 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     await waitFor(() => {
       expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
     });
+    await settleSettingsRequests(mockRequest);
     // Dirty the form so the Save button is enabled (Save is gated on changes).
     fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
     await clickConfigSaveButton();
@@ -338,6 +369,7 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     await waitFor(() => {
       expect(screen.getByText('settings.restartHint')).toBeInTheDocument();
     });
+    await settleSettingsRequests(mockRequest);
     // Dirty the form so the Save button is enabled (Save is gated on changes).
     fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
     await clickConfigSaveButton();
@@ -393,10 +425,7 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     await waitFor(() => expect(screen.getByText('settings.restartHint')).toBeInTheDocument());
     // Let any pending hydration (supervisor/auth fetch) settle and re-baseline the
     // form BEFORE we edit, so the dirty flag isn't cleared by a late baselineTick bump.
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await settleSettingsRequests(mockRequest);
     fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
     await clickConfigSaveButton();
 
@@ -429,10 +458,7 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     await waitFor(() => expect(screen.getByText('settings.restartHint')).toBeInTheDocument());
     // Let any pending hydration settle and re-baseline the form BEFORE we edit, so
     // the dirty flag isn't cleared by a late baselineTick bump.
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await settleSettingsRequests(mockRequest);
     fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
     await clickConfigSaveButton();
 

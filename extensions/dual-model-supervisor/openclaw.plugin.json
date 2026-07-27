@@ -1,7 +1,7 @@
 {
   "id": "dual-model-supervisor",
   "name": "Dual Model Supervisor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Dual-model supervision: course correction, safety filtering, and persistent audit",
   "main": "index.ts",
   "activation": {

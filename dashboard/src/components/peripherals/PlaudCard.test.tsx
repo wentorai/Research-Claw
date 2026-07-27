@@ -60,8 +60,13 @@ function Wrapper({ children }: { children: React.ReactNode }) {
  * immediately; awaiting act() follows the actual state transition instead.
  */
 async function renderPlaudCardAfterInitialStatus(): Promise<void> {
+  render(<Wrapper><PlaudCard /></Wrapper>);
+  const statusIndex = mockRequest.mock.calls.findIndex(
+    ([method]) => method === 'rc.periph.plaud.status',
+  );
+  expect(statusIndex).toBeGreaterThanOrEqual(0);
   await act(async () => {
-    render(<Wrapper><PlaudCard /></Wrapper>);
+    await Promise.resolve(mockRequest.mock.results[statusIndex]?.value);
     await Promise.resolve();
   });
 }

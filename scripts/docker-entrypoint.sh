@@ -5,7 +5,7 @@
 CONFIG_DIR=/app/config
 CONFIG_FILE=$CONFIG_DIR/openclaw.json
 CONFIG_VERSION_FILE=$CONFIG_DIR/.config-version
-IMAGE_VERSION="0.7.5"
+IMAGE_VERSION="0.7.6"
 PORT=${PORT:-28789}
 
 # Entrypoint chatter discipline: the GATEWAY's own output stays full in

@@ -8,7 +8,7 @@
 
 You define the question. Research-Claw runs the lab. 24/7 on your machine. Every output, yours alone.
 
-[![Version](https://img.shields.io/badge/version-v0.7.5-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
+[![Version](https://img.shields.io/badge/version-v0.7.6-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
@@ -179,7 +179,7 @@ Tech: React 18 + Vite 6 + Ant Design 5 + Zustand 5 · Bilingual EN/ZH-CN (1024 i
 
 ### Quality Control: A Reviewer for Your AI
 
-The biggest risk in research is confident nonsense. **Quality Control** puts an independent reviewer model behind every answer the primary model produces — when it spots fabricated citations, logic gaps, or off-target responses, it requests a rewrite before the answer reaches you. Three modes — **auto / manual / off** — with the reviewer model configurable on its own endpoint and protocol, fully decoupled from the primary.
+The biggest risk in research is confident nonsense. **Quality Control** reviews answers asynchronously and persists findings, suggested corrections, and audit status in the Supervisor panel; it does not block or silently replace an answer that has already been delivered. High-risk tools are protected separately by deterministic safety rules and a bounded deep-review gate, with blocking or human approval for confirmed danger. The reviewer can use a dedicated model or inherit the primary model. Network citation verification is opt-in and disabled by default.
 
 ---
 
