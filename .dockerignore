@@ -6,34 +6,22 @@ node_modules
 dashboard/dist
 extensions/*/dist
 
-# User config — volume-mounted at runtime (template is kept separately)
-# Exclude every openclaw.json snapshot/backup (.bak, .last-good, .prefix-<timestamp>) —
-# they may hold plaintext secrets and must never bake into the released image.
-config/openclaw.json
-config/openclaw.json.*
-config/*.bak
-config/*.bak.*
-config/*.prefix-*
-# Runtime dirs that may hold browser cookies / login / credential material — never bake into the image.
-config/browser/
-config/media/
-config/npm/
-config/plugin-skills/
+# User config — deny by default; only the release template enters the image.
+config/**
+!config/openclaw.example.json
 
 # User data — volume-mounted at runtime
 .research-claw
-workspace/.openclaw
-workspace/memory
-workspace/sources
-workspace/skills_collection
-workspace/outputs
-workspace/workspace
-workspace/*.csv
-workspace/*.bib
-workspace/*.json
-workspace/*.py
-workspace/*.ipynb
-workspace/*.txt
+workspace/**
+!workspace/.ResearchClaw/
+!workspace/.ResearchClaw/AGENTS.md
+!workspace/.ResearchClaw/HEARTBEAT.md
+!workspace/.ResearchClaw/SOUL.md.example
+!workspace/.ResearchClaw/IDENTITY.md.example
+!workspace/.ResearchClaw/TOOLS.md.example
+!workspace/.ResearchClaw/BOOTSTRAP.md.example
+!workspace/.ResearchClaw/USER.md.example
+!workspace/MEMORY.md.example
 
 # Git
 .git
