@@ -48,9 +48,11 @@ export interface PluginDiscoveryOptions {
   loadPaths: string[];
 }
 
+type Environment = Readonly<Record<string, string | undefined>>;
+
 /** Match OpenClaw's state-dir precedence without importing its unstable internals. */
 export function resolveOpenClawStateDir(
-  env: { OPENCLAW_STATE_DIR?: string } = process.env,
+  env: Environment = process.env,
   homeDir = os.homedir(),
 ): string {
   const configured = env.OPENCLAW_STATE_DIR?.trim();

@@ -101,7 +101,9 @@ RUN set +e; \
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY patches/ ./patches/
 COPY dashboard/package.json                          ./dashboard/
+COPY extensions/dual-model-supervisor/package.json  ./extensions/dual-model-supervisor/
 COPY extensions/research-claw-core/package.json     ./extensions/research-claw-core/
+COPY extensions/research-superpower/package.json    ./extensions/research-superpower/
 COPY extensions/wentor-connect/package.json          ./extensions/wentor-connect/
 COPY extensions/openclaw-weixin/package.json         ./extensions/openclaw-weixin/
 
