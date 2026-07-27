@@ -75,6 +75,13 @@ export default function EditTagsModal({
 
   const handleInputKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // IME composition guard (CJK input). The host is antd AutoComplete, whose
+      // rc-select BaseSelect forwards keydown to props.onKeyDown unconditionally
+      // (unlike Input.Search, which carries its own composedRef guard). Without
+      // this, the Enter that merely CONFIRMS an IME candidate would also commit
+      // a half-composed tag and close the input; Escape (cancel candidate) would
+      // tear the whole input down.
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       if (e.key === 'Enter') {
         e.preventDefault();
         handleAddTag();

@@ -5,7 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
 import { useToolStreamStore } from '../../stores/tool-stream';
-import { useConfigStore, primaryModelSupportsVision, imageModelSupportsVision } from '../../stores/config';
+import { useConfigStore, imageModelSupportsVision } from '../../stores/config';
+import { useVisionSupport } from '../../hooks/useVisionSupport';
 import type { ChatAttachment, ChatReference } from '../../gateway/types';
 import SlashCommandMenu, { useSlashCommandMenu } from './SlashCommandMenu';
 import ReferenceMenu, { useReferenceMenu } from './ReferenceMenu';
@@ -91,13 +92,24 @@ export default function MessageInput() {
   const isConnected = connState === 'connected';
   const hasReadyReference = references.some((r) => r.status === 'ready');
 
-  // Re-evaluate vision capability when the model/provider config changes so the
-  // attach-time hint appears/disappears as the user switches models.
+  // §13.5 (SPEC:417-419): the composer hint MUST share the vision resolver with
+  // the send pipeline (chat.ts:995 resolveVisionSupport). Using the config-primary
+  // -only primaryModelSupportsVision() here mis-fired under a session /model
+  // override (config primary=vision but the active session is text-only → hint
+  // hidden while chat.ts still routes to /image degradation, and vice-versa).
+  // useVisionSupport() is the session-aware, reactive wrapper over the same pure
+  // resolver, so composer and pipeline can never disagree.
   const gatewayConfig = useConfigStore((s) => s.gatewayConfig);
+  const vision = useVisionSupport();
+  // Show the soft hint only on an AUTHORITATIVE text-only verdict (matches the
+  // send pipeline's `supportsImage === false` degradation trigger; `true` and
+  // 'unknown' are fail-open → no blocking hint). A dedicated /image vision model
+  // (imageModel) is a config-level escape hatch that can still read the image, so
+  // its presence suppresses the hint.
   const attachNoVisionModel =
     attachments.length > 0
     && Boolean(gatewayConfig)
-    && !primaryModelSupportsVision()
+    && vision.supportsImage === false
     && !imageModelSupportsVision();
   const canSend =
     (text.trim().length > 0 || attachments.length > 0 || hasReadyReference) && isConnected && !sending;

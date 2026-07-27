@@ -357,7 +357,11 @@ export default function MonitorPanel() {
   const handleAddMonitor = useCallback(() => {
     send(
       t('monitor.addPrompt', {
-        defaultValue: 'I want to set up a new monitor. Help me configure it. Available source types: arXiv, GitHub, RSS, Webpage, OpenAlex, Twitter, Custom.',
+        // F3 (SPEC §13.1): expose the device/peripheral source so the agent knows
+        // scheduled camera checks are available. For a device monitor it must call
+        // periph_list first to get the device id, then monitor_create(
+        // source_type='device', target=<that id>).
+        defaultValue: 'I want to set up a new monitor. Help me configure it. Available source types: arXiv, GitHub, RSS, Webpage, OpenAlex, Twitter, Camera/Peripheral (device — for scheduled checks of a registered camera; call periph_list first to get the device id), Custom.',
       }),
     );
   }, [send, t]);

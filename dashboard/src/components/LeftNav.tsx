@@ -26,6 +26,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useUiStore, type PanelTab } from '../stores/ui';
 import { useSessionsStore, MAIN_SESSION_KEY } from '../stores/sessions';
+import { usePeripheralsStore } from '../stores/peripherals';
 import { normalizeSessionKey } from '../utils/session-key';
 import { removeScheduledJobForSession } from '../utils/remove-cron-for-session';
 import { isPaperReviewCronSessionRow } from '../utils/paper-review-run';
@@ -82,6 +83,9 @@ export default function LeftNav() {
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const hasPeripheralsAlert = usePeripheralsStore((s) =>
+    s.devices.some((device) => s.observations[device.id]?.[0]?.verdict === 'alert'),
+  );
 
   const sessions = useSessionsStore((s) => s.sessions);
   const activeSessionKey = useSessionsStore((s) => s.activeSessionKey);
@@ -522,11 +526,33 @@ export default function LeftNav() {
             transition: 'all 0.15s ease',
           };
 
+          const navIcon = item.key === 'peripherals' ? (
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              {item.icon}
+              {hasPeripheralsAlert && (
+                <span
+                  data-testid="nav-peripherals-alert"
+                  aria-label={t('nav.peripheralsAlert')}
+                  style={{
+                    position: 'absolute',
+                    top: -3,
+                    right: -4,
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    background: 'var(--status-error, #ef4444)',
+                    boxShadow: '0 0 0 1px var(--surface)',
+                  }}
+                />
+              )}
+            </span>
+          ) : item.icon;
+
           const button = (
             <Button
               key={item.key}
               type="text"
-              icon={item.icon}
+              icon={navIcon}
               onClick={() => handleNavClick(item.key)}
               style={btnStyle}
             >

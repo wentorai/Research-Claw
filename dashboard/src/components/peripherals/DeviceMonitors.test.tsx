@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { App as AntdApp, ConfigProvider } from 'antd';
 import React from 'react';
+import { useConfigStore } from '../../stores/config';
 import { useMonitorStore } from '../../stores/monitor';
 import { usePeripheralsStore } from '../../stores/peripherals';
 import { useUiStore } from '../../stores/ui';
@@ -94,6 +95,25 @@ function renderComponent(props?: Partial<React.ComponentProps<typeof DeviceMonit
   );
 }
 
+function mockSuccessfulCreateFlow(createdMonitor: Monitor) {
+  mockRequest.mockImplementation(async (method: string) => {
+    switch (method) {
+      case 'rc.monitor.create': return createdMonitor;
+      case 'rc.monitor.toggle': return { ...createdMonitor, enabled: true };
+      case 'cron.add': return { id: 'gw-job-created' };
+      case 'rc.monitor.setJobId': return { ok: true };
+      case 'rc.monitor.list':
+        return {
+          items: [{ ...createdMonitor, enabled: true, gateway_job_id: 'gw-job-created' }],
+          total: 1,
+        };
+      case 'cron.list':
+        return { jobs: [], total: 0, offset: 0, limit: 50, hasMore: false, nextOffset: null };
+      default: return null;
+    }
+  });
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe('DeviceMonitors', () => {
@@ -102,6 +122,7 @@ describe('DeviceMonitors', () => {
     useMonitorStore.setState({ monitors: [], loading: false, loaded: true });
     usePeripheralsStore.setState({ devices: [], observations: {}, loading: false, error: null, unavailable: false });
     useUiStore.setState({ chatInputPrefill: null });
+    useConfigStore.setState({ gatewayConfig: null });
   });
 
   // ── Filtering ──────────────────────────────────────────────────────────────
@@ -147,7 +168,7 @@ describe('DeviceMonitors', () => {
 
     it('sends correct rc.monitor.create payload on submit', async () => {
       const createdMonitor = makeMonitor({ id: 'mon-new', name: 'New Lab Check', enabled: false });
-      mockRequest.mockResolvedValueOnce(createdMonitor);
+      mockSuccessfulCreateFlow(createdMonitor);
 
       renderComponent();
       fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
@@ -174,7 +195,7 @@ describe('DeviceMonitors', () => {
 
     it('payload includes filters.check_prompt when custom prompt is set', async () => {
       const createdMonitor = makeMonitor({ id: 'mon-new', name: 'Prompt Test', enabled: false });
-      mockRequest.mockResolvedValueOnce(createdMonitor);
+      mockSuccessfulCreateFlow(createdMonitor);
 
       renderComponent({ checkPrompt: 'Initial prompt' });
       fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
@@ -199,7 +220,7 @@ describe('DeviceMonitors', () => {
 
     it('payload includes empty filters when prompt is blank', async () => {
       const createdMonitor = makeMonitor({ id: 'mon-new', name: 'No Prompt', enabled: false });
-      mockRequest.mockResolvedValueOnce(createdMonitor);
+      mockSuccessfulCreateFlow(createdMonitor);
 
       renderComponent({ checkPrompt: '' });
       fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
@@ -219,7 +240,7 @@ describe('DeviceMonitors', () => {
 
     it('uses selected schedule chip expression in payload', async () => {
       const createdMonitor = makeMonitor({ id: 'mon-new', name: 'Hourly', enabled: false, schedule: '0 * * * *' });
-      mockRequest.mockResolvedValueOnce(createdMonitor);
+      mockSuccessfulCreateFlow(createdMonitor);
 
       renderComponent();
       fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
@@ -242,7 +263,7 @@ describe('DeviceMonitors', () => {
 
     it('uses custom cron expression when custom chip is selected', async () => {
       const createdMonitor = makeMonitor({ id: 'mon-new', name: 'Custom', enabled: false, schedule: '*/15 * * * *' });
-      mockRequest.mockResolvedValueOnce(createdMonitor);
+      mockSuccessfulCreateFlow(createdMonitor);
 
       renderComponent();
       fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
@@ -286,6 +307,105 @@ describe('DeviceMonitors', () => {
     });
   });
 
+  // ── P1-U2: create immediately enables via the toggle path ─────────────────
+
+  describe('create-then-enable (P1-U2)', () => {
+    it('enables the created monitor right away and registers its cron job', async () => {
+      const createdMonitor = makeMonitor({
+        id: 'mon-new', name: 'Auto Enabled', enabled: false, gateway_job_id: null,
+      });
+      const calls: string[] = [];
+      mockRequest.mockImplementation(async (method: string) => {
+        calls.push(method);
+        switch (method) {
+          case 'rc.monitor.create': return createdMonitor;
+          case 'rc.monitor.toggle': return { ...createdMonitor, enabled: true };
+          case 'cron.add': return { id: 'gw-job-new-001' };
+          case 'rc.monitor.setJobId': return { ok: true };
+          case 'rc.monitor.list':
+            return { items: [{ ...createdMonitor, enabled: true, gateway_job_id: 'gw-job-new-001' }], total: 1 };
+          case 'cron.list':
+            return { jobs: [], total: 0, offset: 0, limit: 50, hasMore: false, nextOffset: null, deliveryPreviews: {} };
+          default: return null;
+        }
+      });
+
+      renderComponent();
+      fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
+      fireEvent.change(screen.getByTestId('periph-monitors-form-name'), {
+        target: { value: 'Auto Enabled' },
+      });
+      fireEvent.click(screen.getByTestId('periph-monitors-form-submit'));
+
+      await waitFor(() => {
+        expect(mockRequest).toHaveBeenCalledWith('rc.monitor.toggle', { id: 'mon-new', enabled: true });
+      });
+      // Toggle path registers the cron immediately (dashboard is online at create time)
+      await waitFor(() => {
+        expect(calls).toContain('cron.add');
+      });
+    });
+
+    it('shows an explicit error when cron registration returns no job id', async () => {
+      const createdMonitor = makeMonitor({
+        id: 'mon-no-job', name: 'No Job', enabled: false, gateway_job_id: null,
+      });
+      mockRequest.mockImplementation(async (method: string) => {
+        switch (method) {
+          case 'rc.monitor.create': return createdMonitor;
+          case 'rc.monitor.toggle': return { ...createdMonitor, enabled: true };
+          case 'cron.add': return {};
+          case 'rc.monitor.list':
+            return { items: [{ ...createdMonitor, enabled: true, gateway_job_id: null }], total: 1 };
+          case 'cron.list': return {};
+          default: return null;
+        }
+      });
+
+      renderComponent();
+      fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
+      fireEvent.change(screen.getByTestId('periph-monitors-form-name'), {
+        target: { value: 'No Job' },
+      });
+      fireEvent.click(screen.getByTestId('periph-monitors-form-submit'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('periph-monitors-create-error').textContent).toContain(
+          'cron registration failed',
+        );
+      });
+      expect(screen.queryByText(/Created and enabled/)).toBeNull();
+    });
+  });
+
+  // ── Create form notices (F2b + P1-N1/D9) ──────────────────────────────────
+
+  describe('create form notices', () => {
+    it('always shows the presence-prerequisite info bar (P1-N1/D9)', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
+      expect(screen.getByTestId('periph-monitors-presence-note')).toBeDefined();
+    });
+
+    it('warns when agents.defaults.imageModel is missing without blocking the form (F2b)', () => {
+      // gatewayConfig null (beforeEach) → imageModel unresolvable → warn
+      renderComponent();
+      fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
+      expect(screen.getByTestId('periph-monitors-imagemodel-warning')).toBeDefined();
+      // Not blocking: submit button still present
+      expect(screen.getByTestId('periph-monitors-form-submit')).toBeDefined();
+    });
+
+    it('hides the imageModel warning when agents.defaults.imageModel is configured', () => {
+      useConfigStore.setState({
+        gatewayConfig: { agents: { defaults: { imageModel: { primary: 'zai/glm-4.6v' } } } },
+      });
+      renderComponent();
+      fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
+      expect(screen.queryByTestId('periph-monitors-imagemodel-warning')).toBeNull();
+    });
+  });
+
   // ── "Ask agent" chip ──────────────────────────────────────────────────────
 
   describe('"Let agent configure" chip', () => {
@@ -296,6 +416,17 @@ describe('DeviceMonitors', () => {
 
       const prefill = useUiStore.getState().chatInputPrefill;
       expect(prefill).toContain('dev-cam-001');
+    });
+
+    // §14.4 / P1-C1: with a deviceName the prefill addresses the device by
+    // NAME + (id) so the chat text disambiguates and never leaks a bare UUID.
+    it('prefills with "name (id)" when deviceName is provided', () => {
+      renderComponent({ deviceId: 'dev-cam-001', deviceName: 'FaceTime HD Camera', checkPrompt: '' });
+      fireEvent.click(screen.getByTestId('periph-monitors-create-btn'));
+      fireEvent.click(screen.getByTestId('periph-monitors-ask-agent'));
+
+      const prefill = useUiStore.getState().chatInputPrefill ?? '';
+      expect(prefill).toContain('FaceTime HD Camera (dev-cam-001)');
     });
   });
 

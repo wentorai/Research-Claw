@@ -20,6 +20,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   App,
   Button,
   Divider,
@@ -37,6 +38,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useConfigStore } from '../../stores/config';
 import { useMonitorStore } from '../../stores/monitor';
 import { useUiStore } from '../../stores/ui';
 
@@ -69,11 +71,17 @@ function isValidCron(expr: string): boolean {
 export interface DeviceMonitorsProps {
   deviceId: string;
   checkPrompt: string;
+  /**
+   * Human-facing device name (§14.4). Used in the "let agent configure" prefill
+   * so the chat text disambiguates by NAME + (id) instead of leaking a bare UUID.
+   * Absent (legacy callers) → prefill falls back to the id alone.
+   */
+  deviceName?: string;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitorsProps) {
+export default function DeviceMonitors({ deviceId, checkPrompt, deviceName }: DeviceMonitorsProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
 
@@ -83,6 +91,12 @@ export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitors
   const deleteMonitor = useMonitorStore((s) => s.deleteMonitor);
   const runMonitor = useMonitorStore((s) => s.runMonitor);
   const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
+  const gatewayConfig = useConfigStore((s) => s.gatewayConfig);
+
+  // F2(b): without agents.defaults.imageModel the vision check falls back to the
+  // /image tool which errors out → every run ends 'unverified'. Warn up front,
+  // but never block creation.
+  const imageModelMissing = !gatewayConfig?.agents?.defaults?.imageModel?.primary;
 
   // Filter to device monitors for this device
   const deviceMonitors = useMemo(
@@ -98,6 +112,7 @@ export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitors
   const [useCustom, setUseCustom] = useState(false);
   const [promptText, setPromptText] = useState(checkPrompt);
   const [creating, setCreating] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const effectiveSchedule = useCustom ? customCron : schedule;
 
@@ -111,6 +126,7 @@ export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitors
   }, [checkPrompt]);
 
   const handleCreate = useCallback(async () => {
+    setActionError(null);
     if (!name.trim()) {
       message.warning(t('periph.monitors.nameRequired', 'Name is required'));
       return;
@@ -133,22 +149,46 @@ export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitors
         enabled: false,
       });
       if (result) {
-        message.success(t('periph.monitors.create', 'New Check') + ' — ' + result.name);
+        // P1-U2: create-then-enable via the toggle path — the dashboard is online at
+        // create time, so toggleMonitor registers the cron job immediately.
+        const enabledResult = await toggleMonitor(result.id, true);
+        const registered = useMonitorStore.getState().monitors
+          .find((m) => m.id === result.id);
+        if (!enabledResult.ok || !registered?.gateway_job_id) {
+          const reason = enabledResult.error ?? 'cron-add-missing-id';
+          setActionError(
+            t('periph.monitors.registrationFailed', {
+              reason,
+              defaultValue: `Scheduled check enabled, but cron registration failed: ${reason}`,
+            }),
+          );
+          resetForm();
+          return;
+        }
+        message.success(
+          t('periph.monitors.createdEnabled', {
+            name: result.name,
+            defaultValue: `Created and enabled — "${result.name}" runs on schedule`,
+          }),
+        );
         resetForm();
       }
     } finally {
       setCreating(false);
     }
-  }, [name, effectiveSchedule, deviceId, promptText, createMonitor, message, t, resetForm]);
+  }, [name, effectiveSchedule, deviceId, promptText, createMonitor, toggleMonitor, message, t, resetForm]);
 
   const handleAskAgent = useCallback(() => {
+    // §14.4 / P1-C1: address the device by NAME + (id) so the chat prefill never
+    // leaks a bare UUID. `name (id)` also disambiguates same-named cameras.
+    const deviceRef = deviceName ? `${deviceName} (${deviceId})` : deviceId;
     const prefill = t('periph.monitors.askAgentPrefill', {
-      deviceId,
+      deviceRef,
       hint: promptText.trim() || '判断画面是否存在异常',
-      defaultValue: `帮我为设备 ${deviceId} 创建一个定时查证监控，需要检查：${promptText.trim() || '判断画面是否存在异常'}`,
+      defaultValue: `帮我为设备 ${deviceRef} 创建一个定时查证监控，需要检查：${promptText.trim() || '判断画面是否存在异常'}`,
     });
     setChatInputPrefill(prefill as string);
-  }, [deviceId, promptText, setChatInputPrefill, t]);
+  }, [deviceId, deviceName, promptText, setChatInputPrefill, t]);
 
   return (
     <div data-testid="periph-device-monitors">
@@ -175,6 +215,18 @@ export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitors
           </Button>
         )}
       </div>
+
+      {actionError && (
+        <Alert
+          data-testid="periph-monitors-create-error"
+          type="error"
+          showIcon
+          closable
+          onClose={() => setActionError(null)}
+          message={actionError}
+          style={{ marginBottom: 8, fontSize: 12 }}
+        />
+      )}
 
       {/* Monitor list */}
       {deviceMonitors.length === 0 && !showForm && (
@@ -203,7 +255,19 @@ export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitors
             data-testid={`periph-monitor-toggle-${monitor.id}`}
             size="small"
             checked={monitor.enabled}
-            onChange={(v) => { void toggleMonitor(monitor.id, v); }}
+            onChange={(v) => {
+              setActionError(null);
+              void toggleMonitor(monitor.id, v).then((result) => {
+                if (!result.ok) {
+                  setActionError(
+                    t('periph.monitors.registrationFailed', {
+                      reason: result.error ?? 'unknown',
+                      defaultValue: `Scheduled check enabled, but cron registration failed: ${result.error ?? 'unknown'}`,
+                    }),
+                  );
+                }
+              });
+            }}
           />
 
           {/* Name + schedule */}
@@ -224,8 +288,14 @@ export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitors
             data-testid={`periph-monitor-run-${monitor.id}`}
             size="small"
             icon={<ThunderboltOutlined />}
-            disabled={!monitor.enabled}
-            title={monitor.enabled ? t('periph.monitors.runNow', 'Run now') : t('periph.monitors.enableFirst', 'Enable this check to run it')}
+            disabled={!monitor.enabled || !monitor.gateway_job_id}
+            title={
+              monitor.enabled && monitor.gateway_job_id
+                ? t('periph.monitors.runNow', 'Run now')
+                : monitor.enabled
+                  ? t('periph.monitors.registrationPending', 'Cron registration is pending; reconnect or reload to retry')
+                  : t('periph.monitors.enableFirst', 'Enable this check to run it')
+            }
             onClick={() => { void runMonitor(monitor.id); }}
           />
 
@@ -257,6 +327,32 @@ export default function DeviceMonitors({ deviceId, checkPrompt }: DeviceMonitors
             border: '1px solid rgba(255,255,255,0.08)',
           }}
         >
+          {/* P1-N1/D9: presence prerequisite — browser-camera checks only run while
+              this page is online; wording follows the D9 interim ruling verbatim. */}
+          <Alert
+            data-testid="periph-monitors-presence-note"
+            type="info"
+            showIcon
+            message={t(
+              'periph.monitors.presenceNote',
+              'Scheduled checks depend on this page being online. Keep this machine awake and the Dashboard open; checks while you are away will be recorded as missed (no frame captured).',
+            )}
+            style={{ marginBottom: 8, fontSize: 12 }}
+          />
+
+          {imageModelMissing && (
+            <Alert
+              data-testid="periph-monitors-imagemodel-warning"
+              type="warning"
+              showIcon
+              message={t(
+                'periph.monitors.imageModelMissing',
+                'No image model configured (agents.defaults.imageModel) — visual checks may be unable to reach a verdict. You can still create this check.',
+              )}
+              style={{ marginBottom: 8, fontSize: 12 }}
+            />
+          )}
+
           <Form layout="vertical" size="small">
             {/* Name */}
             <Form.Item

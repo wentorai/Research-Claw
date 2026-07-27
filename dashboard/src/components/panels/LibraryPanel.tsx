@@ -361,6 +361,11 @@ function PaperListItem({ paper, tokens, onEditTags }: PaperListItemProps) {
           rows={3}
           autoFocus
           onPressEnter={(e) => {
+            // IME composition guard (CJK input). rc-textarea derives onPressEnter
+            // straight from keydown with NO composition guard of its own, so the
+            // Enter that merely confirms an IME candidate would otherwise fire a
+            // real agent run with a half-composed question and close the modal.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (!e.shiftKey) {
               e.preventDefault();
               handleIntraViewSubmit();

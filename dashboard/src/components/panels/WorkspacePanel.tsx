@@ -65,7 +65,9 @@ interface InlineNameInputProps {
   onCancel: () => void;
 }
 
-function InlineNameInput({ defaultValue = '', icon, iconColor, depth, tokens, loading, onConfirm, onCancel }: InlineNameInputProps) {
+// Exported for tests: the IME composition guard lives in this handler and must be
+// exercised against the real component, not a re-implementation.
+export function InlineNameInput({ defaultValue = '', icon, iconColor, depth, tokens, loading, onConfirm, onCancel }: InlineNameInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
   const committedRef = useRef(false);
@@ -122,8 +124,12 @@ function InlineNameInput({ defaultValue = '', icon, iconColor, depth, tokens, lo
         onCompositionEnd={() => { composingRef.current = false; }}
         onKeyDown={(e) => {
           if (loading) return;
+          // IME composition guard (CJK input) — MUST sit above both branches.
+          // Escape during composition closes the candidate window, not the editor;
+          // Enter during composition confirms a candidate, not the name.
+          if (composingRef.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
-          if (e.key === 'Enter' && !composingRef.current) {
+          if (e.key === 'Enter') {
             e.preventDefault();
             commit(inputRef.current?.value ?? '');
           }
@@ -234,7 +240,8 @@ interface RenameInputProps {
   onCancel: () => void;
 }
 
-function RenameInput({ defaultValue, isFile, tokens, onConfirm, onCancel }: RenameInputProps) {
+// Exported for tests: see InlineNameInput above.
+export function RenameInput({ defaultValue, isFile, tokens, onConfirm, onCancel }: RenameInputProps) {
   const committedRef = useRef(false);
   const didFocusRef = useRef(false);
 
@@ -269,10 +276,14 @@ function RenameInput({ defaultValue, isFile, tokens, onConfirm, onCancel }: Rena
       onCompositionEnd={(e) => { (e.target as HTMLInputElement).dataset.composing = ''; }}
       onKeyDown={(e) => {
         e.stopPropagation();
+        const el = e.target as HTMLInputElement;
+        // IME composition guard (CJK input) — MUST sit above both branches.
+        // Escape during composition closes the candidate window, not the rename.
+        if (el.dataset.composing || e.nativeEvent.isComposing || e.keyCode === 229) return;
         if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
-        if (e.key === 'Enter' && !(e.target as HTMLInputElement).dataset.composing) {
+        if (e.key === 'Enter') {
           e.preventDefault();
-          commit((e.target as HTMLInputElement).value);
+          commit(el.value);
         }
       }}
       onBlur={(e) => {
@@ -997,6 +1008,11 @@ export default function WorkspacePanel() {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Delayed post-upload refresh: the gateway may still be flushing the write
+  // when the immediate loadData() returns, so we re-read once more a second
+  // later. Tracked in a ref so unmounting cancels it — otherwise the callback
+  // fires against a torn-down component and setState throws.
+  const postWriteRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-scroll file tree when dragging near top/bottom edges.
   // Uses requestAnimationFrame for smooth 60fps scrolling.
@@ -1255,6 +1271,14 @@ export default function WorkspacePanel() {
     return () => clearInterval(id);
   }, [connState, hasLoaded, silentRefresh]);
 
+  // Cancel a pending post-upload refresh when the panel goes away
+  useEffect(() => () => {
+    if (postWriteRefreshRef.current) {
+      clearTimeout(postWriteRefreshRef.current);
+      postWriteRefreshRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     if (pendingPreviewPath) {
       setPreviewPath(pendingPreviewPath);
@@ -1425,7 +1449,8 @@ export default function WorkspacePanel() {
         }
         reportUploadOutcome(destBase ? `${destBase}/` : '/', counts);
         await loadData();
-        setTimeout(() => loadData(), 1000);
+        if (postWriteRefreshRef.current) clearTimeout(postWriteRefreshRef.current);
+        postWriteRefreshRef.current = setTimeout(() => loadData(), 1000);
       } finally {
         uploadingRef.current = false;
         setUploading(false);
@@ -1554,7 +1579,8 @@ export default function WorkspacePanel() {
         });
         reportUploadOutcome(destBase ? `${destBase}/` : '/', counts);
         await loadData();
-        setTimeout(() => loadData(), 1000);
+        if (postWriteRefreshRef.current) clearTimeout(postWriteRefreshRef.current);
+        postWriteRefreshRef.current = setTimeout(() => loadData(), 1000);
       } finally {
         uploadingRef.current = false;
         setUploading(false);

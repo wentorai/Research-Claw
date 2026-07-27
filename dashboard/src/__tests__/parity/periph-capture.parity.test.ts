@@ -67,12 +67,16 @@ vi.mock('../../gateway/camera', () => ({
   captureFrameFromCamera: vi.fn(),
 }));
 
-// peripherals store: announceBridge + loadDevices mocks (called on connect + heartbeat)
+// Peripherals store fixture mirrors every field the production listener reads.
+// Partial getState() shapes hide integration regressions and can turn heartbeat
+// promises into unhandled rejections after the asserting test has completed.
 const announceBridge = vi.fn().mockResolvedValue(undefined);
 const loadDevices = vi.fn().mockResolvedValue(undefined);
+const loadObservations = vi.fn().mockResolvedValue(undefined);
+const devices: Array<{ id: string }> = [];
 vi.mock('../../stores/peripherals', () => ({
   usePeripheralsStore: {
-    getState: () => ({ announceBridge, loadDevices }),
+    getState: () => ({ announceBridge, loadDevices, loadObservations, devices }),
   },
 }));
 
@@ -120,6 +124,7 @@ describe('PeriphCaptureListener — capture request handling', () => {
     vi.resetAllMocks();
     subscribed.clear();
     announceBridge.mockResolvedValue(undefined);
+    loadObservations.mockResolvedValue(undefined);
     mockClient.isConnected = true;
     mockClient.subscribe.mockImplementation((event: string, handler: EventHandler) => {
       subscribed.set(event, handler);
@@ -305,6 +310,7 @@ describe('PeriphCaptureListener — bridge announce + heartbeat', () => {
     subscribed.clear();
     announceBridge.mockResolvedValue(undefined);
     loadDevices.mockResolvedValue(undefined);
+    loadObservations.mockResolvedValue(undefined);
     mockClient.isConnected = true;
     mockClient.subscribe.mockImplementation((event: string, handler: EventHandler) => {
       subscribed.set(event, handler);

@@ -10,6 +10,16 @@
  */
 
 /**
+ * Max time to wait for the video element's `loadedmetadata` event before giving
+ * up on a capture. Audit #9: some browsers/devices never fire `loadedmetadata`
+ * nor `error` after `srcObject` is set (e.g. a camera grabbed by another app, a
+ * suspended tab), so a plain event-gated await hangs forever — a manual "take
+ * photo" then stays permanently `busy`. A finite deadline turns that hang into a
+ * classifiable rejection while `finally` still releases the track.
+ */
+export const CAPTURE_METADATA_TIMEOUT_MS = 10_000;
+
+/**
  * Capture a single JPEG frame from a browser camera.
  *
  * @param deviceId browser mediaDevice id (gateway forwards device.config.deviceId ?? device.id).
@@ -17,7 +27,9 @@
  *        OverconstrainedError / NotFoundError, which callers classify.
  * @returns the JPEG blob plus the source video's intrinsic dimensions.
  * @throws DOMException-shaped errors from getUserMedia (NotAllowedError, NotFoundError,
- *         OverconstrainedError, …) and a plain Error if the frame cannot be encoded.
+ *         OverconstrainedError, …), a plain Error if the frame cannot be encoded, and a
+ *         `camera-timeout` Error if `loadedmetadata` never arrives within
+ *         CAPTURE_METADATA_TIMEOUT_MS (no path is left hanging).
  */
 export async function captureFrameFromCamera(
   deviceId: string,
@@ -32,7 +44,10 @@ export async function captureFrameFromCamera(
     video.playsInline = true;
     video.srcObject = stream;
 
-    // Wait until we have real frame dimensions before drawing.
+    // Wait until we have real frame dimensions before drawing. A finite timeout
+    // guarantees this settles even if neither `loadedmetadata` nor `error` ever
+    // fires (audit #9): on timeout we reject with a `camera-timeout` Error, and
+    // the outer `finally` stops the track so the camera is never left held.
     await new Promise<void>((resolve, reject) => {
       const onLoaded = () => {
         cleanup();
@@ -42,7 +57,17 @@ export async function captureFrameFromCamera(
         cleanup();
         reject(new Error('video element failed to load camera stream'));
       };
+      const onTimeout = () => {
+        cleanup();
+        const err = new Error(
+          `camera-timeout: no frame within ${CAPTURE_METADATA_TIMEOUT_MS}ms`,
+        );
+        err.name = 'CameraTimeoutError';
+        reject(err);
+      };
+      const timer = setTimeout(onTimeout, CAPTURE_METADATA_TIMEOUT_MS);
       const cleanup = () => {
+        clearTimeout(timer);
         video.removeEventListener('loadedmetadata', onLoaded);
         video.removeEventListener('error', onError);
       };

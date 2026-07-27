@@ -417,6 +417,95 @@ export const SESSIONS_LIST_WITH_SYNTHETIC_RESPONSE = {
   ],
 };
 
+// ── sessions.list response with a per-session model OVERRIDE ─────────────
+// Source: OpenClaw gateway session-utils.ts:2186-2187 — the projected row
+// exposes the RUNTIME-MERGED identity as `modelProvider`/`model`. Those are
+// resolved from the session store entry's `providerOverride`/`modelOverride`
+// (set by sessions.patch { model } → sessions-patch.ts:517-585, persisted by
+// applyModelOverrideToSessionEntry) via resolveSessionRowModelIdentity
+// (session-utils.ts:1737-1786, runtime provider/model take precedence).
+//
+// Real scenario (SPEC F5): config primary = a vision model, but the `main`
+// session was switched with /model to a TEXT-ONLY model. The row therefore
+// carries a text-only modelProvider/model that the vision hint + send pipeline
+// must both honor. The store entry's providerOverride/modelOverride are shown
+// for provenance even though only modelProvider/model reach the dashboard row.
+
+export const SESSIONS_LIST_MODEL_OVERRIDE_RESPONSE = {
+  sessions: [
+    {
+      key: 'agent:main:main',
+      displayName: 'Main',
+      derivedTitle: 'Camera check while overridden to a text-only model',
+      updatedAt: 1781104748782,
+      sessionId: 'd3f3cd82-c5c1-4d9f-9b89-e163305365ac',
+      kind: 'agent',
+      // Runtime-merged identity (session-utils.ts:2186-2187) — the /model
+      // override to deepseek-v4-pro (text-only) is what the dashboard reads.
+      // rowModelProvider/rowModel come from rowModelIdentity (session-utils.ts:2058-2059),
+      // which resolves selectedModel?.provider ?? modelProvider (i.e. the store
+      // entry's providerOverride/modelOverride take precedence over runtime).
+      modelProvider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      // Store-entry provenance (not part of the projected row schema, kept here
+      // to document how modelProvider/model above were derived):
+      //   providerOverride: 'deepseek', modelOverride: 'deepseek-v4-pro'
+    },
+  ],
+};
+
+// ── sessions.list response: per-session override to a VISION model ────────
+// The reverse of SESSIONS_LIST_MODEL_OVERRIDE_RESPONSE: config primary is a
+// TEXT-ONLY model, but the `main` session was /model-switched to a vision model
+// (zai/glm-5v-turbo). The projected row therefore carries a vision-capable
+// modelProvider/model. The send pipeline MUST NOT falsely degrade to /image —
+// the current model can read the image inline.
+// Same projection contract: session-utils.ts:2058-2059 (rowModelIdentity) →
+// :2186-2187 (modelProvider/model). Store-entry provenance:
+//   providerOverride: 'zai', modelOverride: 'glm-5v-turbo'.
+
+export const SESSIONS_LIST_VISION_OVERRIDE_RESPONSE = {
+  sessions: [
+    {
+      key: 'agent:main:main',
+      displayName: 'Main',
+      derivedTitle: 'Camera check while overridden to a vision model',
+      updatedAt: 1781104748782,
+      sessionId: 'd3f3cd82-c5c1-4d9f-9b89-e163305365ac',
+      kind: 'agent',
+      modelProvider: 'zai',
+      model: 'glm-5v-turbo',
+    },
+  ],
+};
+
+// ── models.list catalog entries (OC ModelCatalogEntry projection) ─────────
+// Source: OpenClaw gateway models.list → { models: ModelCatalogEntry[] }
+// (src/gateway/server-methods/models.ts). RC consumes the subset declared by
+// OcModelCatalogEntry (utils/oc-catalog-align.ts:26-35). `input` carries the
+// authoritative modality list the vision resolver reads (input.includes('image')).
+// These mirror the real OC 2026.6.1 catalog cards for the two override models
+// above so resolveVisionSupport() can reach a Tier-1 (session) verdict.
+
+export const MODELS_LIST_CATALOG_RESPONSE = {
+  models: [
+    {
+      id: 'deepseek-v4-pro',
+      name: 'DeepSeek V4 Pro',
+      provider: 'deepseek',
+      contextWindow: 163840,
+      input: ['text'], // text-only → resolver returns supportsImage:false
+    },
+    {
+      id: 'glm-5v-turbo',
+      name: 'GLM-5V Turbo',
+      provider: 'zai',
+      contextWindow: 202800,
+      input: ['text', 'image'], // vision → resolver returns supportsImage:true
+    },
+  ],
+};
+
 // ── sessions.delete response ─────────────────────────────────────────────
 // Source: OpenClaw gateway sessions.delete → returns { ok: true }
 

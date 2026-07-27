@@ -238,3 +238,22 @@ describe('PlaceholderCards — cursor and disabled look', () => {
     expect(card.style.cursor).toBe('pointer');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ④ D9 划界 — 无人值守能力标注(P1-N1)
+//    愿景卡不再各自重复"过夜/无人值守需 IP 摄像头"文案(用户反馈:每张卡都加一句
+//    显得啰嗦)。browser-camera 的在场性边界改由 DeviceMonitors 创建表单的常驻
+//    presence-note 单点承载(见 DeviceMonitors.test.tsx)。占位卡只保留愿景简介。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PlaceholderCards — no repeated unattended note', () => {
+  it('LabPlaceholderCard does NOT render a per-card unattended/RTSP note', () => {
+    render(<Wrapper><LabPlaceholderCard /></Wrapper>);
+    expect(screen.queryByTestId('periph-placeholder-lab-unattended-note')).toBeNull();
+  });
+
+  it('EmbodiedPlaceholderCard does NOT render a per-card unattended/RTSP note', () => {
+    render(<Wrapper><EmbodiedPlaceholderCard /></Wrapper>);
+    expect(screen.queryByTestId('periph-placeholder-embodied-unattended-note')).toBeNull();
+  });
+});

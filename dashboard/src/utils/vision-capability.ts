@@ -6,7 +6,11 @@
  *
  *   1. Session-level override  — active session row's modelProvider/model fields
  *      (OC session-utils.ts:2186-2187, runtime-merged values after session patch).
- *      Checked against the model-catalog store cache (no live fetch).
+ *      Checked against the model-catalog store cache (no live fetch). On a catalog
+ *      miss (cold cache), an EXPLICIT config card for the SAME session model
+ *      (models.providers[provider].models[].input) is trusted before falling back
+ *      to 'unknown' — this surfaces vision for e.g. moonshot-cn/kimi-k3 when the
+ *      catalog cache has not been fetched yet (T19 P5).
  *
  *   2. Config default model    — agents.defaults.model.primary from gateway config.
  *      Also checked against catalog (exact → basename, via findCatalogEntry).
@@ -93,7 +97,27 @@ export function resolveVisionSupport(): VisionSupport {
         return { supportsImage, source: 'session', modelRef: sessionModelRef };
       }
     }
-    // Catalog null/empty/miss → cannot determine; fail-open. Do NOT fall through.
+
+    // T19 P5: catalog miss (null/empty/not-found) for the session model — before
+    // giving up as 'unknown', consult the config snapshot's EXPLICIT model card.
+    // The dashboard's model-catalog store may not have been fetched yet (empty
+    // cache), yet the session's model can still be declared verbatim in
+    // models.providers[provider].models[] with an authoritative `input` array.
+    // Trusting an explicit config declaration here surfaces vision support for
+    // models like moonshot-cn/kimi-k3 whose input=['text','image'] even when the
+    // OC catalog cache is cold. source:'config' marks the provenance; the session
+    // modelRef is preserved (it IS the effective model, not config primary).
+    const cfg = useConfigStore.getState().gatewayConfig;
+    const sessionModelDef = cfg?.models?.providers?.[sessionProvider]?.models?.find(
+      (m) => m.id === sessionModelId,
+    );
+    if (sessionModelDef?.input) {
+      const supportsImage = sessionModelDef.input.includes('image');
+      return { supportsImage, source: 'config', modelRef: sessionModelRef };
+    }
+
+    // Catalog null/empty/miss AND no explicit config card → cannot determine;
+    // fail-open. Do NOT fall through to config-primary tiers.
     return { supportsImage: 'unknown', source: 'session', modelRef: sessionModelRef };
   }
 

@@ -1,21 +1,52 @@
 /**
- * rc.periph.* WS RPC methods (9 个)
+ * rc.periph.* WS RPC methods (14 个)
  *
  * Methods registered:
  *   rc.periph.devices.list       — list all registered devices
  *   rc.periph.devices.create     — register a new device
  *   rc.periph.devices.update     — update device config/name/enable
- *   rc.periph.devices.delete     — remove device (observations CASCADE)
+ *   rc.periph.devices.delete     — remove device (observations + bound device monitors CASCADE)
  *   rc.periph.observations.list  — paginated observation timeline
+ *   rc.periph.observations.create — manual snapshot → timeline (P2-T1)
  *   rc.periph.captureResult      — browser bridge delivers frame capture result
  *   rc.periph.bridge.announce    — dashboard announces camera bridge online + updates last_seen_at
+ *   rc.periph.localCameras.list  — enumerate OS-attached cameras (gateway ffmpeg) for the add-device picker
+ *   rc.periph.rtspPreview.start  — start (or reuse) an RTSP→HLS transmux session (§15 场景③ H1-H6)
+ *   rc.periph.rtspPreview.stop   — stop an RTSP→HLS transmux session
  *   rc.periph.plaud.status       — proxy to PlaudManager.status()
  *   rc.periph.plaud.login        — proxy to PlaudManager.login()
+ *   rc.periph.plaud.cancelLogin  — proxy to PlaudManager.cancelLogin() (kill in-flight login)
  */
 
+import * as fs from 'node:fs';
 import type { RegisterMethod } from '../types.js';
 import type { PeriphService } from './service.js';
+import { isValidPeriphDeviceId } from './service.js';
 import type { PeriphBridge, CaptureResult } from './bridge.js';
+import { listLocalCameras } from './local-camera.js';
+import type { RtspPreviewManager } from './rtsp-preview.js';
+
+/**
+ * Base HTTP path segment for RTSP→HLS preview playlists/segments (§15 场景③ H3).
+ * The full playlist URL is `${RTSP_PREVIEW_ROUTE}/${sessionToken}/index.m3u8`.
+ * Kept here so rpc.ts (playlistUrl) and index.ts (the HTTP route) agree on the
+ * prefix without a magic string in two places.
+ */
+export const RTSP_PREVIEW_ROUTE = '/rc/rtsp-preview';
+
+/** Build the credential-free playlist URL a client uses to play the preview. */
+export function rtspPreviewPlaylistUrl(sessionToken: string): string {
+  return `${RTSP_PREVIEW_ROUTE}/${sessionToken}/index.m3u8`;
+}
+
+/**
+ * Detect if running inside a Docker container. Mirrors workspace/rpc.ts:24 so the
+ * two Docker signals stay consistent. Surfaced on rc.periph.plaud.status so the
+ * dashboard can grey out Plaud connect (browser OAuth login cannot work in a
+ * container — SPEC :211, P1-U4). Evaluated once at module load; container-ness
+ * does not change over a process lifetime.
+ */
+const isDocker = fs.existsSync('/.dockerenv') || process.env.DOCKER === '1';
 
 // ── PlaudManager interface (T6 will provide the real implementation) ──────────
 
@@ -25,11 +56,15 @@ export interface PlaudStatus {
   account?: string;
   toolsReady?: boolean;
   lastError?: string;
+  // P1-U4: gateway-side Docker signal. plaud.status() cannot know it (the manager
+  // is container-agnostic), so the rc.periph.plaud.status handler stamps it on.
+  docker?: boolean;
 }
 
 export interface PlaudManager {
   status(): Promise<PlaudStatus>;
   login(): Promise<{ ok: boolean; error?: string }>;
+  cancelLogin(): Promise<{ ok: boolean }>;
 }
 
 // ── Validation helpers ────────────────────────────────────────────────────────
@@ -85,6 +120,7 @@ export function registerPeriphRpc(
   service: PeriphService,
   bridge: PeriphBridge,
   plaud: PlaudManager,
+  rtspPreview: RtspPreviewManager,
 ): void {
   // ── rc.periph.devices.list ───────────────────────────────────────────────
   registerMethod('rc.periph.devices.list', async (_params: Record<string, unknown>) => {
@@ -98,6 +134,14 @@ export function registerPeriphRpc(
       const kind = requireString(params.kind, 'kind');
       const driver = requireString(params.driver, 'driver');
       const id = optionalString(params.id, 'id');
+      // A device id doubles as a frame-directory path segment. Reject traversal
+      // shapes at the boundary so the client gets a validation error instead of
+      // a raw service exception; createDevice enforces the same rule.
+      if (id !== undefined && !isValidPeriphDeviceId(id)) {
+        throw new RpcValidationError(
+          'id 只能包含字母、数字、下划线和连字符,须以字母或数字开头,最长 64 字符',
+        );
+      }
       const config = optionalObject(params.config, 'config');
       const check_prompt = optionalString(params.check_prompt, 'check_prompt');
 
@@ -145,8 +189,11 @@ export function registerPeriphRpc(
   registerMethod('rc.periph.devices.delete', async (params: Record<string, unknown>) => {
     try {
       const id = requireString(params.id, 'id');
-      service.deleteDevice(id);
-      return { ok: true };
+      // R2-I3: monitors bound to this device go with it, but their gateway cron
+      // jobs live outside this DB — hand the ids back so the caller can remove
+      // them (same contract as rc.monitor.delete's gateway_job_id).
+      const { monitors } = service.deleteDevice(id);
+      return { ok: true, deleted_monitors: monitors };
     } catch (err) {
       throw err instanceof RpcValidationError ? new Error(err.message) : err;
     }
@@ -158,9 +205,41 @@ export function registerPeriphRpc(
       const device_id = optionalString(params.device_id, 'device_id');
       const limit = optionalNumber(params.limit, 'limit', 1, 200);
       const before = optionalString(params.before, 'before');
+      const before_cursor = optionalNumber(params.before_cursor, 'before_cursor', 0, Number.MAX_SAFE_INTEGER);
 
-      const observations = service.listObservations({ device_id, limit, before });
+      const observations = service.listObservations({ device_id, limit, before, before_cursor });
       return { observations };
+    } catch (err) {
+      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    }
+  });
+
+  // ── rc.periph.observations.create ────────────────────────────────────────
+  // P2-T1: manual dashboard snapshots write an observation so they appear in the
+  // device timeline (previously only agent-side periph_camera_snap recorded).
+  // Forwards to service.recordObservation (FK to rc_periph_devices rejects an
+  // unknown device_id). Returns { observation } (with the keyset cursor).
+  registerMethod('rc.periph.observations.create', async (params: Record<string, unknown>) => {
+    try {
+      const device_id = requireString(params.device_id, 'device_id');
+      const kindRaw = optionalString(params.kind, 'kind') ?? 'snapshot';
+      if (kindRaw !== 'snapshot' && kindRaw !== 'check' && kindRaw !== 'note') {
+        throw new RpcValidationError("kind 必须为 'snapshot' | 'check' | 'note'");
+      }
+      const verdict = optionalString(params.verdict, 'verdict');
+      const summary = optionalString(params.summary, 'summary');
+      const frame_path = optionalString(params.frame_path, 'frame_path') ?? null;
+      const monitor_id = optionalString(params.monitor_id, 'monitor_id');
+
+      const observation = service.recordObservation({
+        device_id,
+        kind: kindRaw,
+        verdict: verdict as never,
+        summary,
+        frame_path,
+        monitor_id,
+      });
+      return { observation };
     } catch (err) {
       throw err instanceof RpcValidationError ? new Error(err.message) : err;
     }
@@ -235,13 +314,91 @@ export function registerPeriphRpc(
     }
   });
 
+  // ── rc.periph.localCameras.list ──────────────────────────────────────────
+  // Enumerate OS-attached cameras (USB / built-in webcam) via gateway-side
+  // ffmpeg (-list_devices), so the add-device flow can offer a "local camera
+  // (server-side)" source. Returns { cameras: [{device, label}] }. On any
+  // failure (ffmpeg missing, unsupported platform, no devices, parse error) the
+  // driver returns [] — the dashboard then degrades to a manual device-index
+  // input. Never throws.
+  registerMethod('rc.periph.localCameras.list', async (_params: Record<string, unknown>) => {
+    const cameras = await listLocalCameras();
+    return { cameras };
+  });
+
+  // ── rc.periph.rtspPreview.start ──────────────────────────────────────────
+  // Start (or idempotently reuse) an RTSP→HLS transmux session for an rtsp
+  // device so the dashboard can show a *live preview* (§15 场景③ H1-H6). Reads
+  // device.config.{url,username,password} and hands them to the preview manager,
+  // which builds the effective RTSP URL in memory (buildRtspUrl, shared with the
+  // single-frame driver). The credential NEVER leaves the gateway: the returned
+  // playlistUrl carries only the random sessionToken (H4).
+  //   → { sessionToken, playlistUrl }  (playlistUrl = /rc/rtsp-preview/<token>/index.m3u8)
+  registerMethod('rc.periph.rtspPreview.start', async (params: Record<string, unknown>) => {
+    try {
+      const deviceId = requireString(params.device_id, 'device_id');
+      const device = service.getDevice(deviceId);
+      if (!device) {
+        throw new RpcValidationError('设备不存在');
+      }
+      if (device.driver !== 'rtsp') {
+        // Live HLS preview only applies to rtsp devices; browser/local cameras
+        // use getUserMedia / their own preview paths (H5).
+        throw new RpcValidationError('该设备不是 RTSP 设备,不支持 HLS 预览');
+      }
+      const cfg = device.config as { url?: unknown; username?: unknown; password?: unknown };
+      const url = typeof cfg.url === 'string' ? cfg.url.trim() : '';
+      if (!url) {
+        throw new RpcValidationError('RTSP 设备缺少 url 配置');
+      }
+
+      // The manager builds the effective (credentialed) URL internally; only the
+      // token-based playlist URL comes back — no credential in the response.
+      const session = await rtspPreview.start(deviceId, {
+        url,
+        username: typeof cfg.username === 'string' ? cfg.username : undefined,
+        password: typeof cfg.password === 'string' ? cfg.password : undefined,
+      });
+
+      return {
+        sessionToken: session.sessionToken,
+        playlistUrl: rtspPreviewPlaylistUrl(session.sessionToken),
+      };
+    } catch (err) {
+      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    }
+  });
+
+  // ── rc.periph.rtspPreview.stop ───────────────────────────────────────────
+  // Explicitly stop a device's live preview session (dashboard "stop preview" /
+  // component unmount). Kills ffmpeg + removes the temp dir (H1). Idempotent:
+  // stopping an already-stopped / never-started device returns { ok: false }.
+  registerMethod('rc.periph.rtspPreview.stop', async (params: Record<string, unknown>) => {
+    try {
+      const deviceId = requireString(params.device_id, 'device_id');
+      const stopped = await rtspPreview.stop(deviceId);
+      return { ok: stopped };
+    } catch (err) {
+      throw err instanceof RpcValidationError ? new Error(err.message) : err;
+    }
+  });
+
   // ── rc.periph.plaud.status ───────────────────────────────────────────────
+  // Stamp the gateway-side Docker signal (P1-U4): plaud.status() is
+  // container-agnostic, so isDocker is folded in here (not inside the manager).
   registerMethod('rc.periph.plaud.status', async (_params: Record<string, unknown>) => {
-    return plaud.status();
+    return { ...(await plaud.status()), docker: isDocker };
   });
 
   // ── rc.periph.plaud.login ────────────────────────────────────────────────
   registerMethod('rc.periph.plaud.login', async (_params: Record<string, unknown>) => {
     return plaud.login();
+  });
+
+  // ── rc.periph.plaud.cancelLogin ──────────────────────────────────────────
+  // Kill an in-flight login (frees the 8199 OAuth callback port) so the user can
+  // retry without hitting "port 8199 is in use". No-op if nothing is running.
+  registerMethod('rc.periph.plaud.cancelLogin', async (_params: Record<string, unknown>) => {
+    return plaud.cancelLogin();
   });
 }

@@ -11,7 +11,8 @@ import { useCronStore } from './cron';
 import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
 import { useJobsStore } from './jobs';
-import { primaryModelSupportsVision, useConfigStore } from './config';
+import { useConfigStore } from './config';
+import { resolveVisionSupport } from '../utils/vision-capability';
 import { syncSystemPromptAppendToGateway } from '../utils/sync-system-prompt-append';
 import { CHAT_IMAGE_DIR, appendReferenceBlock, dedupePaths, isImagePath } from '../utils/file-reference';
 import { buildAutoLongTaskPrompt, detectLongTaskIntent, shouldPromoteLongTaskWithoutConfirmation } from '../utils/long-task';
@@ -984,7 +985,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // -----------------------------------------------------------------
       let finalMessage = outboundText;
       let finalAttachments = rpcAttachments;
-      const visionCapable = primaryModelSupportsVision();
+      // F5/§13.5: the send pipeline must use the SAME session-aware resolver as
+      // the CameraDetail hint — not primaryModelSupportsVision() (config primary
+      // only). Under a session /model override to a text-only model, the config
+      // primary can still be vision-capable, so the old check inlined images the
+      // model cannot read and the promised /image degradation never fired.
+      // Fail-open: only a confirmed `false` routes to the /image degradation
+      // path; `true` and `'unknown'` keep the inline behavior.
+      const visionCapable = resolveVisionSupport().supportsImage !== false;
 
       // No hard block on images: even without an inline-vision model, the image
       // is saved to the workspace and its path is handed to the agent, which may

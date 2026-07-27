@@ -62,15 +62,17 @@ function makeMonitor(overrides: Partial<Monitor>): Monitor {
 // ── Device monitor fixtures ────────────────────────────────────────────────────
 
 // Device template stored in agent_prompt (from defaultAgentPrompt('device') in service.ts)
-// Source: extensions/research-claw-core/src/monitor/service.ts:330-340
+// Source: extensions/research-claw-core/src/monitor/service.ts
+// NOTE: representative mirror — feeds buildMonitorCronMessage to test its
+// {target}/{monitor_id}/{check_prompt} substitution. Kept in sync with the real
+// defaultAgentPrompt('device') placeholders (service.ts). monitor_report now uses
+// the real schema (monitor_id/results/fingerprints — no top-level title=).
 const DEVICE_AGENT_PROMPT_TEMPLATE =
-  '你是外设定时查证代理。目标设备 ID: {target}。\n' +
-  '1. 调用 periph_camera_snap({"device_id": "{target}", "purpose": "scheduled check"}) 抓取当前帧。\n' +
-  '2. 若抓帧失败(missed/error):调用 periph_observe 记录 kind=\'check\'、verdict=\'missed\'、summary=失败原因,然后 monitor_report 上报空结果,结束。\n' +
-  '3. 若抓帧成功:根据下方"查证要求"分析画面(若你无法直接看到图像,调用 image 工具读取 frame_path 获取画面描述后再分析)。\n' +
-  '4. 调用 periph_observe 记录 kind=\'check\':一切正常 verdict=\'ok\';发现异常 verdict=\'alert\';无法判断 verdict=\'unverified\'。summary 用一句话中文写明结论,frame_path 传抓到的帧。\n' +
-  '5. monitor_report 上报本轮结果(title=结论一句话)。\n' +
-  '6. 仅当 verdict=\'alert\' 时调用 send_notification 通知用户,内容含设备名与异常描述。\n' +
+  '你是外设定时查证代理。目标设备 ID: {target}。本监控 ID: {monitor_id}。\n' +
+  '0. 调用 periph_list 检查 camera_bridge.online。online=false 时:periph_observe 记录 verdict=\'missed\'、monitor_id=\'{monitor_id}\',然后 monitor_report({"monitor_id":"{monitor_id}","results":[],"fingerprints":[]}) 结束。online=true 才继续。\n' +
+  '1. 调用 periph_camera_snap({"device_id":"{target}","purpose":"scheduled check","monitor_id":"{monitor_id}"}) 抓取当前帧。\n' +
+  '4. 调用 periph_observe 记录 kind=\'check\'、monitor_id=\'{monitor_id}\'。\n' +
+  '5. 调用 monitor_report({"monitor_id":"{monitor_id}","results":[{"title":结论一句话}],"fingerprints":[frame_path]})。\n' +
   '查证要求: {check_prompt 或 "描述画面中正在发生什么,判断是否存在异常。"}';
 
 const DEVICE_MONITOR_WITH_CUSTOM_PROMPT: Monitor = makeMonitor({
@@ -109,13 +111,24 @@ const FEED_MONITOR: Monitor = makeMonitor({
 
 describe('buildMonitorCronMessage — device branch', () => {
   describe('target substitution', () => {
+    it('replaces {monitor_id} with the monitor id and uses real monitor_report schema (audit #3/P2-O1)', () => {
+      const msg = testBuildMonitorCronMessage(DEVICE_MONITOR_WITH_CUSTOM_PROMPT);
+      // Every {monitor_id} placeholder is substituted with the monitor's id.
+      expect(msg).not.toContain('{monitor_id}');
+      expect(msg).toContain('"monitor_id":"cam-lab-001"');
+      // monitor_report is called with the real schema, never a top-level title= arg.
+      expect(msg).toContain('"results"');
+      expect(msg).toContain('"fingerprints"');
+      expect(msg).not.toMatch(/monitor_report[^\n]*上报本轮结果\(title=/);
+    });
+
     it('replaces all {target} occurrences with monitor.target (custom check_prompt)', () => {
       const msg = testBuildMonitorCronMessage(DEVICE_MONITOR_WITH_CUSTOM_PROMPT);
       // Both {target} placeholders must be filled
       expect(msg).not.toContain('{target}');
       expect(msg).toContain('dev-cam-001');
       // device_id argument in periph_camera_snap call
-      expect(msg).toContain('"device_id": "dev-cam-001"');
+      expect(msg).toContain('"device_id":"dev-cam-001"');
       // Header line
       expect(msg).toContain('目标设备 ID: dev-cam-001');
     });
@@ -124,7 +137,7 @@ describe('buildMonitorCronMessage — device branch', () => {
       const msg = testBuildMonitorCronMessage(DEVICE_MONITOR_NO_CUSTOM_PROMPT);
       expect(msg).not.toContain('{target}');
       expect(msg).toContain('dev-cam-002');
-      expect(msg).toContain('"device_id": "dev-cam-002"');
+      expect(msg).toContain('"device_id":"dev-cam-002"');
     });
   });
 
@@ -201,6 +214,89 @@ describe('buildMonitorCronMessage — device branch', () => {
       expect(msg).toContain('MONITOR_ID: rss-001');
       expect(msg).toContain('MONITOR_NAME: RSS Feed Monitor');
       expect(msg).toContain('TARGET: https://huggingface.co/blog/feed.xml');
+    });
+  });
+
+  // ── P1-R1 (SPEC:378, §13.4): report/reminder Tool boundary exemption ────────
+  // The seed prompts require workspace_save / task_list:
+  //   weekly-report:  extensions/research-claw-core/src/monitor/service.ts:202-209
+  //   daily-reminder: extensions/research-claw-core/src/monitor/service.ts:220-227
+  // The strict boundary ("Do not call ... workspace_* or other task/workspace
+  // tools") would forbid the monitor's own stored prompt, so report/reminder get
+  // a relaxed boundary via a source_type branch (same approach as device).
+
+  describe('P1-R1: report/reminder monitors get a relaxed Tool boundary', () => {
+    const REPORT_MONITOR: Monitor = makeMonitor({
+      id: 'weekly-report',
+      name: 'Weekly Progress Report',
+      source_type: 'report',
+      target: '',
+      schedule: '0 17 * * 5',
+      // Real seed prompt: monitor/service.ts:202-209
+      agent_prompt:
+        'Generate a weekly research progress report covering the past 7 days. Include: ' +
+        '1) Papers added/read this week (use library_search). ' +
+        '2) Tasks completed and in-progress (use task_list). ' +
+        '3) Key findings or notes added. ' +
+        '4) Suggested focus areas for next week. ' +
+        'Save the report to workspace: workspace_save("outputs/reports/weekly-YYYY-MM-DD.md", ...). ' +
+        'Send a brief notification with send_notification.',
+    });
+
+    const REMINDER_MONITOR: Monitor = makeMonitor({
+      id: 'daily-reminder',
+      name: 'Daily Task Reminder',
+      source_type: 'reminder',
+      target: '',
+      schedule: '0 9 * * *',
+      // Real seed prompt: monitor/service.ts:220-227
+      agent_prompt:
+        'Check for tasks due within 24 hours using task_list with deadline filter. ' +
+        'Also check for overdue tasks. ' +
+        'Send a notification with send_notification summarizing: ' +
+        '- Number of overdue tasks (if any, list titles). ' +
+        '- Tasks due today. ' +
+        '- Top 3 priority tasks for the day. ' +
+        'Keep the notification concise (under 200 chars for title).',
+    });
+
+    it('report monitor message no longer bans workspace_*/task tools', () => {
+      const msg = testBuildMonitorCronMessage(REPORT_MONITOR);
+      // The strict prohibition must be gone…
+      expect(msg).not.toContain('Do not call read, task_flow_stage, workspace_*');
+      // …replaced by an explicit allowance for the tools the seed prompt requires
+      expect(msg).toContain(
+        'You may also call the workspace/task/library tools the stored monitor agent prompt requires (e.g. workspace_save, task_list).',
+      );
+      // Seed prompt itself still delivered verbatim
+      expect(msg).toContain('Stored monitor agent prompt:');
+      expect(msg).toContain('workspace_save("outputs/reports/weekly-YYYY-MM-DD.md", ...)');
+    });
+
+    it('reminder monitor message no longer bans workspace_*/task tools', () => {
+      const msg = testBuildMonitorCronMessage(REMINDER_MONITOR);
+      expect(msg).not.toContain('Do not call read, task_flow_stage, workspace_*');
+      expect(msg).toContain(
+        'You may also call the workspace/task/library tools the stored monitor agent prompt requires (e.g. workspace_save, task_list).',
+      );
+      expect(msg).toContain('task_list with deadline filter');
+    });
+
+    it('report/reminder keep the numbered protocol and monitor bookkeeping tools', () => {
+      const msg = testBuildMonitorCronMessage(REPORT_MONITOR);
+      expect(msg).toContain('You are executing a scheduled monitor. Follow this exact protocol:');
+      expect(msg).toContain('monitor_get_context');
+      expect(msg).toContain('monitor_report');
+      expect(msg).toContain('send_notification');
+      expect(msg).toContain('MONITOR_ID: weekly-report');
+      expect(msg).toContain('SOURCE_TYPE: report');
+    });
+
+    it('feed/api/code monitors keep the strict Tool boundary (non-regression)', () => {
+      const msg = testBuildMonitorCronMessage(FEED_MONITOR);
+      expect(msg).toContain(
+        'Tool boundary: use monitor_get_context, monitor_collect_candidates, monitor_report, monitor_note, and send_notification only. Do not call read, task_flow_stage, workspace_* or other task/workspace tools for this scheduled monitor.',
+      );
     });
   });
 

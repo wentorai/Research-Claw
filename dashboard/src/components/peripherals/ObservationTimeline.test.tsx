@@ -20,7 +20,27 @@ import {
   RC_PERIPH_OBSERVATIONS_LIST_RESPONSE,
   RC_PERIPH_OBSERVATIONS_LIST_EMPTY_RESPONSE,
 } from '../../__fixtures__/gateway-payloads/periph';
-import { usePeripheralsStore } from '../../stores/peripherals';
+import { usePeripheralsStore, PERIPH_OBS_PAGE_SIZE } from '../../stores/peripherals';
+
+// A FULL page of observations (=== PERIPH_OBS_PAGE_SIZE) so the store marks
+// hasMore=true and the "load earlier" pager renders. Descending captured_at; the
+// last (oldest) row's timestamp is what the pager sends as its `before` cursor.
+const FULL_PAGE_RESPONSE = {
+  observations: Array.from({ length: PERIPH_OBS_PAGE_SIZE }, (_, i) => ({
+    id: `obs-full-${i}`,
+    device_id: 'dev-cam-001',
+    monitor_id: null,
+    kind: 'check' as const,
+    verdict: 'ok' as const,
+    summary: `row ${i}`,
+    frame_path: null,
+    result_json: {},
+    captured_at: `2026-07-20 ${String(23 - Math.floor(i / 3)).padStart(2, '0')}:${String(59 - (i % 60)).padStart(2, '0')}:00`,
+    // Monotonic keyset cursor (rowid); DESC list → newest has the largest cursor.
+    cursor: PERIPH_OBS_PAGE_SIZE - i,
+  })),
+};
+const FULL_PAGE_OLDEST = FULL_PAGE_RESPONSE.observations[PERIPH_OBS_PAGE_SIZE - 1];
 
 // ── i18n mock ─────────────────────────────────────────────────────────────────
 vi.mock('react-i18next', () => ({
@@ -90,6 +110,7 @@ describe('ObservationTimeline', () => {
     usePeripheralsStore.setState({
       devices: [],
       observations: {},
+      observationsHasMore: {},
       loading: false,
       error: null,
       unavailable: false,
@@ -121,7 +142,7 @@ describe('ObservationTimeline', () => {
       renderTimeline('dev-cam-001');
 
       await waitFor(() => {
-        expect(mockRequest).toHaveBeenCalledWith('rc.periph.observations.list', { device_id: 'dev-cam-001' });
+        expect(mockRequest).toHaveBeenCalledWith('rc.periph.observations.list', { device_id: 'dev-cam-001', limit: PERIPH_OBS_PAGE_SIZE });
       });
     });
   });
@@ -243,13 +264,30 @@ describe('ObservationTimeline', () => {
         expect(screen.getByTestId('periph-timeline-root')).toBeDefined();
       });
     });
+
+    // P1-N1: missed rows explain their cause on hover (Dashboard offline / host
+    // asleep → no frame captured); other verdicts carry no hover explanation.
+    it('missed observation row has an explanatory hover title (P1-N1)', async () => {
+      mockRequest.mockResolvedValueOnce(RC_PERIPH_OBSERVATIONS_LIST_RESPONSE);
+
+      renderTimeline();
+
+      await waitFor(() => {
+        // obs-003 has verdict 'missed' (periph.ts fixture)
+        const missedRow = screen.getByTestId('periph-timeline-obs-obs-003');
+        expect(missedRow.getAttribute('title')).toContain('offline');
+        // ok row (obs-001) carries no hover title
+        const okRow = screen.getByTestId('periph-timeline-obs-obs-001');
+        expect(okRow.getAttribute('title')).toBeNull();
+      });
+    });
   });
 
   // ── Load more ─────────────────────────────────────────────────────────────
 
   describe('"Load more" pagination', () => {
-    it('renders the "Load earlier" button', async () => {
-      mockRequest.mockResolvedValueOnce(RC_PERIPH_OBSERVATIONS_LIST_RESPONSE);
+    it('renders the "Load earlier" button when the first page is FULL (more may exist)', async () => {
+      mockRequest.mockResolvedValueOnce(FULL_PAGE_RESPONSE);
 
       renderTimeline();
 
@@ -258,14 +296,46 @@ describe('ObservationTimeline', () => {
       });
     });
 
-    it('calls loadObservations with before cursor when "Load earlier" is clicked', async () => {
-      // Initial load
+    it('hides the "Load earlier" button when the page is SHORT (end reached)', async () => {
+      // The 3-row fixture is shorter than a full page → no older rows → no pager.
+      // This is the bug fix: previously the button rendered unconditionally and
+      // clicking it at the end fetched nothing and never disappeared.
       mockRequest.mockResolvedValueOnce(RC_PERIPH_OBSERVATIONS_LIST_RESPONSE);
 
       renderTimeline();
 
       await waitFor(() => {
         expect(screen.getByTestId('periph-timeline-root')).toBeDefined();
+      });
+      expect(screen.queryByTestId('periph-timeline-load-more')).toBeNull();
+    });
+
+    it('hides the pager after a "load earlier" click returns a short page', async () => {
+      mockRequest.mockResolvedValueOnce(FULL_PAGE_RESPONSE);
+
+      renderTimeline();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('periph-timeline-load-more')).toBeDefined();
+      });
+
+      // Older page comes back short → hasMore flips false → pager disappears.
+      mockRequest.mockResolvedValueOnce(RC_PERIPH_OBSERVATIONS_LIST_RESPONSE);
+      fireEvent.click(screen.getByTestId('periph-timeline-load-more'));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('periph-timeline-load-more')).toBeNull();
+      });
+    });
+
+    it('calls loadObservations with before cursor when "Load earlier" is clicked', async () => {
+      // Full first page so the pager renders.
+      mockRequest.mockResolvedValueOnce(FULL_PAGE_RESPONSE);
+
+      renderTimeline();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('periph-timeline-load-more')).toBeDefined();
       });
 
       // Second call for "load more"
@@ -281,7 +351,11 @@ describe('ObservationTimeline', () => {
         expect(calls.length).toBeGreaterThanOrEqual(2);
         const loadMoreCall = calls[calls.length - 1];
         expect(loadMoreCall[1]).toHaveProperty('before');
-        expect(loadMoreCall[1].before).toBe('2026-07-19 22:00:00'); // obs-003 captured_at
+        expect(loadMoreCall[1].before).toBe(FULL_PAGE_OLDEST.captured_at);
+        // Composite keyset cursor: the oldest row's rowid must accompany `before`
+        // so the gateway can tiebreak same-second rows (audit #6).
+        expect(loadMoreCall[1].before_cursor).toBe(FULL_PAGE_OLDEST.cursor);
+        expect(loadMoreCall[1].limit).toBe(PERIPH_OBS_PAGE_SIZE);
       });
     });
   });

@@ -37,7 +37,7 @@
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -373,7 +373,7 @@ CREATE TABLE IF NOT EXISTS rc_periph_devices (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   kind          TEXT NOT NULL CHECK(kind IN ('camera','audio-recorder','lab-instrument','embodied')),
-  driver        TEXT NOT NULL CHECK(driver IN ('browser-camera','mcp-plaud','rtsp','oc-node')),
+  driver        TEXT NOT NULL CHECK(driver IN ('browser-camera','mcp-plaud','rtsp','local-camera','oc-node')),
   enabled       INTEGER NOT NULL DEFAULT 1,
   config        TEXT NOT NULL DEFAULT '{}',
   check_prompt  TEXT NOT NULL DEFAULT '',

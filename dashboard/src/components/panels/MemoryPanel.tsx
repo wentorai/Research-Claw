@@ -306,7 +306,14 @@ export const MemoryPanel: React.FC = () => {
             prefix={<SearchOutlined />}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onPressEnter={handleSearch}
+            onPressEnter={(e) => {
+              // IME composition guard (CJK input). rc-input derives onPressEnter
+              // straight from keydown with NO composition guard of its own, so
+              // the Enter that merely confirms an IME candidate would fire a real
+              // search with a half-composed query.
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              void handleSearch();
+            }}
             style={{ flex: '1 1 220px', minWidth: 0 }}
             allowClear
           />

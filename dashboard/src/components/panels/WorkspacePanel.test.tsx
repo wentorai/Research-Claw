@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { App as AntApp } from 'antd';
-import WorkspacePanel from './WorkspacePanel';
+import WorkspacePanel, { InlineNameInput, RenameInput } from './WorkspacePanel';
 import { useGatewayStore } from '../../stores/gateway';
 import { useConfigStore } from '../../stores/config';
+import { getThemeTokens } from '../../styles/theme';
 import { uploadFileToWorkspace } from '../../gateway/upload';
 
 // Mock the upload HTTP helper so drop tests can assert destinations.
@@ -424,5 +425,201 @@ describe('WorkspacePanel — destination picker & node drops', () => {
 
     await waitFor(() => expect(uploadMock).toHaveBeenCalled());
     expect(screen.queryByText('workspace.dropToUpload')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IME composition guards (CJK input) — 项目强制规则:
+// "Guard all keyboard handlers against IME composition events".
+//
+// 回归目标:这两个 onKeyDown 的守卫曾经只挂在 Enter 分支上,Escape 分支写在守卫
+// 之前且直接 return —— 中文命名文件/文件夹时按 Esc 关候选窗会连带销毁编辑器,
+// 已输入内容全部丢弃。守卫必须置顶,同时覆盖 Escape 与 Enter。
+//
+// 三个合成信号都要拦:onCompositionStart 置的内部标志、nativeEvent.isComposing、
+// keyCode === 229(部分浏览器/输入法只给这一路信号)。
+// ---------------------------------------------------------------------------
+
+const imeTokens = getThemeTokens('dark');
+
+describe('WorkspacePanel InlineNameInput — IME 合成守卫 (新建/内联编辑)', () => {
+  function renderInline() {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <InlineNameInput
+        defaultValue=""
+        icon={null}
+        iconColor="#71717A"
+        depth={0}
+        tokens={imeTokens}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />,
+    );
+    const input = document.querySelector('input') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    return { input, onConfirm, onCancel };
+  }
+
+  it('合成期(compositionStart 已置位)按 Escape 不得销毁编辑器', () => {
+    const { input, onCancel, onConfirm } = renderInline();
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '实验数据' } });
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('合成期(nativeEvent.isComposing)按 Escape 不得销毁编辑器', () => {
+    const { input, onCancel } = renderInline();
+    fireEvent.change(input, { target: { value: '实验数据' } });
+
+    fireEvent.keyDown(input, { key: 'Escape', isComposing: true });
+
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('合成期(keyCode=229)按 Escape 不得销毁编辑器', () => {
+    const { input, onCancel } = renderInline();
+    fireEvent.change(input, { target: { value: '实验数据' } });
+
+    fireEvent.keyDown(input, { key: 'Escape', keyCode: 229 });
+
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('合成期按 Enter 不得提交半成品名字', () => {
+    const { input, onConfirm, onCancel } = renderInline();
+    fireEvent.change(input, { target: { value: '实验数' } });
+
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 });
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('非合成期按 Escape 照常取消(守卫不得误伤主路径)', () => {
+    const { input, onCancel } = renderInline();
+    fireEvent.change(input, { target: { value: '实验数据' } });
+
+    fireEvent.keyDown(input, { key: 'Escape', isComposing: false });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('非合成期按 Enter 照常提交(守卫不得误伤主路径)', () => {
+    const { input, onConfirm } = renderInline();
+    fireEvent.change(input, { target: { value: '实验数据' } });
+
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false });
+
+    expect(onConfirm).toHaveBeenCalledWith('实验数据');
+  });
+
+  it('合成结束(compositionEnd)后 Escape 恢复正常取消', () => {
+    const { input, onCancel } = renderInline();
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '实验数据' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onCancel).not.toHaveBeenCalled();
+
+    fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('WorkspacePanel RenameInput — IME 合成守卫 (重命名)', () => {
+  function renderRename() {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <RenameInput
+        defaultValue="paper.pdf"
+        isFile
+        tokens={imeTokens}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />,
+    );
+    const input = document.querySelector('input') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    return { input, onConfirm, onCancel };
+  }
+
+  it('合成期(compositionStart 置 dataset.composing)按 Escape 不得取消重命名', () => {
+    const { input, onCancel, onConfirm } = renderRename();
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '论文终稿' } });
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('合成期(nativeEvent.isComposing)按 Escape 不得取消重命名', () => {
+    const { input, onCancel } = renderRename();
+    fireEvent.change(input, { target: { value: '论文终稿' } });
+
+    fireEvent.keyDown(input, { key: 'Escape', isComposing: true });
+
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('合成期(keyCode=229)按 Escape 不得取消重命名', () => {
+    const { input, onCancel } = renderRename();
+    fireEvent.change(input, { target: { value: '论文终稿' } });
+
+    fireEvent.keyDown(input, { key: 'Escape', keyCode: 229 });
+
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('合成期按 Enter 不得提交半成品名字', () => {
+    const { input, onConfirm, onCancel } = renderRename();
+    fireEvent.change(input, { target: { value: '论文终' } });
+
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 });
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('非合成期按 Escape 照常取消(守卫不得误伤主路径)', () => {
+    const { input, onCancel } = renderRename();
+    fireEvent.change(input, { target: { value: '论文终稿' } });
+
+    fireEvent.keyDown(input, { key: 'Escape', isComposing: false });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('非合成期按 Enter 照常提交(守卫不得误伤主路径)', () => {
+    const { input, onConfirm } = renderRename();
+    fireEvent.change(input, { target: { value: '论文终稿.pdf' } });
+
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false });
+
+    expect(onConfirm).toHaveBeenCalledWith('论文终稿.pdf');
+  });
+
+  it('合成结束(compositionEnd)后 Escape 恢复正常取消', () => {
+    const { input, onCancel } = renderRename();
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '论文终稿' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onCancel).not.toHaveBeenCalled();
+
+    fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });

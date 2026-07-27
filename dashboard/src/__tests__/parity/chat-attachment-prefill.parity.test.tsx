@@ -153,6 +153,15 @@ vi.mock('../../stores/sessions', () => ({
   },
 }));
 
+// MessageInput now derives its attach-time vision hint from useVisionSupport()
+// (§13.5: composer + send pipeline share one session-aware resolver). This test
+// is about attachment prefill, not vision, so mock the hook to a stable
+// image-capable verdict — mirrors the pre-change primaryModelSupportsVision()=>true
+// mock so attachNoVisionModel stays false and no hint interferes with the render.
+vi.mock('../../hooks/useVisionSupport', () => ({
+  useVisionSupport: () => ({ supportsImage: true, source: 'config', modelRef: null }),
+}));
+
 vi.mock('../../stores/tool-stream', () => ({
   useToolStreamStore: {
     getState: () => ({ clearAll: vi.fn() }),

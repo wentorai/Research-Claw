@@ -85,11 +85,25 @@ export const RC_PERIPH_DEVICES_UPDATE_RESPONSE = {
 };
 
 // ── rc.periph.devices.delete ──────────────────────────────────────────────
-// Source: rpc.ts:143-151 → registerMethod('rc.periph.devices.delete', ...)
-//   returns { ok: true }
+// Source: rpc.ts → registerMethod('rc.periph.devices.delete', ...)
+//   returns { ok: true, deleted_monitors: Array<{id, gateway_job_id}> }
+// The array is the device monitors the plugin cascaded away with the device
+// (R2-I3); each names the OpenClaw cron job the client must still remove.
+// Shape asserted against the real handler in
+// extensions/research-claw-core/src/__tests__/periph-rpc.test.ts.
 
 export const RC_PERIPH_DEVICES_DELETE_RESPONSE = {
   ok: true,
+  deleted_monitors: [] as Array<{ id: string; gateway_job_id: string | null }>,
+};
+
+/** Device that had two bound monitors — one enabled with a cron job, one not. */
+export const RC_PERIPH_DEVICES_DELETE_CASCADE_RESPONSE = {
+  ok: true,
+  deleted_monitors: [
+    { id: 'mon-device-001', gateway_job_id: 'cron-job-7' },
+    { id: 'mon-device-002', gateway_job_id: null },
+  ] as Array<{ id: string; gateway_job_id: string | null }>,
 };
 
 // ── rc.periph.observations.list ───────────────────────────────────────────
@@ -114,6 +128,7 @@ export const RC_PERIPH_OBSERVATIONS_LIST_RESPONSE = {
       frame_path: 'periph/dev-cam-001/2026-07-20T10-30-00.jpg',
       result_json: { confidence: 0.97, items_detected: ['beaker', 'microscope'] },
       captured_at: '2026-07-20 10:30:00',
+      cursor: 3,
     },
     {
       id: 'obs-002',
@@ -125,6 +140,7 @@ export const RC_PERIPH_OBSERVATIONS_LIST_RESPONSE = {
       frame_path: 'periph/dev-cam-001/2026-07-20T09-00-00.jpg',
       result_json: { confidence: 0.89, alert_type: 'spill' },
       captured_at: '2026-07-20 09:00:00',
+      cursor: 2,
     },
     {
       id: 'obs-003',
@@ -136,6 +152,7 @@ export const RC_PERIPH_OBSERVATIONS_LIST_RESPONSE = {
       frame_path: null,
       result_json: { timeout_ms: 5000 },
       captured_at: '2026-07-19 22:00:00',
+      cursor: 1,
     },
   ],
 };
@@ -165,9 +182,13 @@ export const RC_PERIPH_BRIDGE_ANNOUNCE_RESPONSE = {
 };
 
 // ── rc.periph.plaud.status ────────────────────────────────────────────────
-// Source: rpc.ts:237-239 → registerMethod('rc.periph.plaud.status', ...)
-//   returns plaud.status() → PlaudStatus (rpc.ts:22-28)
-//   Fields: tokenPresent, account?, toolsReady?, lastError?
+// Source: rpc.ts registerMethod('rc.periph.plaud.status', ...)
+//   returns { ...(await plaud.status()), docker: isDocker } → PlaudStatus
+//   Fields: tokenPresent, account?, toolsReady?, lastError?, docker?
+//   - docker is stamped by the HANDLER (isDocker = fs.existsSync('/.dockerenv')
+//     || process.env.DOCKER==='1', mirrors workspace/rpc.ts:24). plaud.status()
+//     itself never sets it (periph/plaud.ts status()). On a normal host docker
+//     is false; inside a container it is true → dashboard greys out connect (P1-U4).
 //   NOTE: 'configured' is NOT returned here — dashboard derives it from config.get (T15)
 
 export const RC_PERIPH_PLAUD_STATUS_LOGGED_IN_RESPONSE = {
@@ -175,6 +196,7 @@ export const RC_PERIPH_PLAUD_STATUS_LOGGED_IN_RESPONSE = {
   account: 'researcher@lab.edu',
   toolsReady: true,
   lastError: undefined,
+  docker: false,
 };
 
 /** Clean "not logged in" state — no lastError.  Use for "configured but not logged in" scenarios. */
@@ -182,6 +204,21 @@ export const RC_PERIPH_PLAUD_STATUS_LOGGED_OUT_RESPONSE = {
   tokenPresent: false,
   account: undefined,
   toolsReady: false,
+  docker: false,
+};
+
+/**
+ * Docker container state (P1-U4). The gateway handler stamps docker:true when it
+ * finds /.dockerenv or DOCKER=1 (mirrors workspace/rpc.ts:24). tokenPresent is
+ * false because the container can never complete the browser OAuth login. The
+ * dashboard greys out connect + shows the container-unsupported warning and never
+ * enters the writeConfig/spawn path.
+ */
+export const RC_PERIPH_PLAUD_STATUS_DOCKER_RESPONSE = {
+  tokenPresent: false,
+  account: undefined,
+  toolsReady: false,
+  docker: true,
 };
 
 /** Error state — token expired, lastError present.  Use for "error strip" scenarios. */

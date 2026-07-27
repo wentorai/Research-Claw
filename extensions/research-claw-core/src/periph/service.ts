@@ -14,12 +14,42 @@ import * as path from 'node:path';
 
 import type Database from 'better-sqlite3';
 
+import { resolveWithinRoot } from '../workspace/path-guard.js';
 import type { PeriphDevice, PeriphObservation, PeriphKind, PeriphDriver, PeriphVerdict } from './types.js';
 
 export { type PeriphDevice, type PeriphObservation, type PeriphKind, type PeriphDriver, type PeriphVerdict } from './types.js';
 
 /** Maximum number of observations kept per device (oldest are trimmed). */
 export const OBSERVATION_RETENTION_PER_DEVICE = 500;
+
+// ── Device id validation ────────────────────────────────────────────────────
+
+/**
+ * A device id doubles as a PATH SEGMENT (`<workspaceRoot>/periph/<id>/`), so it
+ * must be a single safe segment — not merely a unique string. Accepts what the
+ * product actually mints: `randomUUID()` (hex + dashes) and the fixed `'plaud'`
+ * literal. Rejects everything that could change the shape of the resolved path:
+ * `..`, `/`, `\` (a Windows separator — CLAUDE.md ships win32), NUL, leading
+ * dots/dashes, absolute paths, control characters, and over-long ids.
+ */
+const DEVICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+export class PeriphDeviceIdError extends Error {
+  override readonly name = 'PeriphDeviceIdError';
+  constructor(public readonly deviceId: string) {
+    // The id is caller-supplied, never a credential — safe to echo back so the
+    // dashboard/agent can see what was rejected.
+    super(`Invalid peripheral device id: ${JSON.stringify(deviceId)}`);
+  }
+}
+
+export function isValidPeriphDeviceId(id: unknown): id is string {
+  return typeof id === 'string' && DEVICE_ID_RE.test(id);
+}
+
+export function assertValidPeriphDeviceId(id: unknown): asserts id is string {
+  if (!isValidPeriphDeviceId(id)) throw new PeriphDeviceIdError(String(id));
+}
 
 // ── DB row types ────────────────────────────────────────────────────────────
 
@@ -47,6 +77,8 @@ interface ObservationRow {
   frame_path: string | null;
   result_json: string;
   captured_at: string;
+  /** SQLite rowid, aliased via `rowid AS _cursor` in list/get SELECTs. */
+  _cursor?: number;
 }
 
 // ── Row → domain mappers ────────────────────────────────────────────────────
@@ -82,7 +114,16 @@ function rowToObservation(row: ObservationRow): PeriphObservation {
     frame_path: row.frame_path,
     result_json,
     captured_at: row.captured_at,
+    cursor: row._cursor ?? 0,
   };
+}
+
+/** Result of {@link PeriphService.deleteDevice} — see its doc comment. */
+export interface PeriphDeviceDeletion {
+  /** false when no device row matched (the monitor cascade still ran). */
+  deleted: boolean;
+  /** Device monitors removed by the cascade, with the cron job each still holds. */
+  monitors: Array<{ id: string; gateway_job_id: string | null }>;
 }
 
 // ── PeriphService ────────────────────────────────────────────────────────────
@@ -120,6 +161,10 @@ export class PeriphService {
     config?: Record<string, unknown>;
     check_prompt?: string;
   }): PeriphDevice {
+    // A caller-supplied id becomes a frame-directory path segment; validate it
+    // BEFORE it can reach the DB, so no row can exist that frameDirFor must
+    // later refuse. Server-minted UUIDs always satisfy the same rule.
+    if (input.id !== undefined) assertValidPeriphDeviceId(input.id);
     const id = input.id ?? randomUUID();
     const config = JSON.stringify(input.config ?? {});
     const check_prompt = input.check_prompt ?? '';
@@ -160,8 +205,40 @@ export class PeriphService {
     return this.getDevice(id)!;
   }
 
-  deleteDevice(id: string): void {
-    this.db.prepare('DELETE FROM rc_periph_devices WHERE id = ?').run(id);
+  /**
+   * Delete a device, its observations (FK CASCADE) and every monitor bound to
+   * it via `source_type='device'`.
+   *
+   * rc_monitors.target is a free-form TEXT column shared by all source types,
+   * so SQLite cannot express this as a foreign key — the cascade is explicit
+   * and matches on `source_type='device' AND target = id`, never on the id
+   * alone (an arxiv/web monitor may legitimately carry the same string).
+   *
+   * Both statements run in one transaction: a half-applied delete would leave
+   * exactly the orphan state this exists to prevent.
+   *
+   * The removed monitors are returned with their `gateway_job_id` because the
+   * OpenClaw cron job lives outside this DB — the caller (rc.periph RPC →
+   * dashboard) removes it, the same division of labour as `MonitorService.delete`.
+   * The monitor cascade runs even when the device row is already gone, so a
+   * retry after a failed delete still clears leftovers.
+   */
+  deleteDevice(id: string): PeriphDeviceDeletion {
+    const run = this.db.transaction((deviceId: string): PeriphDeviceDeletion => {
+      const monitors = this.db.prepare(
+        "SELECT id, gateway_job_id FROM rc_monitors WHERE source_type = 'device' AND target = ?",
+      ).all(deviceId) as Array<{ id: string; gateway_job_id: string | null }>;
+
+      const info = this.db.prepare('DELETE FROM rc_periph_devices WHERE id = ?').run(deviceId);
+      if (monitors.length > 0) {
+        this.db.prepare(
+          "DELETE FROM rc_monitors WHERE source_type = 'device' AND target = ?",
+        ).run(deviceId);
+      }
+
+      return { deleted: info.changes > 0, monitors };
+    });
+    return run(id);
   }
 
   // ── Observations ─────────────────────────────────────────────────────────
@@ -224,15 +301,29 @@ export class PeriphService {
         `).all(input.device_id, input.device_id) as Array<{ id: string; frame_path: string | null }>;
 
         // Collect validated frame_paths before deleting.
+        // Audit #5: a lexical prefix check does NOT follow symlinks. If
+        // `periph/<id>` (an intermediate dir) is a symlink to an external
+        // directory, unlinkSync on `periph/<id>/victim` would delete the real
+        // external file. So we realpath the PARENT directory and require its REAL
+        // location to be under the REAL periph/ dir, then unlink by real path.
+        // (A frame_path that is itself a symlink is safe: unlink removes the link,
+        // not its target.)
         const periphRoot = path.resolve(this.workspaceRoot, 'periph');
+        let realPeriph: string | null = null;
+        try { realPeriph = fs.realpathSync(periphRoot); } catch { realPeriph = null; }
         for (const row of toDelete) {
-          if (row.frame_path) {
-            const abs = path.resolve(this.workspaceRoot, row.frame_path);
-            // Strict prefix check — must be within <workspaceRoot>/periph/
-            // (include the path separator to prevent "periph-evil" bypass).
-            if (abs.startsWith(periphRoot + path.sep) || abs.startsWith(periphRoot + '/')) {
-              pathsToUnlink.push(abs);
+          if (!row.frame_path || realPeriph === null) continue;
+          const abs = path.resolve(this.workspaceRoot, row.frame_path);
+          // Cheap lexical gate first (rejects `..` escapes after normalization).
+          if (!abs.startsWith(periphRoot + path.sep) && !abs.startsWith(periphRoot + '/')) continue;
+          try {
+            const realParent = fs.realpathSync(path.dirname(abs));
+            if (realParent !== realPeriph && !realParent.startsWith(realPeriph + path.sep)) {
+              continue; // parent dir escapes periph/ via symlink — refuse to delete
             }
+            pathsToUnlink.push(path.join(realParent, path.basename(abs)));
+          } catch {
+            // Parent dir missing/unreadable — nothing safe to delete.
           }
         }
 
@@ -263,7 +354,7 @@ export class PeriphService {
 
     return rowToObservation(
       this.db
-        .prepare('SELECT * FROM rc_periph_observations WHERE id = ?')
+        .prepare('SELECT rowid AS _cursor, * FROM rc_periph_observations WHERE id = ?')
         .get(id) as ObservationRow,
     );
   }
@@ -271,14 +362,22 @@ export class PeriphService {
   /**
    * List observations in captured_at DESC order.
    *
-   * @param q.device_id  — filter by device (omit for all devices)
-   * @param q.limit      — default 50, capped at 200
-   * @param q.before     — cursor: only return rows with captured_at < before
+   * @param q.device_id     — filter by device (omit for all devices)
+   * @param q.limit         — default 50, capped at 200
+   * @param q.before        — cursor part 1: the captured_at of the last row seen
+   * @param q.before_cursor — cursor part 2: the rowid (`PeriphObservation.cursor`)
+   *                          of the last row seen. REQUIRED alongside `before` for
+   *                          correct pagination: captured_at is second-precision so
+   *                          `captured_at < before` alone drops all rows sharing the
+   *                          page boundary's second. The composite comparison
+   *                          `(captured_at, rowid) < (before, before_cursor)` matches
+   *                          the `ORDER BY captured_at DESC, rowid DESC` exactly.
    */
   listObservations(q: {
     device_id?: string;
     limit?: number;
     before?: string;
+    before_cursor?: number;
   }): PeriphObservation[] {
     const limit = Math.min(q.limit ?? 50, 200);
     const clauses: string[] = [];
@@ -289,15 +388,24 @@ export class PeriphService {
       params.push(q.device_id);
     }
     if (q.before) {
-      clauses.push('captured_at < ?');
-      params.push(q.before);
+      if (typeof q.before_cursor === 'number') {
+        // Composite keyset cursor: strictly-older second, OR same second with a
+        // smaller rowid. Mirrors ORDER BY (captured_at DESC, rowid DESC).
+        clauses.push('(captured_at < ? OR (captured_at = ? AND rowid < ?))');
+        params.push(q.before, q.before, q.before_cursor);
+      } else {
+        // Backward-compatible degraded path (no tiebreak) — may drop same-second
+        // rows at the page boundary; callers should always send before_cursor.
+        clauses.push('captured_at < ?');
+        params.push(q.before);
+      }
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const rows = this.db
       .prepare(
-        `SELECT * FROM rc_periph_observations ${where} ORDER BY captured_at DESC, rowid DESC LIMIT ?`,
+        `SELECT rowid AS _cursor, * FROM rc_periph_observations ${where} ORDER BY captured_at DESC, rowid DESC LIMIT ?`,
       )
       .all(...params, limit) as ObservationRow[];
 
@@ -333,8 +441,23 @@ export class PeriphService {
 
   // ── Utilities ─────────────────────────────────────────────────────────────
 
-  /** Canonical frame storage directory for a device. */
+  /**
+   * Canonical frame storage directory for a device, guaranteed to stay inside
+   * `<workspaceRoot>/periph/`.
+   *
+   * Two independent layers, because either alone is insufficient:
+   *  1. id-shape validation — createDevice enforces it too, but a legacy row or
+   *     a hand-edited SQLite file can still hold a traversal id, and this is the
+   *     only place that turns an id into a path.
+   *  2. resolveWithinRoot — a valid id still escapes if `periph/` (or the
+   *     workspace root itself) is a SYMLINK to an external directory; the guard
+   *     realpath-walks the first existing ancestor and rejects that.
+   *
+   * Throws (PeriphDeviceIdError / PathEscapeError) rather than returning an
+   * unsafe path — callers must not mkdir or spawn ffmpeg before this succeeds.
+   */
   frameDirFor(deviceId: string): string {
-    return path.join(this.workspaceRoot, 'periph', deviceId);
+    assertValidPeriphDeviceId(deviceId);
+    return resolveWithinRoot(this.workspaceRoot, path.join('periph', deviceId));
   }
 }

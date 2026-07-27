@@ -376,6 +376,74 @@ const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_captured ON rc_periph_observations(captured_at);`,
     ].join('\n'),
   },
+  {
+    version: 17,
+    name: 'periph_add_local_camera_driver',
+    sql: '',
+    // Widen the rc_periph_devices.driver CHECK constraint to admit 'local-camera'
+    // (§15 v1.3 场景②: gateway-side ffmpeg grab from an OS-attached USB/built-in
+    // webcam). SQLite cannot ALTER a CHECK constraint in place, so the table is
+    // rebuilt. rc_periph_observations FKs rc_periph_devices(id) ON DELETE CASCADE;
+    // we drop/recreate the child inside the same transaction so the FK repoints
+    // at the rebuilt parent (with foreign_keys temporarily suspended for the swap
+    // — legacy_alter_table keeps RENAME from rewriting child SQL, and we recreate
+    // the child explicitly to preserve its own DDL and indexes).
+    fn: (db) => {
+      // PRAGMA foreign_keys cannot change inside a transaction; applyMigration
+      // wraps this fn in one. defer_foreign_keys defers FK enforcement to COMMIT,
+      // which IS settable within a transaction and lets us drop/rebuild safely.
+      db.pragma('defer_foreign_keys = ON');
+      db.exec(`
+        -- 1. New parent with the widened driver CHECK.
+        CREATE TABLE rc_periph_devices_v17 (
+          id            TEXT PRIMARY KEY,
+          name          TEXT NOT NULL,
+          kind          TEXT NOT NULL CHECK(kind IN ('camera','audio-recorder','lab-instrument','embodied')),
+          driver        TEXT NOT NULL CHECK(driver IN ('browser-camera','mcp-plaud','rtsp','local-camera','oc-node')),
+          enabled       INTEGER NOT NULL DEFAULT 1,
+          config        TEXT NOT NULL DEFAULT '{}',
+          check_prompt  TEXT NOT NULL DEFAULT '',
+          last_seen_at  TEXT,
+          last_error    TEXT,
+          created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO rc_periph_devices_v17 (
+          id, name, kind, driver, enabled, config, check_prompt,
+          last_seen_at, last_error, created_at, updated_at
+        )
+        SELECT
+          id, name, kind, driver, enabled, config, check_prompt,
+          last_seen_at, last_error, created_at, updated_at
+        FROM rc_periph_devices;
+
+        -- 2. Preserve observations, then rebuild parent + child so the child FK
+        --    points at the rebuilt parent table (not the dropped one).
+        CREATE TEMP TABLE _obs_backup AS SELECT * FROM rc_periph_observations;
+
+        DROP TABLE rc_periph_observations;
+        DROP TABLE rc_periph_devices;
+        ALTER TABLE rc_periph_devices_v17 RENAME TO rc_periph_devices;
+
+        CREATE TABLE rc_periph_observations (
+          id           TEXT PRIMARY KEY,
+          device_id    TEXT NOT NULL REFERENCES rc_periph_devices(id) ON DELETE CASCADE,
+          monitor_id   TEXT,
+          kind         TEXT NOT NULL CHECK(kind IN ('snapshot','check','note')),
+          verdict      TEXT NOT NULL DEFAULT 'info' CHECK(verdict IN ('ok','alert','info','unverified','missed','error')),
+          summary      TEXT NOT NULL DEFAULT '',
+          frame_path   TEXT,
+          result_json  TEXT NOT NULL DEFAULT '{}',
+          captured_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO rc_periph_observations SELECT * FROM _obs_backup;
+        DROP TABLE _obs_backup;
+
+        CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_device   ON rc_periph_observations(device_id);
+        CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_captured ON rc_periph_observations(captured_at);
+      `);
+    },
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────

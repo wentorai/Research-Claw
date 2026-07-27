@@ -250,3 +250,14 @@ index 348ea2271570f7be08616a385bcb1c2697701cac..46a2b9a883e5ca505820e35b703fb605
  		}
  	];
  	const result = [];
+--- a/dist/http-common-DuE8kH2j.js
++++ b/dist/http-common-DuE8kH2j.js
+@@ -10,7 +10,7 @@
+ function setDefaultSecurityHeaders(res, opts) {
+ 	res.setHeader("X-Content-Type-Options", "nosniff");
+ 	res.setHeader("Referrer-Policy", "no-referrer");
+-	res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
++	res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()");
+ 	const strictTransportSecurity = opts?.strictTransportSecurity;
+ 	if (typeof strictTransportSecurity === "string" && strictTransportSecurity.length > 0) res.setHeader("Strict-Transport-Security", strictTransportSecurity);
+ }

@@ -1172,6 +1172,68 @@ describe('Sessions store RPC parity (sessions.*)', () => {
     });
   });
 
+  // patchSession is the general-purpose sessions.patch wrapper. Its ONLY consumer
+  // (CameraDetail's "clear /model override") reports the outcome to the user, so
+  // the store must hand back a real success/failure signal — a Promise<void> that
+  // resolves identically on success, on transport rejection and on "not connected"
+  // makes an honest UI impossible.
+  describe('patchSession → sessions.patch (outcome signalling)', () => {
+    it('returns true and forwards the fields when the gateway accepts the patch', async () => {
+      // Real wire response: OC sessions.patch → { ok: true, key } (SESSIONS_PATCH_RESPONSE)
+      mockGatewayClient.request.mockResolvedValueOnce(SESSIONS_PATCH_RESPONSE);
+
+      const ok = await useSessionsStore
+        .getState()
+        .patchSession('agent:main:project-a1b2c3d4', { model: null });
+
+      expect(ok).toBe(true);
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'sessions.patch',
+        { key: 'agent:main:project-a1b2c3d4', model: null },
+      );
+    });
+
+    it('returns false when sessions.patch is rejected by the gateway', async () => {
+      mockGatewayClient.request.mockRejectedValueOnce(new Error('invalid session key'));
+
+      const ok = await useSessionsStore
+        .getState()
+        .patchSession('agent:main:project-a1b2c3d4', { model: null });
+
+      expect(ok).toBe(false);
+    });
+
+    it('returns false without issuing an RPC when the gateway is not connected', async () => {
+      mockGatewayClient.isConnected = false;
+      try {
+        const ok = await useSessionsStore
+          .getState()
+          .patchSession('agent:main:project-a1b2c3d4', { model: null });
+
+        expect(ok).toBe(false);
+        expect(mockGatewayClient.request).not.toHaveBeenCalled();
+      } finally {
+        mockGatewayClient.isConnected = true;
+      }
+    });
+
+    it('still mirrors an accepted label patch into local state', async () => {
+      // Regression guard: tightening the return type must not drop the existing
+      // local label sync (sessions.ts patchSession `if ('label' in fields)`).
+      mockGatewayClient.request.mockResolvedValueOnce(SESSIONS_PATCH_RESPONSE);
+      useSessionsStore.setState({ sessions: SESSIONS_LIST_RESPONSE.sessions });
+
+      const ok = await useSessionsStore
+        .getState()
+        .patchSession('agent:main:project-a1b2c3d4', { label: 'Patched' });
+
+      expect(ok).toBe(true);
+      expect(
+        useSessionsStore.getState().sessions.find((s) => s.key === 'agent:main:project-a1b2c3d4')?.label,
+      ).toBe('Patched');
+    });
+  });
+
   describe('isMainSession', () => {
     it('recognizes bare "main" key', () => {
       // Source: sessions.ts:55-58

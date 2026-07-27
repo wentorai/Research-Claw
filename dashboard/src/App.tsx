@@ -389,6 +389,12 @@ export default function App() {
                       id="rc-token-input"
                       placeholder={t('boot.tokenPlaceholder')}
                       onPressEnter={(e) => {
+                        // IME composition guard (CJK input). rc-input derives
+                        // onPressEnter straight from keydown with no composition
+                        // guard, and this handler navigates the whole page away —
+                        // an Enter that merely confirms an IME candidate would
+                        // discard whatever the user had typed so far.
+                        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                         const val = (e.target as HTMLInputElement).value.trim();
                         if (val) {
                           window.location.href = `${window.location.pathname}?token=${encodeURIComponent(val)}`;

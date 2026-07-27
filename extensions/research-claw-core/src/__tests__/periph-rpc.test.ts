@@ -28,9 +28,25 @@ import type BetterSqlite3 from 'better-sqlite3';
 
 import { runMigrations } from '../db/migrations.js';
 import { PeriphService } from '../periph/service.js';
+import { MonitorService } from '../monitor/service.js';
 import { PeriphBridge } from '../periph/bridge.js';
-import { registerPeriphRpc, type PlaudManager, type PlaudStatus } from '../periph/rpc.js';
+// Mock the local-camera enumerator so rc.periph.localCameras.list is deterministic
+// (no real ffmpeg spawn). The driver itself is unit-tested in periph-local-camera.test.ts.
+vi.mock('../periph/local-camera.js', () => ({
+  listLocalCameras: vi.fn(async () => [{ device: '0', label: 'FaceTime HD Camera' }]),
+}));
+import {
+  registerPeriphRpc,
+  rtspPreviewPlaylistUrl,
+  type PlaudManager,
+  type PlaudStatus,
+} from '../periph/rpc.js';
+import { listLocalCameras } from '../periph/local-camera.js';
+import { RtspPreviewManager } from '../periph/rtsp-preview.js';
+import type { PreviewSession } from '../periph/rtsp-preview.js';
 import type { RegisterMethod } from '../types.js';
+
+const mockListLocalCameras = vi.mocked(listLocalCameras);
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3') as typeof BetterSqlite3;
@@ -80,7 +96,30 @@ function makeFakePlaud(): PlaudManager {
       toolsReady: true,
     })),
     login: vi.fn(async () => ({ ok: true })),
+    cancelLogin: vi.fn(async () => ({ ok: true })),
   };
+}
+
+/**
+ * Fake RtspPreviewManager: records start/stop calls with a deterministic token so
+ * the RPC surface is tested WITHOUT spawning real ffmpeg (the manager itself is
+ * unit-tested with a fake ffmpeg in periph-rtsp-preview.test.ts). Typed as the
+ * real class so the registration signature stays honest.
+ */
+function makeFakeRtspPreview() {
+  const starts: Array<{ deviceId: string; url: string; username?: string; password?: string }> = [];
+  const stops: string[] = [];
+  const fake = {
+    start: vi.fn(async (deviceId: string, opts: { url: string; username?: string; password?: string }): Promise<PreviewSession> => {
+      starts.push({ deviceId, url: opts.url, username: opts.username, password: opts.password });
+      return { sessionToken: `tok-${deviceId}`, deviceId, dir: `/tmp/${deviceId}` };
+    }),
+    stop: vi.fn(async (deviceId: string): Promise<boolean> => {
+      stops.push(deviceId);
+      return true;
+    }),
+  } as unknown as RtspPreviewManager;
+  return { fake, starts, stops };
 }
 
 // ── Suite ─────────────────────────────────────────────────────────────────────
@@ -91,6 +130,7 @@ describe('rc.periph.* WS RPC', () => {
   let svc: PeriphService;
   let bridge: PeriphBridge;
   let fakePlaud: PlaudManager;
+  let fakePreview: ReturnType<typeof makeFakeRtspPreview>;
   let handlers: Map<string, (params: Record<string, unknown>) => Promise<unknown> | unknown>;
 
   beforeEach(() => {
@@ -99,10 +139,14 @@ describe('rc.periph.* WS RPC', () => {
     svc = new PeriphService(db, { workspaceRoot: tmpWs });
     bridge = new PeriphBridge();
     fakePlaud = makeFakePlaud();
+    fakePreview = makeFakeRtspPreview();
+
+    mockListLocalCameras.mockReset();
+    mockListLocalCameras.mockResolvedValue([{ device: '0', label: 'FaceTime HD Camera' }]);
 
     const { registerMethod, handlers: h } = makeFakeRegister();
     handlers = h;
-    registerPeriphRpc(registerMethod, svc, bridge, fakePlaud);
+    registerPeriphRpc(registerMethod, svc, bridge, fakePlaud, fakePreview.fake);
   });
 
   afterEach(() => {
@@ -112,22 +156,27 @@ describe('rc.periph.* WS RPC', () => {
 
   // ── Handler registration ─────────────────────────────────────────────────
 
-  it('registers exactly 9 methods', () => {
+  it('registers exactly 14 methods', () => {
     const methods = [
       'rc.periph.devices.list',
       'rc.periph.devices.create',
       'rc.periph.devices.update',
       'rc.periph.devices.delete',
       'rc.periph.observations.list',
+      'rc.periph.observations.create', // P2-T1: manual snapshot → timeline
       'rc.periph.captureResult',
       'rc.periph.bridge.announce',
+      'rc.periph.localCameras.list', // §15 v1.3 场景②: OS camera enumeration
+      'rc.periph.rtspPreview.start', // §15 v1.3 场景③: RTSP→HLS live preview
+      'rc.periph.rtspPreview.stop',  // §15 v1.3 场景③: stop preview session
       'rc.periph.plaud.status',
       'rc.periph.plaud.login',
+      'rc.periph.plaud.cancelLogin',
     ];
     for (const m of methods) {
       expect(handlers.has(m), `missing handler: ${m}`).toBe(true);
     }
-    expect(handlers.size).toBe(9);
+    expect(handlers.size).toBe(14);
   });
 
   // ── rc.periph.devices.list ───────────────────────────────────────────────
@@ -255,9 +304,27 @@ describe('rc.periph.* WS RPC', () => {
     const dev = svc.createDevice({ name: 'To Delete', kind: 'camera', driver: 'browser-camera' });
 
     const result = await call(handlers, 'rc.periph.devices.delete', { id: dev.id });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, deleted_monitors: [] });
 
     expect(svc.getDevice(dev.id)).toBeNull();
+  });
+
+  // R2-I3: the cron job for a bound device monitor lives in the gateway, not in
+  // this DB — the handler must hand its id back so the dashboard can remove it.
+  it('devices.delete reports the cascaded device monitors and their cron job ids', async () => {
+    const dev = svc.createDevice({ name: 'Bench', kind: 'camera', driver: 'rtsp' });
+    const monitors = new MonitorService(db);
+    const mon = monitors.create({ name: 'Bench watch', source_type: 'device', target: dev.id });
+    monitors.toggle(mon.id, true);
+    monitors.setGatewayJobId(mon.id, 'gw-job-7');
+
+    const result = await call(handlers, 'rc.periph.devices.delete', { id: dev.id });
+
+    expect(result).toEqual({
+      ok: true,
+      deleted_monitors: [{ id: mon.id, gateway_job_id: 'gw-job-7' }],
+    });
+    expect(() => monitors.get(mon.id)).toThrow(/not found/i);
   });
 
   it('devices.delete throws validation error if id is missing', async () => {
@@ -300,6 +367,37 @@ describe('rc.periph.* WS RPC', () => {
     expect(result.observations).toHaveLength(2);
   });
 
+  // ── rc.periph.observations.create (P2-T1: manual snapshot → timeline) ─────
+  it('observations.create records an observation and returns it (manual snapshot)', async () => {
+    const dev = svc.createDevice({ name: 'Cam', kind: 'camera', driver: 'browser-camera' });
+    const result = await call(handlers, 'rc.periph.observations.create', {
+      device_id: dev.id,
+      kind: 'snapshot',
+      verdict: 'info',
+      summary: 'Manual snapshot from the dashboard',
+      frame_path: `periph/${dev.id}/manual.jpg`,
+    }) as { observation: { id: string; device_id: string; kind: string; cursor: number } };
+
+    expect(result.observation.device_id).toBe(dev.id);
+    expect(result.observation.kind).toBe('snapshot');
+    expect(typeof result.observation.cursor).toBe('number');
+    // It appears in the device's timeline.
+    expect(svc.listObservations({ device_id: dev.id })).toHaveLength(1);
+  });
+
+  it('observations.create rejects unknown device_id (FK)', async () => {
+    await expect(
+      call(handlers, 'rc.periph.observations.create', { device_id: 'no-such', kind: 'snapshot' }),
+    ).rejects.toThrow();
+  });
+
+  it('observations.create rejects an invalid kind', async () => {
+    const dev = svc.createDevice({ name: 'Cam', kind: 'camera', driver: 'browser-camera' });
+    await expect(
+      call(handlers, 'rc.periph.observations.create', { device_id: dev.id, kind: 'bogus' }),
+    ).rejects.toThrow(/kind/);
+  });
+
   // ── rc.periph.captureResult ──────────────────────────────────────────────
 
   it('captureResult → bridge.resolveCapture: resolves a pending request', async () => {
@@ -307,14 +405,21 @@ describe('rc.periph.* WS RPC', () => {
     const broadcast = vi.fn();
     bridge.adoptContext({ broadcast });
 
-    // Kick off a requestCapture (creates a pending entry).
-    const capturePromise = bridge.requestCapture('dev-1', 'test');
+    // Kick off a requestCapture (creates a pending entry). The 4th arg is the
+    // registered device UUID (audit#8): distinct from the browser deviceId and
+    // carried in the broadcast payload for the dashboard's upload-dir key. The
+    // 3rd arg is the explicit timeout (default) so the id lands in slot 4.
+    const capturePromise = bridge.requestCapture('dev-1', 'test', undefined, 'reg-uuid-1');
 
-    // Extract the requestId from the broadcast call.
+    // Extract the requestId + registeredDeviceId from the broadcast call.
     expect(broadcast).toHaveBeenCalledOnce();
-    const [, payload] = broadcast.mock.calls[0] as [string, { requestId: string }];
+    const [, payload] = broadcast.mock.calls[0] as [
+      string,
+      { requestId: string; registeredDeviceId: string },
+    ];
     const requestId = payload.requestId;
     expect(typeof requestId).toBe('string');
+    expect(payload.registeredDeviceId).toBe('reg-uuid-1');
 
     // Deliver the result via RPC.
     const rpcResult = await call(handlers, 'rc.periph.captureResult', {
@@ -447,6 +552,103 @@ describe('rc.periph.* WS RPC', () => {
     ).rejects.toThrow(/secureContext/);
   });
 
+  // ── rc.periph.localCameras.list ──────────────────────────────────────────
+
+  it('localCameras.list proxies to listLocalCameras() and wraps in {cameras}', async () => {
+    mockListLocalCameras.mockResolvedValueOnce([
+      { device: '0', label: 'FaceTime HD Camera' },
+      { device: '1', label: 'USB Webcam' },
+    ]);
+    const result = (await call(handlers, 'rc.periph.localCameras.list')) as {
+      cameras: Array<{ device: string; label: string }>;
+    };
+    expect(mockListLocalCameras).toHaveBeenCalledOnce();
+    expect(result.cameras).toEqual([
+      { device: '0', label: 'FaceTime HD Camera' },
+      { device: '1', label: 'USB Webcam' },
+    ]);
+  });
+
+  it('localCameras.list returns {cameras: []} when no cameras are detected', async () => {
+    mockListLocalCameras.mockResolvedValueOnce([]);
+    const result = (await call(handlers, 'rc.periph.localCameras.list')) as { cameras: unknown[] };
+    expect(result).toEqual({ cameras: [] });
+  });
+
+  // ── rc.periph.rtspPreview.start / .stop (§15 场景③ H1-H6) ─────────────────
+
+  function makeRtspDevice(config: Record<string, unknown> = { url: 'rtsp://cam.local/stream' }) {
+    return svc.createDevice({ name: 'IP Cam', kind: 'camera', driver: 'rtsp', config });
+  }
+
+  it('rtspPreview.start reads config.{url,username,password} and returns a credential-free playlistUrl', async () => {
+    const dev = makeRtspDevice({ url: 'rtsp://cam.local/stream', username: 'alice', password: 's3cr3t' });
+    const result = (await call(handlers, 'rc.periph.rtspPreview.start', { device_id: dev.id })) as {
+      sessionToken: string;
+      playlistUrl: string;
+    };
+    // The manager received the raw url + creds (built in-memory into the effective URL).
+    expect(fakePreview.starts).toHaveLength(1);
+    expect(fakePreview.starts[0]).toMatchObject({
+      deviceId: dev.id,
+      url: 'rtsp://cam.local/stream',
+      username: 'alice',
+      password: 's3cr3t',
+    });
+    // The response carries ONLY the token — no credential anywhere (H4).
+    expect(result.sessionToken).toBe(`tok-${dev.id}`);
+    expect(result.playlistUrl).toBe(rtspPreviewPlaylistUrl(`tok-${dev.id}`));
+    expect(result.playlistUrl).toBe(`/rc/rtsp-preview/tok-${dev.id}/index.m3u8`);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('alice');
+    expect(serialized).not.toContain('s3cr3t');
+  });
+
+  it('rtspPreview.start rejects a device_id that does not exist', async () => {
+    await expect(
+      call(handlers, 'rc.periph.rtspPreview.start', { device_id: 'nope' }),
+    ).rejects.toThrow(/不存在/);
+    expect(fakePreview.starts).toHaveLength(0);
+  });
+
+  it('rtspPreview.start rejects a non-rtsp device (browser-camera has no HLS preview)', async () => {
+    const browser = svc.createDevice({
+      name: 'Webcam',
+      kind: 'camera',
+      driver: 'browser-camera',
+      config: { deviceId: 'cam-a' },
+    });
+    await expect(
+      call(handlers, 'rc.periph.rtspPreview.start', { device_id: browser.id }),
+    ).rejects.toThrow(/RTSP/);
+    expect(fakePreview.starts).toHaveLength(0);
+  });
+
+  it('rtspPreview.start rejects an rtsp device with no url in config', async () => {
+    const dev = makeRtspDevice({});
+    await expect(
+      call(handlers, 'rc.periph.rtspPreview.start', { device_id: dev.id }),
+    ).rejects.toThrow(/url/);
+    expect(fakePreview.starts).toHaveLength(0);
+  });
+
+  it('rtspPreview.start throws validation error if device_id missing', async () => {
+    await expect(call(handlers, 'rc.periph.rtspPreview.start', {})).rejects.toThrow(/device_id/);
+  });
+
+  it('rtspPreview.stop forwards to the manager and returns {ok}', async () => {
+    const dev = makeRtspDevice();
+    const result = (await call(handlers, 'rc.periph.rtspPreview.stop', { device_id: dev.id })) as {
+      ok: boolean;
+    };
+    expect(fakePreview.stops).toEqual([dev.id]);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('rtspPreview.stop throws validation error if device_id missing', async () => {
+    await expect(call(handlers, 'rc.periph.rtspPreview.stop', {})).rejects.toThrow(/device_id/);
+  });
+
   // ── rc.periph.plaud.status ───────────────────────────────────────────────
 
   it('plaud.status proxies to fakePlaud.status()', async () => {
@@ -472,6 +674,21 @@ describe('rc.periph.* WS RPC', () => {
     expect(result.lastError).toBe('not configured');
   });
 
+  it('plaud.status stamps docker on the HANDLER, not the manager (P1-U4)', async () => {
+    // The manager is container-agnostic — it never returns `docker`.
+    (fakePlaud.status as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      configured: true,
+      tokenPresent: true,
+    });
+    const result = await call(handlers, 'rc.periph.plaud.status') as PlaudStatus;
+    // The handler folds in isDocker (fs.existsSync('/.dockerenv') || DOCKER==='1',
+    // mirrors workspace/rpc.ts:24). On the CI/dev host that is false, but the key
+    // MUST be present — its absence was the P1-U4 dead-code root cause.
+    expect(result).toHaveProperty('docker');
+    expect(typeof result.docker).toBe('boolean');
+    expect(result.docker).toBe(false); // test host is not a container
+  });
+
   // ── rc.periph.plaud.login ────────────────────────────────────────────────
 
   it('plaud.login proxies to fakePlaud.login()', async () => {
@@ -490,5 +707,21 @@ describe('rc.periph.* WS RPC', () => {
     const result = await call(handlers, 'rc.periph.plaud.login') as { ok: boolean; error?: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe('browser-unavailable');
+  });
+
+  // ── rc.periph.plaud.cancelLogin ──────────────────────────────────────────
+
+  it('plaud.cancelLogin proxies to fakePlaud.cancelLogin()', async () => {
+    const result = await call(handlers, 'rc.periph.plaud.cancelLogin') as { ok: boolean };
+
+    expect(fakePlaud.cancelLogin).toHaveBeenCalledOnce();
+    expect(result.ok).toBe(true);
+  });
+
+  it('plaud.cancelLogin forwards {ok:false} from PlaudManager', async () => {
+    (fakePlaud.cancelLogin as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false });
+
+    const result = await call(handlers, 'rc.periph.plaud.cancelLogin') as { ok: boolean };
+    expect(result.ok).toBe(false);
   });
 });

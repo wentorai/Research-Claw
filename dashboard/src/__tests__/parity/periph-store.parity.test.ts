@@ -11,13 +11,14 @@
  * Each test cites the rpc.ts handler line and verifies field-by-field parity.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { usePeripheralsStore } from '../../stores/peripherals';
+import { usePeripheralsStore, PERIPH_OBS_PAGE_SIZE } from '../../stores/peripherals';
 
 import {
   RC_PERIPH_DEVICES_LIST_RESPONSE,
   RC_PERIPH_DEVICES_CREATE_RESPONSE,
   RC_PERIPH_DEVICES_UPDATE_RESPONSE,
   RC_PERIPH_DEVICES_DELETE_RESPONSE,
+  RC_PERIPH_DEVICES_DELETE_CASCADE_RESPONSE,
   RC_PERIPH_OBSERVATIONS_LIST_RESPONSE,
   RC_PERIPH_OBSERVATIONS_LIST_EMPTY_RESPONSE,
   RC_PERIPH_BRIDGE_ANNOUNCE_RESPONSE,
@@ -61,6 +62,7 @@ describe('Peripherals store RPC parity (rc.periph.*)', () => {
     usePeripheralsStore.setState({
       devices: [],
       observations: {},
+      observationsHasMore: {},
       loading: false,
       error: null,
       unavailable: false,
@@ -313,6 +315,65 @@ describe('Peripherals store RPC parity (rc.periph.*)', () => {
 
       expect(usePeripheralsStore.getState().unavailable).toBe(true);
     });
+
+    // ── R2-I3: cascaded monitors leave a cron job only the client can remove ──
+
+    it('removes the gateway cron job of every cascaded monitor and reloads monitors', async () => {
+      usePeripheralsStore.setState({ devices: RC_PERIPH_DEVICES_LIST_RESPONSE.devices });
+      mockGatewayClient.request.mockImplementation(async (method: string) => {
+        if (method === 'rc.periph.devices.delete') return RC_PERIPH_DEVICES_DELETE_CASCADE_RESPONSE;
+        if (method === 'cron.remove') return { ok: true };
+        if (method === 'rc.monitor.list') return { items: [], total: 0 };
+        return {};
+      });
+
+      await usePeripheralsStore.getState().deleteDevice('dev-cam-001');
+
+      // Only the monitor that actually held a job triggers cron.remove.
+      const cronCalls = mockGatewayClient.request.mock.calls.filter(([m]) => m === 'cron.remove');
+      expect(cronCalls).toEqual([['cron.remove', { id: 'cron-job-7' }]]);
+      // The monitor list still holds the cascaded rows until it reloads.
+      expect(mockGatewayClient.request.mock.calls.some(([m]) => m === 'rc.monitor.list')).toBe(true);
+      expect(usePeripheralsStore.getState().error).toBeNull();
+    });
+
+    it('reports a stranded cron job instead of reporting silent success', async () => {
+      usePeripheralsStore.setState({ devices: RC_PERIPH_DEVICES_LIST_RESPONSE.devices });
+      mockGatewayClient.request.mockImplementation(async (method: string) => {
+        if (method === 'rc.periph.devices.delete') return RC_PERIPH_DEVICES_DELETE_CASCADE_RESPONSE;
+        if (method === 'cron.remove') throw new Error('gateway busy');
+        if (method === 'rc.monitor.list') return { items: [], total: 0 };
+        return {};
+      });
+
+      await usePeripheralsStore.getState().deleteDevice('dev-cam-001');
+
+      const state = usePeripheralsStore.getState();
+      // The device delete itself succeeded — it must not be rolled back…
+      expect(state.devices.find((d) => d.id === 'dev-cam-001')).toBeUndefined();
+      // …but the leftover job is surfaced, not swallowed.
+      expect(state.error).toContain('cron-job-7');
+    });
+
+    it('does not call cron.remove when no monitor was bound', async () => {
+      usePeripheralsStore.setState({ devices: RC_PERIPH_DEVICES_LIST_RESPONSE.devices });
+      mockGatewayClient.request.mockResolvedValueOnce(RC_PERIPH_DEVICES_DELETE_RESPONSE);
+
+      await usePeripheralsStore.getState().deleteDevice('dev-cam-001');
+
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(1);
+      expect(usePeripheralsStore.getState().error).toBeNull();
+    });
+
+    it('tolerates a pre-cascade plugin that omits deleted_monitors', async () => {
+      usePeripheralsStore.setState({ devices: RC_PERIPH_DEVICES_LIST_RESPONSE.devices });
+      mockGatewayClient.request.mockResolvedValueOnce({ ok: true });
+
+      await usePeripheralsStore.getState().deleteDevice('dev-cam-001');
+
+      expect(usePeripheralsStore.getState().devices.find((d) => d.id === 'dev-cam-001')).toBeUndefined();
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── loadObservations → rc.periph.observations.list ──────────────────────
@@ -359,7 +420,7 @@ describe('Peripherals store RPC parity (rc.periph.*)', () => {
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'rc.periph.observations.list',
-        { device_id: 'dev-cam-001' },
+        { device_id: 'dev-cam-001', limit: PERIPH_OBS_PAGE_SIZE },
       );
     });
 
@@ -387,10 +448,24 @@ describe('Peripherals store RPC parity (rc.periph.*)', () => {
 
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'rc.periph.observations.list',
-        { device_id: 'dev-cam-001', before: '2026-07-20T10:00:00.000Z' },
+        { device_id: 'dev-cam-001', before: '2026-07-20T10:00:00.000Z', limit: PERIPH_OBS_PAGE_SIZE },
       );
       // Appended: existing 1 + empty 0 = still 1
       expect(usePeripheralsStore.getState().observations['dev-cam-001']).toHaveLength(1);
+    });
+
+    it('forwards before_cursor (composite keyset) when provided (audit #6)', async () => {
+      mockGatewayClient.request.mockResolvedValueOnce(RC_PERIPH_OBSERVATIONS_LIST_EMPTY_RESPONSE);
+
+      await usePeripheralsStore.getState().loadObservations('dev-cam-001', {
+        before: '2026-07-20 12:00:00',
+        before_cursor: 42,
+      });
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'rc.periph.observations.list',
+        { device_id: 'dev-cam-001', before: '2026-07-20 12:00:00', before_cursor: 42, limit: PERIPH_OBS_PAGE_SIZE },
+      );
     });
 
     it('appends new observations when before is provided', async () => {
@@ -407,6 +482,33 @@ describe('Peripherals store RPC parity (rc.periph.*)', () => {
       await usePeripheralsStore.getState().loadObservations('dev-cam-001', { before: '2026-07-20T10:00:00.000Z' });
 
       expect(usePeripheralsStore.getState().observations['dev-cam-001']).toHaveLength(2);
+    });
+
+    it('hasMoreObservations=false when a short page is returned (end reached)', async () => {
+      // 3-row fixture < PERIPH_OBS_PAGE_SIZE → no older rows → pager hidden.
+      mockGatewayClient.request.mockResolvedValueOnce(RC_PERIPH_OBSERVATIONS_LIST_RESPONSE);
+
+      await usePeripheralsStore.getState().loadObservations('dev-cam-001');
+
+      expect(usePeripheralsStore.getState().hasMoreObservations('dev-cam-001')).toBe(false);
+    });
+
+    it('hasMoreObservations=true when a FULL page is returned (older rows may remain)', async () => {
+      const fullPage = {
+        observations: Array.from({ length: PERIPH_OBS_PAGE_SIZE }, (_, i) => ({
+          ...RC_PERIPH_OBSERVATIONS_LIST_RESPONSE.observations[0],
+          id: `obs-full-${i}`,
+        })),
+      };
+      mockGatewayClient.request.mockResolvedValueOnce(fullPage);
+
+      await usePeripheralsStore.getState().loadObservations('dev-cam-001');
+
+      expect(usePeripheralsStore.getState().hasMoreObservations('dev-cam-001')).toBe(true);
+    });
+
+    it('hasMoreObservations defaults to false for a device never loaded', () => {
+      expect(usePeripheralsStore.getState().hasMoreObservations('never-loaded')).toBe(false);
     });
 
     it('sets unavailable=true on METHOD_NOT_FOUND', async () => {
@@ -483,11 +585,12 @@ describe('Peripherals store RPC parity (rc.periph.*)', () => {
       expect(result.ok).toBe(true);
       expect(result.error).toBeUndefined();
       // Plaud login blocks on a browser OAuth flow → request timeout is bumped
-      // well past the default so slow human sign-in isn't a transport failure.
+      // past the gateway's 150s token-poll window so slow human sign-in isn't a
+      // transport failure (T19 P-1).
       expect(mockGatewayClient.request).toHaveBeenCalledWith(
         'rc.periph.plaud.login',
         {},
-        { timeoutMs: 190_000 },
+        { timeoutMs: 200_000 },
       );
     });
 
@@ -515,6 +618,61 @@ describe('Peripherals store RPC parity (rc.periph.*)', () => {
       await usePeripheralsStore.getState().plaudLogin();
 
       expect(usePeripheralsStore.getState().unavailable).toBe(true);
+    });
+  });
+
+  // ── plaudCancelLogin → rc.periph.plaud.cancelLogin ──────────────────────
+
+  describe('plaudCancelLogin → rc.periph.plaud.cancelLogin', () => {
+    it('sends the cancelLogin RPC and returns {ok:true}', async () => {
+      // Source: rpc.ts → plaud.cancelLogin() → { ok: boolean }
+      mockGatewayClient.request.mockResolvedValueOnce({ ok: true });
+
+      const result = await usePeripheralsStore.getState().plaudCancelLogin();
+
+      expect(result.ok).toBe(true);
+      expect(mockGatewayClient.request).toHaveBeenCalledWith('rc.periph.plaud.cancelLogin', {});
+    });
+
+    it('returns {ok:false} on RPC failure (best-effort)', async () => {
+      mockGatewayClient.request.mockRejectedValueOnce(new Error('cancel failed'));
+
+      const result = await usePeripheralsStore.getState().plaudCancelLogin();
+
+      expect(result.ok).toBe(false);
+    });
+
+    it('returns {ok:false} when gateway is disconnected', async () => {
+      mockGatewayClient.isConnected = false;
+
+      const result = await usePeripheralsStore.getState().plaudCancelLogin();
+
+      expect(result.ok).toBe(false);
+      expect(mockGatewayClient.request).not.toHaveBeenCalled();
+    });
+
+    it('sets unavailable=true on METHOD_NOT_FOUND', async () => {
+      mockGatewayClient.request.mockRejectedValueOnce(makeMethodNotFoundError());
+
+      await usePeripheralsStore.getState().plaudCancelLogin();
+
+      expect(usePeripheralsStore.getState().unavailable).toBe(true);
+    });
+  });
+
+  // ── plaudLogin timeout bump (T19 P-1) ───────────────────────────────────
+
+  describe('plaudLogin timeout window (T19 P-1)', () => {
+    it('uses a 200s request timeout to cover the 150s token poll', async () => {
+      mockGatewayClient.request.mockResolvedValueOnce({ ok: true });
+
+      await usePeripheralsStore.getState().plaudLogin();
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'rc.periph.plaud.login',
+        {},
+        { timeoutMs: 200_000 },
+      );
     });
   });
 

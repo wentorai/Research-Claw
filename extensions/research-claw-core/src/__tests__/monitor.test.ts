@@ -198,6 +198,140 @@ describe('MonitorService', () => {
     });
   });
 
+  // ── device template migration (F7 迁移半 / 审计#4) ─────────────────────
+  //
+  // The v1 device template (commit b9deba9) has no {monitor_id} threading, uses
+  // a wrong monitor_report schema — "monitor_report 上报本轮结果(title=…)" —
+  // and lacks F7-b step 8. repairLegacyDefaultPrompts() must regenerate it with
+  // the current template (kind-branched by target), while leaving custom prompts
+  // untouched. This is the verbatim old string, kept as a fixture so the detector
+  // is exercised against the real historical prompt, not a paraphrase.
+  const LEGACY_DEVICE_PROMPT_V1 =
+    '你是外设定时查证代理。目标设备 ID: {target}。\n' +
+    '1. 调用 periph_camera_snap({"device_id": "{target}", "purpose": "scheduled check"}) 抓取当前帧。\n' +
+    "2. 若抓帧失败(missed/error):调用 periph_observe 记录 kind='check'、verdict='missed'、summary=失败原因,然后 monitor_report 上报空结果,结束。\n" +
+    '3. 若抓帧成功:根据下方"查证要求"分析画面(若你无法直接看到图像,调用 image 工具读取 frame_path 获取画面描述后再分析)。\n' +
+    "4. 调用 periph_observe 记录 kind='check':一切正常 verdict='ok';发现异常 verdict='alert';无法判断 verdict='unverified'。summary 用一句话中文写明结论,frame_path 传抓到的帧。\n" +
+    '5. monitor_report 上报本轮结果(title=结论一句话)。\n' +
+    "6. 仅当 verdict='alert' 时调用 send_notification 通知用户,内容含设备名与异常描述。\n" +
+    '查证要求: {check_prompt 或 "描述画面中正在发生什么,判断是否存在异常。"}';
+
+  function insertPeriphDeviceRow(db: BetterSqlite3.Database, id: string, kind: string): void {
+    db.prepare(`
+      INSERT INTO rc_periph_devices (id, name, kind, driver, enabled, config, check_prompt, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, '{}', '', datetime('now'), datetime('now'))
+    `).run(id, `Dev ${id}`, kind, kind === 'camera' ? 'browser-camera' : 'mcp-plaud');
+  }
+
+  describe('device template migration', () => {
+    it('regenerates the v1 device (camera) template with monitor_id / real schema / step 8', () => {
+      insertPeriphDeviceRow(db, 'cam-legacy', 'camera');
+      const m = svc.create({ name: 'Legacy cam', source_type: 'device', target: 'cam-legacy' });
+      // Force the stored prompt back to the v1 template (simulate an old DB row).
+      db.prepare('UPDATE rc_monitors SET agent_prompt = ? WHERE id = ?').run(LEGACY_DEVICE_PROMPT_V1, m.id);
+      // Sanity: the row really is on the broken template before migration.
+      expect(svc.get(m.id).agent_prompt).toContain('monitor_report 上报本轮结果(title=');
+
+      expect(svc.repairLegacyDefaultPrompts()).toBe(1);
+
+      const repaired = svc.get(m.id).agent_prompt;
+      // monitor_id is now threaded through the template.
+      expect(repaired).toContain('本监控 ID: {monitor_id}');
+      expect(repaired).toContain('{monitor_id}');
+      // Real monitor_report schema (monitor_id/results/fingerprints), NOT title=.
+      expect(repaired).toContain('monitor_report({"monitor_id":"{monitor_id}"');
+      expect(repaired).not.toContain('monitor_report 上报本轮结果(title=');
+      // F7-b step 8 (silent final reply unless verdict=alert) is present, and it
+      // asks for NO_REPLY — not an empty body. An empty final reply is an
+      // incomplete turn for OpenClaw (status=error + "⚠️ Agent couldn't generate
+      // a response"), so the empty-body wording made every healthy round log an
+      // error. Live proof: scripts/f7-delivery-routes.sh R2 vs R3.
+      expect(repaired).toContain('8.');
+      expect(repaired).toContain('最终回复');
+      expect(repaired).toContain('必须且只能是 NO_REPLY');
+      expect(repaired).not.toContain('必须留空');
+      // Still a camera template (kind resolved from target).
+      expect(repaired).toContain('periph_camera_snap');
+      expect(repaired).not.toContain('plaud__list_files');
+    });
+
+    it('regenerates an audio-recorder device onto the plaud digest template (kind by target)', () => {
+      insertPeriphDeviceRow(db, 'plaud-legacy', 'audio-recorder');
+      const m = svc.create({ name: 'Legacy voice', source_type: 'device', target: 'plaud-legacy' });
+      // A device monitor whose stored prompt is the v1 camera template (e.g. it
+      // predates the audio-recorder branch) must migrate to the plaud template
+      // because its device kind is audio-recorder.
+      db.prepare('UPDATE rc_monitors SET agent_prompt = ? WHERE id = ?').run(LEGACY_DEVICE_PROMPT_V1, m.id);
+
+      expect(svc.repairLegacyDefaultPrompts()).toBe(1);
+
+      const repaired = svc.get(m.id).agent_prompt;
+      expect(repaired).toContain('plaud__list_files');
+      expect(repaired).toContain('plaud__get_transcript');
+      expect(repaired).toContain('{monitor_id}');
+      // Plaud template only *forbids* the snap call; it never actively invokes
+      // it, and carries no camera-only vision language.
+      expect(repaired).toContain('不要调用 periph_camera_snap');
+      expect(repaired).not.toContain('抓取当前帧');
+      expect(repaired).not.toContain('camera_bridge.online');
+      expect(repaired).not.toContain('monitor_report 上报本轮结果(title=');
+    });
+
+    it('migrates the v2 device template (empty final reply) onto NO_REPLY', () => {
+      insertPeriphDeviceRow(db, 'cam-v2', 'camera');
+      const m = svc.create({ name: 'V2 cam', source_type: 'device', target: 'cam-v2' });
+      // The v2 template differs from v1 only in step 8: it had the real
+      // monitor_report schema already, so v1's detector clause misses it. Without
+      // the second clause these rows would keep telling the agent to answer with
+      // an empty body — which OpenClaw scores as a failed turn, not as silence.
+      const v2 = svc.get(m.id).agent_prompt.replace(
+        /8\..*?\n/s,
+        '8. 最终回复(本轮最后一条消息的正文)决定是否推送到通知渠道——只有非空正文会被推送。'
+        + '**仅当本轮 verdict=\'alert\' 时**,输出一句简短中文异常说明作为最终回复;'
+        + '其余情况(ok/unverified/missed)最终回复**必须留空**,不要输出任何总结、确认或客套话。\n',
+      );
+      db.prepare('UPDATE rc_monitors SET agent_prompt = ? WHERE id = ?').run(v2, m.id);
+      expect(svc.get(m.id).agent_prompt).toContain('必须留空');
+
+      expect(svc.repairLegacyDefaultPrompts()).toBe(1);
+
+      const repaired = svc.get(m.id).agent_prompt;
+      expect(repaired).toContain('必须且只能是 NO_REPLY');
+      expect(repaired).not.toContain('必须留空');
+      expect(repaired).toContain('periph_camera_snap');
+    });
+
+    it('falls back to the camera template when the target device is unknown/missing', () => {
+      const m = svc.create({ name: 'Orphan legacy', source_type: 'device', target: 'no-such-device' });
+      db.prepare('UPDATE rc_monitors SET agent_prompt = ? WHERE id = ?').run(LEGACY_DEVICE_PROMPT_V1, m.id);
+
+      expect(svc.repairLegacyDefaultPrompts()).toBe(1);
+      const repaired = svc.get(m.id).agent_prompt;
+      expect(repaired).toContain('periph_camera_snap');
+      expect(repaired).not.toContain('plaud__list_files');
+    });
+
+    it('does NOT overwrite a user-customized device prompt', () => {
+      insertPeriphDeviceRow(db, 'cam-custom', 'camera');
+      const custom = '你是外设定时查证代理。这是我自定义的完全不同的提示词,不含旧 schema。';
+      const m = svc.create({ name: 'Custom device', source_type: 'device', target: 'cam-custom', agent_prompt: custom });
+
+      expect(svc.repairLegacyDefaultPrompts()).toBe(0);
+      expect(svc.get(m.id).agent_prompt).toBe(custom);
+    });
+
+    it('leaves the already-migrated current device template untouched', () => {
+      insertPeriphDeviceRow(db, 'cam-cur', 'camera');
+      const m = svc.create({ name: 'Current cam', source_type: 'device', target: 'cam-cur' });
+      const before = svc.get(m.id).agent_prompt;
+      // The freshly created monitor already has the current template.
+      expect(before).toContain('本监控 ID: {monitor_id}');
+
+      expect(svc.repairLegacyDefaultPrompts()).toBe(0);
+      expect(svc.get(m.id).agent_prompt).toBe(before);
+    });
+  });
+
   // ── create() ──────────────────────────────────────────────────────────
 
   describe('create()', () => {
@@ -314,10 +448,100 @@ describe('MonitorService', () => {
       expect(m.agent_prompt).toContain('{check_prompt');
       // Device prompt is standalone — does NOT use the standard EXECUTION PROTOCOL header
       expect(m.agent_prompt).not.toContain('monitor_collect_candidates');
-      expect(m.agent_prompt).not.toContain('monitor_get_context');
+      expect(m.agent_prompt).not.toContain('EXECUTION PROTOCOL');
       // Verify notification gate semantics
       expect(m.agent_prompt).toContain('send_notification');
       expect(m.agent_prompt).toContain('仅当');
+      // Step 0: bridge pre-check via periph_list
+      expect(m.agent_prompt).toContain('periph_list');
+      expect(m.agent_prompt).toContain('camera_bridge.online');
+      expect(m.agent_prompt).toContain('0.');
+    });
+
+    // F2 (SPEC:326-330): 连续多轮 unverified → send_notification 一次性提醒
+    it('camera device prompt has step 7: one-time unverified notification via notes marker', () => {
+      const m = svc.create({ name: 'Device', source_type: 'device' });
+      expect(m.agent_prompt).toContain('7.');
+      expect(m.agent_prompt).toContain('unverified');
+      expect(m.agent_prompt).toContain('vision-unverified-notified');
+      expect(m.agent_prompt).toContain('monitor_get_context');
+      expect(m.agent_prompt).toContain('monitor_note');
+      expect(m.agent_prompt).toContain('一次性提醒');
+      // 一次性提醒段落必须在结尾的查证要求段(唯一锚点 '查证要求: {check_prompt')之前
+      expect(m.agent_prompt.indexOf('vision-unverified-notified')).toBeLessThan(m.agent_prompt.indexOf('查证要求: {check_prompt'));
+    });
+
+    // F7-b (SPEC:356-360 [v1.2 裁决]): 仅异常才推 — camera 模板 step 8 约束
+    // 正常轮回 NO_REPLY(normalizeSilentReplyText 判为刻意静音 → 跳过渠道投递,
+    // run 记录仍是 status=ok),仅 alert 输出正文。刻意不用"空正文":空回复被
+    // OpenClaw 判成 incomplete turn,每个正常轮都会留下一条 error 运行记录。
+    it('camera device prompt has step 8: NO_REPLY unless verdict=alert (仅异常才推)', () => {
+      const m = svc.create({ name: 'Device', source_type: 'device' });
+      expect(m.agent_prompt).toContain('8.');
+      expect(m.agent_prompt).toContain('最终回复');
+      expect(m.agent_prompt).toContain('必须且只能是 NO_REPLY');
+      expect(m.agent_prompt).not.toContain('必须留空');
+      expect(m.agent_prompt).toContain("verdict='alert'");
+      // step 8 在结尾的查证要求段之前
+      expect(m.agent_prompt.indexOf('最终回复')).toBeLessThan(m.agent_prompt.indexOf('查证要求: {check_prompt'));
+    });
+
+    // F4 (SPEC:338-342 + §13.1): device 模板按 rc_periph_devices.kind 分支
+    describe('device template kind branch (F4)', () => {
+      function insertPeriphDevice(id: string, kind: string): void {
+        db.prepare(`
+          INSERT INTO rc_periph_devices (id, name, kind, driver, enabled, config, check_prompt, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 1, '{}', '', datetime('now'), datetime('now'))
+        `).run(id, `Dev ${id}`, kind, kind === 'camera' ? 'browser-camera' : 'mcp-plaud');
+      }
+
+      it('audio-recorder device → plaud transcript-digest template (no snap, no collector)', () => {
+        insertPeriphDevice('plaud-001', 'audio-recorder');
+        const m = svc.create({ name: 'Daily voice digest', source_type: 'device', target: 'plaud-001' });
+        expect(m.agent_prompt).toContain('plaud__list_files');
+        expect(m.agent_prompt).toContain('plaud__get_transcript');
+        expect(m.agent_prompt).toContain('workspace_save');
+        expect(m.agent_prompt).toContain('send_notification');
+        // 收口方式与 camera 模板对齐: periph_observe → monitor_report
+        expect(m.agent_prompt).toContain('periph_observe');
+        expect(m.agent_prompt).toContain('monitor_report');
+        // 不抓帧不走 collector(明示禁止)
+        expect(m.agent_prompt).toContain('不要调用 periph_camera_snap');
+        expect(m.agent_prompt).toContain('不要调用 monitor_collect_candidates');
+        // F7-b 边界:日报是交付物,不受 camera 的"仅异常才推(回 NO_REPLY)"约束
+        expect(m.agent_prompt).not.toContain('最终回复');
+        expect(m.agent_prompt).not.toContain('NO_REPLY');
+        // {target} 占位符保留给 dashboard buildMonitorCronMessage 替换
+        expect(m.agent_prompt).toContain('{target}');
+        // 不含摄像头查证语义
+        expect(m.agent_prompt).not.toContain('抓取当前帧');
+        expect(m.agent_prompt).not.toContain('camera_bridge.online');
+      });
+
+      it('camera device → vision template (kind lookup by target)', () => {
+        insertPeriphDevice('cam-001', 'camera');
+        const m = svc.create({ name: 'Lab cam check', source_type: 'device', target: 'cam-001' });
+        expect(m.agent_prompt).toContain('periph_camera_snap');
+        expect(m.agent_prompt).toContain('camera_bridge.online');
+        expect(m.agent_prompt).not.toContain('plaud__list_files');
+      });
+
+      it('unknown/missing target → falls back to camera vision template', () => {
+        const m = svc.create({ name: 'Orphan device', source_type: 'device', target: 'no-such-device' });
+        expect(m.agent_prompt).toContain('periph_camera_snap');
+        expect(m.agent_prompt).not.toContain('plaud__list_files');
+      });
+
+      it('custom agent_prompt overrides kind-branched template', () => {
+        insertPeriphDevice('plaud-002', 'audio-recorder');
+        const m = svc.create({
+          name: 'Custom',
+          source_type: 'device',
+          target: 'plaud-002',
+          agent_prompt: 'my custom protocol',
+        });
+        expect(m.agent_prompt).toBe('my custom protocol');
+      });
     });
 
     it('feed prompt is unchanged after device branch added', () => {
@@ -1452,6 +1676,42 @@ describe('Monitor Agent Tools', () => {
       expect(tool.parameters).toBeDefined();
       expect(typeof tool.execute).toBe('function');
     }
+  });
+
+  // ── F3 NL 契约 (SPEC:332-336 + §13.1) — device 语义进工具描述 ──────────
+
+  describe('device NL contract in tool descriptions (F3/§13.1)', () => {
+    it('monitor_create description enumerates "device" and periph_list target contract', () => {
+      const tool = findTool('monitor_create');
+      expect(tool.description).toContain('"device"');
+      expect(tool.description).toContain('periph_list');
+      expect(tool.description).toContain('mediaDeviceId');
+      // 如实新语义: monitor_update(enabled=true) 即可启用,dashboard 在线自动注册 cron
+      expect(tool.description).toContain('monitor_update(enabled=true)');
+      expect(tool.description).toContain('automatically registers');
+      expect(tool.description).not.toContain('After the user enables it in the dashboard');
+    });
+
+    it('monitor_create source_type/target param descriptions mention device semantics', () => {
+      const tool = findTool('monitor_create');
+      const props = (tool.parameters as { properties: Record<string, { description: string }> }).properties;
+      expect(props.source_type.description).toContain('device');
+      expect(props.target.description).toContain('periph_list');
+    });
+
+    it('monitor_update description states enable auto-registers cron and device target contract', () => {
+      const tool = findTool('monitor_update');
+      expect(tool.description).toContain('enabled=true');
+      expect(tool.description).toContain('automatically');
+      expect(tool.description).toContain('periph_list');
+      expect(tool.description).toContain('mediaDeviceId');
+    });
+
+    it('monitor_create result text guides enabling via monitor_update, not dashboard round-trip', async () => {
+      const result = await exec('monitor_create', { name: 'Guide', source_type: 'feed' });
+      expect(result.content[0].text).toContain('monitor_update(enabled=true)');
+      expect(result.content[0].text).not.toContain('Enable it in the dashboard');
+    });
   });
 
   // ── monitor_create ────────────────────────────────────────────────

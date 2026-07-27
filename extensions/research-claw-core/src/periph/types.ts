@@ -6,7 +6,7 @@
  */
 
 export type PeriphKind = 'camera' | 'audio-recorder' | 'lab-instrument' | 'embodied';
-export type PeriphDriver = 'browser-camera' | 'mcp-plaud' | 'rtsp' | 'oc-node';
+export type PeriphDriver = 'browser-camera' | 'mcp-plaud' | 'rtsp' | 'local-camera' | 'oc-node';
 export type PeriphVerdict = 'ok' | 'alert' | 'info' | 'unverified' | 'missed' | 'error';
 
 export interface PeriphDevice {
@@ -33,4 +33,10 @@ export interface PeriphObservation {
   frame_path: string | null;
   result_json: Record<string, unknown>;
   captured_at: string;
+  /**
+   * Opaque pagination cursor = SQLite rowid. captured_at has only second
+   * precision, so it is NOT a unique sort key; pagination must tiebreak on
+   * this monotonic rowid to avoid dropping same-second rows across pages.
+   */
+  cursor: number;
 }

@@ -105,11 +105,24 @@ export class PeriphBridge {
    * - If no broadcast handle: immediately resolves {ok:false, error:'bridge-offline'}.
    * - Otherwise: broadcasts `plugin.rc.periph.captureRequest` and waits for
    *   resolveCapture() to be called, or times out after `timeoutMs` ms.
+   *
+   * `registeredDeviceId` (audit#8 / P2-F1) is the rc_periph_devices UUID of the
+   * device being captured — distinct from `deviceId`, which is the *browser*
+   * MediaDevices id used to pick the webcam. The dashboard's PeriphCaptureListener
+   * keys the upload target directory on `registeredDeviceId` (fixed cross-agent
+   * contract field name), so when provided it rides in the broadcast payload.
+   * The caller (periph_camera_snap in tools.ts) has already resolved the
+   * registered device and passes its id in.
+   *
+   * It is the LAST parameter (optional, after timeoutMs) so pre-existing
+   * two/three-arg callers keep working while callers opt in by passing it —
+   * inserting it earlier would have collided with the positional timeoutMs arg.
    */
   requestCapture(
     deviceId: string,
     purposeHint: string,
     timeoutMs: number = CAPTURE_TIMEOUT_MS,
+    registeredDeviceId?: string,
   ): Promise<CaptureResult> {
     if (this._broadcast === null) {
       return Promise.resolve({ ok: false, error: 'bridge-offline' });
@@ -126,7 +139,29 @@ export class PeriphBridge {
 
       this._pending.set(requestId, { resolve, timer });
 
-      broadcast('plugin.rc.periph.captureRequest', { requestId, deviceId, purposeHint });
+      // Payload only carries registeredDeviceId when the caller supplied it, so
+      // the dashboard can distinguish "not provided" from an empty string.
+      const payload: {
+        requestId: string;
+        deviceId: string;
+        purposeHint: string;
+        registeredDeviceId?: string;
+      } = { requestId, deviceId, purposeHint };
+      if (registeredDeviceId !== undefined) payload.registeredDeviceId = registeredDeviceId;
+
+      // audit#9: a synchronous throw from broadcast() would otherwise leave the
+      // pending entry armed for the full timeout (~45s) with no listener ever
+      // delivering a result. Reject + clean up immediately instead of dangling.
+      try {
+        broadcast('plugin.rc.periph.captureRequest', payload);
+      } catch (err) {
+        clearTimeout(timer);
+        this._pending.delete(requestId);
+        resolve({
+          ok: false,
+          error: `bridge-broadcast-failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     });
   }
 
@@ -146,4 +181,13 @@ export class PeriphBridge {
 }
 
 /** Module-level singleton — shared across all RPC calls in the same process. */
-export const periphBridge = new PeriphBridge();
+// P2-A fix: anchor the singleton on globalThis. OC loads plugin modules through
+// jiti and may materialize the module graph more than once (tool-discovery pass
+// vs gateway pass). A plain module-level singleton then splits into per-graph
+// instances: RPC handlers adopt the broadcast fn on one instance while tools
+// read another that stays empty → spurious 'bridge-offline'. globalThis is
+// process-wide and immune to module-graph duplication.
+const BRIDGE_GLOBAL_KEY = '__rcPeriphBridge__';
+const globalSlot = globalThis as Record<string, unknown>;
+export const periphBridge: PeriphBridge = (globalSlot[BRIDGE_GLOBAL_KEY] as PeriphBridge | undefined) ??
+  ((globalSlot[BRIDGE_GLOBAL_KEY] = new PeriphBridge()) as PeriphBridge);

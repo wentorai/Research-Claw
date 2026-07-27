@@ -171,6 +171,10 @@ export default function ObservationTimeline({ deviceId }: ObservationTimelinePro
   const observationsMap = usePeripheralsStore((s) => s.observations);
   const observations = observationsMap[deviceId] ?? EMPTY_OBS;
   const loadObservations = usePeripheralsStore((s) => s.loadObservations);
+  // Subscribe to the per-device pager flag so the "load earlier" button appears
+  // only when the last page came back full (older rows may remain). Reading the
+  // map (not calling the selector) keeps this reactive to store updates.
+  const hasMore = usePeripheralsStore((s) => s.observationsHasMore[deviceId] === true);
   const [initialLoading, setInitialLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -180,17 +184,18 @@ export default function ObservationTimeline({ deviceId }: ObservationTimelinePro
     void loadObservations(deviceId).finally(() => setInitialLoading(false));
   }, [deviceId, loadObservations]);
 
-  // Oldest captured_at for "load more" cursor
-  const beforeCursor = useMemo(() => {
+  // Oldest row = keyset cursor for "load earlier". Both parts are required:
+  // captured_at (second precision) + rowid cursor to tiebreak same-second rows.
+  const oldest = useMemo(() => {
     if (observations.length === 0) return null;
-    return observations[observations.length - 1].captured_at;
+    return observations[observations.length - 1];
   }, [observations]);
 
   const handleLoadMore = async () => {
-    if (!beforeCursor) return;
+    if (!oldest) return;
     setLoadingMore(true);
     try {
-      await loadObservations(deviceId, { before: beforeCursor });
+      await loadObservations(deviceId, { before: oldest.captured_at, before_cursor: oldest.cursor });
     } finally {
       setLoadingMore(false);
     }
@@ -229,6 +234,14 @@ export default function ObservationTimeline({ deviceId }: ObservationTimelinePro
       <div
         data-testid={`periph-timeline-obs-${obs.id}`}
         style={{ paddingBottom: 8 }}
+        // P1-N1: explain why a check was missed — browser-camera frames can only be
+        // captured while the Dashboard is open and the host is awake (D9 boundary).
+        title={obs.verdict === 'missed'
+          ? t(
+              'periph.timeline.missedHover',
+              'No frame captured: the Dashboard was offline or this machine was asleep when this check ran.',
+            )
+          : undefined}
       >
         {/* Frame thumbnail (if available) — fetched with Bearer auth to avoid 401 */}
         {obs.frame_path && (
@@ -250,16 +263,18 @@ export default function ObservationTimeline({ deviceId }: ObservationTimelinePro
     <div data-testid="periph-timeline-root">
       <Timeline items={items} style={{ paddingTop: 8 }} />
 
-      <Button
-        data-testid="periph-timeline-load-more"
-        type="text"
-        size="small"
-        loading={loadingMore}
-        onClick={() => { void handleLoadMore(); }}
-        style={{ display: 'block', margin: '0 auto' }}
-      >
-        {t('periph.timeline.loadMore', 'Load earlier')}
-      </Button>
+      {hasMore && (
+        <Button
+          data-testid="periph-timeline-load-more"
+          type="text"
+          size="small"
+          loading={loadingMore}
+          onClick={() => { void handleLoadMore(); }}
+          style={{ display: 'block', margin: '0 auto' }}
+        >
+          {t('periph.timeline.loadMore', 'Load earlier')}
+        </Button>
+      )}
     </div>
   );
 }

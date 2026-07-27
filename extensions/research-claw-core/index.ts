@@ -6,8 +6,8 @@
  *
  * Registration totals:
  *   - 56 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job + 3 periph)
- *   - 102 WS RPC methods + 2 HTTP routes = 104 interface methods
- *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* + rc.onboarding.* + rc.periph.* = 102 WS; POST /rc/upload + GET /rc/download = 2 HTTP)
+ *   - 137 WS RPC methods + 3 HTTP routes = 140 interface methods
+ *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* + rc.onboarding.* + rc.periph.* = 137 WS; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
  *   - 10 hooks (before_prompt_build, session_start, session_end, before_tool_call, agent_end, after_tool_call ×3, gateway_start, agent:bootstrap)
  *   - 1 service (research-claw-db lifecycle)
  *   - 1 session monitoring service (automatic memory extraction)
@@ -73,9 +73,11 @@ import { registerOnboardingRpc } from './src/onboarding/rpc.js';
 import { bootstrapDoneExists } from './src/onboarding/bootstrap-done.js';
 import { PeriphService } from './src/periph/service.js';
 import { periphBridge } from './src/periph/bridge.js';
-import { registerPeriphRpc } from './src/periph/rpc.js';
+import { registerPeriphRpc, RTSP_PREVIEW_ROUTE } from './src/periph/rpc.js';
 import { createPeriphTools } from './src/periph/tools.js';
 import { PlaudManager } from './src/periph/plaud.js';
+import { RtspPreviewManager, PREVIEW_PLAYLIST_NAME } from './src/periph/rtsp-preview.js';
+import { resolveWithinRoot } from './src/workspace/path-guard.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -188,6 +190,121 @@ let _periphService: PeriphService | null = null;
 // tool call), so a module-level singleton is safe; it is instantiated in the
 // init block below to keep all periph wiring together.
 let _plaudManager: PlaudManager | null = null;
+
+// ── RTSP→HLS live-preview manager (§15 v1.3 场景③ H1-H6) ─────────────────────
+// Owns on-demand ffmpeg transmux sessions (RTSP→HLS) for the dashboard live
+// preview. Process-level singleton: the idle sweep + all live sessions must
+// survive runtime teardown/reload like the other periph singletons. Its
+// destroy() (kill all ffmpeg + clean temp dirs) is wired to the research-claw-db
+// service stop() below so a real gateway shutdown leaves no orphan processes.
+let _rtspPreviewManager: RtspPreviewManager | null = null;
+
+/**
+ * Minimal session lookup surface the RTSP→HLS route handler needs. Kept as a
+ * narrow interface (not the whole manager) so the route factory is unit/E2E
+ * testable against a real manager OR a fake, without dragging in ffmpeg.
+ */
+interface RtspPreviewRouteDeps {
+  getByToken: (sessionToken: string) => { dir: string } | null;
+  touch: (sessionToken: string) => boolean;
+  /** Symlink-aware path guard (H3). Defaults to resolveWithinRoot. */
+  resolveWithinRoot?: (root: string, rel: string) => string;
+  /** Playlist file name (H3 content-type branch). Defaults to PREVIEW_PLAYLIST_NAME. */
+  playlistName?: string;
+}
+
+/**
+ * Build the GET /rc/rtsp-preview/<token>/<file> request handler (§15 v1.3 场景③
+ * H3/H4). Extracted from the inline registerHttpRoute closure so a REAL http
+ * end-to-end test can mount the EXACT same logic against a real http.Server,
+ * backed by a real transmux session — proving the path guard rejects `..`
+ * traversal / null-byte / bad-ext and serves a real playlist/segment on the
+ * happy path. The gateway auth layer (auth:'gateway' → 401 for missing token)
+ * is applied by OpenClaw ahead of this handler; it is exercised separately in
+ * the E2E harness which reproduces the same Bearer check.
+ */
+export function createRtspPreviewRouteHandler(deps: RtspPreviewRouteDeps) {
+  const guard = deps.resolveWithinRoot ?? resolveWithinRoot;
+  const playlist = deps.playlistName ?? PREVIEW_PLAYLIST_NAME;
+  return async function rtspPreviewRouteHandler(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<boolean> {
+    if (req.method !== 'GET') {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: { code: 'METHOD_NOT_ALLOWED', message: 'GET only' } }));
+      return true;
+    }
+
+    try {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      // Strip the route prefix → `<token>/<file>`. pathname is already
+      // percent-decoded by URL for the most part; decode defensively.
+      let rel = decodeURIComponent(url.pathname);
+      if (rel.startsWith(RTSP_PREVIEW_ROUTE)) rel = rel.slice(RTSP_PREVIEW_ROUTE.length);
+      rel = rel.replace(/^\/+/, ''); // drop leading slash(es)
+
+      const slash = rel.indexOf('/');
+      const sessionToken = slash === -1 ? rel : rel.slice(0, slash);
+      const file = slash === -1 ? '' : rel.slice(slash + 1);
+
+      if (!sessionToken || !file) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'BAD_REQUEST', message: 'token and file required' } }));
+        return true;
+      }
+
+      const session = deps.getByToken(sessionToken);
+      if (!session) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'NO_SESSION', message: 'No such preview session' } }));
+        return true;
+      }
+
+      // Extension allowlist: only the playlist + its transport segments.
+      if (!/\.(m3u8|ts)$/.test(file)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'FORBIDDEN_EXT', message: 'Only .m3u8/.ts served' } }));
+        return true;
+      }
+
+      // Path guard (H3): contain `file` within the session dir (symlink-aware).
+      let resolved: string;
+      try {
+        resolved = guard(session.dir, file);
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'PATH_ESCAPE', message: 'Path escapes session dir' } }));
+        return true;
+      }
+
+      const stat = await fs.promises.stat(resolved).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'NOT_FOUND', message: 'Segment not found' } }));
+        return true;
+      }
+
+      // A successful, authenticated hit keeps the session alive (H1) so an
+      // actively-watched preview is not swept out from under the player.
+      deps.touch(sessionToken);
+
+      const isPlaylist = file.endsWith('.m3u8') || file === playlist;
+      res.writeHead(200, {
+        'Content-Type': isPlaylist ? 'application/vnd.apple.mpegurl' : 'video/mp2t',
+        'Content-Length': stat.size,
+        // Live segments must never be cached by intermediaries.
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      });
+      fs.createReadStream(resolved).pipe(res);
+      return true;
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: { code: 'PREVIEW_FAILED', message: String(err) } }));
+      return true;
+    }
+  };
+}
 
 // Server-side jobs sync loop: keeps OpenClaw subagent jobs and stale-detection
 // fresh even when no dashboard is polling, and coalesces all sync triggers
@@ -925,6 +1042,9 @@ const RESEARCH_CLAW_AGENT_TOOLS = [
   'job_checkpoint',
   'job_status',
   'job_finish',
+  'periph_list',
+  'periph_camera_snap',
+  'periph_observe',
 ];
 
 const plugin: PluginDefinition = {
@@ -983,6 +1103,7 @@ const plugin: PluginDefinition = {
       };
       _periphService = new PeriphService(_dbManager.db, { workspaceRoot: _wsConfig.root });
       _plaudManager = new PlaudManager();
+      _rtspPreviewManager = new RtspPreviewManager();
       try {
         _periphService.ensurePeriphGitignore();
       } catch (err) {
@@ -1108,7 +1229,14 @@ const plugin: PluginDefinition = {
         }
       },
       stop() {
-        // No-op: process-scoped singletons survive runtime teardown (see note above).
+        // Process-scoped singletons survive runtime teardown (see note above).
+        // EXCEPTION (§15 场景③ H1): RTSP→HLS preview sessions each hold a live
+        // ffmpeg child + a temp dir. On a real gateway shutdown we MUST kill them
+        // and clean up, otherwise orphan ffmpeg processes and HLS segment dirs
+        // leak. destroy() is idempotent and never throws.
+        if (_rtspPreviewManager) {
+          void _rtspPreviewManager.destroy();
+        }
       },
     });
 
@@ -1136,7 +1264,7 @@ const plugin: PluginDefinition = {
     for (const tool of createJobTools(jobService)) {
       api.registerTool(tool);
     }
-    for (const tool of createPeriphTools(_periphService!, periphBridge)) {
+    for (const tool of createPeriphTools(_periphService!, periphBridge, { workspaceRoot: wsConfig.root })) {
       api.registerTool(tool);
     }
 
@@ -1273,7 +1401,9 @@ const plugin: PluginDefinition = {
         params: Record<string, unknown>;
         respond: (ok: boolean, payload?: unknown, error?: { code: string; message: string }) => void;
       }) => {
-        if ((opts as any)?.context) periphBridge.adoptContext((opts as any).context);
+        if ((opts as any)?.context) {
+          periphBridge.adoptContext((opts as any).context);
+        }
         try {
           const result = await handler(opts.params);
           opts.respond(true, result);
@@ -1313,7 +1443,7 @@ const plugin: PluginDefinition = {
       getLitService: () => _litService,
       getTaskService: () => _taskService,
     }); // 1 method
-    registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!); // 9 methods
+    registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!, _rtspPreviewManager!); // 14 methods
 
     if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
     const memoryService = _memoryService;
@@ -1860,6 +1990,27 @@ const plugin: PluginDefinition = {
           return true;
         }
       },
+    });
+
+    // ── 6c. Register HTTP route: GET /rc/rtsp-preview/<token>/<file> ──
+    // Serves the HLS playlist + .ts segments for a live RTSP→HLS preview session
+    // (§15 v1.3 场景③ H3). Reuses the SAME gateway auth token as /rc/download
+    // (auth:'gateway' → Bearer / x-openclaw-password), so an unauthenticated
+    // request is rejected before this handler runs.
+    //
+    // Path guard (H3): the requested <file> is contained to the session's temp
+    // dir via resolveWithinRoot (symlink-aware realpath walk) — a `..` traversal
+    // or a symlink escape is rejected. Only .m3u8 / .ts extensions are served.
+    // Credentials (H4): the URL carries only the random sessionToken; the RTSP
+    // user:pass never appears in the path/playlist/segment names.
+    api.registerHttpRoute({
+      path: RTSP_PREVIEW_ROUTE,
+      auth: 'gateway',
+      match: 'prefix',
+      handler: createRtspPreviewRouteHandler({
+        getByToken: (token) => _rtspPreviewManager?.getByToken(token) ?? null,
+        touch: (token) => _rtspPreviewManager?.touch(token) ?? false,
+      }),
     });
 
     // ── 7. Register hooks ─────────────────────────────────────────────
@@ -2660,7 +2811,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (53 tools, 123 WS RPC + 2 HTTP = 125 interfaces, 9 hooks, 1 session monitoring service)');
+    api.logger.info('Research-Claw Core registered (56 tools, 137 WS RPC + 3 HTTP = 140 interfaces, 9 hooks, 1 session monitoring service)');
     _hooksRegistered = true;
     }
   },
