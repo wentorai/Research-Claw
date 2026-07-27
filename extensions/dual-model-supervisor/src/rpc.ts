@@ -67,7 +67,6 @@ export function registerSupervisorRpc(
       effectiveSupervisorModel: readiness?.effectiveModel,
       reviewerReady: readiness?.ready,
       reviewerUnavailableReason: readiness?.reason,
-      memoryGuardEnabled: cfg.memoryGuard.enabled,
       courseCorrectionEnabled: cfg.courseCorrection.enabled,
       deviationThreshold: cfg.courseCorrection.deviationThreshold,
       forceRegenerate: cfg.courseCorrection.forceRegenerate,
@@ -89,7 +88,6 @@ export function registerSupervisorRpc(
       // Only accept known config keys — reject arbitrary params
       const ALLOWED_KEYS = [
         'enabled', 'supervisorModel', 'reviewMode',
-        'memoryGuard',
         'courseCorrection', 'highRiskTools',
         'dangerousToolPolicy', 'toolReviewGateMs', 'grounding',
       ] as const;
@@ -104,9 +102,6 @@ export function registerSupervisorRpc(
       }
       // Deep-merge nested config objects to preserve sub-fields on partial updates
       const merged: Record<string, unknown> = { ...current, ...filtered };
-      if (filtered.memoryGuard && typeof filtered.memoryGuard === 'object' && current.memoryGuard) {
-        merged.memoryGuard = { ...current.memoryGuard, ...(filtered.memoryGuard as Record<string, unknown>) };
-      }
       if (filtered.courseCorrection && typeof filtered.courseCorrection === 'object' && current.courseCorrection) {
         merged.courseCorrection = { ...current.courseCorrection, ...(filtered.courseCorrection as Record<string, unknown>) };
       }

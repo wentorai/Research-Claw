@@ -1,7 +1,7 @@
 {
   "name": "@research-claw/dual-model-supervisor",
   "version": "0.1.0",
-  "description": "Dual-model supervision: course correction, memory guarding, and safety filtering",
+  "description": "Dual-model supervision: course correction, safety filtering, and persistent audit",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -18,7 +18,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

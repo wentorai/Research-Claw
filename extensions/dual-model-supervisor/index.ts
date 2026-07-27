@@ -1,10 +1,9 @@
 /**
  * Dual Model Supervisor — Plugin Entry Point
  *
- * Registers 9 hooks + 10 RPC methods for dual-model supervision:
+ * Registers 7 hooks + 10 RPC methods for dual-model supervision:
  *   - Safety gate (before_tool_call)
  *   - Course correction (llm_output → session analysis, before_prompt_build, llm_input)
- *   - Memory guarding (before_compaction, after_compaction)
  *   - Audit logging (SQLite)
  *   - Dashboard RPC (rc.supervisor.*)
  */
@@ -22,12 +21,11 @@ import type {
   ModelsProviderEntry,
   ConfiguredProvider,
 } from './src/core/types.js';
-import { parseConfig, isSupervisorActive, isCourseCorrectionActive, isMemoryGuardActive } from './src/core/config.js';
+import { parseConfig, isSupervisorActive, isCourseCorrectionActive } from './src/core/config.js';
 import { ReviewerClient } from './src/client/reviewer.js';
 import { QuickChecker } from './src/hooks/quick-checker.js';
 import { OutputReviewer } from './src/hooks/output-reviewer.js';
 import { ToolReviewer } from './src/hooks/tool-reviewer.js';
-import { MemoryGuardian } from './src/hooks/memory-guardian.js';
 import { CourseCorrector } from './src/hooks/course-corrector.js';
 import { ConsistencyChecker } from './src/hooks/consistency-checker.js';
 import { GoalParser } from './src/hooks/goal-parser.js';
@@ -48,7 +46,6 @@ let _reviewerClient: ReviewerClient | null = null;
 let _quickChecker: QuickChecker | null = null;
 let _outputReviewer: OutputReviewer | null = null;
 let _toolReviewer: ToolReviewer | null = null;
-let _memoryGuardian: MemoryGuardian | null = null;
 let _courseCorrector: CourseCorrector | null = null;
 let _consistencyChecker: ConsistencyChecker | null = null;
 let _goalParser: GoalParser | null = null;
@@ -93,7 +90,6 @@ function newSessionState(sessionId: string): SessionState {
     methodologyDecisions: [],
     recentOutputs: [],
     recentSummaries: [],
-    preCompactionMemory: [],
     regenerateAttempts: 0,
     regenerateHistory: [],
     lastReviewReport: undefined,
@@ -164,7 +160,6 @@ function applyLocalRuntimeConfig(config: SupervisorConfig): void {
   _reviewerClient?.updateSupervisorConfig(config);
   _outputReviewer?.updateConfig(config);
   _toolReviewer?.updateConfig(config);
-  _memoryGuardian?.updateConfig(config);
   _courseCorrector?.updateConfig(config);
   _consistencyChecker?.updateConfig(config);
   _goalParser?.updateConfig(config);
@@ -300,7 +295,7 @@ function resolveSessionKey(
 const plugin: PluginDefinition = {
   id: 'dual-model-supervisor',
   name: 'Dual Model Supervisor',
-  description: 'Dual-model supervision: course correction, memory guarding, and safety filtering',
+  description: 'Dual-model supervision: course correction, safety filtering, and persistent audit',
   version: '0.1.0',
 
   register(api: PluginApi) {
@@ -358,7 +353,6 @@ const plugin: PluginDefinition = {
       _quickChecker = new QuickChecker(cfg, api.logger);
       _outputReviewer = new OutputReviewer(cfg, api.logger, _reviewerClient, _quickChecker, _auditLog);
       _toolReviewer = new ToolReviewer(cfg, api.logger, _reviewerClient, _quickChecker, _auditLog);
-      _memoryGuardian = new MemoryGuardian(cfg, api.logger, _reviewerClient, _auditLog);
       _courseCorrector = new CourseCorrector(cfg, api.logger, _reviewerClient, _auditLog);
       _consistencyChecker = new ConsistencyChecker(cfg, api.logger, _reviewerClient, _auditLog);
       _goalParser = new GoalParser(cfg, api.logger, _reviewerClient, _auditLog);
@@ -394,7 +388,6 @@ const plugin: PluginDefinition = {
     const auditLog = _auditLog!;
     const outputReviewer = _outputReviewer!;
     const toolReviewer = _toolReviewer!;
-    const memoryGuardian = _memoryGuardian!;
     const courseCorrector = _courseCorrector!;
     const consistencyChecker = _consistencyChecker!;
     const goalParser = _goalParser!;
@@ -455,12 +448,12 @@ const plugin: PluginDefinition = {
           ocConfig.plugins.entries['dual-model-supervisor'] = {};
         }
         const existing = ocConfig.plugins.entries['dual-model-supervisor'].config || {};
+        const { memoryGuard: _withdrawnMemoryGuard, ...supportedExisting } = existing;
         ocConfig.plugins.entries['dual-model-supervisor'].config = {
-          ...existing,  // preserve dbPath and other infra keys
+          ...supportedExisting,  // preserve dbPath and other infra keys
           enabled: newCfg.enabled,
           supervisorModel: newCfg.supervisorModel,
           reviewMode: newCfg.reviewMode,
-          memoryGuard: newCfg.memoryGuard,
           courseCorrection: newCfg.courseCorrection,
           highRiskTools: newCfg.highRiskTools,
           dangerousToolPolicy: newCfg.dangerousToolPolicy,
@@ -747,76 +740,6 @@ const plugin: PluginDefinition = {
       return {};
     });
 
-    // before_compaction — memory anchor injection (memory-guard business →
-    // gated by the memory-guard switch, per invariant: no memory work when off).
-    api.on('before_compaction', async (event, ctx) => {
-      const activeCfg = currentRuntimeConfig(cfg);
-      if (!isMemoryGuardActive(activeCfg)) {
-        return;
-      }
-
-      // Typed PluginHookBeforeCompactionEvent.messages is `unknown[]` — read the
-      // real field and runtime-guard elements to the {role, content} shape.
-      const raw = event.messages;
-      if (!Array.isArray(raw) || raw.length === 0) {
-        return;
-      }
-      const messages = raw.filter(
-        (m): m is { role: string; content: string } =>
-          !!m &&
-          typeof m === 'object' &&
-          typeof (m as { role?: unknown }).role === 'string' &&
-          typeof (m as { content?: unknown }).content === 'string',
-      );
-      if (messages.length === 0) {
-        return;
-      }
-
-      const sessionKey = resolveSessionKey(ctx);
-      if (!sessionKey) return;
-      const state = getOrCreateSession(sessionKey);
-
-      // NOTE (dead-path, surfaced by the typed hook gate): OC types before_compaction
-      // as a VOID hook — a modifying return is discarded. The memory-guard anchor
-      // injection here cannot take effect via the return value; retained for its
-      // state side-effects only. Real injection must move to a live channel
-      // (before_prompt_build) — tracked for the memory-guard remediation.
-      await memoryGuardian.beforeCompaction(messages, sessionKey, state);
-    });
-
-    // after_compaction — memory-loss detection.
-    //
-    // CONTRACT-VERIFIED (OC 2026.6.1 PluginHookAfterCompactionEvent):
-    // the event carries ONLY { messageCount, tokenCount?, compactedCount,
-    // sessionFile? } — NOT the before/after message arrays. Content-based
-    // memory-loss detection is therefore IMPOSSIBLE from the event alone.
-    //
-    // The previous code read phantom `event.original` / `event.compacted` (via an
-    // `as` cast that invented the fields), so `MemoryGuardian.afterCompaction`
-    // NEVER ran — a SILENT dead path. It is disabled here and made OBSERVABLE:
-    // we record that compaction happened + why detection is unavailable. Wiring
-    // real detection requires parsing `event.sessionFile` — tracked for the
-    // memory-guard remediation (not P1). `void memoryGuardian` keeps the
-    // dependency wired for that follow-up.
-    api.on('after_compaction', (event, ctx) => {
-      const activeCfg = currentRuntimeConfig(cfg);
-      // Feature switch first: no memory_guard business audit when the guard is
-      // OFF (invariant: observability must not override the feature switch).
-      if (!isMemoryGuardActive(activeCfg)) {
-        return;
-      }
-      const sessionKey = resolveSessionKey(ctx);
-      if (!sessionKey) return;
-      void memoryGuardian;
-      auditLog.record({
-        sessionId: sessionKey,
-        type: 'memory_guard',
-        action: 'info',
-        details: `compaction observed (messageCount=${event.messageCount}, compactedCount=${event.compactedCount}); content-diff memory-loss detection unavailable from event — needs sessionFile parsing`,
-        timestamp: Date.now(),
-      });
-    });
-
     // session_end — output regeneration summary and cleanup session state
     api.on('session_end', (event, ctx) => {
       const sessionKey = resolveSessionKey(ctx, event);
@@ -841,7 +764,7 @@ const plugin: PluginDefinition = {
     _hookRegistrationApis.add(hookRegistrationKey);
     } // end per-PluginApi hook-registration guard
 
-    api.logger.info('Dual Model Supervisor registered (9 hooks + 10 RPC methods)');
+    api.logger.info('Dual Model Supervisor registered (7 hooks + 10 RPC methods)');
   },
 };
 

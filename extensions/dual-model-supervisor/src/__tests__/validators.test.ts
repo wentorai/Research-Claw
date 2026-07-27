@@ -5,7 +5,6 @@ import {
   validateConsistencyResult,
   validateTaskParsingResult,
   validateMessageSummary,
-  validateMemoryLossItems,
   validateDeviationAnalysis,
 } from '../core/validators.js';
 
@@ -166,30 +165,6 @@ describe('validateMessageSummary', () => {
     const r = validateMessageSummary({});
     expect(r!.claims).toEqual([]);
     expect(r!.decisions).toEqual([]);
-  });
-});
-
-describe('validateMemoryLossItems', () => {
-  it('extracts valid items', () => {
-    const items = validateMemoryLossItems({
-      lostItems: [
-        { category: 'research_goal', content: 'Lost goal', importance: 'critical' },
-        { category: 'key_conclusion', content: 'Lost fact' },  // missing importance → default medium
-      ],
-    });
-    expect(items).toHaveLength(2);
-    expect(items[1].importance).toBe('medium');
-  });
-
-  it('filters invalid items', () => {
-    const items = validateMemoryLossItems({
-      lostItems: [
-        { category: 123, content: 'bad category' },  // non-string category
-        'not an object',
-        null,
-      ],
-    });
-    expect(items).toHaveLength(0);
   });
 });
 

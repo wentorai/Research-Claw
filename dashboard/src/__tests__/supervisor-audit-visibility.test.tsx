@@ -88,12 +88,11 @@ function mountPanel(opts: { status?: Record<string, unknown>; entries?: Record<s
 function inheritedStatus(overrides: Record<string, unknown> = {}) {
   return {
     enabled: true,
-    reviewMode: 'full',
+    reviewMode: 'correct',
     supervisorModel: '', // the inherit marker — never a model name
     modelSource: 'inherited',
     effectiveSupervisorModel: 'custom/test-model',
     reviewerReady: true,
-    memoryGuardEnabled: true,
     courseCorrectionEnabled: true,
     deviationThreshold: 0.5,
     forceRegenerate: false,

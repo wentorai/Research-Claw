@@ -15,7 +15,6 @@ function makeClient() {
         enabled: true,
         reviewMode: 'correct',
         supervisorModel: '',
-        memoryGuardEnabled: false,
         courseCorrectionEnabled: false,
         deviationThreshold: 0.5,
         forceRegenerate: false,

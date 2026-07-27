@@ -615,10 +615,6 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
           enabled: false,
           supervisorModel: '',
           reviewMode: 'off',
-          memoryGuard: {
-            enabled: true,
-            keyCategories: ['research_goal', 'key_conclusion', 'user_preference', 'methodology_decision'],
-          },
           courseCorrection: {
             enabled: true,
             deviationThreshold: 0.5,
@@ -1220,11 +1216,17 @@ export function buildSaveConfig(
     const existingSupervisorConfig = (existingSupervisorEntry?.config as Record<string, unknown> | undefined) ?? {};
 
     // Preserve existing supervisor config values when not explicitly overridden
+    const { memoryGuard: _withdrawnMemoryGuard, ...supportedSupervisorConfig } =
+      existingSupervisorConfig;
+    const requestedReviewMode =
+      input.supervisorReviewMode ??
+      (existingSupervisorConfig.reviewMode as string) ??
+      'off';
     const supervisorConfig: Record<string, unknown> = {
-      ...existingSupervisorConfig,
+      ...supportedSupervisorConfig,
       enabled: input.supervisorEnabled ?? (existingSupervisorConfig.enabled as boolean) ?? false,
       supervisorModel: input.supervisorModel !== undefined ? input.supervisorModel : (existingSupervisorConfig.supervisorModel as string) ?? '',
-      reviewMode: input.supervisorReviewMode ?? (existingSupervisorConfig.reviewMode as string) ?? 'off',
+      reviewMode: requestedReviewMode === 'full' ? 'correct' : requestedReviewMode,
     };
 
     // Only written when the form sends one — omitting it leaves whatever is already
@@ -1244,9 +1246,9 @@ export function buildSaveConfig(
         forceRegenerate: input.supervisorForceRegenerate ?? (existingCourseCorrection.forceRegenerate as boolean) ?? false,
         maxRegenerateAttempts: input.supervisorMaxRegenerateAttempts ?? (existingCourseCorrection.maxRegenerateAttempts as number) ?? 3,
       };
-      // Enable courseCorrection when review mode is 'correct' or 'full'
+      // Enable courseCorrection only in the supported correction mode.
       (supervisorConfig.courseCorrection as Record<string, unknown>).enabled =
-        supervisorConfig.reviewMode === 'correct' || supervisorConfig.reviewMode === 'full';
+        supervisorConfig.reviewMode === 'correct';
     }
 
     result.plugins = {

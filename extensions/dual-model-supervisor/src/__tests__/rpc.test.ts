@@ -4,8 +4,8 @@ import { parseConfig } from '../core/config.js';
 describe('rc.supervisor.config allowlist', () => {
   const ALLOWED_KEYS = [
     'enabled', 'supervisorModel', 'reviewMode',
-    'memoryGuard',
     'courseCorrection', 'highRiskTools',
+    'dangerousToolPolicy', 'toolReviewGateMs', 'grounding',
   ];
 
   it('filters out unknown keys from params', () => {
@@ -34,9 +34,11 @@ describe('rc.supervisor.config allowlist', () => {
       enabled: true,
       supervisorModel: 'openai/gpt-4o-mini',
       reviewMode: 'correct',
-      memoryGuard: { enabled: true, keyCategories: [] },
       courseCorrection: { enabled: false, deviationThreshold: 0.5, forceRegenerate: false, maxRegenerateAttempts: 3 },
       highRiskTools: ['bash'],
+      dangerousToolPolicy: 'approve',
+      toolReviewGateMs: 2000,
+      grounding: { networkPolicy: 'off', verdictMode: 'flag' },
       extraField: 'nope',
     };
 
@@ -69,47 +71,11 @@ describe('rc.supervisor.config allowlist', () => {
 });
 
 describe('rc.supervisor.config nested merge', () => {
-  it('preserves memoryGuard.keyCategories on partial update', () => {
-    const current = {
-      enabled: true,
-      supervisorModel: 'test/model',
-      reviewMode: 'full' as const,
-      memoryGuard: {
-        enabled: true,
-        keyCategories: ['custom_a', 'custom_b'],
-      },
-      courseCorrection: {
-        enabled: true,
-        deviationThreshold: 0.5,
-        forceRegenerate: false,
-        maxRegenerateAttempts: 3,
-      },
-      highRiskTools: ['exec'],
-    };
-
-    // Simulate partial update: only toggle memoryGuard.enabled
-    const filtered: Record<string, unknown> = { memoryGuard: { enabled: false } };
-
-    // Deep merge (mirrors the logic in rpc.ts rc.supervisor.config handler)
-    const merged: Record<string, unknown> = { ...current, ...filtered };
-    if (filtered.memoryGuard && typeof filtered.memoryGuard === 'object' && current.memoryGuard) {
-      merged.memoryGuard = { ...current.memoryGuard, ...(filtered.memoryGuard as Record<string, unknown>) };
-    }
-
-    const result = parseConfig(merged);
-    expect(result.memoryGuard.enabled).toBe(false);
-    expect(result.memoryGuard.keyCategories).toEqual(['custom_a', 'custom_b']);
-  });
-
   it('preserves courseCorrection sub-fields on partial update', () => {
     const current = {
       enabled: true,
       supervisorModel: 'test/model',
       reviewMode: 'correct' as const,
-      memoryGuard: {
-        enabled: true,
-        keyCategories: ['research_goal'],
-      },
       courseCorrection: {
         enabled: true,
         deviationThreshold: 0.8,
@@ -134,33 +100,4 @@ describe('rc.supervisor.config nested merge', () => {
     expect(result.courseCorrection.maxRegenerateAttempts).toBe(5);
   });
 
-  it('handles full object replacement when no prior value exists', () => {
-    const current = {
-      enabled: true,
-      supervisorModel: 'test/model',
-      reviewMode: 'full' as const,
-      memoryGuard: undefined as unknown,
-      courseCorrection: {
-        enabled: true,
-        deviationThreshold: 0.5,
-        forceRegenerate: false,
-        maxRegenerateAttempts: 3,
-      },
-      highRiskTools: ['exec'],
-    };
-
-    const filtered: Record<string, unknown> = { memoryGuard: { enabled: false } };
-
-    const merged: Record<string, unknown> = { ...current, ...filtered };
-    // When current.memoryGuard is falsy, no deep-merge — just use the filtered value
-    if (filtered.memoryGuard && typeof filtered.memoryGuard === 'object' && current.memoryGuard) {
-      merged.memoryGuard = { ...current.memoryGuard, ...(filtered.memoryGuard as Record<string, unknown>) };
-    }
-
-    const result = parseConfig(merged);
-    // Without deep merge (no existing value), defaults fill in missing keyCategories
-    expect(result.memoryGuard.enabled).toBe(false);
-    // keyCategories falls back to DEFAULT_CONFIG since it wasn't provided
-    expect(result.memoryGuard.keyCategories).toBeDefined();
-  });
 });

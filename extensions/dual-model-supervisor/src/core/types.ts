@@ -7,11 +7,6 @@ import type { GatewayRequestHandlerOptions } from 'openclaw/plugin-sdk/core';
 
 // ── Configuration ──────────────────────────────────────────────────────
 
-export interface MemoryGuardConfig {
-  enabled: boolean;            // Whether memory guard is active
-  keyCategories: string[];     // Categories of memory to protect (e.g., 'research_goal', 'key_conclusion')
-}
-
 export interface CourseCorrectionConfig {
   enabled: boolean;            // Whether course correction is active
   deviationThreshold: number;  // Correct at or above this deviation; 0-1 inclusive at both ends
@@ -58,8 +53,7 @@ export interface GroundingConfig {
 export interface SupervisorConfig {
   enabled: boolean;                    // Whether supervisor is active
   supervisorModel: string;             // "provider/model" e.g. "openai/gpt-4o-mini"
-  reviewMode: 'off' | 'filter-only' | 'correct' | 'full';  // Review depth level
-  memoryGuard: MemoryGuardConfig;      // Memory protection settings
+  reviewMode: 'off' | 'filter-only' | 'correct';  // Review depth level
   courseCorrection: CourseCorrectionConfig;  // Course correction settings
   highRiskTools: string[];             // Tool names that require extra review
   /**
@@ -103,10 +97,6 @@ export const DEFAULT_CONFIG: SupervisorConfig = {
   enabled: false,
   supervisorModel: '',
   reviewMode: 'off',
-  memoryGuard: {
-    enabled: true,
-    keyCategories: ['research_goal', 'key_conclusion', 'user_preference', 'methodology_decision'],
-  },
   courseCorrection: {
     enabled: true,
     deviationThreshold: 0.5,
@@ -159,26 +149,12 @@ export interface ConsistencyCheckResult {
   details: string[];              // Detailed descriptions of inconsistencies
 }
 
-export interface MemoryLossItem {
-  category: string;               // Category of lost memory (e.g., 'research_goal')
-  content: string;                // The actual content that was lost
-  importance: 'critical' | 'high' | 'medium';  // Importance level of lost memory
-}
-
-export interface MemoryItem {
-  category: string;               // Memory category for organization
-  summary: string;                // Concise summary of the memory
-  source: string;                 // Source of the memory (e.g., message_id, tool_call_id)
-  timestamp: number;              // When the memory was created/recorded
-}
-
 // ── Audit Log ──────────────────────────────────────────────────────────
 
 export type AuditLogType =
   | 'tool_review'         // Review of tool calls
   | 'output_review'       // Review of model outputs
   | 'consistency_check'   // Check for reasoning consistency
-  | 'memory_guard'        // Memory protection actions
   | 'course_correction'   // Course correction interventions
   | 'force_regenerate'    // Force regeneration on deviation
   | 'approval'            // Human-in-the-loop approval lifecycle (requested → allowed/denied/timeout/cancelled)
@@ -247,8 +223,6 @@ export interface SessionState {
   };
   regenerateAttempts: number;      // Number of regeneration attempts in this session
   regenerateHistory: RegenerateHistoryEntry[];  // History of regeneration attempts
-  lostMemorySummary?: string;      // Summary of memories lost during conversation compression
-  preCompactionMemory: MemoryItem[];  // Memory snapshots before conversation compaction
   lastReviewReport?: string;       // Most recent review report text (for Dashboard panel display)
   lastStaticSupervisorInjectAt?: number;  // Per-session debounce for static rules injection
   groundingFindings?: GroundingFinding[]; // Cached citation existence results (deduped by raw)
@@ -386,7 +360,7 @@ export interface PluginDefinition {
 
 export interface SupervisorStatus {
   enabled: boolean;        // Whether supervisor is currently active
-  reviewMode: string;      // Current review mode (off/filter-only/correct/full)
+  reviewMode: string;      // Current review mode (off/filter-only/correct)
   supervisorModel: string; // Currently configured supervisor model
   stats: {
     total: number;         // Total number of review operations performed

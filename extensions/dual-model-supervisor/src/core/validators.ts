@@ -159,45 +159,6 @@ export function validateMessageSummary(raw: unknown): MessageSummary | null {
 }
 
 /**
- * Validate memory loss items from after_compaction review.
- */
-export function validateMemoryLossItems(raw: unknown): Array<{ category: string; content: string; importance: string }> {
-  if (!raw || typeof raw !== 'object') return [];
-  const r = raw as Record<string, unknown>;
-  const items = r.lostItems;
-  if (!Array.isArray(items)) return [];
-
-  return items
-    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-    .filter((item) => isString(item.category) && isString(item.content))
-    .map((item) => ({
-      category: item.category as string,
-      content: item.content as string,
-      importance: isString(item.importance) ? item.importance : 'medium',
-    }));
-}
-
-/**
- * Validate key memory items from before_compaction review.
- */
-export function validateKeyMemoryItems(raw: unknown): Array<{ category: string; summary: string; source: string; timestamp: number }> {
-  if (!raw || typeof raw !== 'object') return [];
-  const r = raw as Record<string, unknown>;
-  const items = r.keyItems;
-  if (!Array.isArray(items)) return [];
-
-  return items
-    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-    .filter((item) => isString(item.category) && isString(item.summary))
-    .map((item) => ({
-      category: item.category as string,
-      summary: item.summary as string,
-      source: isString(item.source) ? item.source : '',
-      timestamp: isNumber(item.timestamp) ? item.timestamp : 0,
-    }));
-}
-
-/**
  * Validate course correction / deviation analysis response.
  */
 export function validateDeviationAnalysis(raw: unknown): {

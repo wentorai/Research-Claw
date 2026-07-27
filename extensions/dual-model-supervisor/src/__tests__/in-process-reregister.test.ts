@@ -3,8 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { loadPluginFresh } from './harness/plugin-harness.js';
 
 const EXPECTED_TYPED_HOOKS = [
-  'after_compaction',
-  'before_compaction',
   'before_message_write',
   'before_prompt_build',
   'before_tool_call',

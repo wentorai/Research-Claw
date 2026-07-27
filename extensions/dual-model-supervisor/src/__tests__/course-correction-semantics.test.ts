@@ -41,7 +41,6 @@ function makeState(): SessionState {
     methodologyDecisions: [],
     recentOutputs: [],
     recentSummaries: [],
-    preCompactionMemory: [],
     regenerateAttempts: 0,
     regenerateHistory: [],
     lastLlmOutput: 'some drifted output',

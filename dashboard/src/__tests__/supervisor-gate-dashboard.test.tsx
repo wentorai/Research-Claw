@@ -79,8 +79,7 @@ function supervisorConfigStub(overrides: Record<string, unknown> = {}) {
   return {
     enabled: true,
     supervisorModel: '',
-    reviewMode: 'full' as const,
-    memoryGuard: { enabled: true, keyCategories: [] as string[] },
+    reviewMode: 'correct' as const,
     courseCorrection: { enabled: true, deviationThreshold: 0.5, forceRegenerate: false, maxRegenerateAttempts: 3 },
     highRiskTools: ['exec', 'write'],
     ...overrides,
@@ -90,14 +89,13 @@ function supervisorConfigStub(overrides: Record<string, unknown> = {}) {
 function supervisorStatusStub(overrides: Record<string, unknown> = {}) {
   return {
     enabled: true,
-    reviewMode: 'full',
+    reviewMode: 'correct',
     supervisorModel: '',
     modelSource: 'inherited',
     effectiveSupervisorModel: 'custom/test-model',
     reviewerReady: true,
     highRiskTools: ['exec', 'write'],
     toolReviewGateMs: 4000,
-    memoryGuardEnabled: true,
     courseCorrectionEnabled: true,
     deviationThreshold: 0.5,
     forceRegenerate: false,
@@ -192,7 +190,7 @@ describe('C13 buildSaveConfig carries the gate into the supervisor plugin config
       textModel: 'test-model',
       supervisorEnabled: true,
       supervisorModel: '',
-      supervisorReviewMode: 'full',
+      supervisorReviewMode: 'correct',
       supervisorToolReviewGateMs: 2000,
     }) as { plugins: { entries: Record<string, { config: Record<string, unknown> }> } };
 
@@ -214,7 +212,7 @@ describe('C13 buildSaveConfig carries the gate into the supervisor plugin config
       textModel: 'test-model',
       supervisorEnabled: true,
       supervisorModel: '',
-      supervisorReviewMode: 'full',
+      supervisorReviewMode: 'correct',
     }) as { plugins: { entries: Record<string, { config: Record<string, unknown> }> } };
 
     expect(saved.plugins.entries['dual-model-supervisor'].config.toolReviewGateMs).toBe(12000);

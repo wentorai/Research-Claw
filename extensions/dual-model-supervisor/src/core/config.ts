@@ -21,8 +21,7 @@ export function parseConfig(raw: Record<string, unknown> | undefined): Superviso
   return {
     enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULT_CONFIG.enabled,
     supervisorModel: typeof raw.supervisorModel === 'string' ? raw.supervisorModel : DEFAULT_CONFIG.supervisorModel,
-    reviewMode: isValidReviewMode(raw.reviewMode) ? raw.reviewMode : DEFAULT_CONFIG.reviewMode,
-    memoryGuard: parseMemoryGuard(raw.memoryGuard),
+    reviewMode: parseReviewMode(raw.reviewMode),
     courseCorrection: parseCourseCorrection(raw.courseCorrection),
     highRiskTools: parseStringArray(raw.highRiskTools, DEFAULT_CONFIG.highRiskTools),
     dangerousToolPolicy: raw.dangerousToolPolicy === 'approve' ? 'approve' : DEFAULT_CONFIG.dangerousToolPolicy,
@@ -111,19 +110,19 @@ function parseGrounding(raw: unknown): SupervisorConfig['grounding'] {
   };
 }
 
-/** Type-guard for the four valid reviewMode values. */
+/** Type-guard for the supported reviewMode values. */
 function isValidReviewMode(value: unknown): value is SupervisorConfig['reviewMode'] {
-  return typeof value === 'string' && ['off', 'filter-only', 'correct', 'full'].includes(value);
+  return typeof value === 'string' && ['off', 'filter-only', 'correct'].includes(value);
 }
 
-/** Parse memoryGuard sub-config with fallback defaults. */
-function parseMemoryGuard(raw: unknown): SupervisorConfig['memoryGuard'] {
-  if (typeof raw !== 'object' || raw === null) return { ...DEFAULT_CONFIG.memoryGuard };
-  const obj = raw as Record<string, unknown>;
-  return {
-    enabled: typeof obj.enabled === 'boolean' ? obj.enabled : DEFAULT_CONFIG.memoryGuard.enabled,
-    keyCategories: parseStringArray(obj.keyCategories, DEFAULT_CONFIG.memoryGuard.keyCategories),
-  };
+/**
+ * Parse review mode. `full` existed only to enable the withdrawn Memory Guard;
+ * preserving it as `correct` keeps legacy users supervised instead of silently
+ * falling back to the default `off`.
+ */
+function parseReviewMode(raw: unknown): SupervisorConfig['reviewMode'] {
+  if (raw === 'full') return 'correct';
+  return isValidReviewMode(raw) ? raw : DEFAULT_CONFIG.reviewMode;
 }
 
 /**
@@ -192,17 +191,10 @@ export function isSupervisorActive(cfg: SupervisorConfig): boolean {
 }
 
 /**
- * Check if memory guard should be active.
- */
-export function isMemoryGuardActive(cfg: SupervisorConfig): boolean {
-  return isSupervisorActive(cfg) && cfg.reviewMode === 'full' && cfg.memoryGuard.enabled;
-}
-
-/**
  * Check if course correction should be active.
  */
 export function isCourseCorrectionActive(cfg: SupervisorConfig): boolean {
-  return isSupervisorActive(cfg) && (cfg.reviewMode === 'correct' || cfg.reviewMode === 'full') && cfg.courseCorrection.enabled;
+  return isSupervisorActive(cfg) && cfg.reviewMode === 'correct' && cfg.courseCorrection.enabled;
 }
 
 /**

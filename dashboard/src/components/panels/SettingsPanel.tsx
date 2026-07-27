@@ -540,7 +540,7 @@ export default function SettingsPanel() {
   const [supervisorApiKeyConfigured, setSupervisorApiKeyConfigured] = useState(false);
   const [supervisorApiKeyDeletePending, setSupervisorApiKeyDeletePending] = useState(false);
   const [supervisorUseMainModel, setSupervisorUseMainModel] = useState(true);
-  const [reviewMode, setReviewMode] = useState<'filter-only' | 'correct' | 'full'>('correct');
+  const [reviewMode, setReviewMode] = useState<'filter-only' | 'correct'>('correct');
   const [deviationThreshold, setDeviationThreshold] = useState(0.5);
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [maxRegenerateAttempts, setMaxRegenerateAttempts] = useState(3);
@@ -612,7 +612,8 @@ export default function SettingsPanel() {
         }
       }
 
-      setReviewMode(supervisorConfig.reviewMode === 'off' ? 'correct' : (supervisorConfig.reviewMode ?? 'correct'));
+      const storedReviewMode = supervisorConfig.reviewMode as string | undefined;
+      setReviewMode(storedReviewMode === 'filter-only' ? 'filter-only' : 'correct');
       setToolReviewGateMs(supervisorConfig.toolReviewGateMs ?? SUPERVISOR_GATE_DEFAULT_MS);
       const cc = supervisorConfig.courseCorrection;
       if (cc) {
@@ -2696,7 +2697,6 @@ export default function SettingsPanel() {
               options={[
                 { value: 'filter-only', label: t('settings.reviewModeFilter') },
                 { value: 'correct', label: t('settings.reviewModeCorrect') },
-                { value: 'full', label: t('settings.reviewModeFull') },
               ]}
               optionRender={(option) => (
                 <div style={{ padding: '4px 0' }}>
@@ -2704,7 +2704,6 @@ export default function SettingsPanel() {
                   <div style={{ fontSize: 12, color: tokens.text.muted, marginTop: 2 }}>
                     {option.value === 'filter-only' && t('settings.reviewModeFilterDesc')}
                     {option.value === 'correct' && t('settings.reviewModeCorrectDesc')}
-                    {option.value === 'full' && t('settings.reviewModeFullDesc')}
                   </div>
                 </div>
               )}

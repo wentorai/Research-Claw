@@ -38,7 +38,6 @@ export interface SupervisorStatus {
   /** How long a high-risk tool call waits for deep review before failing open. */
   toolReviewGateMs?: number;
   dangerousToolPolicy?: 'block' | 'approve';
-  memoryGuardEnabled: boolean;
   courseCorrectionEnabled: boolean;
   deviationThreshold: number;
   forceRegenerate: boolean;
@@ -52,11 +51,7 @@ export interface SupervisorStatus {
 export interface SupervisorConfig {
   enabled: boolean;
   supervisorModel: string;
-  reviewMode: 'off' | 'filter-only' | 'correct' | 'full';
-  memoryGuard: {
-    enabled: boolean;
-    keyCategories: string[];
-  };
+  reviewMode: 'off' | 'filter-only' | 'correct';
   courseCorrection: {
     enabled: boolean;
     deviationThreshold: number;

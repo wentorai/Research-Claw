@@ -27,8 +27,8 @@ async function setConfig(h: Harness, params: Record<string, unknown>) {
 describe('P2-F rc.supervisor.config production RPC', () => {
   it('applies known keys, drops unknown, and resists prototype/constructor pollution', async () => {
     const h = await loadPluginFresh(CONFIG);
-    const res = await setConfig(h, { reviewMode: 'full', bogusKey: 'x', constructor: 'evil' });
-    expect(res.config.reviewMode).toBe('full');
+    const res = await setConfig(h, { reviewMode: 'correct', bogusKey: 'x', constructor: 'evil' });
+    expect(res.config.reviewMode).toBe('correct');
     expect(res.config.bogusKey).toBeUndefined();
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect((Object.prototype as Record<string, unknown>).bogusKey).toBeUndefined();

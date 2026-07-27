@@ -218,13 +218,6 @@ export class CourseCorrector {
 
     const lines: string[] = [];
 
-    if (sessionState.lostMemorySummary) {
-      lines.push('[Supervisor] ⚠️ Context compaction may have lost the following key information. Refer to it:');
-      lines.push(sessionState.lostMemorySummary);
-      lines.push('');
-      sessionState.lostMemorySummary = undefined;
-    }
-
     if (sessionState.pendingCourseCorrection && isCourseCorrectionActive(this.config)) {
       lines.push('[Supervisor] 🧭 Drift detected in the previous turn. Please note:');
       lines.push(sessionState.pendingCourseCorrection);

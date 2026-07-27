@@ -14,7 +14,6 @@ function makeSessionState(id: string): SessionState {
     methodologyDecisions: [],
     recentOutputs: [],
     recentSummaries: [],
-    preCompactionMemory: [],
     regenerateAttempts: 0,
     regenerateHistory: [],
   };
@@ -36,8 +35,8 @@ describe('session routing: per-session debounce', () => {
     const sessionA = makeSessionState('a');
     const sessionB = makeSessionState('b');
 
-    const resultA = takeStaticRules('full', sessionA);
-    const resultB = takeStaticRules('full', sessionB);
+    const resultA = takeStaticRules('correct', sessionA);
+    const resultB = takeStaticRules('correct', sessionB);
 
     expect(resultA).toBe('[Supervisor rules]');
     expect(resultB).toBe('[Supervisor rules]');
@@ -46,8 +45,8 @@ describe('session routing: per-session debounce', () => {
   it('blocks duplicate injection for the SAME session within debounce window', () => {
     const session = makeSessionState('test');
 
-    const first = takeStaticRules('full', session);
-    const second = takeStaticRules('full', session);
+    const first = takeStaticRules('correct', session);
+    const second = takeStaticRules('correct', session);
 
     expect(first).toBe('[Supervisor rules]');
     expect(second).toBe(''); // debounced
@@ -60,8 +59,8 @@ describe('session routing: per-session debounce', () => {
 
   it('works with null session (no state to track)', () => {
     // null session = no debounce tracking, always emits
-    expect(takeStaticRules('full', null)).toBe('[Supervisor rules]');
-    expect(takeStaticRules('full', null)).toBe('[Supervisor rules]');
+    expect(takeStaticRules('correct', null)).toBe('[Supervisor rules]');
+    expect(takeStaticRules('correct', null)).toBe('[Supervisor rules]');
   });
 });
 
