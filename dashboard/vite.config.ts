@@ -6,22 +6,33 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 /** Replace __RC_BUILD_HASH__ in public/theme-init.js with a real hash after build. */
-function cacheBust(): Plugin {
+export function createCacheBustPlugin(
+  outputFile = resolve(__dirname, 'dist/theme-init.js'),
+): Plugin {
+  let buildFailed = false;
   return {
     name: 'rc-cache-bust',
     apply: 'build',
+    buildStart() {
+      buildFailed = false;
+    },
+    buildEnd(error) {
+      buildFailed = error != null;
+    },
     closeBundle() {
-      const file = resolve(__dirname, 'dist/theme-init.js');
-      const src = readFileSync(file, 'utf8');
+      // Rollup also calls closeBundle after a failed build. Do not replace the
+      // primary compiler error with an ENOENT from an output that was never made.
+      if (buildFailed) return;
+      const src = readFileSync(outputFile, 'utf8');
       if (!src.includes('__RC_BUILD_HASH__')) return;
       const hash = createHash('sha256').update(Date.now().toString()).digest('hex').slice(0, 12);
-      writeFileSync(file, src.replace(/__RC_BUILD_HASH__/g, hash));
+      writeFileSync(outputFile, src.replace(/__RC_BUILD_HASH__/g, hash));
     },
   };
 }
 
 export default defineConfig({
-  plugins: [react(), cacheBust()],
+  plugins: [react(), createCacheBustPlugin()],
   base: './',
   css: {
     preprocessorOptions: {
