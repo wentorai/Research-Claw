@@ -16,11 +16,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadPluginFresh, type Harness } from './harness/plugin-harness.js';
+import { OUTPUT_REVIEW_SYSTEM_PROMPT } from '../core/prompts.js';
 
 const CONFIG = {
   enabled: true,
   supervisorModel: 'testprov/testmodel',
   reviewMode: 'correct',
+  courseCorrection: { enabled: false },
   providers: {
     testprov: { api: 'openai-completions', baseUrl: 'http://mock.local/v1/chat/completions', apiKey: 'k', models: [{ id: 'testmodel', maxTokens: 1000 }] },
   },
@@ -33,16 +35,40 @@ let releaseReview: (() => void) | null = null;
 function installDeferredReviewer() {
   releaseReview = null;
   (globalThis as { fetch: unknown }).fetch = vi.fn(
-    () =>
-      new Promise((resolve) => {
+    (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      const systemPrompt = body.messages?.find((message) => message.role === 'system')?.content;
+      const response = (content: Record<string, unknown>) => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify(content) } }],
+        }),
+        text: async () => '',
+      });
+
+      // Summary extraction is a separate reviewer call on the same queue. Let it
+      // complete immediately so this probe defers exactly the output-review call.
+      if (systemPrompt !== OUTPUT_REVIEW_SYSTEM_PROMPT) {
+        return Promise.resolve(response({}));
+      }
+
+      return new Promise((resolve) => {
         releaseReview = () =>
-          resolve({
-            ok: true,
-            status: 200,
-            json: async () => ({ choices: [{ message: { content: JSON.stringify({ blocked: false, corrected: false, warnings: [], qualityScore: 0.9, deviationScore: 0.1 }) } }] }),
-            text: async () => '',
-          });
-      }),
+          resolve(
+            response({
+              flagged: false,
+              hasSuggestion: false,
+              warnings: [],
+              memoryAlerts: [],
+              qualityScore: 0.9,
+              deviationScore: 0.1,
+            }),
+          );
+      });
+    },
   );
 }
 
@@ -52,14 +78,24 @@ function llmOutput(sk: string, text: string) {
     ctx: { sessionKey: sk, sessionId: sk, runId: `run-${sk}` },
   };
 }
-async function outputReviews(h: Harness, sk: string): Promise<unknown[]> {
-  const r = (await h.rpc.get('rc.supervisor.log')!({ sessionId: sk, type: 'output_review' })) as { entries: unknown[] };
-  return r.entries;
+interface OutputReviewEntry {
+  details?: string;
+}
+async function deepOutputReviews(h: Harness, sk: string): Promise<OutputReviewEntry[]> {
+  const r = (await h.rpc.get('rc.supervisor.log')!({
+    sessionId: sk,
+    type: 'output_review',
+  })) as { entries: OutputReviewEntry[] };
+  return r.entries.filter((entry) =>
+    /^(Review passed|Deep review degraded|Suggested correction|Flagged)/.test(
+      entry.details ?? '',
+    ),
+  );
 }
 async function waitForOutputReview(h: Harness, sk: string, timeoutMs = 2000): Promise<unknown[]> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const e = await outputReviews(h, sk);
+    const e = await deepOutputReviews(h, sk);
     if (e.length > 0) return e;
     await new Promise((r) => setTimeout(r, 5));
   }
@@ -90,10 +126,11 @@ describe('P1-B output review is fire-and-forget, audit-delivered (no footer)', (
       new Promise((r) => setTimeout(() => r('BLOCKED'), 250)),
     ]);
     expect(raced).toBe('RETURNED'); // never blocks on the reviewer
+    await h.waitUntil(() => releaseReview !== null);
 
     // The review is still pending → no output_review audit yet, and there is no
     // outbound-modification path to produce a late footer.
-    expect(await outputReviews(h, sk)).toHaveLength(0);
+    expect(await deepOutputReviews(h, sk)).toHaveLength(0);
 
     // Release the reviewer; the review result is now delivered via the audit path.
     releaseReview!();
@@ -107,12 +144,13 @@ describe('P1-B output review is fire-and-forget, audit-delivered (no footer)', (
     const h1 = await loadPluginFresh({ ...CONFIG, dbPath });
     const s = llmOutput(sk, 'ANSWER_TEXT');
     await h1.fire('llm_output', s.event, s.ctx);
+    await h1.waitUntil(() => releaseReview !== null);
     releaseReview!();
     await waitForOutputReview(h1, sk);
 
     // Reopen the plugin on the SAME db (simulate a restart) and re-query.
     const h2 = await loadPluginFresh({ ...CONFIG, dbPath });
-    const recovered = await outputReviews(h2, sk);
+    const recovered = await deepOutputReviews(h2, sk);
     expect(recovered.length).toBeGreaterThan(0); // persisted in SQLite, recovered after reopen
   });
 });

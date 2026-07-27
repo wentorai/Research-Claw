@@ -7,9 +7,11 @@
  * audit) exactly as the gateway would.
  */
 
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
 
 export interface Harness {
   /** Fire a hook with the real (event, ctx) signature; returns the merged handler result. */
@@ -37,7 +39,11 @@ export interface Harness {
   registerFreshApi(): string[];
 }
 
-let _dbCounter = 0;
+const pendingCleanup: Array<() => void> = [];
+
+afterEach(() => {
+  for (const cleanup of pendingCleanup.splice(0)) cleanup();
+});
 
 /**
  * Load a FRESH copy of the plugin (module singletons reset) and register it
@@ -60,8 +66,13 @@ export async function loadPluginFresh(
   const rpc = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>();
   const broadcasts: Array<{ event: string; payload: unknown }> = [];
 
-  // Unique temp DB path per harness so better-sqlite3 never collides.
-  const dbPath = pluginConfig.dbPath ?? path.join(os.tmpdir(), `rc-supervisor-test-${process.pid}-${_dbCounter++}.db`);
+  // A random file path avoids PID-reuse collisions. The module's own exit
+  // finalizer is captured below so afterEach can close SQLite before deleting
+  // the generated database and WAL sidecars. Restart/recovery tests pass an
+  // explicit file path, which this harness never deletes.
+  const generatedDbPath = pluginConfig.dbPath === undefined;
+  const dbPath = pluginConfig.dbPath
+    ?? path.join(os.tmpdir(), `rc-supervisor-test-${randomUUID()}.db`);
 
   const api = {
     id: 'dual-model-supervisor',
@@ -104,10 +115,25 @@ export async function loadPluginFresh(
     },
   };
 
+  const exitListenersBefore = new Set(process.listeners('exit'));
   const mod = (await import('../../../index.js')) as {
     default: { register: (api: unknown) => void };
   };
   mod.default.register(api);
+  const moduleExitListeners = process
+    .listeners('exit')
+    .filter((listener) => !exitListenersBefore.has(listener));
+  pendingCleanup.push(() => {
+    for (const listener of moduleExitListeners) {
+      process.removeListener('exit', listener);
+      listener(0);
+    }
+    if (generatedDbPath) {
+      for (const suffix of ['', '-wal', '-shm']) {
+        fs.rmSync(`${dbPath}${suffix}`, { force: true });
+      }
+    }
+  });
 
   return {
     async fire(hookName, event, ctx) {
