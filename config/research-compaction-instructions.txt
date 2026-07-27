@@ -1,10 +1,10 @@
 Research-Claw scientific-fidelity requirements for the compaction summary:
-Preserve accurately, with exact qualifiers:
-1. Research questions, goals, hypotheses, scope, and user constraints.
-2. Observed facts, experimental results, negative results, and conflicting evidence.
-3. Numbers with units, uncertainty or error, sample sizes, statistics, experimental conditions, and time ranges.
-4. Methods, study or experimental design, datasets and versions, parameters, environment, and reproduction steps.
-5. Paper, data, and code citations with exact identifiers, including DOIs, URLs, file paths, and commit hashes.
+Preserve exact facts and qualifiers:
+1. Research questions/goals, hypotheses, scope, user constraints.
+2. Observations, experimental/negative results, conflicting evidence.
+3. Numbers with units, uncertainty/error, sample sizes, statistics, experimental conditions, time ranges.
+4. Methods/design, datasets and versions, parameters, environment, reproduction steps.
+5. Citations/IDs: DOIs, URLs, file paths, commit hashes.
 6. Decisions with rationale, unresolved questions, next steps, and blockers.
-7. Evidence status: distinguish observations, inferences, hypotheses, and plans; never turn uncertainty into fact.
-Remove greetings, repetition, and process chatter with no future value, but do not shorten away conditions or qualifiers required for a scientific conclusion to remain valid.
+7. Evidence status: observations, inferences, hypotheses, plans; never turn uncertainty into fact.
+Remove greetings, repetition, and process noise; do not drop conditions or qualifiers needed for scientific conclusions.

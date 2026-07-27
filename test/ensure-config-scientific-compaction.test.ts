@@ -68,6 +68,13 @@ describe('ensure-config scientific compaction migration', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('fits OpenClaw 2026.6.1 custom-instruction delivery without truncation', () => {
+    expect(Array.from(EXPECTED_PROMPT).length).toBeLessThanOrEqual(800);
+    expect(EXPECTED_PROMPT).toContain(
+      'Remove greetings, repetition, and process noise; do not drop conditions or qualifiers needed for scientific conclusions.',
+    );
+  });
+
   it('adds the scientific default when customInstructions is absent', () => {
     fs.writeFileSync(configPath, JSON.stringify({ agents: { defaults: {} } }));
 
