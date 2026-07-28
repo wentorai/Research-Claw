@@ -28,6 +28,12 @@ export function describeReviewerUnavailableForUser(): string {
     + 'Choose a valid reviewer model in Supervisor settings, or check its API key, balance, and provider settings.';
 }
 
+/** Human-readable copy for a provider that accepted the request but returned no answer. */
+export function describeEmptyReviewerResponseForUser(): string {
+  return 'AI review returned no usable content. Your main chat is unaffected, and dangerous-command protection remains active. '
+    + 'Choose another reviewer model in Supervisor settings, or check the selected model and its provider account.';
+}
+
 function hasProviderAuth(providerCfg: ModelsProviderEntry): boolean {
   if (providerCfg.apiKey) return true;
   const h = providerCfg.headers;
@@ -92,6 +98,8 @@ export interface ReviewerClientOptions {
    * credentials and provider runtime auth exactly like the main agent.
    */
   runtimeComplete?: RuntimeLlmComplete;
+  /** Called when a runtime result disproves the cached structural readiness. */
+  onReadinessChanged?: (readiness: ReviewerReadiness) => void;
 }
 
 export class ReviewerClient {
@@ -101,6 +109,7 @@ export class ReviewerClient {
   /** Fallback model reference from main model config (`agents.defaults.model.primary`). */
   private fallbackModel: string;
   private readonly runtimeComplete?: RuntimeLlmComplete;
+  private readonly onReadinessChanged?: (readiness: ReviewerReadiness) => void;
   /** Cached adapter for the effective reviewer model; refreshed on config/provider updates. */
   private _adapter: ReviewerApiAdapter | null = null;
   /**
@@ -124,6 +133,7 @@ export class ReviewerClient {
     this.logger = opts.logger;
     this.fallbackModel = opts.fallbackModel ?? '';
     this.runtimeComplete = opts.runtimeComplete;
+    this.onReadinessChanged = opts.onReadinessChanged;
     this._resolveAdapter();
   }
 
@@ -368,7 +378,17 @@ export class ReviewerClient {
         signal,
       });
       if (!result.text.trim()) {
-        this.logger.error('Reviewer API returned empty content');
+        const details = describeEmptyReviewerResponseForUser();
+        this._readiness = {
+          ready: false,
+          modelSource: 'unavailable',
+          effectiveModel: readiness.effectiveModel,
+          reason: 'reviewer runtime returned empty content',
+        };
+        this._adapter = null;
+        this._loggedReadinessKey = `${this._readiness.effectiveModel}|${this._readiness.reason}`;
+        this.logger.error(`[ReviewerClient] ${details}`);
+        this.onReadinessChanged?.({ ...this._readiness });
         return null;
       }
       const parsedJson = parseJsonFromResponse(result.text);

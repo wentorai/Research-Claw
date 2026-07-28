@@ -247,10 +247,10 @@ export type ReviewerModelSource = 'explicit' | 'inherited' | 'unavailable';
 /** Reviewer-model readiness — one truth source for status/audit/logs. */
 export interface ReviewerReadiness {
   /**
-   * Whether a deep-review call can be ATTEMPTED: the model reference resolves, its
-   * provider exists, the protocol is supported and credentials are present. This is a
-   * static config check, not a liveness probe — the endpoint can still reject the call
-   * (that failure is logged per call and fails open).
+   * Whether a deep-review call can be attempted. Structural configuration establishes
+   * initial readiness; a runtime response that violates the completion contract (for
+   * example, empty content) changes it to unavailable until configuration is refreshed.
+   * Ordinary endpoint errors remain per-call fail-open failures.
    */
   ready: boolean;
   modelSource: ReviewerModelSource;

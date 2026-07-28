@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, vi } from 'vitest';
+import type { RuntimeLlmComplete } from '../../core/types.js';
 
 export interface Harness {
   /** Fire a hook with the real (event, ctx) signature; returns the merged handler result. */
@@ -62,23 +63,7 @@ export async function loadPluginFresh(
   opts?: {
     preserveRuntimeConfigHub?: boolean;
     configMutationError?: Error;
-    runtimeLlmComplete?: (params: {
-      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
-      model?: string;
-      maxTokens?: number;
-      temperature?: number;
-      systemPrompt?: string;
-      signal?: AbortSignal;
-      purpose?: string;
-      agentId?: string;
-    }) => Promise<{
-      text: string;
-      provider: string;
-      model: string;
-      agentId: string;
-      usage: Record<string, number>;
-      audit: { caller: { kind: 'plugin'; id?: string }; purpose?: string };
-    }>;
+    runtimeLlmComplete?: RuntimeLlmComplete;
   },
 ): Promise<Harness> {
   if (!opts?.preserveRuntimeConfigHub) {

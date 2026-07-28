@@ -24,6 +24,7 @@ import type {
 import { parseConfig, isSupervisorActive, isCourseCorrectionActive } from './src/core/config.js';
 import {
   ReviewerClient,
+  describeEmptyReviewerResponseForUser,
   describeReviewerUnavailableForUser,
 } from './src/client/reviewer.js';
 import { QuickChecker } from './src/hooks/quick-checker.js';
@@ -146,7 +147,9 @@ function reportReviewerHealth(
     return;
   }
 
-  const details = describeReviewerUnavailableForUser();
+  const details = r.reason === 'reviewer runtime returned empty content'
+    ? describeEmptyReviewerResponseForUser()
+    : describeReviewerUnavailableForUser();
   logger.warn(`[Supervisor] ${details}`);
   auditLog.record({
     sessionId: 'supervisor',
@@ -366,6 +369,16 @@ const plugin: PluginDefinition = {
         logger: api.logger,
         fallbackModel,
         runtimeComplete: api.runtime.llm?.complete,
+        onReadinessChanged: () => {
+          if (!_reviewerClient || !_auditLog) return;
+          reportReviewerHealth(
+            _reviewerClient,
+            _auditLog,
+            api.logger,
+            currentRuntimeConfig(cfg),
+            supervisorDbPath,
+          );
+        },
       });
 
       _quickChecker = new QuickChecker(cfg, api.logger);
