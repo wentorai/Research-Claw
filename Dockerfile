@@ -1,7 +1,7 @@
 # ============================================================
 # Research-Claw (科研龙虾)
 # ============================================================
-FROM --platform=$TARGETPLATFORM node:22-slim
+FROM node:22-slim
 
 # Release builds pass the frozen Research-Claw commit. The runtime version
 # helper reads this value even though the image intentionally contains no .git.
