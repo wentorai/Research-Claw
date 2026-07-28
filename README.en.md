@@ -8,7 +8,7 @@
 
 You define the question. Research-Claw runs the lab. 24/7 on your machine. Every output, yours alone.
 
-[![Version](https://img.shields.io/badge/version-v0.8.0-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
+[![Version](https://img.shields.io/badge/version-v0.8.1-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows_%7C_Linux-lightgrey?style=flat-square)](#)
@@ -313,10 +313,10 @@ curl -fsSL https://wentor.ai/docker-install.sh | bash
 irm https://wentor.ai/docker-install.ps1 | iex
 ```
 
-> The script automatically: checks Docker → stops/removes old container → pulls latest image → starts → opens browser.
+> The script automatically: checks Docker → pulls the latest image → retains the old container for rollback → starts and verifies the replacement → opens the browser. If the replacement does not become healthy, the previous version is restored automatically.
 > Re-run anytime to update. Data persists in Docker named volumes.
 
-After install, the browser opens `http://127.0.0.1:28789` automatically. Follow the **Setup Wizard** to configure your API key — no config file editing needed.
+After install, the browser opens `http://127.0.0.1:28789` automatically. Follow the **Setup Wizard** to configure your API key — no config file editing needed. Install, update, and `pnpm serve` all print the current Research-Claw, OpenClaw, and source revision in the terminal.
 
 <details>
 <summary><b>Manual install / China network / Troubleshooting</b></summary>

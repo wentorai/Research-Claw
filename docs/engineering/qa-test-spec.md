@@ -732,18 +732,19 @@ TC-A-01, TC-A-03, TC-A-04, TC-B-01, TC-C-01, TC-C-02, TC-C-14, TC-E-01, TC-E-02,
 
 ### 已有自动化
 
-- Dashboard：**1880** unit tests（`dashboard/src/__tests__/`，含 task-flow / intraview / paper-review / api-profiles / session-freshness / periph-store / periph-camera / periph-capture 等）
-- 插件：`extensions/research-claw-core`（963 tests，含 periph-bridge / periph-rpc / periph-service / periph-tools / fresh-install-peripherals 等）
-- 质量管控：`extensions/dual-model-supervisor`（多测试）
+- Dashboard：**2243** tests（145 个测试文件，含 task-flow / intraview / paper-review / api-profiles / session-freshness / periph-store / periph-camera / periph-capture 等）
+- 根仓：**1460** tests 通过（93 个测试文件，覆盖 Research-Claw Core、Supervisor、安装迁移与真实本机 HTTP/文件系统边界；另有 10 个条件跳过、22 个待实现标记）
+- 详细命令、环境无效重跑与变异证据见 [`v0.8.1-validation.md`](./v0.8.1-validation.md)。
 
 **尚无组件级自动化：** `PaperReviewPanel.tsx`、`TaskFlowTimeline.tsx`（依赖手动 TC-P / TC-C-14）；`PeripheralsPanel.tsx` 真机行为依赖手动 TC-Q-*
 
 #### 真网关端到端校验（`pnpm verify:e2e`）
 
-单元测试证明不了「跨插件边界之后行为仍成立」，因此以下脚本各自拉起真实网关（端口 28799）与桩 provider（端口 28801），断言可观测终态。三者共用端口，必须串行；CI 在 `pnpm test` 之后执行同一条命令。
+单元测试证明不了「跨插件边界之后行为仍成立」，因此以下脚本各自拉起真实网关（端口 28799）与桩 provider（端口 28801），断言可观测终态。它们共用端口，必须串行；CI 在 `pnpm test` 之后执行同一条命令。
 
 | 脚本 | 断言 |
 |------|------|
+| `verify-dashboard-version-gate.mjs` | 旧 Dashboard 构建版本被新网关明确拒绝，当前构建正常连接 |
 | `verify-rpc-error-classification.mjs` | 领域错误/带 code 错误走 warn 单行，未预期错误走 error + stack；错误文本中的密钥不外泄 |
 | `verify-runtime-self-check.mjs` | 启动自检与运行时挂载对账真实触发；缺失工具/被截断技能被识别；探针失败不阻塞运行 |
 | `verify-cron-deadline-fallback.mjs` | 定时任务主 provider 超时后真正切换到 fallback，用户主动取消不触发 fallback |

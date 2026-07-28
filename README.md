@@ -8,7 +8,7 @@
 
 你做导师，科研龙虾做团队。24/7 本地运行，一切产出专属于你。
 
-[![Version](https://img.shields.io/badge/version-v0.8.0-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
+[![Version](https://img.shields.io/badge/version-v0.8.1-EF4444?style=flat-square&logo=github)](https://github.com/wentorai/Research-Claw/releases)
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows_%7C_Linux-lightgrey?style=flat-square)](#)
@@ -315,10 +315,10 @@ curl -fsSL https://wentor.ai/docker-install.sh | bash
 irm https://wentor.ai/docker-install.ps1 | iex
 ```
 
-> 脚本自动完成：检测 Docker → 停止/删除旧容器 → 拉取最新镜像 → 启动 → 打开浏览器。
+> 脚本自动完成：检测 Docker → 拉取最新镜像 → 保留旧容器作为回退 → 启动并验活 → 打开浏览器。新版本未能正常启动时会自动恢复旧版本。
 > 重复运行即可更新到最新版本，数据不丢失（持久化在 Docker named volumes 中）。
 
-安装完成后浏览器自动打开 `http://127.0.0.1:28789`，在 **Setup Wizard** 中配置 API Key，无需编辑任何配置文件。
+安装完成后浏览器自动打开 `http://127.0.0.1:28789`，在 **Setup Wizard** 中配置 API Key，无需编辑任何配置文件。安装、更新和 `pnpm serve` 启动时都会在终端显示当前 Research-Claw、OpenClaw 与代码版本。
 
 <details>
 <summary><b>手动安装 / 大陆网络 / 故障排查</b></summary>
