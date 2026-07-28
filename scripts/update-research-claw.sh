@@ -63,6 +63,18 @@ fi
 pnpm install
 pnpm build
 
+# Finish the same idempotent config migration used by install/startup before
+# claiming the update succeeded. The next restart therefore never sees a
+# half-upgraded config, and re-running this update remains byte-idempotent.
+CONFIG_PATHS=()
+[ -f "$ROOT/config/openclaw.json" ] && CONFIG_PATHS+=("$ROOT/config/openclaw.json")
+[ -f "$HOME/.openclaw/openclaw.json" ] && CONFIG_PATHS+=("$HOME/.openclaw/openclaw.json")
+if [ "${#CONFIG_PATHS[@]}" -gt 0 ]; then
+  node "$ROOT/scripts/ensure-config.cjs" "${CONFIG_PATHS[@]}"
+fi
+
+node "$ROOT/scripts/version-info.cjs" --root "$ROOT"
+
 # Update research-plugins (skills + agent tools)
 PLUGIN_DIR="$HOME/.openclaw/extensions/research-plugins"
 if [ -d "$PLUGIN_DIR" ]; then

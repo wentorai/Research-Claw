@@ -10,6 +10,8 @@ const scripts = {
   dockerPosix: path.join(ROOT, 'scripts', 'install-docker.sh'),
   dockerWindows: path.join(ROOT, 'scripts', 'install-docker.ps1'),
   dockerEntrypoint: path.join(ROOT, 'scripts', 'docker-entrypoint.sh'),
+  updatePosix: path.join(ROOT, 'scripts', 'update-research-claw.sh'),
+  updateWindows: path.join(ROOT, 'scripts', 'update-research-claw.ps1'),
   ensureConfig: path.join(ROOT, 'scripts', 'ensure-config.cjs'),
 };
 
@@ -32,10 +34,30 @@ describe('release installation surfaces', () => {
     expect(native).toContain('scripts/ensure-config.cjs');
   });
 
+  it('installs the ffmpeg runtime required by camera and RTSP features', () => {
+    const native = read(scripts.native);
+    const dockerfile = read(path.join(ROOT, 'Dockerfile'));
+
+    expect(native).toContain('ensure_ffmpeg');
+    expect(native).toContain('pkg_install ffmpeg');
+    expect(native).toContain('brew install ffmpeg');
+    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bffmpeg\b/);
+  });
+
   it('native and Docker startup both pass through the shared idempotent config migration', () => {
     expect(read(scripts.native)).toContain('node scripts/ensure-config.cjs');
     expect(read(scripts.dockerEntrypoint)).toContain('node /app/scripts/ensure-config.cjs');
     expect(read(scripts.ensureConfig)).toContain('Supervisor lifecycle cleanup');
+  });
+
+  it('POSIX and PowerShell source updates complete the shared config migration before reporting success', () => {
+    const posix = read(scripts.updatePosix);
+    const windows = read(scripts.updateWindows);
+
+    expect(posix).toContain('ensure-config.cjs');
+    expect(windows).toContain('ensure-config.cjs');
+    expect(posix.indexOf('ensure-config.cjs')).toBeLessThan(posix.indexOf('version-info.cjs'));
+    expect(windows.indexOf('ensure-config.cjs')).toBeLessThan(windows.indexOf('version-info.cjs'));
   });
 
   it('the POSIX Docker installer is valid Bash', () => {
@@ -72,6 +94,50 @@ describe('release installation surfaces', () => {
     for (const obligation of obligations) {
       expect(posix).toMatch(obligation);
       expect(windows).toMatch(obligation);
+    }
+  });
+
+  it('Docker updates keep the old service alive until the replacement image is available', () => {
+    const posix = read(scripts.dockerPosix);
+    const windows = read(scripts.dockerWindows);
+
+    expect(posix.indexOf('if docker ps -a')).toBeGreaterThan(posix.indexOf('ok "Image pulled"'));
+    expect(windows.indexOf('$existing =')).toBeGreaterThan(
+      windows.indexOf('Write-Host "  + Image pulled"'),
+    );
+  });
+
+  it('Docker updates retain the previous container until the replacement passes health checks', () => {
+    const posix = read(scripts.dockerPosix);
+    const windows = read(scripts.dockerWindows);
+
+    expect(posix).toContain('ROLLBACK_CONTAINER="${CONTAINER}-rollback"');
+    expect(windows).toContain('$RollbackContainer = "${Container}-rollback"');
+    expect(posix).toContain('docker rename "$CONTAINER" "$ROLLBACK_CONTAINER"');
+    expect(windows).toContain('docker rename $Container $RollbackContainer');
+    expect(posix).toContain('restore_previous_container');
+    expect(windows).toContain('Restore-PreviousContainer');
+    expect(posix).toContain('trap on_interrupt INT TERM');
+    expect(posix).toContain("curl -sf --noproxy '*'");
+    expect(windows).toContain('$currentHealthy');
+    expect(posix.lastIndexOf('docker rm "$ROLLBACK_CONTAINER"')).toBeGreaterThan(
+      posix.indexOf('if [ "$READY" = false ]'),
+    );
+    expect(windows.lastIndexOf('docker rm $RollbackContainer')).toBeGreaterThan(
+      windows.indexOf('if (-not $ready)'),
+    );
+  });
+
+  it('Docker installers never terminate an unrelated process merely because it owns the port', () => {
+    expect(read(scripts.dockerPosix)).not.toMatch(/xargs\s+kill/);
+    expect(read(scripts.dockerWindows)).not.toMatch(/Stop-Process\s+-Id/);
+  });
+
+  it('the two Docker installers display the version read from the pulled image', () => {
+    for (const file of [scripts.dockerPosix, scripts.dockerWindows]) {
+      const content = read(file);
+      expect(content).toContain('/app/scripts/version-info.cjs');
+      expect(content).toMatch(/--entrypoint\s+node/i);
     }
   });
 

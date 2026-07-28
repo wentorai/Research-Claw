@@ -270,6 +270,43 @@ else
   fi
 fi
 
+# Camera capture and RTSP preview both execute ffmpeg at runtime. Install it
+# during setup instead of letting those features fail later with ENOENT.
+ensure_ffmpeg() {
+  if command -v ffmpeg &>/dev/null && command -v ffprobe &>/dev/null; then
+    ok "ffmpeg"
+    return 0
+  fi
+
+  info "Installing ffmpeg (camera and RTSP runtime)..."
+  if [ "$RC_OS" = mac ]; then
+    if command -v brew &>/dev/null; then
+      if ! brew install ffmpeg; then
+        warn "ffmpeg installation failed. Camera and RTSP features will remain unavailable."
+        warn "Retry later with: brew install ffmpeg"
+        return 0
+      fi
+    else
+      warn "Homebrew is not installed, so ffmpeg could not be installed automatically."
+      warn "Camera and RTSP features need: https://brew.sh, then brew install ffmpeg"
+      return 0
+    fi
+  else
+    if ! pkg_install ffmpeg; then
+      warn "ffmpeg installation failed. Camera and RTSP features will remain unavailable."
+      warn "Install the ffmpeg package with your Linux distribution, then re-run this installer."
+      return 0
+    fi
+  fi
+
+  if command -v ffmpeg &>/dev/null && command -v ffprobe &>/dev/null; then
+    ok "ffmpeg"
+  else
+    warn "ffmpeg/ffprobe are still unavailable; camera and RTSP features are disabled."
+  fi
+}
+ensure_ffmpeg
+
 # --- Shell-profile block management (idempotent) ---
 # Persisted exports are stored as marker-bounded blocks:
 #   # >>> research-claw:<id> >>>
@@ -1379,6 +1416,9 @@ fi
 
 # --- Done ---
 printf "\n  ${G}${B}Ready!${N}  ${D}(total $(_elapsed))${N}\n\n"
+"$GW_NODE" "$INSTALL_DIR/scripts/version-info.cjs" --root "$INSTALL_DIR" 2>/dev/null \
+  | sed 's/^/  /' || true
+printf "\n"
 printf "  ${B}Dashboard:${N}  ${C}${DASHBOARD_URL}${N}\n"
 printf "  ${B}Location:${N}   $INSTALL_DIR\n"
 printf "  ${B}Start:${N}      cd $INSTALL_DIR && bash scripts/run.sh\n"
@@ -1399,20 +1439,8 @@ if [ "${SKIP_START:-0}" = "1" ]; then
   exit 0
 fi
 
-# --- Check port availability ---
-if command -v lsof &>/dev/null; then
-  EXISTING_PIDS=$(lsof -ti :"$PORT" 2>/dev/null || true)
-  if [ -n "$EXISTING_PIDS" ]; then
-    info "Port $PORT is in use. Stopping old instance..."
-    echo "$EXISTING_PIDS" | xargs kill 2>/dev/null || true
-    sleep 1
-  fi
-fi
-
-# --- Launch with auto-restart ---
-# The gateway exits on SIGUSR1 after config save (API key, model, etc.),
-# expecting an external supervisor to restart it. This loop handles that.
-info "Starting gateway (auto-restart on config change)..."
+# --- Launch through the one canonical runtime path ---
+info "Starting gateway..."
 printf "  ${D}Dashboard will open automatically at${N} ${C}${DASHBOARD_URL}${N}\n"
 printf "  ${D}Press Ctrl+C to stop${N}\n\n"
 
@@ -1430,117 +1458,8 @@ printf "  ${D}Press Ctrl+C to stop${N}\n\n"
   sleep 1
 done) &
 
-STOP=false
-trap 'STOP=true' INT TERM
-trap - ERR  # Clear ERR trap — restart loop handles errors internally (macOS bash 3.2 compat)
-set +e
-
-cd "$INSTALL_DIR"
-
-# GW_NODE and GW_NODE_DIR already resolved at [6/8] (conda openclaw → system fallback).
-
-# OPENCLAW_CONFIG_PATH already exported at line 651 (shell profile section)
-# using $INSTALL_DIR which is absolute ($HOME/research-claw by default).
-
-# Resolve relative paths to absolute AND rebase stale absolute paths from other
-# installations (e.g., dev ~/Downloads/wentor/research-claw → installed ~/research-claw).
-# This happens when the config was written by run.sh in a different directory and
-# survives across git pull (config is gitignored).
-"$GW_NODE" -e "
-const fs = require('fs'), path = require('path');
-const f = process.env.OPENCLAW_CONFIG_PATH;
-const cfg = JSON.parse(fs.readFileSync(f, 'utf8'));
-const root = process.cwd();
-const fix = p => {
-  if (!path.isAbsolute(p)) return { v: path.resolve(root, p), c: true };
-  if (p.startsWith(root + '/') || p === root) return { v: p, c: false };
-  // Absolute path outside our root — try to rebase via basename match
-  const name = path.basename(p);
-  const parent = path.basename(path.dirname(p));
-  const candidate = path.join(root, parent, name);
-  try { fs.accessSync(candidate); return { v: candidate, c: true }; } catch {}
-  return { v: p, c: false };
-};
-let changed = false;
-if (cfg.plugins?.load?.paths) {
-  cfg.plugins.load.paths = cfg.plugins.load.paths.map(p => { const r = fix(p); if (r.c) changed = true; return r.v; });
-}
-if (cfg.skills?.load?.extraDirs) {
-  cfg.skills.load.extraDirs = cfg.skills.load.extraDirs.map(p => { const r = fix(p); if (r.c) changed = true; return r.v; });
-}
-if (cfg.gateway?.controlUi?.root) {
-  const r = fix(cfg.gateway.controlUi.root); if (r.c) { cfg.gateway.controlUi.root = r.v; changed = true; }
-}
-if (cfg.agents?.defaults?.workspace) {
-  const r = fix(cfg.agents.defaults.workspace); if (r.c) { cfg.agents.defaults.workspace = r.v; changed = true; }
-}
-if (cfg.plugins?.entries) {
-  for (const e of Object.values(cfg.plugins.entries)) {
-    if (e?.config?.dbPath && !path.isAbsolute(e.config.dbPath)) {
-      if (e.config.dbPath.startsWith('~/')) {
-        e.config.dbPath = path.join(require('os').homedir(), e.config.dbPath.slice(2)); changed = true;
-      } else {
-        e.config.dbPath = path.resolve(root, e.config.dbPath); changed = true;
-      }
-    }
-  }
-}
-if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); console.log('[config] Rebased paths to ' + root); }
-"
-
-# Token auth — config file is the source of truth.
-# Default 'research-claw' matches Dashboard's DEFAULT_TOKEN for zero-config local use.
-# Custom token: set gateway.auth.token in config/openclaw.json.
-# Env override: OPENCLAW_GATEWAY_TOKEN=my-secret curl ... | bash
-if [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
-  OPENCLAW_GATEWAY_TOKEN=$("$GW_NODE" -e "
-    try { const c = JSON.parse(require('fs').readFileSync('config/openclaw.json', 'utf8'));
-      if (c.gateway?.auth?.token) console.log(c.gateway.auth.token);
-    } catch {}
-  " 2>/dev/null)
-  export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-research-claw}"
-fi
-
-CRASH_COUNT=0
-MAX_CRASHES=10
-# Run start for the farewell usage overview (mirrors run.sh).
-export RC_RUN_START_EPOCH=$(date +%s)
-
-while true; do
-  START_TS=$(date +%s)
-
-  PATH="$GW_NODE_DIR:$PATH" \
-    "$GW_NODE" ./node_modules/openclaw/dist/entry.js \
-    gateway run --allow-unconfigured --auth token --port "$PORT" --force \
-    </dev/null
-  CODE=$?
-
-  if $STOP; then
-    # Same farewell screen as run.sh. curl|bash makes $0 useless here — the
-    # script must be resolved via INSTALL_DIR (we cd'd there above).
-    RC_NODE="$GW_NODE" bash "$INSTALL_DIR/scripts/farewell.sh" || true
-    exit 0
-  fi
-
-  # If gateway ran > 30s, it was a normal config-change restart — reset crash counter
-  ELAPSED=$(( $(date +%s) - START_TS ))
-  if [ "$ELAPSED" -gt 30 ]; then
-    CRASH_COUNT=0
-  else
-    CRASH_COUNT=$((CRASH_COUNT + 1))
-  fi
-
-  if [ "$CRASH_COUNT" -ge "$MAX_CRASHES" ]; then
-    printf "\n  ${R}  ✗ Gateway crashed %s times in quick succession. Stopping.${N}\n" "$MAX_CRASHES"
-    printf "  ${D}Check logs above for errors. Report: ${ISSUES_URL}${N}\n"
-    exit 1
-  fi
-
-  # Backoff: 1s, 2s, 3s, 4s, 5s (cap)
-  BACKOFF=$((CRASH_COUNT > 5 ? 5 : (CRASH_COUNT > 0 ? CRASH_COUNT : 1)))
-  printf "  ${C}▸${N} Gateway exited (code $CODE) — restarting in ${BACKOFF}s...\n"
-  sleep "$BACKOFF"
-done
+export PORT
+exec bash "$INSTALL_DIR/scripts/run.sh"
 
 } # end _main — do not remove; curl|bash safety depends on this closing brace
 _main "$@"

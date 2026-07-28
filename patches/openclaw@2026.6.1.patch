@@ -436,3 +436,27 @@ index 348ea2271570f7be08616a385bcb1c2697701cac..46a2b9a883e5ca505820e35b703fb605
  	const strictTransportSecurity = opts?.strictTransportSecurity;
  	if (typeof strictTransportSecurity === "string" && strictTransportSecurity.length > 0) res.setHeader("Strict-Transport-Security", strictTransportSecurity);
  }
+diff --git a/dist/message-handler-Du1uvc4A.js b/dist/message-handler-Du1uvc4A.js
+--- a/dist/message-handler-Du1uvc4A.js
++++ b/dist/message-handler-Du1uvc4A.js
+@@ -1575,5 +1575,20 @@
+ 					}
+ 				}
++				const expectedControlUiVersion = process.env.RESEARCH_CLAW_UI_VERSION?.trim();
++				if (
++					expectedControlUiVersion
++					&& connectParams.client.id === GATEWAY_CLIENT_IDS.CONTROL_UI
++					&& connectParams.client.version !== expectedControlUiVersion
++				) {
++					logWsControl.warn(`stale Research-Claw Dashboard rejected conn=${connId} clientVersion=${formatForLog(connectParams.client.version)} expected=${formatForLog(expectedControlUiVersion)}`);
++					sendHandshakeErrorResponse("FORBIDDEN", `Research-Claw was updated to v${expectedControlUiVersion}. Refresh this page to load the current Dashboard.`, { details: {
++						code: "RESEARCH_CLAW_UI_VERSION_MISMATCH",
++						clientVersion: connectParams.client.version,
++						expectedVersion: expectedControlUiVersion
++					} });
++					close(1008, "stale Research-Claw Dashboard");
++					return;
++				}
+ 				if (!setClient(nextClient)) {
+ 					setCloseCause("connect-aborted-before-register", {
+ 						...clientMeta,

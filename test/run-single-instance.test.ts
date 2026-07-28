@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const ROOT = path.resolve(__dirname, '..');
 const RUN_SCRIPT = path.join(ROOT, 'scripts', 'run.sh');
+const INSTALL_SCRIPT = path.join(ROOT, 'scripts', 'install.sh');
 const LOCK_HELPER = path.join(ROOT, 'scripts', 'run-lock.sh');
 const tempRoots: string[] = [];
 const children: ReturnType<typeof spawn>[] = [];
@@ -78,5 +79,21 @@ describe('run.sh single-instance ownership', () => {
     expect(script).not.toMatch(/kill\s+-9/);
     expect(script).not.toMatch(/xargs\s+kill/);
     expect(script).not.toContain('gateway run --allow-unconfigured --auth token --port 28789 --force');
+  });
+
+  it('curl installer delegates startup to run.sh instead of maintaining a second launcher', () => {
+    const script = fs.readFileSync(INSTALL_SCRIPT, 'utf8');
+    expect(script).toContain('exec bash "$INSTALL_DIR/scripts/run.sh"');
+    expect(script).not.toMatch(/xargs\s+kill/);
+    expect(script).not.toMatch(/gateway run .*--force/);
+  });
+
+  it('run.sh consistently honors an explicit PORT override', () => {
+    const script = fs.readFileSync(RUN_SCRIPT, 'utf8');
+    expect(script).toContain('PORT="${PORT:-28789}"');
+    expect(script).toContain('-iTCP:"$PORT"');
+    expect(script).toContain('--port "$PORT"');
+    expect(script).not.toContain('-iTCP:28789');
+    expect(script).not.toContain('--port 28789');
   });
 });

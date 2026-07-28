@@ -5,7 +5,12 @@
 CONFIG_DIR=/app/config
 CONFIG_FILE=$CONFIG_DIR/openclaw.json
 CONFIG_VERSION_FILE=$CONFIG_DIR/.config-version
-IMAGE_VERSION="0.8.0"
+IMAGE_VERSION="$(node -p "require('/app/package.json').version" 2>/dev/null)"
+if [ -z "$IMAGE_VERSION" ]; then
+  echo "[research-claw] ERROR: Cannot read the installed Research-Claw version"
+  exit 1
+fi
+export RESEARCH_CLAW_UI_VERSION="$IMAGE_VERSION"
 PORT=${PORT:-28789}
 
 # Entrypoint chatter discipline: the GATEWAY's own output stays full in
@@ -150,6 +155,12 @@ node /app/scripts/ensure-config.cjs "$CONFIG_FILE" 2>/dev/null || true
 node /app/scripts/docker-config-patch.cjs "$CONFIG_FILE" 2>&1 || \
   echo "[research-claw] WARNING: Config patch failed — gateway may not start correctly"
 
+# Reconcile the persisted cron JSON while the gateway is still stopped.
+node /app/scripts/reconcile-cron-upgrade.cjs \
+  --config "$CONFIG_FILE" \
+  --state "${OPENCLAW_STATE_DIR:-/root/.openclaw}" 2>&1 || \
+  echo "[research-claw] WARNING: Could not check old scheduled tasks"
+
 # --- Resolve relative paths to absolute (prevents CWD drift during agent runs) ---
 # Agent process.chdir(workspace/) changes CWD; relative paths in config break.
 node -e "
@@ -272,6 +283,8 @@ cat <<'ART'
 ART
 printf "${N}\n  ${B}科研龙虾 — AI-Powered Local Research Assistant${N}\n"
 printf "  ${D}https://wentor.ai${N}\n\n"
+node /app/scripts/version-info.cjs --root /app 2>/dev/null | sed 's/^/  /' || true
+printf "\n"
 
 echo "[research-claw] Dashboard: http://127.0.0.1:$PORT/?token=$OPENCLAW_GATEWAY_TOKEN"
 dbg "[research-claw] Gateway token: $OPENCLAW_GATEWAY_TOKEN (override via -e OPENCLAW_GATEWAY_TOKEN=…)"

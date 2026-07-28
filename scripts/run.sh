@@ -8,6 +8,8 @@
 
 cd "$(dirname "$0")/.."
 
+PORT="${PORT:-28789}"
+
 # --- Single-owner lock: a second launcher reuses the live instance ---
 source "./scripts/run-lock.sh"
 if acquire_run_lock; then
@@ -35,6 +37,9 @@ cat <<'ART'
 ART
 printf "${N}\n  ${B}科研龙虾 — AI-Powered Local Research Assistant${N}\n"
 printf "  ${D}https://wentor.ai${N}\n\n"
+node "$(dirname "$0")/version-info.cjs" --root "$(pwd)" 2>/dev/null \
+  | sed 's/^/  /' || true
+printf "\n"
 
 # --- Output discipline (P1/P2 noise off by default; full detail lands in files) ---
 # Default terminal shows only what a user can act on. The gateway's own INFO
@@ -158,6 +163,14 @@ fi
 
 dbg "Using Node: $GW_NODE ($("$GW_NODE" -v))"
 dbg "Config: $OPENCLAW_CONFIG_PATH"
+export RESEARCH_CLAW_UI_VERSION="$("$GW_NODE" -p "require('./package.json').version" 2>/dev/null)"
+
+# Repair stale RC preset jobs before OpenClaw opens the cron JSON store.
+if ! "$GW_NODE" "$(dirname "$0")/reconcile-cron-upgrade.cjs" \
+  --config "$OPENCLAW_CONFIG_PATH" \
+  --state "${OPENCLAW_STATE_DIR:-$HOME/.openclaw}" >>"$RC_RUN_LOG" 2>&1; then
+  say "⚠ Could not check old scheduled tasks. Research-Claw will still start; see $RC_RUN_LOG."
+fi
 
 # Stop macOS LaunchAgent gateway (installed by `openclaw doctor`) — it binds 28789.
 LAUNCH_AGENT="$HOME/Library/LaunchAgents/ai.openclaw.gateway.plist"
@@ -167,8 +180,8 @@ if [ -f "$LAUNCH_AGENT" ]; then
   dbg "Stopped LaunchAgent ai.openclaw.gateway (use pnpm serve OR LaunchAgent, not both)"
 fi
 if command -v lsof >/dev/null 2>&1 \
-  && lsof -nP -iTCP:28789 -sTCP:LISTEN -t >/dev/null 2>&1; then
-  say "✗ Port 28789 is already in use. Research-Claw did not terminate that process."
+  && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+  say "✗ Port $PORT is already in use. Research-Claw did not terminate that process."
   say "  Stop the existing gateway first, then run pnpm serve again."
   exit 75
 fi
@@ -232,7 +245,7 @@ trap 'STOP=true' INT TERM
 
 # Print access + log info ONCE up front. The gateway's own "ready / dashboard
 # URL" lines are INFO level and hidden by consoleLevel=warn, so surface them here.
-printf "\n  ${B}Dashboard:${N} http://127.0.0.1:28789/?token=%s\n" "$OPENCLAW_GATEWAY_TOKEN"
+printf "\n  ${B}Dashboard:${N} http://127.0.0.1:$PORT/?token=%s\n" "$OPENCLAW_GATEWAY_TOKEN"
 say "Logs: terminal quiet by default · full gateway log ~/.research-claw/logs/openclaw.log · startup log $RC_RUN_LOG"
 [ -z "$RC_VERBOSE" ] && printf "  ${D}(set RC_VERBOSE=1 for full terminal output)${N}\n"
 printf "\n"
@@ -269,7 +282,7 @@ while true; do
   PROXY_PID=$!
 
   "$GW_NODE" ./node_modules/openclaw/dist/entry.js \
-    gateway run --allow-unconfigured --auth token --port 28789
+    gateway run --allow-unconfigured --auth token --port "$PORT"
   CODE=$?
 
   # Stop proxy when gateway exits (gateway restart loop).

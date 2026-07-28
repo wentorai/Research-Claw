@@ -5,7 +5,7 @@
 # Usage:
 #   irm https://wentor.ai/docker-install.ps1 | iex
 #
-# Idempotent: safe to re-run for updates (stop -> rm -> pull -> run).
+# Idempotent: safe to re-run for updates (pull -> stage old -> run -> verify).
 # Data persists in Docker named volumes across container recreation.
 #
 # ── Volume Architecture (CRITICAL — do NOT remove any volume) ──────────
@@ -39,6 +39,7 @@ $GhcrRepo       = "ghcr.io/wentorai/research-claw"
 $ImageRepo      = if ($env:MIRROR) { $env:MIRROR } else { $AcrRepo }
 $Image          = "${ImageRepo}:latest"
 $Container      = "research-claw"
+$RollbackContainer = "${Container}-rollback"
 $Port           = 28789
 $HealthTimeout  = 60
 
@@ -70,6 +71,27 @@ function Write-Step([int]$N, [string]$Title) {
     Write-Host ""
     Write-Host "  > [$N/5] $Title" -ForegroundColor Cyan
     Write-RcLog "step $N/5: $Title"
+}
+
+$script:HadPrevious = $false
+function Restore-PreviousContainer {
+    if (-not $script:HadPrevious) { return }
+    Write-Host "  ! The replacement did not become ready; restoring the previous version." -ForegroundColor Yellow
+    & { $ErrorActionPreference = 'Continue'; docker rm -f $Container 2>&1 | Out-Null }
+    & { $ErrorActionPreference = 'Continue'; docker rename $RollbackContainer $Container 2>&1 | Out-Null }
+    $renamed = $LASTEXITCODE -eq 0
+    if ($renamed) {
+        & { $ErrorActionPreference = 'Continue'; docker start $Container 2>&1 | Out-Null }
+    }
+    if ($renamed -and $LASTEXITCODE -eq 0) {
+        Write-Host "  + Previous version restored" -ForegroundColor Green
+        Write-RcLog "rollback restored previous container"
+    } else {
+        Write-Host "  x Automatic rollback failed. The previous container is still named '$RollbackContainer'." -ForegroundColor Red
+        Write-Host "    Recover it with: docker rename $RollbackContainer $Container; docker start $Container"
+        Write-RcLog "rollback failed"
+    }
+    $script:HadPrevious = $false
 }
 
 # -- 1. Check Docker -------------------------------------------------------
@@ -194,29 +216,6 @@ if ($wslProxyIssue) {
     Write-Host "           HTTP:  http://host.docker.internal:<your-proxy-port>" -ForegroundColor DarkGray
     Write-Host "           HTTPS: http://host.docker.internal:<your-proxy-port>" -ForegroundColor DarkGray
     Write-Host ""
-}
-
-# -- 2. Stop + Remove existing container ------------------------------------
-$existing = & { $ErrorActionPreference = 'Continue'; docker ps -a --format "{{.Names}}" 2>&1 } | Where-Object { $_ -eq $Container }
-if ($existing) {
-    Write-Host "  > Found existing container '$Container' - stopping and removing..." -ForegroundColor Cyan
-    & { $ErrorActionPreference = 'Continue'; docker stop $Container 2>&1 | Out-Null }
-    & { $ErrorActionPreference = 'Continue'; docker rm $Container 2>&1 | Out-Null }
-    Write-Host "  + Old container removed" -ForegroundColor Green
-}
-
-# -- 3. Free port (may be held by a non-Docker process) ---------------------
-# Use Get-NetTCPConnection for precise port matching (no regex false positives)
-$portInUse = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-if ($portInUse) {
-    Write-Host "  > Port ${Port} still in use by another process - stopping..." -ForegroundColor Cyan
-    foreach ($conn in $portInUse) {
-        if ($conn.OwningProcess -and $conn.OwningProcess -ne 0) {
-            try { Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-    Start-Sleep -Seconds 1
-    Write-Host "  + Port ${Port} freed" -ForegroundColor Green
 }
 
 # -- 4. Pre-flight: test registry connectivity ------------------------------
@@ -404,6 +403,71 @@ if (-not $pullOk) {
     return
 }
 Write-Host "  + Image pulled" -ForegroundColor Green
+$imageInfo = & {
+    $ErrorActionPreference = 'Continue'
+    & docker run --rm --entrypoint node $Image /app/scripts/version-info.cjs --root /app 2>$null
+}
+if ($imageInfo) {
+    Write-Host "  + $imageInfo" -ForegroundColor Green
+}
+
+# Recover an interrupted update before starting another one.
+$rollbackExists = & { $ErrorActionPreference = 'Continue'; docker ps -a --format "{{.Names}}" 2>&1 } |
+    Where-Object { $_ -eq $RollbackContainer }
+$existing = & { $ErrorActionPreference = 'Continue'; docker ps -a --format "{{.Names}}" 2>&1 } |
+    Where-Object { $_ -eq $Container }
+if ($rollbackExists) {
+    if ($existing) {
+        $currentHealthy = $false
+        $currentRunning = & { $ErrorActionPreference = 'Continue'; docker inspect --format '{{.State.Running}}' $Container 2>&1 }
+        if ($currentRunning -eq 'true') {
+            try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:${Port}/healthz" -UseBasicParsing -TimeoutSec 2
+                $currentHealthy = $response.StatusCode -eq 200
+            } catch {}
+        }
+        if ($currentHealthy) {
+            & { $ErrorActionPreference = 'Continue'; docker rm -f $RollbackContainer 2>&1 | Out-Null }
+        } else {
+            $script:HadPrevious = $true
+            Restore-PreviousContainer
+        }
+    } else {
+        Write-Host "  ! Found an interrupted update; restoring the previous container first." -ForegroundColor Yellow
+        & { $ErrorActionPreference = 'Continue'; docker rename $RollbackContainer $Container 2>&1 | Out-Null }
+        & { $ErrorActionPreference = 'Continue'; docker start $Container 2>&1 | Out-Null }
+        $existing = $Container
+    }
+}
+
+# Keep the previous container until the replacement passes its health check.
+if ($existing) {
+    Write-Host "  > New image is ready - staging existing container for rollback..." -ForegroundColor Cyan
+    & { $ErrorActionPreference = 'Continue'; docker stop $Container 2>&1 | Out-Null }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  x Could not stop the existing container; it was left untouched." -ForegroundColor Red
+        return
+    }
+    & { $ErrorActionPreference = 'Continue'; docker rename $Container $RollbackContainer 2>&1 | Out-Null }
+    if ($LASTEXITCODE -ne 0) {
+        & { $ErrorActionPreference = 'Continue'; docker start $Container 2>&1 | Out-Null }
+        Write-Host "  x Could not prepare the existing container for rollback; it was restarted." -ForegroundColor Red
+        return
+    }
+    $script:HadPrevious = $true
+    Write-Host "  + Previous version retained until health verification passes" -ForegroundColor Green
+}
+
+# Never terminate an unrelated process just because it owns RC's default port.
+$portInUse = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+if ($portInUse) {
+    $owners = @($portInUse | ForEach-Object { $_.OwningProcess } | Where-Object { $_ } | Sort-Object -Unique)
+    Write-Host "  x Port ${Port} is already used by another process (PID: $($owners -join ', '))." -ForegroundColor Red
+    Write-Host "    Stop that service yourself, then re-run this installer." -ForegroundColor Yellow
+    Write-Host "    No process was terminated." -ForegroundColor Yellow
+    Restore-PreviousContainer
+    return
+}
 
 # -- 4c. Clean up dangling images (old versions left by previous pulls) -------
 $pruned = & { $ErrorActionPreference = 'Continue'; docker image prune -f 2>&1 }
@@ -436,6 +500,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  Possible causes:"
     Write-Host "    - Port $Port already in use (run: Get-NetTCPConnection -LocalPort $Port)"
     Write-Host "    - Container name conflict (run: docker rm $Container)"
+    Restore-PreviousContainer
     return
 }
 
@@ -447,6 +512,7 @@ if ($containerRunning -ne 'true') {
     Write-Host "    Check logs: docker logs $Container" -ForegroundColor Yellow
     Write-Host "    Common fix: docker volume rm rc-config && re-run this script" -ForegroundColor Yellow
     Write-Host "    (This resets config only — chat history and data are preserved)" -ForegroundColor Yellow
+    Restore-PreviousContainer
     return
 }
 
@@ -467,8 +533,16 @@ while ($hw -lt $HealthTimeout) {
 Write-Host ""
 
 if (-not $ready) {
-    Write-Host "  ! Gateway not ready after ${HealthTimeout}s - it may still be starting." -ForegroundColor Yellow
-    Write-Host "    Check logs: docker logs -f $Container"
+    Write-Host "  ! Gateway did not become ready within ${HealthTimeout}s." -ForegroundColor Yellow
+    Restore-PreviousContainer
+    Write-Host "    Diagnostic log: $RcLog"
+    return
+}
+
+if ($script:HadPrevious) {
+    & { $ErrorActionPreference = 'Continue'; docker rm $RollbackContainer 2>&1 | Out-Null }
+    $script:HadPrevious = $false
+    Write-Host "  + Update verified; previous container removed" -ForegroundColor Green
 }
 
 # -- 7. Done -----------------------------------------------------------------

@@ -1,6 +1,6 @@
 {
   "name": "research-claw",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Research-Claw (科研龙虾) — AI-powered local academic research assistant, built as an OpenClaw satellite",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
     "test": "vitest run && pnpm --filter dashboard test",
     "test:root": "vitest run",
     "test:watch": "vitest",
-    "verify:e2e": "node scripts/verify-rpc-error-classification.mjs && node scripts/verify-runtime-self-check.mjs && node scripts/verify-cron-deadline-fallback.mjs",
+    "verify:e2e": "node scripts/verify-dashboard-version-gate.mjs && node scripts/verify-rpc-error-classification.mjs && node scripts/verify-runtime-self-check.mjs && node scripts/verify-cron-deadline-fallback.mjs",
     "verify:docker": "node scripts/verify-docker-config.mjs",
     "setup": "bash scripts/setup.sh",
     "health": "bash scripts/health.sh",

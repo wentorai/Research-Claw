@@ -40,6 +40,9 @@
         "lightContext": true,
         "isolatedSession": true
       },
+      "memorySearch": {
+        "enabled": false
+      },
       "sandbox": {
         "mode": "off"
       }

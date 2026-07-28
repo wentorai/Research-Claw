@@ -77,7 +77,7 @@ const plugin: OpenClawPluginDefinition = {
   id: 'wentor-connect',
   name: 'Wentor Connect',
   description: 'Connect Research-Claw to your wentor.ai account for skills sync and activity tracking',
-  version: '0.8.0',
+  version: '0.8.1',
 
   register(api: PluginApi) {
     const config = api.getConfig<WentorConnectConfig>() ?? {};

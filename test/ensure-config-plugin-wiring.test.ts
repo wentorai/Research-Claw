@@ -55,6 +55,9 @@ function legacyProjectConfig() {
         'research-claw-core': { enabled: true },
         'openclaw-weixin': { enabled: true },
         'dual-model-supervisor': { enabled: true },
+        // An explicit entry is operator intent. An allow-only Discord id has
+        // no installed/configured target and is cleaned as a legacy orphan.
+        discord: { enabled: false },
       },
     },
   };
@@ -100,7 +103,7 @@ describe('ensure-config.cjs — plugin wiring (browser + research-superpower)', 
     ).toBe(true);
   });
 
-  it('preserves the user-added telegram/discord trust entries', () => {
+  it('preserves user-added Telegram and explicitly configured Discord trust', () => {
     fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
     execFileSync('node', [ENSURE_CONFIG, configPath]);
     const allow = pluginsOf(configPath).allow;

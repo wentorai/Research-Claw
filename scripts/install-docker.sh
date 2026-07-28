@@ -6,7 +6,7 @@
 # Usage:
 #   curl -fsSL https://wentor.ai/docker-install.sh | bash
 #
-# Idempotent: safe to re-run for updates (stop → rm → pull → run).
+# Idempotent: safe to re-run for updates (pull → stage old → run → verify).
 # Data persists in Docker named volumes across container recreation.
 #
 # ── Volume Architecture (CRITICAL — do NOT remove any volume) ──────────
@@ -37,6 +37,7 @@ GHCR_REPO="ghcr.io/wentorai/research-claw"
 IMAGE_REPO="${MIRROR:-$ACR_REPO}"
 IMAGE="${IMAGE_REPO}:latest"
 CONTAINER="research-claw"
+ROLLBACK_CONTAINER="${CONTAINER}-rollback"
 PORT=28789
 HEALTH_TIMEOUT=60
 
@@ -52,6 +53,25 @@ info() { printf "${C}  ▸${N} %s\n" "$1"; }
 warn() { printf "${Y}  ⚠${N} %s\n" "$1"; }
 err()  { printf "${R}  ✗ %s${N}\n" "$1" >&2; }
 
+HAD_PREVIOUS=false
+restore_previous_container() {
+  if [ "$HAD_PREVIOUS" != true ]; then
+    return
+  fi
+  warn "The replacement did not become ready; restoring the previous version."
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  if docker rename "$ROLLBACK_CONTAINER" "$CONTAINER" >/dev/null 2>&1 &&
+     docker start "$CONTAINER" >/dev/null 2>&1; then
+    ok "Previous version restored"
+    rclog "rollback restored previous container"
+  else
+    err "Automatic rollback failed. The previous container is still named '${ROLLBACK_CONTAINER}'."
+    echo "  Recover it with: docker rename ${ROLLBACK_CONTAINER} ${CONTAINER} && docker start ${CONTAINER}"
+    rclog "rollback failed"
+  fi
+  HAD_PREVIOUS=false
+}
+
 # ── Diagnostic breadcrumb log ─────────────────────────────────────────
 # Key decisions and failure details are appended here so a failed install
 # has an attachable log for bug reports. Screen output stays untouched
@@ -66,8 +86,14 @@ _elapsed() {
   printf '%dm%02ds' $((_s / 60)) $((_s % 60))
 }
 
-# Interrupted installs are fully resumable — say so instead of dying silently.
-trap 'printf "\n${Y}  ⚠ Interrupted.${N} Nothing is broken — this installer is resumable.\n  Re-run the same command to continue where it left off:\n    ${B}curl -fsSL https://wentor.ai/docker-install.sh | bash${N}\n  ${D}Diagnostic log: ${RC_LOG}${N}\n\n"; exit 130' INT TERM
+# Interrupted installs are fully resumable. If replacement has begun, restore
+# the known-working container before returning control to the user.
+on_interrupt() {
+  restore_previous_container
+  printf "\n${Y}  ⚠ Interrupted.${N} The previous working version was preserved.\n  Re-run the same command to continue:\n    ${B}curl -fsSL https://wentor.ai/docker-install.sh | bash${N}\n  ${D}Diagnostic log: ${RC_LOG}${N}\n\n"
+  exit 130
+}
+trap on_interrupt INT TERM
 
 step() { printf "\n${C}  ▸ [%s/5]${N} ${B}%s${N}\n" "$1" "$2"; rclog "step $1/5: $2"; }
 
@@ -176,25 +202,6 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
     echo "           HTTP:  http://host.docker.internal:<your-proxy-port>"
     echo "           HTTPS: http://host.docker.internal:<your-proxy-port>"
     echo ""
-  fi
-fi
-
-# ── 2. Stop + Remove existing container ───────────────────────────────
-if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
-  info "Found existing container '${CONTAINER}' — stopping and removing..."
-  docker stop "$CONTAINER" >/dev/null 2>&1 || true
-  docker rm "$CONTAINER" >/dev/null 2>&1 || true
-  ok "Old container removed"
-fi
-
-# ── 3. Free port (may be held by a non-Docker process) ────────────────
-if command -v lsof &>/dev/null; then
-  EXISTING_PIDS=$(lsof -ti :"$PORT" 2>/dev/null || true)
-  if [ -n "$EXISTING_PIDS" ]; then
-    info "Port ${PORT} still in use by another process — stopping..."
-    echo "$EXISTING_PIDS" | xargs kill 2>/dev/null || true
-    sleep 1
-    ok "Port ${PORT} freed"
   fi
 fi
 
@@ -392,6 +399,58 @@ if [ "$PULL_OK" = false ]; then
   exit 1
 fi
 ok "Image pulled"
+IMAGE_INFO=$(docker run --rm --entrypoint node "$IMAGE" \
+  /app/scripts/version-info.cjs --root /app 2>/dev/null || true)
+if [ -n "$IMAGE_INFO" ]; then
+  ok "$IMAGE_INFO"
+fi
+
+# Recover an interrupted update before starting another one. If the canonical
+# container exists it is newer than a stale rollback copy, so discard the copy.
+if docker ps -a --format '{{.Names}}' | grep -qx "${ROLLBACK_CONTAINER}"; then
+  if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
+    if [ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" = true ] &&
+       curl -sf --noproxy '*' "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
+      docker rm -f "$ROLLBACK_CONTAINER" >/dev/null 2>&1 || true
+    else
+      HAD_PREVIOUS=true
+      restore_previous_container
+    fi
+  else
+    warn "Found an interrupted update; restoring the previous container first."
+    docker rename "$ROLLBACK_CONTAINER" "$CONTAINER"
+    docker start "$CONTAINER" >/dev/null 2>&1 || true
+  fi
+fi
+
+# Replace the old service only after the new image is safely available. Keep
+# the previous container until the replacement passes its health check.
+if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
+  info "New image is ready — staging existing container for rollback..."
+  if ! docker stop "$CONTAINER" >/dev/null 2>&1; then
+    err "Could not stop the existing container; it was left untouched."
+    exit 1
+  fi
+  if ! docker rename "$CONTAINER" "$ROLLBACK_CONTAINER"; then
+    docker start "$CONTAINER" >/dev/null 2>&1 || true
+    err "Could not prepare the existing container for rollback; it was restarted."
+    exit 1
+  fi
+  HAD_PREVIOUS=true
+  ok "Previous version retained until health verification passes"
+fi
+
+# Never terminate an unrelated process just because it owns RC's default port.
+if command -v lsof &>/dev/null; then
+  EXISTING_PIDS=$(lsof -ti :"$PORT" 2>/dev/null || true)
+  if [ -n "$EXISTING_PIDS" ]; then
+    err "Port ${PORT} is already used by another process (PID: $(echo "$EXISTING_PIDS" | tr '\n' ' '))."
+    echo "  Stop that service yourself, then re-run this installer."
+    echo "  No process was terminated."
+    restore_previous_container
+    exit 1
+  fi
+fi
 
 # ── 4c. Clean up dangling images (old versions left by previous pulls) ─
 PRUNED=$(docker image prune -f 2>/dev/null || true)
@@ -416,6 +475,7 @@ if ! docker run -d \
   echo "  - Port ${PORT} already in use (run: lsof -ti :${PORT})"
   echo "  - Container name conflict (run: docker rm ${CONTAINER})"
   echo "  Diagnostic log: $RC_LOG"
+  restore_previous_container
   exit 1
 fi
 
@@ -429,6 +489,7 @@ if [ "$CONTAINER_RUNNING" != "true" ]; then
   echo "    (This resets config only — chat history and data are preserved)"
   docker logs --tail 30 "$CONTAINER" >>"$RC_LOG" 2>&1 || true
   echo "    Diagnostic log: $RC_LOG"
+  restore_previous_container
   exit 1
 fi
 
@@ -452,10 +513,17 @@ done
 [ -t 1 ] && printf '\r\033[2K'
 
 if [ "$READY" = false ]; then
-  warn "Gateway not ready after ${HEALTH_TIMEOUT}s — it may still be starting (slow disks need longer)."
-  echo "  Watch it come up:  docker logs -f ${CONTAINER}"
-  echo "  Then open:         http://127.0.0.1:${PORT}/"
+  warn "Gateway did not become ready within ${HEALTH_TIMEOUT}s."
   rclog "health timeout after ${HEALTH_TIMEOUT}s"
+  restore_previous_container
+  echo "  Diagnostic log: $RC_LOG"
+  exit 1
+fi
+
+if [ "$HAD_PREVIOUS" = true ]; then
+  docker rm "$ROLLBACK_CONTAINER" >/dev/null
+  HAD_PREVIOUS=false
+  ok "Update verified; previous container removed"
 fi
 
 # ── 7. Done ───────────────────────────────────────────────────────────

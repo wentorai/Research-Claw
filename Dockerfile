@@ -1,7 +1,13 @@
 # ============================================================
 # Research-Claw (科研龙虾)
 # ============================================================
-FROM node:22-slim
+FROM --platform=$TARGETPLATFORM node:22-slim
+
+# Release builds pass the frozen Research-Claw commit. The runtime version
+# helper reads this value even though the image intentionally contains no .git.
+ARG RC_BUILD_COMMIT=unknown
+ENV RC_BUILD_COMMIT=${RC_BUILD_COMMIT}
+LABEL org.opencontainers.image.revision=${RC_BUILD_COMMIT}
 
 # ── Mirror configuration ──────────────────────────────────────────────
 # Defaults: China mainland mirrors (TUNA + npmmirror).
@@ -27,6 +33,7 @@ RUN npm config set registry ${NPM_REGISTRY}
 # fonts-noto-cjk: 中日韩字体，确保 docx/pdf 中文渲染正确
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ git curl ca-certificates psmisc procps wget xdg-utils \
+      ffmpeg \
       pandoc texlive-xetex texlive-latex-recommended lmodern \
       fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*

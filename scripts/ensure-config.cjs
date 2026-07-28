@@ -25,6 +25,7 @@
  *  19. agents.defaults.compaction.reserveTokens/reserveTokensFloor — strip stale override
  *  20. agents.defaults.compaction.customInstructions — add RC scientific default
  *  21. dual-model-supervisor — remove withdrawn settings and validation placeholders
+ *  22. agents.defaults.memorySearch — default off until embeddings are configured
  */
 'use strict';
 
@@ -225,6 +226,53 @@ function ensureConfig(filePath) {
     // token already exists, just remove the stale key
     delete c.channels.discord.botToken;
     changed = true;
+  }
+
+  // 6b. Old RC templates shipped Telegram/Discord placeholder channel blocks.
+  // Remove only the recognisable placeholder shape; a real token or explicit
+  // plugin provenance is operator intent and must survive every migration.
+  const discordChannel = c.channels?.discord;
+  if (discordChannel && typeof discordChannel === 'object' && !Array.isArray(discordChannel)) {
+    const token = discordChannel.token;
+    const placeholderToken =
+      typeof token === 'string'
+      && (token.includes('<') || token.includes('YOUR_'));
+    const legacyOnly = Object.keys(discordChannel).every((key) =>
+      ['token', 'botToken', 'commands', 'enabled'].includes(key));
+    if (placeholderToken && legacyOnly) {
+      delete c.channels.discord;
+      if (Object.keys(c.channels).length === 0) delete c.channels;
+      changed = true;
+    }
+  }
+  const discordHasProvenance = Boolean(
+    c.channels?.discord
+    || c.plugins?.entries?.discord
+    || c.plugins?.installs?.discord
+    || c.plugins?.load?.paths?.some((entry) =>
+      typeof entry === 'string' && /(^|[/\\])discord([/\\]|$)/i.test(entry)),
+  );
+  if (
+    Array.isArray(c.plugins?.allow)
+    && c.plugins.allow.includes('discord')
+    && !discordHasProvenance
+  ) {
+    c.plugins.allow = c.plugins.allow.filter((id) => id !== 'discord');
+    changed = true;
+  }
+  const telegramChannel = c.channels?.telegram;
+  if (telegramChannel && typeof telegramChannel === 'object' && !Array.isArray(telegramChannel)) {
+    const token = telegramChannel.token ?? telegramChannel.botToken;
+    const placeholderToken =
+      typeof token === 'string'
+      && (token.includes('<') || token.includes('YOUR_'));
+    const legacyOnly = Object.keys(telegramChannel).every((key) =>
+      ['token', 'botToken', 'commands', 'enabled'].includes(key));
+    if (placeholderToken && legacyOnly) {
+      delete c.channels.telegram;
+      if (Object.keys(c.channels).length === 0) delete c.channels;
+      changed = true;
+    }
   }
 
   // 7. Remove node_modules references from plugin load paths
@@ -635,6 +683,17 @@ function ensureConfig(filePath) {
       || compaction.customInstructions.trim().length === 0
     ) {
       compaction.customInstructions = RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS;
+      changed = true;
+    }
+
+    // 22. Semantic memory defaults OFF unless the operator has made an explicit
+    // choice. RC's default DeepSeek chat provider has no embeddings endpoint;
+    // leaving this field absent makes OpenClaw implicitly select OpenAI
+    // text-embedding-3-small and retry forever without credentials. Preserve an
+    // existing object byte-for-byte: enabled=true, provider/model and extension
+    // fields are operator-owned.
+    if (!Object.prototype.hasOwnProperty.call(c.agents.defaults, 'memorySearch')) {
+      c.agents.defaults.memorySearch = { enabled: false };
       changed = true;
     }
   }

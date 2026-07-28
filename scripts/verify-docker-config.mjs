@@ -18,8 +18,11 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const projectVersion = JSON.parse(
+  await readFile(path.join(projectRoot, 'package.json'), 'utf8'),
+).version;
 const image = process.env.RC_TEST_DOCKER_IMAGE
-  ?? 'ghcr.io/wentorai/research-claw:0.8.0';
+  ?? `ghcr.io/wentorai/research-claw:${projectVersion}`;
 const hostPort = Number(process.env.RC_TEST_GATEWAY_PORT ?? 28799);
 const gatewayToken = 'rc-docker-config-fixture';
 const containerPrefix = `rc-observability-docker-${process.pid}`;

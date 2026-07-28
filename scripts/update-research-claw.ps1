@@ -78,6 +78,22 @@ try {
         throw "pnpm build failed with exit code $LASTEXITCODE"
     }
 
+    # Complete the same idempotent config migration used by install/startup
+    # before reporting success. Existing operator values remain authoritative.
+    $ConfigPaths = @()
+    $ProjectConfig = Join-Path $ProjectRoot 'config' 'openclaw.json'
+    $GlobalConfig = Join-Path $env:USERPROFILE '.openclaw' 'openclaw.json'
+    if (Test-Path $ProjectConfig) { $ConfigPaths += $ProjectConfig }
+    if (Test-Path $GlobalConfig) { $ConfigPaths += $GlobalConfig }
+    if ($ConfigPaths.Count -gt 0) {
+        & node (Join-Path $ProjectRoot 'scripts' 'ensure-config.cjs') @ConfigPaths
+        if ($LASTEXITCODE -ne 0) {
+            throw "configuration migration failed with exit code $LASTEXITCODE"
+        }
+    }
+
+    & node (Join-Path $ProjectRoot 'scripts' 'version-info.cjs') --root $ProjectRoot
+
     # Update research-plugins (skills + agent tools)
     $PluginDir = Join-Path $env:USERPROFILE '.openclaw' 'extensions' 'research-plugins'
     if (Test-Path $PluginDir) {
