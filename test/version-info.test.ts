@@ -85,9 +85,13 @@ describe('user-visible Research-Claw version', () => {
 
   it('makes the frozen source commit observable inside release images', () => {
     const dockerfile = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
-    expect(dockerfile).toContain('FROM --platform=$TARGETPLATFORM node:22-slim');
+    expect(dockerfile).toContain('FROM node:22-slim');
+    expect(dockerfile).not.toContain('FROM --platform=');
     expect(dockerfile).toContain('ARG RC_BUILD_COMMIT=unknown');
     expect(dockerfile).toContain('ENV RC_BUILD_COMMIT=${RC_BUILD_COMMIT}');
     expect(dockerfile).toContain('org.opencontainers.image.revision=${RC_BUILD_COMMIT}');
+    expect(dockerfile.indexOf('ARG RC_BUILD_COMMIT=unknown')).toBeGreaterThan(
+      dockerfile.indexOf('RUN pnpm build'),
+    );
   });
 });

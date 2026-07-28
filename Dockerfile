@@ -3,12 +3,6 @@
 # ============================================================
 FROM node:22-slim
 
-# Release builds pass the frozen Research-Claw commit. The runtime version
-# helper reads this value even though the image intentionally contains no .git.
-ARG RC_BUILD_COMMIT=unknown
-ENV RC_BUILD_COMMIT=${RC_BUILD_COMMIT}
-LABEL org.opencontainers.image.revision=${RC_BUILD_COMMIT}
-
 # ── Mirror configuration ──────────────────────────────────────────────
 # Defaults: China mainland mirrors (TUNA + npmmirror).
 # Overseas: docker build --build-arg APT_MIRROR=deb.debian.org --build-arg NPM_REGISTRY=https://registry.npmjs.org .
@@ -176,6 +170,12 @@ COPY scripts/docker-entrypoint.sh /entrypoint.sh
 # converts LF→CRLF, causing "exec /entrypoint.sh: no such file or directory"
 # because the shebang becomes #!/bin/sh\r (not a valid interpreter path).
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+
+# Keep release metadata after dependency/build layers. Changing only the Git
+# revision must not invalidate the multi-gigabyte scientific runtime cache.
+ARG RC_BUILD_COMMIT=unknown
+ENV RC_BUILD_COMMIT=${RC_BUILD_COMMIT}
+LABEL org.opencontainers.image.revision=${RC_BUILD_COMMIT}
 
 EXPOSE 28789
 
