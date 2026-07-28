@@ -8,22 +8,13 @@
 
 cd "$(dirname "$0")/.."
 
-# --- PID lock: prevent multiple run.sh instances from fighting ---
-PIDFILE="/tmp/research-claw-gateway.pid"
-if [ -f "$PIDFILE" ]; then
-  OLD_PID=$(cat "$PIDFILE" 2>/dev/null)
-  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-    echo "[run] Another run.sh is already running (PID $OLD_PID). Stopping it first..."
-    kill "$OLD_PID" 2>/dev/null || true
-    # Give the gateway enough time for clean shutdown (WAL checkpoint, WS drain)
-    # before forced kill. 10s is sufficient for the full close sequence.
-    sleep 10
-    kill -9 "$OLD_PID" 2>/dev/null || true
-  fi
+# --- Single-owner lock: a second launcher reuses the live instance ---
+source "./scripts/run-lock.sh"
+if acquire_run_lock; then
+  trap release_run_lock EXIT
+else
+  exit $?
 fi
-echo $$ > "$PIDFILE"
-cleanup_pid() { rm -f "$PIDFILE"; }
-trap cleanup_pid EXIT
 
 # Run start time — consumed by the exit farewell screen (this-run usage + duration).
 export RC_RUN_START_EPOCH=$(date +%s)
@@ -168,21 +159,21 @@ fi
 dbg "Using Node: $GW_NODE ($("$GW_NODE" -v))"
 dbg "Config: $OPENCLAW_CONFIG_PATH"
 
-# Stop macOS LaunchAgent gateway (installed by `openclaw doctor`) — it binds 28789 and
-# respawns on --force, causing "port still not bindable" when using pnpm serve.
+# Stop macOS LaunchAgent gateway (installed by `openclaw doctor`) — it binds 28789.
 LAUNCH_AGENT="$HOME/Library/LaunchAgents/ai.openclaw.gateway.plist"
 if [ -f "$LAUNCH_AGENT" ]; then
   launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT" 2>/dev/null \
     || launchctl unload "$LAUNCH_AGENT" 2>/dev/null || true
   dbg "Stopped LaunchAgent ai.openclaw.gateway (use pnpm serve OR LaunchAgent, not both)"
 fi
-if command -v lsof >/dev/null 2>&1 && lsof -ti :28789 >/dev/null 2>&1; then
-  dbg "Freeing port 28789..."
-  lsof -ti :28789 | xargs kill -9 2>/dev/null || true
-  sleep 1
+if command -v lsof >/dev/null 2>&1 \
+  && lsof -nP -iTCP:28789 -sTCP:LISTEN -t >/dev/null 2>&1; then
+  say "✗ Port 28789 is already in use. Research-Claw did not terminate that process."
+  say "  Stop the existing gateway first, then run pnpm serve again."
+  exit 75
 fi
 
-# Sync RC settings → ~/.openclaw/openclaw.json so `openclaw gateway --force` also works.
+# Sync RC settings → ~/.openclaw/openclaw.json so the OpenClaw gateway also works.
 # Direction: RC project config → global config (preserves user-only keys in global).
 # Strips invalid channels.*.commands for OC 2026.6.1+.
 "$GW_NODE" "$(dirname "$0")/sync-global-config.cjs" 2>/dev/null || true
@@ -278,7 +269,7 @@ while true; do
   PROXY_PID=$!
 
   "$GW_NODE" ./node_modules/openclaw/dist/entry.js \
-    gateway run --allow-unconfigured --auth token --port 28789 --force
+    gateway run --allow-unconfigured --auth token --port 28789
   CODE=$?
 
   # Stop proxy when gateway exits (gateway restart loop).

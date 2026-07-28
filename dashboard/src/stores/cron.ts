@@ -13,13 +13,21 @@ export interface CronPreset {
   gateway_job_id: string | null;
 }
 
-type CronJobRow = { id?: unknown; sessionKey?: unknown; name?: unknown; schedule?: unknown; payload?: unknown };
+type CronJobRow = {
+  id?: unknown;
+  sessionKey?: unknown;
+  name?: unknown;
+  schedule?: unknown;
+  payload?: unknown;
+  delivery?: unknown;
+};
 type CronJobSnapshot = {
   id: string;
   sessionKey: string | null;
   name: string;
   schedule: unknown;
   payload: Record<string, unknown>;
+  delivery: Record<string, unknown>;
 };
 
 // Agent turn messages for cron presets.
@@ -45,10 +53,7 @@ function buildCronAgentTurn(params: {
       kind: 'agentTurn',
       message: params.message,
     },
-    delivery: {
-      mode: 'none',
-      channel: 'last',
-    },
+    delivery: { mode: 'none' },
   };
 }
 
@@ -91,6 +96,9 @@ function extractCronJobs(res: unknown): CronJobSnapshot[] | null {
       payload: row.payload && typeof row.payload === 'object'
         ? row.payload as Record<string, unknown>
         : {},
+      delivery: row.delivery && typeof row.delivery === 'object'
+        ? row.delivery as Record<string, unknown>
+        : {},
     }];
   });
 }
@@ -127,6 +135,11 @@ function cronJobNeedsRefresh(preset: CronPreset, job: CronJobSnapshot): boolean 
 
   const message = PRESET_AGENT_TURNS[preset.id] ?? `Run cron preset: ${preset.id}`;
   if (typeof job.payload.message === 'string' && job.payload.message !== message) return true;
+
+  // Preset runs persist their result in RC and must not inherit a pre-upgrade
+  // announce route. An old announce job can otherwise keep failing forever on
+  // a stale channel target even though newly created jobs use mode:none.
+  if (job.delivery.mode !== 'none') return true;
 
   const schedule = job.schedule && typeof job.schedule === 'object'
     ? job.schedule as Record<string, unknown>

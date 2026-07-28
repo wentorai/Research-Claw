@@ -126,6 +126,7 @@ describe('Cron Store', () => {
               sessionKey: 'cron:rc-preset:group_meeting_prep',
               schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
               payload: { kind: 'agentTurn', message: 'Run cron preset: group_meeting_prep' },
+              delivery: { mode: 'none' },
             },
             {
               id: 'gw-duplicate-a',
@@ -133,6 +134,7 @@ describe('Cron Store', () => {
               sessionKey: 'cron:rc-preset:group_meeting_prep',
               schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
               payload: { kind: 'agentTurn', message: 'Run cron preset: group_meeting_prep' },
+              delivery: { mode: 'none' },
             },
             {
               id: 'gw-duplicate-b',
@@ -140,6 +142,7 @@ describe('Cron Store', () => {
               sessionKey: 'cron:rc-preset:group_meeting_prep',
               schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
               payload: { kind: 'agentTurn', message: 'Run cron preset: group_meeting_prep' },
+              delivery: { mode: 'none' },
             },
           ],
         })
@@ -171,6 +174,7 @@ describe('Cron Store', () => {
             sessionKey: 'cron:rc-preset:group_meeting_prep',
             schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
             payload: { kind: 'agentTurn', message: 'Run cron preset: group_meeting_prep' },
+            delivery: { mode: 'none' },
           }],
         })
         .mockResolvedValue({ presets: [{ ...disabled, gateway_job_id: null }] });
@@ -182,6 +186,46 @@ describe('Cron Store', () => {
       expect(mockRequest).toHaveBeenCalledWith('rc.cron.presets.setJobId', {
         preset_id: 'group_meeting_prep',
         job_id: '',
+      });
+    });
+
+    it('replaces a pre-upgrade announce job with a non-delivering preset job', async () => {
+      const active = makePreset({
+        id: 'weekly_report',
+        name: 'Weekly Report',
+        schedule: '0 17 * * 5',
+        enabled: true,
+        gateway_job_id: 'gw-legacy-announce',
+      });
+
+      mockRequest
+        .mockResolvedValueOnce({ presets: [active] })
+        .mockResolvedValueOnce({
+          jobs: [{
+            id: 'gw-legacy-announce',
+            name: 'Weekly Report',
+            sessionKey: 'cron:rc-preset:weekly_report',
+            schedule: { kind: 'cron', expr: '0 17 * * 5' },
+            payload: { kind: 'agentTurn', message: 'Run cron preset: weekly_report' },
+            delivery: { mode: 'announce' },
+          }],
+        })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ id: 'gw-safe-replacement' })
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValue({ presets: [{ ...active, gateway_job_id: 'gw-safe-replacement' }] });
+
+      await useCronStore.getState().loadPresets();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(mockRequest).toHaveBeenCalledWith('cron.remove', { id: 'gw-legacy-announce' });
+      expect(mockRequest).toHaveBeenCalledWith('cron.add', expect.objectContaining({
+        sessionKey: 'cron:rc-preset:weekly_report',
+        delivery: { mode: 'none' },
+      }));
+      expect(mockRequest).toHaveBeenCalledWith('rc.cron.presets.setJobId', {
+        preset_id: 'weekly_report',
+        job_id: 'gw-safe-replacement',
       });
     });
   });
@@ -218,7 +262,6 @@ describe('Cron Store', () => {
         },
         delivery: {
           mode: 'none',
-          channel: 'last',
         },
       });
       expect(mockRequest).toHaveBeenNthCalledWith(3, 'rc.cron.presets.setJobId', {
