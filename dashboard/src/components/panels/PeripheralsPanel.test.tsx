@@ -236,6 +236,30 @@ describe('PeripheralsPanel — empty guide', () => {
 
 // ── Device cards render from store.devices (§14.2) ────────────────────────────
 describe('PeripheralsPanel — device cards from store (§14.2)', () => {
+  it('keeps every card at its content height so action rows scroll instead of being clipped', async () => {
+    usePeripheralsStore.setState({
+      devices: [
+        PLAUD_DEVICE,
+        makeDevice(),
+        makeDevice({ id: 'dev-cam-002', name: 'Second Camera' }),
+      ],
+    });
+    const { default: PeripheralsPanel } = await import('./PeripheralsPanel');
+    render(<Wrapper><PeripheralsPanel /></Wrapper>);
+
+    const list = screen.getByTestId('periph-device-list');
+    expect(list.style.overflowY).toBe('auto');
+    expect(list.style.display).toBe('grid');
+    expect(list.style.gridAutoRows).toBe('max-content');
+    expect(list.style.alignContent).toBe('start');
+
+    // Positive delivery assertion: the controls remain part of each full-height
+    // card; the scroll container, not the cards, owns the overflow.
+    expect(screen.getByTestId('periph-device-rename-btn-plaud')).toBeTruthy();
+    expect(screen.getByTestId('periph-device-delete-btn-dev-cam-001')).toBeTruthy();
+    expect(screen.getByTestId('periph-device-open-detail-dev-cam-002')).toBeTruthy();
+  });
+
   it('renders one DeviceCard per registered device, including plaud', async () => {
     usePeripheralsStore.setState({ devices: [makeDevice(), PLAUD_DEVICE] });
     const { default: PeripheralsPanel } = await import('./PeripheralsPanel');

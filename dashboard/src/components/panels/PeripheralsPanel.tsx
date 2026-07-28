@@ -210,12 +210,20 @@ export default function PeripheralsPanel() {
 
       {/* Device cards + guide + placeholders */}
       <div
+        data-testid="periph-device-list"
         style={{
           flex: 1,
+          minHeight: 0,
           overflowY: 'auto',
           padding: '16px',
-          display: 'flex',
-          flexDirection: 'column',
+          // A constrained column flexbox shrinks its children by default.
+          // DeviceCard intentionally clips its rounded border with
+          // overflow:hidden, so shrinking used to cut off the action row.
+          // Max-content grid tracks preserve each card's intrinsic height and
+          // move overflow ownership to this scrolling list.
+          display: 'grid',
+          gridAutoRows: 'max-content',
+          alignContent: 'start',
           gap: '12px',
         }}
       >
