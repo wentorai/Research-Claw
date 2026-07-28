@@ -34,6 +34,26 @@ describe('release installation surfaces', () => {
     expect(native).toContain('scripts/ensure-config.cjs');
   });
 
+  it('does not make a Gitee install depend on the GitHub-only ppt-master submodule URL', () => {
+    const native = read(scripts.native);
+
+    expect(native).toContain(
+      'PPT_MASTER_GITHUB="https://github.com/hugohe3/ppt-master.git"',
+    );
+    expect(native).toContain(
+      'PPT_MASTER_ATOMGIT="https://atomgit.com/hugohe3/ppt-master.git"',
+    );
+    expect(native).toContain(
+      'git -C "$INSTALL_DIR" config submodule.ppt-master.url "$primary_url"',
+    );
+    expect(native).toContain(
+      'git -C "$INSTALL_DIR" config submodule.ppt-master.url "$fallback_url"',
+    );
+    expect(native).toContain(
+      'git -C "$INSTALL_DIR" -c http.version=HTTP/1.1 submodule update',
+    );
+  });
+
   it('installs the ffmpeg runtime required by camera and RTSP features', () => {
     const native = read(scripts.native);
     const dockerfile = read(path.join(ROOT, 'Dockerfile'));

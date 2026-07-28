@@ -36,6 +36,8 @@ PORT="${PORT:-28789}"
 # Override: REPO=https://github.com/wentorai/Research-Claw.git curl ... | bash
 GITEE_REPO="https://gitee.com/Ruby_Callipygian_5cb5/ResearchClaw.git"
 GITHUB_REPO="https://github.com/wentorai/Research-Claw.git"
+PPT_MASTER_GITHUB="https://github.com/hugohe3/ppt-master.git"
+PPT_MASTER_ATOMGIT="https://atomgit.com/hugohe3/ppt-master.git"
 REPO_OVERRIDE="${REPO:-}"
 REPO="${REPO:-$GITEE_REPO}"
 NODE_MIN=22
@@ -114,6 +116,8 @@ run_with_heartbeat() {
 ensure_ppt_master() {
   local target_dir="$INSTALL_DIR/ppt-master"
   local scripts_root="$target_dir/skills/ppt-master/scripts"
+  local primary_url="$PPT_MASTER_GITHUB"
+  local fallback_url="$PPT_MASTER_ATOMGIT"
 
   if [ -f "$scripts_root/project_manager.py" ] && [ -f "$scripts_root/svg_to_pptx.py" ]; then
     ok "ppt-master ready"
@@ -123,8 +127,22 @@ ensure_ppt_master() {
   if [ -f "$INSTALL_DIR/.gitmodules" ] && grep -q 'path = ppt-master' "$INSTALL_DIR/.gitmodules" 2>/dev/null; then
     info "Initializing ppt-master submodule..."
     git -C "$INSTALL_DIR" submodule sync -- ppt-master >/dev/null 2>&1 || true
-    if ! git -C "$INSTALL_DIR" submodule update --init --recursive ppt-master; then
-      die "Failed to initialize ppt-master. Try: cd $INSTALL_DIR && git submodule update --init --recursive ppt-master"
+
+    # A Gitee main-repository clone must not silently retain a GitHub-only
+    # submodule dependency. AtomGit is an upstream-documented mirror and has
+    # the pinned gitlink commit; Git still verifies/checks out that exact SHA.
+    if [ "$REPO" = "$GITEE_REPO" ]; then
+      primary_url="$PPT_MASTER_ATOMGIT"
+      fallback_url="$PPT_MASTER_GITHUB"
+    fi
+
+    git -C "$INSTALL_DIR" config submodule.ppt-master.url "$primary_url"
+    if ! git -C "$INSTALL_DIR" -c http.version=HTTP/1.1 submodule update --init --recursive ppt-master; then
+      warn "Primary ppt-master source unavailable; trying the alternate mirror..."
+      git -C "$INSTALL_DIR" config submodule.ppt-master.url "$fallback_url"
+      if ! git -C "$INSTALL_DIR" -c http.version=HTTP/1.1 submodule update --init --recursive ppt-master; then
+        die "Failed to initialize ppt-master from both sources. Re-run this installer when either GitHub or AtomGit is reachable."
+      fi
     fi
   fi
 
