@@ -433,14 +433,18 @@ async function probeDeliveryRecipient(
  * (`mergeCronDelivery`, jobs-BUelsOiC.js:900-927): a field the patch omits keeps
  * its old value. So a probe that tried recipient B after A could never clear A,
  * and an announce→none downgrade would leave `channel`/`to` behind on a job the
- * UI shows as silent. Every field the dashboard owns is therefore always sent,
- * with `null` to clear (all three accept null: src-CgoRVpph.js:1752,1758,1791).
+ * UI shows as silent. Recipient/account fields accept null, but the installed
+ * OpenClaw 2026.6.1 schema rejects `delivery.channel:null`; callers must replace
+ * the job rather than use this helper when the final mode is `none`.
  */
 function deliveryUpdatePatch(delivery: Record<string, unknown>): Record<string, unknown> {
+  if (delivery.mode === 'none') {
+    throw new Error('delivery mode none requires cron job replacement');
+  }
   return {
     delivery: {
       mode: delivery.mode,
-      channel: delivery.channel ?? null,
+      channel: delivery.channel,
       accountId: delivery.accountId ?? null,
       to: delivery.to ?? null,
       bestEffort: delivery.bestEffort === true,
@@ -614,7 +618,7 @@ async function registerMonitorCronJob(
     ? (bound !== undefined ? bound : await resolveBoundDeliveryTarget())
     : null;
 
-  const cronResult = await client.request<{ id: string }>('cron.add', {
+  const addJob = (delivery: Record<string, unknown>) => client.request<{ id: string }>('cron.add', {
     name: `[rc-monitor] ${monitor.name}`,
     description: `Monitor: ${monitor.id}`,
     schedule: { kind: 'cron' as const, expr: monitor.schedule },
@@ -625,8 +629,9 @@ async function registerMonitorCronJob(
       message: buildMonitorCronMessage(monitor),
       timeoutSeconds: 900,
     },
-    delivery: buildMonitorDelivery(monitor, target),
+    delivery,
   });
+  let cronResult = await addJob(buildMonitorDelivery(monitor, target));
 
   if (!cronResult?.id) throw new Error('cron-add-missing-id');
 
@@ -637,11 +642,19 @@ async function registerMonitorCronJob(
   // …" — accepted by cron.add, dropped at every run.
   if (target?.toCandidates) {
     const verified = await ensureProbedDelivery(target, cronResult.id);
-    try {
-      await client.request('cron.update', { id: cronResult.id, patch: deliveryUpdatePatch(verified) });
-    } catch (err) {
+    if (verified.mode === 'none') {
+      // cron.update merges delivery and OC rejects channel:null, so the only
+      // contract-valid way to remove a stale announce route is replacement.
       try { await client.request('cron.remove', { id: cronResult.id }); } catch { /* best effort */ }
-      throw new Error(`delivery-update-failed: ${errorMessage(err)}`);
+      cronResult = await addJob({ mode: 'none' });
+      if (!cronResult?.id) throw new Error('cron-add-replacement-missing-id');
+    } else {
+      try {
+        await client.request('cron.update', { id: cronResult.id, patch: deliveryUpdatePatch(verified) });
+      } catch (err) {
+        try { await client.request('cron.remove', { id: cronResult.id }); } catch { /* best effort */ }
+        throw new Error(`delivery-update-failed: ${errorMessage(err)}`);
+      }
     }
   }
 
@@ -767,7 +780,7 @@ async function reconcileEnabledMonitors(
   let repaired = false;
   let repairFailed = false;
   // Jobs that must carry a routable delivery, collected for the probe below.
-  const announceJobIds: string[] = [];
+  const announceJobs: Array<{ id: string; monitor: Monitor }> = [];
   for (const monitor of monitors) {
     const matches = Array.from(jobs.values()).filter((job) => cronJobMatchesMonitor(job, monitor));
 
@@ -796,7 +809,7 @@ async function reconcileEnabledMonitors(
       ?? matches.find((job) => !cronJobNeedsRefresh(monitor, job, bound));
     const duplicates = matches.filter((job) => job.id !== liveJob?.id);
 
-    if (monitor.notify && liveJob) announceJobIds.push(liveJob.id);
+    if (monitor.notify && liveJob) announceJobs.push({ id: liveJob.id, monitor });
 
     if (duplicates.length === 0 && liveJob && liveJob.id === monitor.gateway_job_id) continue;
     if (_inflightOps.has(monitor.id)) continue;
@@ -818,7 +831,6 @@ async function reconcileEnabledMonitors(
       const jobId = await registerMonitorCronJob(monitor, bound);
       if (jobId) {
         repaired = true;
-        if (monitor.notify) announceJobIds.push(jobId);
       } else {
         repairFailed = true;
       }
@@ -830,18 +842,33 @@ async function reconcileEnabledMonitors(
     }
   }
 
-  // Probe once per gateway session, then write the gateway-verified delivery to
-  // every announce job. Until this runs the jobs carry whatever recipient was
-  // already on disk, which is why cronJobNeedsRefresh ignores `to` while
-  // toCandidates is still set.
-  if (bound?.toCandidates && announceJobIds.length > 0) {
-    const finalDelivery = await ensureProbedDelivery(bound, announceJobIds[0]);
-    for (const jobId of announceJobIds) {
-      try {
-        await client.request('cron.update', { id: jobId, patch: deliveryUpdatePatch(finalDelivery) });
-      } catch (err) {
-        console.warn('[MonitorStore] applying probed delivery failed:', err);
-        repairFailed = true;
+  // Probe existing announce jobs once per gateway session, then write the
+  // gateway-verified delivery to each one. Newly registered jobs are excluded:
+  // registerMonitorCronJob already performs the same probe and replacement,
+  // and processing them again would delete and recreate the fresh job twice.
+  // Until this runs, existing jobs carry whatever recipient was already on
+  // disk, which is why cronJobNeedsRefresh ignores `to` while toCandidates is
+  // still set.
+  if (bound?.toCandidates && announceJobs.length > 0) {
+    const finalDelivery = await ensureProbedDelivery(bound, announceJobs[0].id);
+    for (const { id: jobId, monitor } of announceJobs) {
+      if (finalDelivery.mode === 'none') {
+        try {
+          await client.request('cron.remove', { id: jobId });
+          const replacementId = await registerMonitorCronJob(monitor, null);
+          if (!replacementId) throw new Error('cron replacement returned no id');
+          repaired = true;
+        } catch (err) {
+          console.warn('[MonitorStore] replacing unroutable announce job failed:', err);
+          repairFailed = true;
+        }
+      } else {
+        try {
+          await client.request('cron.update', { id: jobId, patch: deliveryUpdatePatch(finalDelivery) });
+        } catch (err) {
+          console.warn('[MonitorStore] applying probed delivery failed:', err);
+          repairFailed = true;
+        }
       }
     }
   }

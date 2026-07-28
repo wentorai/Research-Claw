@@ -308,15 +308,28 @@ describe('cron delivery is notify-aware (F7)', () => {
       channelDefaultAccountId: Object.fromEntries(channels.map((channel) => [channel, 'default'])),
     };
     const probedChannels: string[] = [];
+    const cronAdds: Record<string, unknown>[] = [];
+    const removedJobIds: string[] = [];
 
     mockGatewayClient.request.mockImplementation(async (method: string, params: Record<string, unknown>) => {
       switch (method) {
         case 'rc.monitor.toggle': return RC_MONITOR_TOGGLE_ENABLED;
         case 'channels.status': return status;
         case 'config.get': return { config: { channels: {} } };
-        case 'cron.add': return CRON_ADD_RESPONSE;
+        case 'cron.add':
+          cronAdds.push(params);
+          return CRON_ADD_RESPONSE;
+        case 'cron.remove':
+          removedJobIds.push(String(params.id));
+          return { ok: true };
         case 'cron.update': {
           const delivery = ((params.patch as Record<string, unknown>).delivery ?? {}) as Record<string, unknown>;
+          // Real OpenClaw 2026.6.1 rejects `channel:null`:
+          // "delivery.channel must be one of: <installed channels>". An empty
+          // value therefore cannot be used to clear an announce route.
+          if (delivery.channel == null) {
+            throw new Error('INVALID_REQUEST: delivery.channel must be one of: openclaw-weixin');
+          }
           if (typeof delivery.channel === 'string') probedChannels.push(delivery.channel);
           return { ok: true };
         }
@@ -342,6 +355,8 @@ describe('cron delivery is notify-aware (F7)', () => {
     expect(result).toEqual({ ok: true });
     expect(new Set(probedChannels).size).toBe(32);
     expect(probedChannels).not.toContain('bad-32');
+    expect(removedJobIds).toContain(CRON_ADD_RESPONSE.id);
+    expect(cronAdds.at(-1)?.delivery).toEqual({ mode: 'none' });
   });
 
   it('notify=true monitor with NO bound external channel registers mode:none, never announce/last', async () => {
@@ -360,6 +375,82 @@ describe('cron delivery is notify-aware (F7)', () => {
     // drops at every run while the UI shows push as armed; the dashboard bell is
     // the fallback instead.
     expect(cronAdd!.params.delivery).toEqual(NO_CHANNEL_DELIVERY);
+  });
+
+  it('reconcile replaces a newly registered unroutable announce job exactly once', async () => {
+    let addCount = 0;
+    let persistedJobId = '';
+    const cronAdds: RecordedCall[] = [];
+    const cronRemoves: RecordedCall[] = [];
+    const unroutableStatus = {
+      channelOrder: ['bad-channel'],
+      channelAccounts: {
+        'bad-channel': [{
+          accountId: 'default',
+          enabled: true,
+          configured: true,
+          connected: true,
+          running: true,
+        }],
+      },
+      channelDefaultAccountId: { 'bad-channel': 'default' },
+    };
+
+    mockGatewayClient.request.mockImplementation(async (method: string, params: Record<string, unknown>) => {
+      switch (method) {
+        case 'rc.monitor.list':
+          return persistedJobId
+            ? {
+                items: [{
+                  ...RC_MONITOR_LIST_ORPHAN_ENABLED_RESPONSE.items[0],
+                  gateway_job_id: persistedJobId,
+                }],
+                total: 1,
+              }
+            : RC_MONITOR_LIST_ORPHAN_ENABLED_RESPONSE;
+        case 'cron.list':
+          if (typeof params.query === 'string') {
+            return {
+              ...CRON_LIST_EMPTY_RESPONSE,
+              deliveryPreviews: { [params.query]: { detail: 'unroutable' } },
+            };
+          }
+          return CRON_LIST_EMPTY_RESPONSE;
+        case 'channels.status':
+          return unroutableStatus;
+        case 'config.get':
+          return { config: { channels: {} } };
+        case 'cron.add': {
+          const call = { method, params };
+          cronAdds.push(call);
+          addCount += 1;
+          return { id: `cron-added-${addCount}` };
+        }
+        case 'cron.update':
+          return { ok: true };
+        case 'cron.remove':
+          cronRemoves.push({ method, params });
+          return { ok: true };
+        case 'rc.monitor.setJobId':
+          persistedJobId = String(params.job_id);
+          return { ok: true };
+        default:
+          throw new Error(`unexpected RPC in test: ${method}`);
+      }
+    });
+
+    await useMonitorStore.getState().loadMonitors();
+
+    expect(cronAdds).toHaveLength(2);
+    expect(cronAdds[0].params.delivery).toEqual({
+      mode: 'announce',
+      channel: 'bad-channel',
+      accountId: 'default',
+      bestEffort: true,
+    });
+    expect(cronAdds[1].params.delivery).toEqual({ mode: 'none' });
+    expect(cronRemoves.map((call) => call.params.id)).toEqual(['cron-added-1']);
+    expect(persistedJobId).toBe('cron-added-2');
   });
 
   it("notify=false monitor keeps delivery mode 'none' and never queries channels.status", async () => {
