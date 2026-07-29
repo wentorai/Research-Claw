@@ -60,6 +60,24 @@ describe('production dependency security floors', () => {
     );
   });
 
+  it('uses the reviewed package manager in native and Docker install entrypoints', () => {
+    const reviewedVersion = REVIEWED_PACKAGE_MANAGER.slice('pnpm@'.length);
+    const dockerfile = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
+    const nativeInstaller = fs.readFileSync(
+      path.join(ROOT, 'scripts', 'install.sh'),
+      'utf8',
+    );
+
+    const dockerPins = [...dockerfile.matchAll(/\bnpm install -g pnpm@([^\s]+)/g)]
+      .map((match) => match[1]);
+    const nativePins = [
+      ...nativeInstaller.matchAll(/^PNPM_VERSION=([^\s#]+)$/gm),
+    ].map((match) => match[1]);
+
+    expect(dockerPins).toEqual([reviewedVersion]);
+    expect(nativePins).toEqual([reviewedVersion]);
+  });
+
   it('keeps the reviewed transitive-dependency overrides in the root manifest', () => {
     const rootPackage = JSON.parse(
       fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'),

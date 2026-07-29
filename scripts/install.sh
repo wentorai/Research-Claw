@@ -41,7 +41,7 @@ PPT_MASTER_ATOMGIT="https://atomgit.com/hugohe3/ppt-master.git"
 REPO_OVERRIDE="${REPO:-}"
 REPO="${REPO:-$GITEE_REPO}"
 NODE_MIN=22
-PNPM_VERSION=9
+PNPM_VERSION=10.34.4
 ISSUES_URL="https://github.com/wentorai/Research-Claw/issues"
 RC_PNPM_PREFIX="${RC_PNPM_PREFIX:-$INSTALL_DIR/.tools/pnpm}"
 PNPM_BIN=""
@@ -593,8 +593,10 @@ activate_private_pnpm() {
 }
 
 pnpm_cmd_works() {
+  local detected_version
   command -v pnpm &>/dev/null || return 1
-  pnpm --version &>/dev/null
+  detected_version="$(pnpm --version 2>/dev/null)" || return 1
+  [ "$detected_version" = "$PNPM_VERSION" ]
 }
 
 install_private_pnpm() {
@@ -605,6 +607,7 @@ install_private_pnpm() {
 }
 
 ensure_pnpm() {
+  local detected_version=""
   if pnpm_cmd_works; then
     PNPM_BIN="$(command -v pnpm)"
     ok "pnpm $(pnpm --version)"
@@ -618,7 +621,14 @@ ensure_pnpm() {
     return 0
   fi
 
-  warn "Detected a broken pnpm/Corepack shim. Falling back to a standalone pnpm install."
+  if command -v pnpm &>/dev/null; then
+    detected_version="$(pnpm --version 2>/dev/null || true)"
+  fi
+  if [ -n "$detected_version" ]; then
+    warn "pnpm $detected_version does not match required $PNPM_VERSION. Installing an isolated compatible copy."
+  else
+    warn "pnpm is unavailable or its Corepack shim is broken. Installing an isolated compatible copy."
+  fi
   if ! install_private_pnpm || ! pnpm_cmd_works; then
     die "pnpm installation failed. Install manually: npm install --prefix $RC_PNPM_PREFIX -g pnpm@$PNPM_VERSION"
   fi

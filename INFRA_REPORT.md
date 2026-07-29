@@ -56,7 +56,7 @@ Patch applies automatically on `pnpm install --frozen-lockfile`.
 | Dependency | Version | Notes |
 |-----------|---------|-------|
 | Node.js | >= 22.12.0 | Required by openclaw |
-| pnpm | 9.15.0 | Workspace + patch support |
+| pnpm | 10.34.4 | Workspace + patch support |
 | Python | 3.x | For node-gyp (better-sqlite3 build) |
 | Xcode CLI Tools | latest | macOS native compilation |
 

@@ -175,7 +175,7 @@ fnm default 22
 node -v  # 确认输出 v22.x.x
 
 # 安装 pnpm
-npm install -g pnpm@9
+npm install -g pnpm@10.34.4
 ```
 
 #### 3. 克隆并构建

@@ -32,8 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-# pnpm — match version in package.json
-RUN npm install -g pnpm@9.15.0
+# pnpm — exact match with packageManager in package.json and native installer
+RUN npm install -g pnpm@10.34.4
 
 WORKDIR /app
 
