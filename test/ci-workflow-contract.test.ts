@@ -31,7 +31,6 @@ type Job = {
 const REVIEWED_ACTIONS = new Set([
   'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
   'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
-  'pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271',
 ]);
 
 function workflow(): Record<string, any> {
@@ -70,7 +69,12 @@ describe('GitHub Actions release gate contract', () => {
           with: { 'node-version': 22 },
         },
         {
-          uses: 'pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271',
+          name: 'Enable pnpm',
+          run: 'corepack enable pnpm',
+        },
+        {
+          name: 'Verify pnpm version',
+          run: 'test "$(pnpm --version)" = "10.34.4"',
         },
         {
           name: 'Install dependencies',
@@ -99,7 +103,12 @@ describe('GitHub Actions release gate contract', () => {
           with: { 'node-version': 22 },
         },
         {
-          uses: 'pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271',
+          name: 'Enable pnpm',
+          run: 'corepack enable pnpm',
+        },
+        {
+          name: 'Verify pnpm version',
+          run: 'test "$(pnpm --version)" = "10.34.4"',
         },
         {
           name: 'Install dependencies',
@@ -186,6 +195,19 @@ describe('GitHub Actions release gate contract', () => {
       );
       expect(setupNodeSteps).toHaveLength(1);
       expect(String(setupNodeSteps[0]?.with?.['node-version'])).toBe('22');
+      const enableIndex = steps.findIndex(
+        (step) => step.run?.trim() === 'corepack enable pnpm',
+      );
+      const versionIndex = steps.findIndex(
+        (step) =>
+          step.run?.trim() === 'test "$(pnpm --version)" = "10.34.4"',
+      );
+      const installIndex = steps.findIndex(
+        (step) => step.run?.trim() === 'pnpm install --frozen-lockfile',
+      );
+      expect(enableIndex).toBeGreaterThan(-1);
+      expect(versionIndex).toBeGreaterThan(enableIndex);
+      expect(installIndex).toBeGreaterThan(versionIndex);
     }
   });
 

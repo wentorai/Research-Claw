@@ -33,6 +33,7 @@
     "openclaw": ">=2026.3.22"
   },
   "devDependencies": {
+    "openclaw": "2026.6.1",
     "typescript": "^5.8.0"
   },
   "openclaw": {

@@ -27,8 +27,12 @@ jobs:
         with:
           node-version: 22
 
-      # v6.0.9; reads the exact packageManager declaration from package.json.
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+      # Node 22 ships Corepack; enable its shim so nested scripts can call pnpm.
+      - name: Enable pnpm
+        run: corepack enable pnpm
+
+      - name: Verify pnpm version
+        run: test "$(pnpm --version)" = "10.34.4"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -50,7 +54,11 @@ jobs:
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+      - name: Enable pnpm
+        run: corepack enable pnpm
+
+      - name: Verify pnpm version
+        run: test "$(pnpm --version)" = "10.34.4"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

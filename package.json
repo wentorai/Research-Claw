@@ -7,7 +7,7 @@
   "engines": {
     "node": ">=22.16.0"
   },
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.34.4",
   "scripts": {
     "prepare": "git config core.hooksPath git-hooks 2>/dev/null || true",
     "start": "bash scripts/run.sh",
@@ -40,7 +40,28 @@
       "openclaw@2026.6.1": "patches/openclaw@2026.6.1.patch"
     },
     "overrides": {
-      "sass-embedded": "npm:sass@^1.77.0"
-    }
+      "sass-embedded": "npm:sass@^1.77.0",
+      "@hono/node-server@<1.19.13": "1.19.13",
+      "body-parser@>=2.0.0 <2.3.0": "2.3.0",
+      "brace-expansion@>=2.0.0 <5.0.8": "5.0.8",
+      "fast-uri@>=3.0.0 <3.1.4": "3.1.4",
+      "hono@>=4.0.0 <4.12.27": "4.12.27",
+      "ip-address@>=10.0.0 <=10.1.0": "10.1.1",
+      "path-to-regexp@>=8.0.0 <8.4.0": "8.4.0",
+      "protobufjs@>=7.0.0 <=7.6.2": "7.6.5",
+      "qs@>=6.11.1 <=6.15.1": "6.15.2",
+      "tar@>=7.0.0 <7.5.21": "7.5.21",
+      "undici@>=8.0.0 <8.5.0": "8.5.0",
+      "yaml@>=1.0.0 <1.10.3": "1.10.3"
+    },
+    "onlyBuiltDependencies": [
+      "@google/genai",
+      "@parcel/watcher",
+      "better-sqlite3",
+      "esbuild",
+      "openclaw",
+      "protobufjs",
+      "tree-sitter-bash"
+    ]
   }
 }
