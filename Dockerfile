@@ -149,6 +149,7 @@ RUN mkdir -p /defaults/research-plugins && cd /tmp && \
 # 烘焙配置模板 + 系统提示词到 /defaults/，entrypoint 会同步到 volume
 RUN mkdir -p /defaults/bootstrap-prompts && \
     cp config/openclaw.example.json /defaults/openclaw.example.json && \
+    cp config/research-compaction-instructions.txt /defaults/research-compaction-instructions.txt && \
     # L1 system prompts (version-gated refresh at container start)
     cp workspace/.ResearchClaw/AGENTS.md \
        workspace/.ResearchClaw/HEARTBEAT.md /defaults/bootstrap-prompts/ && \

@@ -338,11 +338,12 @@ async function assertHealthyContainer(name) {
 async function assertBadConfigVisible(name) {
   await writeFile(path.join(tempRoot, 'config', 'openclaw.json'), '{ broken-json\n');
   await startContainer(name);
-  const logs = await waitForLog(
+  await waitForLog(
     name,
     /Config patch failed[\s\S]*(?:Invalid config|Unexpected|JSON|parse)/i,
   );
   const inspect = await waitForContainerExit(name);
+  const logs = await containerLogs(name);
   assert(
     !inspect.State.Running && inspect.State.ExitCode !== 0,
     'container did not fail closed after a bad config',

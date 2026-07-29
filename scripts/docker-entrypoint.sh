@@ -45,6 +45,10 @@ fi
 
 # Seed config on fresh install; preserve user config on upgrade
 mkdir -p "$CONFIG_DIR"
+COMPACTION_INSTRUCTIONS=$CONFIG_DIR/research-compaction-instructions.txt
+if [ ! -f "$COMPACTION_INSTRUCTIONS" ]; then
+  cp /defaults/research-compaction-instructions.txt "$COMPACTION_INSTRUCTIONS"
+fi
 CURRENT_VERSION=""
 if [ -f "$CONFIG_VERSION_FILE" ]; then
   CURRENT_VERSION=$(cat "$CONFIG_VERSION_FILE")

@@ -8,6 +8,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 const ENSURE_CONFIG = path.resolve(__dirname, '../scripts/ensure-config.cjs');
 const INSTALL_SCRIPT = path.resolve(__dirname, '../scripts/install.sh');
 const RUN_SCRIPT = path.resolve(__dirname, '../scripts/run.sh');
+const DOCKER_ENTRYPOINT = path.resolve(
+  __dirname,
+  '../scripts/docker-entrypoint.sh',
+);
+const DOCKERFILE = path.resolve(__dirname, '../Dockerfile');
 const OPENCLAW = path.resolve(__dirname, '../node_modules/.bin/openclaw');
 const EXAMPLE_CONFIG = path.resolve(__dirname, '../config/openclaw.example.json');
 const PROMPT_SOURCE = path.resolve(
@@ -230,6 +235,23 @@ describe('ensure-config scientific compaction migration', () => {
       example.agents?.defaults?.compaction?.customInstructions;
     expect(customInstructions).toBe(EXPECTED_PROMPT);
     expectScientificDefault(customInstructions);
+  });
+
+  it('seeds the scientific prompt before Docker config reconciliation', () => {
+    const dockerfile = fs.readFileSync(DOCKERFILE, 'utf8');
+    const entrypoint = fs.readFileSync(DOCKER_ENTRYPOINT, 'utf8');
+    expect(dockerfile).toContain(
+      'cp config/research-compaction-instructions.txt /defaults/research-compaction-instructions.txt',
+    );
+    expect(entrypoint).toContain(
+      'COMPACTION_INSTRUCTIONS=$CONFIG_DIR/research-compaction-instructions.txt',
+    );
+    expect(entrypoint).toContain(
+      'cp /defaults/research-compaction-instructions.txt "$COMPACTION_INSTRUCTIONS"',
+    );
+    expect(entrypoint.indexOf('COMPACTION_INSTRUCTIONS=')).toBeLessThan(
+      entrypoint.indexOf('node /app/scripts/ensure-config.cjs'),
+    );
   });
 
   it(

@@ -142,7 +142,12 @@ describe('native installer research-plugins degradation contract', () => {
       'await waitForContainerExit(name)',
       badConfigProbe,
     );
+    const finalLogsObserved = verifier.indexOf(
+      'const logs = await containerLogs(name)',
+      terminalObserved,
+    );
     expect(warningObserved).toBeGreaterThan(badConfigProbe);
     expect(terminalObserved).toBeGreaterThan(warningObserved);
+    expect(finalLogsObserved).toBeGreaterThan(terminalObserved);
   });
 });
