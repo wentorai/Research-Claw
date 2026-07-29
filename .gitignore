@@ -75,6 +75,10 @@ extensions/*/package-lock.json
 extensions/*/scripts/.cache/
 
 # Workspace runtime data
+# research-claw-core can create its own nested runtime workspace repository.
+# It is local state, not an OpenClaw submodule.
+/extensions/research-claw-core/workspace/
+
 # All prompt files live in workspace/.ResearchClaw/ (loaded via agent:bootstrap hook).
 # Root-level copies (AGENTS.md, HEARTBEAT.md) are synced by run.sh for OC compatibility
 # but must not be tracked — .ResearchClaw/ versions are the source of truth.
