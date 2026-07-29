@@ -39,4 +39,15 @@ describe('Docker dependency layer tracks every pnpm workspace package', () => {
       ).toContain(`COPY ${dir}/package.json`);
     }
   });
+
+  it('copies the root prepare lifecycle script before pnpm install', () => {
+    const dockerfile = readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+    const installOffset = dockerfile.indexOf('RUN pnpm install --node-linker=hoisted');
+    expect(installOffset).toBeGreaterThan(0);
+
+    const dependencyLayer = dockerfile.slice(0, installOffset);
+    expect(dependencyLayer).toContain(
+      'COPY scripts/prepare-package-manager.cjs ./scripts/',
+    );
+  });
 });

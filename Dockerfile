@@ -101,6 +101,7 @@ RUN set +e; \
 # ── 依赖层（package 文件不变则缓存命中）──────────────────────────────
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY patches/ ./patches/
+COPY scripts/prepare-package-manager.cjs ./scripts/
 COPY dashboard/package.json                          ./dashboard/
 COPY extensions/dual-model-supervisor/package.json  ./extensions/dual-model-supervisor/
 COPY extensions/research-claw-core/package.json     ./extensions/research-claw-core/
