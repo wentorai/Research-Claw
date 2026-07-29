@@ -35,23 +35,48 @@ try {
     Write-Host "[update-research-claw] Pulling latest changes..." -ForegroundColor Cyan
 
     $OldHead = & git rev-parse HEAD 2>$null
-    & { $ErrorActionPreference = 'Continue'; git pull --ff-only 2>$null }
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & git pull --ff-only 2>$null
+    $OriginPullSucceeded = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $PreviousErrorActionPreference
+    if (-not $OriginPullSucceeded) {
+        Write-Warning "Origin could not be checked; trying GitHub."
+    }
 
     $NewHead = & git rev-parse HEAD 2>$null
+    $GithubFetchSucceeded = $false
+    $GithubMergeSucceeded = $false
     if ($OldHead -eq $NewHead) {
         # Default remote had no new commits — try GitHub fallback
         Write-Host "[update-research-claw] Default remote had no updates, trying GitHub..." -ForegroundColor Cyan
-        & {
-            $ErrorActionPreference = 'Continue'
-            $null = git remote set-url github $GithubRepo 2>$null
-            if ($LASTEXITCODE -ne 0) {
-                $null = git remote add github $GithubRepo 2>$null
-            }
-            $null = git fetch github main 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                $null = git merge --ff-only github/main 2>$null
+        $PreviousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $null = git remote set-url github $GithubRepo 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            $null = git remote add github $GithubRepo 2>$null
+        }
+        $null = git fetch github main 2>$null
+        $GithubFetchSucceeded = ($LASTEXITCODE -eq 0)
+        if ($GithubFetchSucceeded) {
+            $null = git merge --ff-only github/main 2>$null
+            $GithubMergeSucceeded = ($LASTEXITCODE -eq 0)
+        }
+        $ErrorActionPreference = $PreviousErrorActionPreference
+
+        if ($GithubFetchSucceeded) {
+            if (-not $GithubMergeSucceeded) {
+                throw "Update was not completed: GitHub changes could not be fast-forwarded."
             }
         }
+        if (-not $OriginPullSucceeded -and -not $GithubFetchSucceeded) {
+            throw "Update could not be completed: neither origin nor GitHub could be checked. The existing installation was kept."
+        }
+        if ($OriginPullSucceeded -and -not $GithubFetchSucceeded) {
+            Write-Warning "Origin was checked successfully; GitHub was unavailable, so the origin result is being used."
+        }
+    } elseif (-not $OriginPullSucceeded) {
+        throw "Update could not be completed because origin reported a failure after changing the working copy."
     }
 
     Write-Host "[update-research-claw] Installing dependencies..." -ForegroundColor Cyan

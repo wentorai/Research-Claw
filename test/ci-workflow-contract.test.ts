@@ -88,6 +88,10 @@ describe('GitHub Actions release gate contract', () => {
           name: 'Test',
           run: 'pnpm test',
         },
+        {
+          name: 'Verify PowerShell updater behavior',
+          run: 'pwsh -NoLogo -NoProfile -File scripts/verify-updater-powershell.ps1',
+        },
       ],
     });
     expect(config.jobs.e2e).toEqual({

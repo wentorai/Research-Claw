@@ -48,7 +48,13 @@ run_with_heartbeat() {
 }
 
 OLD_HEAD=$(git rev-parse HEAD)
-run_with_heartbeat "pulling from origin" git pull --ff-only || true
+ORIGIN_PULL_SUCCEEDED=false
+GITHUB_FETCH_SUCCEEDED=false
+if run_with_heartbeat "pulling from origin" git pull --ff-only; then
+  ORIGIN_PULL_SUCCEEDED=true
+else
+  echo "[update-research-claw] Origin could not be checked; trying GitHub." >&2
+fi
 
 # If default remote had no new commits (Gitee may lag behind GitHub), try GitHub
 if [ "$(git rev-parse HEAD)" = "$OLD_HEAD" ]; then
@@ -56,8 +62,25 @@ if [ "$(git rev-parse HEAD)" = "$OLD_HEAD" ]; then
     || git remote add github "$GITHUB_REPO" 2>/dev/null \
     || true
   if run_with_heartbeat "fetching github/main" git fetch github main; then
-    git merge --ff-only github/main 2>/dev/null || true
+    GITHUB_FETCH_SUCCEEDED=true
+    if ! git merge --ff-only github/main 2>/dev/null; then
+      echo "[update-research-claw] Update was not completed: GitHub changes could not be fast-forwarded." >&2
+      exit 1
+    fi
+  elif ! $ORIGIN_PULL_SUCCEEDED; then
+    echo "[update-research-claw] Update was not completed: neither origin nor GitHub could be checked." >&2
+    echo "[update-research-claw] The existing installation was kept. Re-run this updater when the network is available." >&2
+    exit 1
+  else
+    echo "[update-research-claw] Origin was checked successfully; GitHub was unavailable, so the origin result is being used." >&2
   fi
+fi
+
+# A failed pull must never fall through to a build unless the GitHub fallback
+# was fetched and fast-forwarded successfully.
+if ! $ORIGIN_PULL_SUCCEEDED && ! $GITHUB_FETCH_SUCCEEDED; then
+  echo "[update-research-claw] Update was not completed; the existing installation was kept." >&2
+  exit 1
 fi
 
 node "$ROOT/scripts/run-pnpm.cjs" install

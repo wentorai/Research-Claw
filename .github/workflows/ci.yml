@@ -43,6 +43,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Verify PowerShell updater behavior
+        run: pwsh -NoLogo -NoProfile -File scripts/verify-updater-powershell.ps1
+
   e2e:
     name: CI / E2E
     runs-on: ubuntu-latest
