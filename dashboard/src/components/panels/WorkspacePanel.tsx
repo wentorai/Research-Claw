@@ -927,6 +927,44 @@ function RecentChanges({ commits, tokens, hasMore, onLoadMore, loadingMore }: {
   );
 }
 
+export interface OwnedPromptState<Value> {
+  id: number;
+  resolve: (value: Value | null) => void;
+}
+
+export interface DestinationPromptState extends OwnedPromptState<DestinationChoice> {
+  hasFolders: boolean;
+}
+
+interface ConflictPromptState extends OwnedPromptState<Map<string, ConflictAction>> {
+  conflicts: UploadConflict[];
+}
+
+export function replaceOwnedPrompt<Value, Prompt extends OwnedPromptState<Value>>(
+  ref: { current: Prompt | null },
+  setPrompt: React.Dispatch<React.SetStateAction<Prompt | null>>,
+  nextPrompt: Prompt,
+): void {
+  const previousPrompt = ref.current;
+  ref.current = nextPrompt;
+  setPrompt(nextPrompt);
+  previousPrompt?.resolve(null);
+}
+
+export function settleOwnedPrompt<Value, Prompt extends OwnedPromptState<Value>>(
+  ref: { current: Prompt | null },
+  setPrompt: React.Dispatch<React.SetStateAction<Prompt | null>>,
+  id: number,
+  value: Value | null,
+): boolean {
+  const prompt = ref.current;
+  if (!prompt || prompt.id !== id) return false;
+  ref.current = null;
+  setPrompt((current) => (current?.id === id ? null : current));
+  prompt.resolve(value);
+  return true;
+}
+
 export default function WorkspacePanel() {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
@@ -950,18 +988,12 @@ export default function WorkspacePanel() {
   // Ref mirror for concurrency guards: the state value goes stale inside async
   // upload flows (closures capture the render-time value).
   const uploadingRef = useRef(false);
-  const [conflictPrompt, setConflictPrompt] = useState<{
-    conflicts: UploadConflict[];
-    resolve: (decisions: Map<string, ConflictAction> | null) => void;
-  } | null>(null);
+  const [conflictPrompt, setConflictPrompt] = useState<ConflictPromptState | null>(null);
+  const nextConflictPromptIdRef = useRef(0);
   const conflictPromptRef = useRef<typeof conflictPrompt>(null);
-  conflictPromptRef.current = conflictPrompt;
-  const [destPrompt, setDestPrompt] = useState<{
-    hasFolders: boolean;
-    resolve: (choice: DestinationChoice | null) => void;
-  } | null>(null);
+  const [destPrompt, setDestPrompt] = useState<DestinationPromptState | null>(null);
+  const nextDestPromptIdRef = useRef(0);
   const destPromptRef = useRef<typeof destPrompt>(null);
-  destPromptRef.current = destPrompt;
   // Last-used picker destination, persisted across sessions.
   const [lastDest, setLastDest] = useState(() => {
     try {
@@ -1312,10 +1344,25 @@ export default function WorkspacePanel() {
   const askConflictDecisions = useCallback(
     (conflicts: UploadConflict[]) =>
       new Promise<Map<string, ConflictAction> | null>((resolve) => {
-        // Settle any already-pending dialog so its promise can't leak.
-        conflictPromptRef.current?.resolve(null);
-        setConflictPrompt({ conflicts, resolve });
+        const nextPrompt = { id: ++nextConflictPromptIdRef.current, conflicts, resolve };
+        replaceOwnedPrompt<Map<string, ConflictAction>, ConflictPromptState>(
+          conflictPromptRef,
+          setConflictPrompt,
+          nextPrompt,
+        );
       }),
+    [],
+  );
+
+  const settleConflict = useCallback(
+    (id: number, decisions: Map<string, ConflictAction> | null) => {
+      settleOwnedPrompt<Map<string, ConflictAction>, ConflictPromptState>(
+        conflictPromptRef,
+        setConflictPrompt,
+        id,
+        decisions,
+      );
+    },
     [],
   );
 
@@ -1323,12 +1370,24 @@ export default function WorkspacePanel() {
   const askDestination = useCallback(
     (hasFolders: boolean) =>
       new Promise<DestinationChoice | null>((resolve) => {
-        // Settle any already-pending picker so its promise can't leak.
-        destPromptRef.current?.resolve(null);
-        setDestPrompt({ hasFolders, resolve });
+        const nextPrompt = { id: ++nextDestPromptIdRef.current, hasFolders, resolve };
+        replaceOwnedPrompt<DestinationChoice, DestinationPromptState>(
+          destPromptRef,
+          setDestPrompt,
+          nextPrompt,
+        );
       }),
     [],
   );
+
+  const settleDestination = useCallback((id: number, choice: DestinationChoice | null) => {
+    settleOwnedPrompt<DestinationChoice, DestinationPromptState>(
+      destPromptRef,
+      setDestPrompt,
+      id,
+      choice,
+    );
+  }, []);
 
   const rememberDest = useCallback((dest: string) => {
     setLastDest(dest);
@@ -1970,28 +2029,25 @@ export default function WorkspacePanel() {
         open={conflictPrompt !== null}
         conflicts={conflictPrompt?.conflicts ?? []}
         onResolve={(decisions) => {
-          conflictPrompt?.resolve(decisions);
-          setConflictPrompt(null);
+          if (conflictPrompt) settleConflict(conflictPrompt.id, decisions);
         }}
         onCancel={() => {
-          conflictPrompt?.resolve(null);
-          setConflictPrompt(null);
+          if (conflictPrompt) settleConflict(conflictPrompt.id, null);
         }}
       />
 
       <DestinationPickerModal
         open={destPrompt !== null}
+        promptId={destPrompt?.id ?? 0}
         tree={tree}
         hasFolders={destPrompt?.hasFolders ?? false}
         defaultDest={lastDest}
         onCreateFolder={handlePickerCreateFolder}
         onResolve={(choice) => {
-          destPrompt?.resolve(choice);
-          setDestPrompt(null);
+          if (destPrompt) settleDestination(destPrompt.id, choice);
         }}
         onCancel={() => {
-          destPrompt?.resolve(null);
-          setDestPrompt(null);
+          if (destPrompt) settleDestination(destPrompt.id, null);
         }}
       />
     </div>

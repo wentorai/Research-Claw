@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 
 import DestinationPickerModal, { type DirNode } from './DestinationPickerModal';
@@ -37,6 +37,7 @@ function renderPicker(overrides: Partial<React.ComponentProps<typeof Destination
   render(
     <DestinationPickerModal
       open
+      promptId={1}
       tree={TREE}
       hasFolders={false}
       defaultDest="sources"
@@ -99,17 +100,135 @@ describe('DestinationPickerModal', () => {
   });
 
   it('new folder creates under the selected dir and selects the result', async () => {
-    const { onResolve, onCreateFolder } = renderPicker();
+    let resolveCreate!: (path: string | null) => void;
+    const onCreateFolder = vi.fn(
+      () => new Promise<string | null>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const { onResolve } = renderPicker({ onCreateFolder });
     fireEvent.click(screen.getByText('sources/papers'));
     fireEvent.click(screen.getByText('workspace.destNewFolder'));
     const input = screen.getByPlaceholderText('workspace.destNewFolderIn') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'datasets' } });
     fireEvent.click(screen.getByText('workspace.destCreate'));
     await waitFor(() => expect(onCreateFolder).toHaveBeenCalledWith('sources/papers', 'datasets'));
+    const uploadButton = screen.getByText('workspace.destUpload').closest('button');
+    expect(uploadButton).toBeDisabled();
+    fireEvent.click(uploadButton!);
+    expect(onResolve).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveCreate('sources/papers/datasets');
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText('workspace.destNewFolderIn')).toBeNull(),
+    );
     fireEvent.click(screen.getByText('workspace.destUpload'));
     await waitFor(() =>
       expect(onResolve).toHaveBeenCalledWith({ dest: 'sources/papers/datasets', preserveRootName: false }),
     );
+  });
+
+  it('keeps cancel usable while folder creation is pending', async () => {
+    const onCreateFolder = vi.fn(() => new Promise<string | null>(() => {}));
+    const { onResolve, onCancel } = renderPicker({ onCreateFolder });
+    fireEvent.click(screen.getByText('workspace.destNewFolder'));
+    fireEvent.change(screen.getByPlaceholderText('workspace.destNewFolderIn'), {
+      target: { value: 'datasets' },
+    });
+    fireEvent.click(screen.getByText('workspace.destCreate'));
+    await waitFor(() => expect(onCreateFolder).toHaveBeenCalledTimes(1));
+
+    const uploadButton = screen.getByText('workspace.destUpload').closest('button');
+    expect(uploadButton).toBeDisabled();
+    fireEvent.click(screen.getByText('common.cancel'));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stale create result after cancel and reopen', async () => {
+    let resolveCreate!: (path: string | null) => void;
+    const onCreateFolder = vi.fn(
+      () => new Promise<string | null>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const onResolve = vi.fn();
+    const onCancel = vi.fn();
+    const renderModal = (open: boolean, defaultDest: string) => (
+      <DestinationPickerModal
+        open={open}
+        promptId={1}
+        tree={TREE}
+        hasFolders={false}
+        defaultDest={defaultDest}
+        onCreateFolder={onCreateFolder}
+        onResolve={onResolve}
+        onCancel={onCancel}
+      />
+    );
+    const view = render(renderModal(true, 'sources'));
+
+    fireEvent.click(screen.getByText('sources/papers'));
+    fireEvent.click(screen.getByText('workspace.destNewFolder'));
+    fireEvent.change(screen.getByPlaceholderText('workspace.destNewFolderIn'), {
+      target: { value: 'datasets' },
+    });
+    fireEvent.click(screen.getByText('workspace.destCreate'));
+    await waitFor(() => expect(onCreateFolder).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText('common.cancel'));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+
+    view.rerender(renderModal(false, 'outputs'));
+    view.rerender(renderModal(true, 'outputs'));
+    await act(async () => {
+      resolveCreate('sources/papers/datasets');
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByText('workspace.destUpload'));
+
+    expect(onResolve).toHaveBeenCalledWith({ dest: 'outputs', preserveRootName: false });
+  });
+
+  it('isolates a replacement prompt while the modal stays open', async () => {
+    let resolveCreate!: (path: string | null) => void;
+    const onCreateFolder = vi.fn(
+      () => new Promise<string | null>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const onResolve = vi.fn();
+    const renderModal = (promptId: number, defaultDest: string) => (
+      <DestinationPickerModal
+        promptId={promptId}
+        open
+        tree={TREE}
+        hasFolders={false}
+        defaultDest={defaultDest}
+        onCreateFolder={onCreateFolder}
+        onResolve={onResolve}
+        onCancel={vi.fn()}
+      />
+    );
+    const view = render(renderModal(1, 'sources'));
+
+    fireEvent.click(screen.getByText('sources/papers'));
+    fireEvent.click(screen.getByText('workspace.destNewFolder'));
+    fireEvent.change(screen.getByPlaceholderText('workspace.destNewFolderIn'), {
+      target: { value: 'datasets' },
+    });
+    fireEvent.click(screen.getByText('workspace.destCreate'));
+    await waitFor(() => expect(onCreateFolder).toHaveBeenCalledTimes(1));
+
+    view.rerender(renderModal(2, 'outputs'));
+    await act(async () => {
+      resolveCreate('sources/papers/datasets');
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByText('workspace.destUpload'));
+
+    expect(onResolve).toHaveBeenCalledWith({ dest: 'outputs', preserveRootName: false });
   });
 
   it('cancel invokes onCancel without resolving', () => {

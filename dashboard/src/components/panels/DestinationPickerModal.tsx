@@ -8,7 +8,7 @@
  * "keep top-level folder name" toggle for folder drops.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Input, Modal, Typography } from 'antd';
 import { FolderOutlined, FolderAddOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -30,6 +30,8 @@ export interface DestinationChoice {
 
 export interface DestinationPickerModalProps {
   open: boolean;
+  /** Unique identity for each destination request, even when open stays true. */
+  promptId: number;
   tree: DirNode[];
   /** Whether the pending drop contains folders (shows the keep-name toggle). */
   hasFolders: boolean;
@@ -51,6 +53,7 @@ function collectDirs(nodes: DirNode[], out: { path: string; depth: number }[] = 
 
 export default function DestinationPickerModal({
   open,
+  promptId,
   tree,
   hasFolders,
   defaultDest,
@@ -71,30 +74,41 @@ export default function DestinationPickerModal({
   const [preserve, setPreserve] = useState(true);
   const [creatingName, setCreatingName] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
+  const createGeneration = useRef(0);
 
   // Reset per open: last-used destination (fall back to sources) + defaults.
   useEffect(() => {
+    createGeneration.current += 1;
     if (open) {
       setDest(dirs.some((d) => d.path === defaultDest) ? defaultDest : 'sources');
       setPreserve(true);
       setCreatingName(null);
+      setCreateBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, promptId]);
 
   const handleCreateFolder = async () => {
     const name = creatingName?.trim();
     if (!name || !onCreateFolder) return;
+    const generation = ++createGeneration.current;
     setCreateBusy(true);
     try {
       const newPath = await onCreateFolder(dest, name);
+      if (createGeneration.current !== generation) return;
       if (newPath) {
         setDest(newPath);
         setCreatingName(null);
       }
     } finally {
-      setCreateBusy(false);
+      if (createGeneration.current === generation) setCreateBusy(false);
     }
+  };
+
+  const handleCancel = () => {
+    createGeneration.current += 1;
+    setCreateBusy(false);
+    onCancel();
   };
 
   return (
@@ -104,8 +118,9 @@ export default function DestinationPickerModal({
       title={t('workspace.destTitle', { defaultValue: 'Choose destination folder' })}
       okText={t('workspace.destUpload', { defaultValue: 'Upload' })}
       cancelText={t('common.cancel', { defaultValue: 'Cancel' })}
+      okButtonProps={{ disabled: createBusy, loading: createBusy }}
       onOk={() => onResolve({ dest, preserveRootName: hasFolders ? preserve : false })}
-      onCancel={onCancel}
+      onCancel={handleCancel}
       width={460}
     >
       <div style={{ maxHeight: 260, overflowY: 'auto', margin: '8px 0' }} data-testid="dest-dir-list">

@@ -785,8 +785,8 @@ describe('PlaudCard — disconnect (P1-U3)', () => {
       return Promise.resolve(null);
     });
 
-    render(<Wrapper><PlaudCard /></Wrapper>);
-    await waitFor(() => expect(screen.getByTestId('plaud-disconnect-btn')).toBeTruthy());
+    await renderPlaudCardAfterInitialStatus();
+    expect(screen.getByTestId('plaud-disconnect-btn')).toBeTruthy();
 
     await act(async () => { fireEvent.click(screen.getByTestId('plaud-disconnect-btn')); });
     // Popconfirm — confirm the danger action.

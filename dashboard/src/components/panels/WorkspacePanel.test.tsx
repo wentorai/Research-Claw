@@ -2,7 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { App as AntApp } from 'antd';
-import WorkspacePanel, { InlineNameInput, RenameInput } from './WorkspacePanel';
+import WorkspacePanel, {
+  InlineNameInput,
+  RenameInput,
+  replaceOwnedPrompt,
+  settleOwnedPrompt,
+  type DestinationPromptState,
+  type OwnedPromptState,
+} from './WorkspacePanel';
+import type { DestinationChoice } from './DestinationPickerModal';
 import { useGatewayStore } from '../../stores/gateway';
 import { useConfigStore } from '../../stores/config';
 import { getThemeTokens } from '../../styles/theme';
@@ -236,6 +244,100 @@ describe('WorkspacePanel — external file drag-over state', () => {
 
     // Should still show default drag zone, not dropToUpload
     expect(screen.queryByText('workspace.dropToUpload')).toBeNull();
+  });
+});
+
+// ============================================================
+// Destination prompt ownership
+// ============================================================
+
+describe('WorkspacePanel — destination prompt ownership', () => {
+  it('atomically replaces the owner and ignores stale settlement', () => {
+    let rendered: DestinationPromptState | null = null;
+    const ref: { current: DestinationPromptState | null } = { current: null };
+    const setPrompt: React.Dispatch<React.SetStateAction<DestinationPromptState | null>> = (next) => {
+      rendered = typeof next === 'function' ? next(rendered) : next;
+    };
+    const firstResolve = vi.fn();
+    const secondResolve = vi.fn();
+    const first: DestinationPromptState = { id: 1, hasFolders: false, resolve: firstResolve };
+    const second: DestinationPromptState = { id: 2, hasFolders: true, resolve: secondResolve };
+
+    replaceOwnedPrompt<DestinationChoice, DestinationPromptState>(ref, setPrompt, first);
+    replaceOwnedPrompt<DestinationChoice, DestinationPromptState>(ref, setPrompt, second);
+    expect(firstResolve).toHaveBeenCalledWith(null);
+    expect(ref.current).toBe(second);
+    expect(rendered).toBe(second);
+
+    expect(
+      settleOwnedPrompt<DestinationChoice, DestinationPromptState>(ref, setPrompt, first.id, null),
+    ).toBe(false);
+    expect(ref.current).toBe(second);
+    expect(rendered).toBe(second);
+    expect(secondResolve).not.toHaveBeenCalled();
+
+    const choice = { dest: 'outputs', preserveRootName: false };
+    expect(
+      settleOwnedPrompt<DestinationChoice, DestinationPromptState>(
+        ref,
+        setPrompt,
+        second.id,
+        choice,
+      ),
+    ).toBe(true);
+    expect(ref.current).toBeNull();
+    expect(rendered).toBeNull();
+    expect(secondResolve).toHaveBeenCalledWith(choice);
+  });
+
+  it('uses the same ownership rules for conflict decisions', () => {
+    type ConflictPrompt = OwnedPromptState<Map<string, 'skip' | 'overwrite'>> & {
+      conflicts: string[];
+    };
+    let rendered: ConflictPrompt | null = null;
+    const ref: { current: ConflictPrompt | null } = { current: null };
+    const setPrompt: React.Dispatch<React.SetStateAction<ConflictPrompt | null>> = (next) => {
+      rendered = typeof next === 'function' ? next(rendered) : next;
+    };
+    const firstResolve = vi.fn();
+    const secondResolve = vi.fn();
+    const first: ConflictPrompt = { id: 1, conflicts: ['a.pdf'], resolve: firstResolve };
+    const second: ConflictPrompt = { id: 2, conflicts: ['b.pdf'], resolve: secondResolve };
+
+    replaceOwnedPrompt<Map<string, 'skip' | 'overwrite'>, ConflictPrompt>(
+      ref,
+      setPrompt,
+      first,
+    );
+    replaceOwnedPrompt<Map<string, 'skip' | 'overwrite'>, ConflictPrompt>(
+      ref,
+      setPrompt,
+      second,
+    );
+    expect(firstResolve).toHaveBeenCalledWith(null);
+    expect(
+      settleOwnedPrompt<Map<string, 'skip' | 'overwrite'>, ConflictPrompt>(
+        ref,
+        setPrompt,
+        first.id,
+        new Map(),
+      ),
+    ).toBe(false);
+    expect(ref.current).toBe(second);
+    expect(rendered).toBe(second);
+
+    const decisions = new Map([['b.pdf', 'overwrite' as const]]);
+    expect(
+      settleOwnedPrompt<Map<string, 'skip' | 'overwrite'>, ConflictPrompt>(
+        ref,
+        setPrompt,
+        second.id,
+        decisions,
+      ),
+    ).toBe(true);
+    expect(ref.current).toBeNull();
+    expect(rendered).toBeNull();
+    expect(secondResolve).toHaveBeenCalledWith(decisions);
   });
 });
 
