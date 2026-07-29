@@ -94,17 +94,64 @@ try {
 
     & node (Join-Path $ProjectRoot 'scripts' 'version-info.cjs') --root $ProjectRoot
 
-    # Update research-plugins (skills + agent tools)
+    # Install or update research-plugins in the canonical directory shared by
+    # plugin discovery and SkillSearch. The Node helper stages and validates the
+    # package before it atomically replaces an existing working version.
     $PluginDir = Join-Path $env:USERPROFILE '.openclaw' 'extensions' 'research-plugins'
-    if (Test-Path $PluginDir) {
-        Write-Host "[update-research-claw] Updating research-plugins..." -ForegroundColor Cyan
-        $TmpCfg = [System.IO.Path]::GetTempFileName()
-        '{}' | Set-Content $TmpCfg
-        & {
+    $PluginInstaller = Join-Path $ProjectRoot 'scripts' 'install-research-plugins.cjs'
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    Write-Host "[update-research-claw] Updating research plugins..." -ForegroundColor Cyan
+    & node $PluginInstaller --target $PluginDir
+    $PluginInstallExit = $LASTEXITCODE
+    $ErrorActionPreference = $PreviousErrorActionPreference
+    if ($PluginInstallExit -eq 0) {
+        $NewVersion = & node -e "console.log(require(process.argv[1]).version)" (Join-Path $PluginDir 'package.json')
+        Write-Host "[update-research-claw] Research plugins -> v$NewVersion" -ForegroundColor Green
+    } else {
+        $PreviousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & node $PluginInstaller --check --quiet --target $PluginDir 2>$null
+        $PluginStillUsable = ($LASTEXITCODE -eq 0)
+        $ErrorActionPreference = $PreviousErrorActionPreference
+        if ($PluginStillUsable) {
+            Write-Warning "Research plugins were not updated; the existing version was kept."
+        } else {
+            Write-Warning "Research features are temporarily unavailable; the core assistant remains available."
+            Write-Warning "Run this updater again to restore research features."
+        }
+    }
+
+    # Reconcile after the optional plugin update. Missing or partial installs
+    # are removed from the load path; complete installs are restored.
+    if ($ConfigPaths.Count -gt 0) {
+        & node (Join-Path $ProjectRoot 'scripts' 'ensure-config.cjs') @ConfigPaths
+        if ($LASTEXITCODE -ne 0) {
+            throw "configuration reconciliation failed with exit code $LASTEXITCODE"
+        }
+    }
+
+    # Validate the exact project config used by the gateway. Preserve a caller's
+    # environment instead of leaving OPENCLAW_CONFIG_PATH pointed at a temp file.
+    if (Test-Path $ProjectConfig) {
+        $HadConfigPath = Test-Path Env:OPENCLAW_CONFIG_PATH
+        $PreviousConfigPath = $env:OPENCLAW_CONFIG_PATH
+        try {
+            $env:OPENCLAW_CONFIG_PATH = $ProjectConfig
+            $PreviousErrorActionPreference = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
-            $env:OPENCLAW_CONFIG_PATH = $TmpCfg
-            node (Join-Path $ProjectRoot 'node_modules' 'openclaw' 'dist' 'entry.js') plugins install '@wentorai/research-plugins' 2>$null
-            Remove-Item $TmpCfg -ErrorAction SilentlyContinue
+            & node (Join-Path $ProjectRoot 'node_modules' 'openclaw' 'dist' 'entry.js') config validate --json | Out-Null
+            $ValidationExit = $LASTEXITCODE
+            $ErrorActionPreference = $PreviousErrorActionPreference
+            if ($ValidationExit -ne 0) {
+                throw "configuration validation failed with exit code $ValidationExit"
+            }
+        } finally {
+            if ($HadConfigPath) {
+                $env:OPENCLAW_CONFIG_PATH = $PreviousConfigPath
+            } else {
+                Remove-Item Env:OPENCLAW_CONFIG_PATH -ErrorAction SilentlyContinue
+            }
         }
     }
 

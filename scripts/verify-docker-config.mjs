@@ -114,6 +114,28 @@ function dockerRunArgs(name) {
       '/app/scripts/docker-config-patch.cjs',
       true,
     ),
+    '--mount',
+    volumeMount(
+      path.join(projectRoot, 'scripts', 'ensure-config.cjs'),
+      '/app/scripts/ensure-config.cjs',
+      true,
+    ),
+    '--mount',
+    volumeMount(
+      path.join(projectRoot, 'scripts', 'install-research-plugins.cjs'),
+      '/app/scripts/install-research-plugins.cjs',
+      true,
+    ),
+    '--mount',
+    volumeMount(
+      path.join(
+        projectRoot,
+        'scripts',
+        'research-plugins-install-utils.cjs',
+      ),
+      '/app/scripts/research-plugins-install-utils.cjs',
+      true,
+    ),
     image,
     '/entrypoint.sh',
   ];
@@ -170,6 +192,16 @@ async function waitForLog(name, pattern, timeoutMs = 30_000) {
   throw new Error(`container ${name} never logged ${pattern}\n${logs}`);
 }
 
+async function waitForContainerExit(name, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const inspect = JSON.parse((await docker(['inspect', name])).stdout)[0];
+    if (!inspect.State.Running) return inspect;
+    await sleep(200);
+  }
+  throw new Error(`container ${name} did not stop after a fatal config error`);
+}
+
 async function seedDebugConfig() {
   const template = JSON.parse(
     await readFile(path.join(projectRoot, 'config', 'openclaw.example.json'), 'utf8'),
@@ -190,10 +222,57 @@ async function seedDebugConfig() {
     path.join(tempRoot, 'config', 'openclaw.json'),
     `${JSON.stringify(template, null, 2)}\n`,
   );
+  await writeFile(
+    path.join(
+      tempRoot,
+      'config',
+      'research-compaction-instructions.txt',
+    ),
+    await readFile(
+      path.join(
+        projectRoot,
+        'config',
+        'research-compaction-instructions.txt',
+      ),
+    ),
+  );
 }
 
 async function assertHealthyContainer(name) {
   const health = await waitForHealth(name);
+  await docker([
+    'exec',
+    name,
+    'node',
+    '/app/scripts/install-research-plugins.cjs',
+    '--check',
+    '--quiet',
+    '--target',
+    '/root/.openclaw/extensions/research-plugins',
+  ]);
+  const pluginListingResult = await docker([
+    'exec',
+    '-e',
+    'OPENCLAW_CONFIG_PATH=/app/config/openclaw.json',
+    name,
+    'node',
+    '/app/node_modules/openclaw/dist/entry.js',
+    'plugins',
+    'list',
+    '--json',
+  ]);
+  const pluginListing = JSON.parse(pluginListingResult.stdout);
+  const researchPlugins = pluginListing.plugins.find(
+    candidate => candidate.id === 'research-plugins',
+  );
+  assert(
+    researchPlugins?.status === 'loaded',
+    `research-plugins discovery failed: ${JSON.stringify(researchPlugins)}`,
+  );
+  assert(
+    researchPlugins?.dependencyStatus?.requiredInstalled === true,
+    'research-plugins production dependencies are unavailable',
+  );
   const config = JSON.parse(
     await readFile(path.join(tempRoot, 'config', 'openclaw.json'), 'utf8'),
   );
@@ -241,6 +320,11 @@ async function assertHealthyContainer(name) {
 
   return {
     health: health.trim(),
+    researchPlugins: {
+      status: researchPlugins.status,
+      requiredInstalled:
+        researchPlugins.dependencyStatus.requiredInstalled,
+    },
     entrypointLines: entrypointLines.length,
     volumeFiles: {
       config: configFiles.length,
@@ -258,11 +342,18 @@ async function assertBadConfigVisible(name) {
     name,
     /Config patch failed[\s\S]*(?:Invalid config|Unexpected|JSON|parse)/i,
   );
-  const inspect = JSON.parse((await docker(['inspect', name])).stdout)[0];
-  assert(inspect.State.Running, 'entrypoint stopped supervising after a bad config');
+  const inspect = await waitForContainerExit(name);
+  assert(
+    !inspect.State.Running && inspect.State.ExitCode !== 0,
+    'container did not fail closed after a bad config',
+  );
   assert(
     logs.includes('Config patch failed'),
     'bad config did not produce an entrypoint-visible failure',
+  );
+  assert(
+    logs.includes('Could not apply Docker configuration'),
+    'bad config did not explain why startup was stopped',
   );
   return logs
     .split(/\r?\n/)

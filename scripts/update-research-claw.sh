@@ -75,20 +75,41 @@ fi
 
 node "$ROOT/scripts/version-info.cjs" --root "$ROOT"
 
-# Update research-plugins (skills + agent tools)
+# Install or update research-plugins (skills + agent tools) in the one
+# canonical directory used by both plugin discovery and SkillSearch.
 PLUGIN_DIR="$HOME/.openclaw/extensions/research-plugins"
-if [ -d "$PLUGIN_DIR" ]; then
-  RP_LOG="$(mktemp)"
-  echo "[update-research-claw] Updating research-plugins..."
-  TMP_CFG="$(mktemp)"; echo '{}' > "$TMP_CFG"
-  if OPENCLAW_CONFIG_PATH="$TMP_CFG" node ./node_modules/openclaw/dist/entry.js plugins install @wentorai/research-plugins >"$RP_LOG" 2>&1; then
-    NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
-    echo "[update-research-claw] research-plugins → v${NEW_VER}"
-  else
-    echo "[update-research-claw] research-plugins update failed (non-critical). Details:" >&2
-    tail -3 "$RP_LOG" >&2
+RP_LOG="$(mktemp)"
+echo "[update-research-claw] Updating research plugins..."
+if node "$ROOT/scripts/install-research-plugins.cjs" \
+    --target "$PLUGIN_DIR" >"$RP_LOG" 2>&1; then
+  NEW_VER=$(node -e 'console.log(require(process.argv[1]).version)' \
+    "$PLUGIN_DIR/package.json" 2>/dev/null || echo "unknown")
+  echo "[update-research-claw] Research plugins → v${NEW_VER}"
+elif node "$ROOT/scripts/install-research-plugins.cjs" \
+    --check --quiet --target "$PLUGIN_DIR" 2>/dev/null; then
+  echo "[update-research-claw] Research plugins were not updated; the existing version was kept." >&2
+  tail -3 "$RP_LOG" >&2
+else
+  echo "[update-research-claw] Research features are temporarily unavailable; the core assistant remains available." >&2
+  echo "[update-research-claw] Run this updater again to restore research features." >&2
+  tail -3 "$RP_LOG" >&2
+fi
+rm -f "$RP_LOG"
+
+# Reconcile after the optional plugin update. A failed/partial install must not
+# leave an invalid load path; a usable install is restored on the next pass.
+if [ "${#CONFIG_PATHS[@]}" -gt 0 ]; then
+  node "$ROOT/scripts/ensure-config.cjs" "${CONFIG_PATHS[@]}"
+fi
+if [ -f "$ROOT/config/openclaw.json" ]; then
+  if ! OPENCLAW_CONFIG_PATH="$ROOT/config/openclaw.json" \
+    "$ROOT/node_modules/.bin/openclaw" config validate --json >/dev/null
+  then
+    echo "[update-research-claw] Configuration validation failed; update was not completed." >&2
+    OPENCLAW_CONFIG_PATH="$ROOT/config/openclaw.json" \
+      "$ROOT/node_modules/.bin/openclaw" config validate --json >&2 || true
+    exit 1
   fi
-  rm -f "$TMP_CFG" "$RP_LOG"
 fi
 
 echo "[update-research-claw] Done. Restart the gateway (Settings → Restart or scripts/run.sh)."

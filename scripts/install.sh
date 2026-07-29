@@ -1285,34 +1285,6 @@ rp_summary() {
   local SKILLS; SKILLS=$(find "$PLUGIN_DIR/skills" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
   [ "$SKILLS" -gt 0 ] 2>/dev/null && echo "${SKILLS} skills" || true
 }
-# Deterministic install: npm pack → extract into $PLUGIN_DIR → install prod deps.
-# Returns 0 on success, non-zero on failure; appends diagnostics to log file ($1).
-rp_install_to_extensions() {
-  local LOG="$1"
-  local TMPD; TMPD="$(mktemp -d)"
-  local RC_=1 OK_PACK=1
-  # Timeout (120s) prevents indefinite hang on slow npm networks (e.g. China)
-  if command -v timeout &>/dev/null; then
-    timeout 120 npm pack @wentorai/research-plugins --pack-destination "$TMPD" ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$LOG" 2>&1 && OK_PACK=0
-  else
-    npm pack @wentorai/research-plugins --pack-destination "$TMPD" ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$LOG" 2>&1 && OK_PACK=0
-  fi
-  if [ "$OK_PACK" -eq 0 ]; then
-    local RP_TGZ; RP_TGZ=$(ls "$TMPD"/wentorai-research-plugins-*.tgz 2>/dev/null | head -1)
-    if [ -n "$RP_TGZ" ]; then
-      rm -rf "$PLUGIN_DIR"; mkdir -p "$PLUGIN_DIR"
-      # Raw tarball ships no node_modules; the plugin (main: dist/index.js) imports
-      # @sinclair/typebox at load, so install prod deps or the plugin fails to load
-      # (losing all 34 agent tools). --ignore-scripts: typebox is pure JS.
-      if tar xzf "$RP_TGZ" --strip-components=1 -C "$PLUGIN_DIR" 2>>"$LOG" \
-        && ( cd "$PLUGIN_DIR" && npm install --omit=dev --ignore-scripts --no-audit --no-fund ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$LOG" 2>&1 ); then
-        RC_=0
-      fi
-    fi
-  fi
-  rm -rf "$TMPD"
-  return $RC_
-}
 # Remove any stale OC-managed install (from older installers that used
 # `openclaw plugins install`) so the plugin does not load twice — tools and
 # skills now come solely from $PLUGIN_DIR.
@@ -1332,46 +1304,32 @@ rp_network_hint() {
   printf "    ${C}NPM_REGISTRY=https://registry.npmmirror.com${N} curl -fsSL https://wentor.ai/install.sh | bash\n"
 }
 
-info "Installing research-plugins (npm download, up to 2 min on slow networks)..."
+info "Installing research plugins (network stages can each take up to 2 min)..."
 RP_LOG="$(mktemp)"
-if [ -d "$PLUGIN_DIR" ]; then
-  # Update existing: backup → install → restore on failure
-  CURRENT_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
-  cp -r "$PLUGIN_DIR" "${PLUGIN_DIR}.bak" 2>/dev/null || true
-  if rp_install_to_extensions "$RP_LOG"; then
-    rm -rf "${PLUGIN_DIR}.bak"
-    rp_cleanup_oc_managed
-    NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
-    if [ "$CURRENT_VER" = "$NEW_VER" ]; then
-      RP_S=$(rp_summary); ok "Research-plugins v${NEW_VER}${RP_S:+ ($RP_S)}"
-    else
-      ok "Research-plugins updated: v${CURRENT_VER} → v${NEW_VER}"
-    fi
-  elif [ -d "${PLUGIN_DIR}.bak" ]; then
-    rm -rf "$PLUGIN_DIR"
-    mv "${PLUGIN_DIR}.bak" "$PLUGIN_DIR"
-    warn "research-plugins update failed. Kept existing v${CURRENT_VER}."
-    warn "Error details (last 5 lines):"
-    tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
-    rp_network_hint
-  else
-    warn "research-plugins install failed. You can retry later:"
-    printf "    cd $INSTALL_DIR && curl -fsSL https://wentor.ai/install.sh | bash\n"
-    rp_network_hint
-  fi
-else
-  # Fresh install — clean any residual partial installs first
-  rm -rf "$PLUGIN_DIR" 2>/dev/null || true
-  if rp_install_to_extensions "$RP_LOG"; then
-    rp_cleanup_oc_managed
-    NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
+CURRENT_VER=$(node -e 'console.log(require(process.argv[1]).version)' \
+  "$PLUGIN_DIR/package.json" 2>/dev/null || echo "none")
+if node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
+    --target "$PLUGIN_DIR" >>"$RP_LOG" 2>&1; then
+  rp_cleanup_oc_managed
+  NEW_VER=$(node -e 'console.log(require(process.argv[1]).version)' \
+    "$PLUGIN_DIR/package.json" 2>/dev/null || echo "unknown")
+  if [ "$CURRENT_VER" = "$NEW_VER" ]; then
+    RP_S=$(rp_summary); ok "Research-plugins v${NEW_VER}${RP_S:+ ($RP_S)}"
+  elif [ "$CURRENT_VER" = "none" ]; then
     RP_S=$(rp_summary); ok "Research-plugins v${NEW_VER}${RP_S:+ ($RP_S)}"
   else
-    warn "research-plugins install failed."
-    warn "Error details (last 5 lines):"
-    tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
-    warn "You can retry later:"
-    printf "    cd $INSTALL_DIR && curl -fsSL https://wentor.ai/install.sh | bash\n"
+    ok "Research-plugins updated: v${CURRENT_VER} → v${NEW_VER}"
+  fi
+else
+  warn "Research plugins could not be downloaded or prepared."
+  warn "Error details (last 5 lines):"
+  tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
+  if node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
+      --check --quiet --target "$PLUGIN_DIR" 2>/dev/null; then
+    warn "The existing research plugins were kept at v${CURRENT_VER}."
+  else
+    warn "Research features are temporarily unavailable; the core assistant can still start."
+    warn "Run this installer again to restore research features."
     rp_network_hint
   fi
 fi
@@ -1389,6 +1347,34 @@ if $_RP_INTERRUPTED; then
 fi
 
 fi  # end: if ! $UPDATE_FAILED (skip build/install/plugins)
+
+# Reconcile plugin configuration only after the optional download has reached a
+# terminal state. A missing/partial research-plugins install is removed from the
+# load path; a complete install is added back. Then ask the real OpenClaw CLI to
+# validate the exact config that the gateway will use.
+if [ -f "$INSTALL_DIR/config/openclaw.json" ]; then
+  GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
+  if ! node "$INSTALL_DIR/scripts/ensure-config.cjs" --inherit-global-compaction \
+      "$INSTALL_DIR/config/openclaw.json" ${GLOBAL_CFG:+"$GLOBAL_CFG"}; then
+    die "Research-Claw could not finish configuration migration. Run the installer again; your existing files have been kept."
+  fi
+
+  VALIDATION_OUTPUT=""
+  if ! VALIDATION_OUTPUT=$(
+    OPENCLAW_CONFIG_PATH="$INSTALL_DIR/config/openclaw.json" \
+      "$INSTALL_DIR/node_modules/.bin/openclaw" config validate --json 2>&1
+  ); then
+    warn "Research-Claw configuration is not ready, so the gateway was not started."
+    printf "%s\n" "$VALIDATION_OUTPUT" | tail -12
+    die "Run the installer again after checking the message above."
+  fi
+fi
+
+if ! node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
+    --check --quiet --target "$PLUGIN_DIR" 2>/dev/null; then
+  warn "Research features are temporarily unavailable; the core assistant can still start."
+  warn "Run this installer again to restore research features."
+fi
 
 # --- Persist OPENCLAW_CONFIG_PATH in shell profile ---
 # Ensures `openclaw config set/get` always targets the RC project config,

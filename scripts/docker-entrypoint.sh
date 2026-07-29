@@ -185,28 +185,6 @@ node -e "
   if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); }
 " 2>/dev/null || true
 
-# --- Ensure research-plugins is in plugins.load.paths (Docker only) ---
-# RP lives at /root/.openclaw/extensions/research-plugins (rc-state volume) — NOT under
-# /app/extensions where OC discovers the baked path plugins, and not in the config
-# template's load.paths. Without an explicit load-path entry it is allow-listed but never
-# loaded, silently losing all 34 agent tools (SkillSearch still indexes its catalog).
-# Native installs auto-discover ~/.openclaw/extensions, so this gap is Docker-specific.
-# Idempotent: matched by suffix so re-runs don't duplicate.
-node -e "
-  const fs = require('fs');
-  const f = '$CONFIG_FILE', rp = '/root/.openclaw/extensions/research-plugins';
-  const cfg = JSON.parse(fs.readFileSync(f, 'utf8'));
-  if (!cfg.plugins) cfg.plugins = {};
-  if (!cfg.plugins.load) cfg.plugins.load = {};
-  if (!Array.isArray(cfg.plugins.load.paths)) cfg.plugins.load.paths = [];
-  if (!cfg.plugins.load.paths.some(p => p === rp || p.endsWith('/extensions/research-plugins'))) {
-    cfg.plugins.load.paths.push(rp);
-    const o = JSON.stringify(cfg, null, 2) + '\n', t = f + '.tmp.' + process.pid;
-    fs.writeFileSync(t, o); fs.renameSync(t, f);
-    if (process.env.RC_VERBOSE) console.log('[research-claw] Added research-plugins to plugins.load.paths');
-  }
-" 2>/dev/null || true
-
 # --- Sync research-plugins from image → volume if version differs ---
 # rc-state volume persists /root/.openclaw/ across container recreation.
 # On image upgrade, the baked-in plugin version may be newer than the volume's.
@@ -214,13 +192,66 @@ node -e "
 # instead of npm install (avoids silent network failures in China/offline).
 IMAGE_RP_VER=$(cat /defaults/rp-version.txt 2>/dev/null || true)
 VOL_RP_VER=$(node -e "console.log(require('/root/.openclaw/extensions/research-plugins/package.json').version)" 2>/dev/null || true)
-# Guard on /defaults/research-plugins existing: never rm a good volume install
-# when the baked source is missing (would leave SkillSearch permanently broken).
-if [ -d /defaults/research-plugins ] && [ -n "$IMAGE_RP_VER" ] && [ "$IMAGE_RP_VER" != "$VOL_RP_VER" ]; then
-  echo "[research-claw] Updating research-plugins: ${VOL_RP_VER:-none} → $IMAGE_RP_VER"
-  mkdir -p /root/.openclaw/extensions
-  rm -rf /root/.openclaw/extensions/research-plugins
-  cp -a /defaults/research-plugins /root/.openclaw/extensions/research-plugins
+VOL_RP_READY=false
+if node /app/scripts/install-research-plugins.cjs \
+    --check --quiet \
+    --target /root/.openclaw/extensions/research-plugins 2>/dev/null; then
+  VOL_RP_READY=true
+fi
+# The helper owns both the version/no-op check and the same-version integrity
+# check. Calling it on every boot is cheap when the volume is healthy, repairs a
+# damaged copy, and leaves a usable previous version untouched on failure.
+if [ -d /defaults/research-plugins ]; then
+  if ! $VOL_RP_READY; then
+    echo "[research-claw] Repairing research-plugins v${IMAGE_RP_VER:-unknown}"
+  elif [ "$IMAGE_RP_VER" != "$VOL_RP_VER" ]; then
+    echo "[research-claw] Updating research-plugins: ${VOL_RP_VER:-none} → ${IMAGE_RP_VER:-unknown}"
+  fi
+  if node /app/scripts/install-research-plugins.cjs \
+      --quiet \
+      --source-dir /defaults/research-plugins \
+      --target /root/.openclaw/extensions/research-plugins
+  then
+    VOL_RP_READY=true
+  elif node /app/scripts/install-research-plugins.cjs \
+      --check --quiet \
+      --target /root/.openclaw/extensions/research-plugins 2>/dev/null
+  then
+    echo "[research-claw] WARNING: Research plugins were not updated; the existing version was kept"
+  else
+    echo "[research-claw] WARNING: Research features are temporarily unavailable; the core assistant will still start"
+    echo "[research-claw] Recreate this container with the current image to restore research features"
+  fi
+fi
+
+# The optional plugin must reach its final on-disk state before config
+# reconciliation. This one shared migration both adds a complete install and
+# removes a missing/partial install, so Docker and native startup cannot drift.
+node /app/scripts/ensure-config.cjs "$CONFIG_FILE" 2>&1 || {
+  echo "[research-claw] ERROR: Could not reconcile Research-Claw configuration"
+  exit 1
+}
+# The shared migration normalizes native paths. Reapply the container-owned
+# database/logging/network paths after that final reconciliation so it cannot
+# move persistent Docker data back under /root.
+node /app/scripts/docker-config-patch.cjs "$CONFIG_FILE" 2>&1 || {
+  echo "[research-claw] ERROR: Could not apply Docker configuration"
+  exit 1
+}
+if ! OPENCLAW_CONFIG_PATH="$CONFIG_FILE" \
+  node /app/node_modules/openclaw/dist/entry.js config validate --json >/dev/null
+then
+  echo "[research-claw] ERROR: Configuration validation failed; gateway was not started"
+  OPENCLAW_CONFIG_PATH="$CONFIG_FILE" \
+    node /app/node_modules/openclaw/dist/entry.js config validate --json 2>&1 || true
+  exit 1
+fi
+if ! node /app/scripts/install-research-plugins.cjs \
+    --check --quiet \
+    --target /root/.openclaw/extensions/research-plugins 2>/dev/null
+then
+  echo "[research-claw] WARNING: Research features are temporarily unavailable; the core assistant will still start"
+  echo "[research-claw] Recreate this container with the current image to restore research features"
 fi
 
 # --- Sync bootstrap prompt files from image → volume ---

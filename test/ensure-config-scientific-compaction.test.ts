@@ -56,17 +56,33 @@ function compactionOf(configPath: string): Record<string, unknown> {
 describe('ensure-config scientific compaction migration', () => {
   let tmpDir: string;
   let configPath: string;
+  let isolatedEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-scientific-compaction-'));
     const configDir = path.join(tmpDir, 'config');
     fs.mkdirSync(configDir, { recursive: true });
     configPath = path.join(configDir, 'openclaw.json');
+    isolatedEnv = {
+      ...process.env,
+      HOME: path.join(tmpDir, 'home'),
+      XDG_CACHE_HOME: path.join(tmpDir, 'xdg-cache'),
+      XDG_CONFIG_HOME: path.join(tmpDir, 'xdg-config'),
+      XDG_DATA_HOME: path.join(tmpDir, 'xdg-data'),
+      XDG_STATE_HOME: path.join(tmpDir, 'xdg-state'),
+      OPENCLAW_STATE_DIR: path.join(tmpDir, 'state'),
+    };
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  function runEnsure(...args: string[]): void {
+    execFileSync('node', [ENSURE_CONFIG, ...args], {
+      env: isolatedEnv,
+    });
+  }
 
   it('fits OpenClaw 2026.6.1 custom-instruction delivery without truncation', () => {
     expect(Array.from(EXPECTED_PROMPT).length).toBeLessThanOrEqual(800);
@@ -78,7 +94,7 @@ describe('ensure-config scientific compaction migration', () => {
   it('adds the scientific default when customInstructions is absent', () => {
     fs.writeFileSync(configPath, JSON.stringify({ agents: { defaults: {} } }));
 
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure(configPath);
 
     const compaction = compactionOf(configPath);
     expect(compaction.mode).toBe('safeguard');
@@ -98,7 +114,7 @@ describe('ensure-config scientific compaction migration', () => {
       }),
     );
 
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure(configPath);
 
     const customInstructions = compactionOf(configPath).customInstructions;
     expect(customInstructions).toBe(EXPECTED_PROMPT);
@@ -118,11 +134,11 @@ describe('ensure-config scientific compaction migration', () => {
       }),
     );
 
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure(configPath);
     const afterFirst = fs.readFileSync(configPath, 'utf8');
     expect(compactionOf(configPath).customInstructions).toBe(customInstructions);
 
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure(configPath);
     expect(fs.readFileSync(configPath, 'utf8')).toBe(afterFirst);
     expect(compactionOf(configPath).customInstructions).toBe(customInstructions);
   });
@@ -155,12 +171,11 @@ describe('ensure-config scientific compaction migration', () => {
       }),
     );
 
-    execFileSync('node', [
-      ENSURE_CONFIG,
+    runEnsure(
       '--inherit-global-compaction',
       configPath,
       globalConfigPath,
-    ]);
+    );
 
     expect(compactionOf(configPath).customInstructions).toBe(customInstructions);
     expect(compactionOf(globalConfigPath).customInstructions).toBe(customInstructions);
@@ -191,12 +206,11 @@ describe('ensure-config scientific compaction migration', () => {
       }),
     );
 
-    execFileSync('node', [
-      ENSURE_CONFIG,
+    runEnsure(
       '--inherit-global-compaction',
       configPath,
       globalConfigPath,
-    ]);
+    );
 
     expect(compactionOf(configPath).customInstructions).toBe(projectInstructions);
   });
@@ -222,18 +236,17 @@ describe('ensure-config scientific compaction migration', () => {
     'is accepted by the installed OpenClaw 2026.6.1 config schema',
     () => {
       fs.copyFileSync(EXAMPLE_CONFIG, configPath);
-      execFileSync('node', [ENSURE_CONFIG, configPath]);
+      runEnsure(configPath);
 
       // OpenClaw intentionally silences its CLI when it inherits Vitest's process
       // markers. The subprocess is the product CLI, so run it with production-like
       // markers while retaining the rest of the environment.
-      const cliEnv = { ...process.env };
+      const cliEnv = { ...isolatedEnv };
       delete cliEnv.VITEST;
       delete cliEnv.VITEST_POOL_ID;
       delete cliEnv.VITEST_WORKER_ID;
       cliEnv.NODE_ENV = 'production';
       cliEnv.OPENCLAW_CONFIG_PATH = configPath;
-      cliEnv.OPENCLAW_STATE_DIR = path.join(tmpDir, 'state');
 
       const raw = execFileSync(OPENCLAW, ['config', 'validate', '--json'], {
         encoding: 'utf8',

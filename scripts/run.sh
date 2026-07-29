@@ -99,7 +99,14 @@ fi
 # MUST run BEFORE path resolution so that newly added relative paths
 # (e.g. ./extensions/openclaw-weixin) get converted to absolute below.
 GLOBAL_CFG="$HOME/.openclaw/openclaw.json"
-node "$(dirname "$0")/ensure-config.cjs" "$OPENCLAW_CONFIG_PATH" ${GLOBAL_CFG:+"$GLOBAL_CFG"} >>"$RC_RUN_LOG" 2>&1 || true
+if ! node "$(dirname "$0")/ensure-config.cjs" \
+    "$OPENCLAW_CONFIG_PATH" ${GLOBAL_CFG:+"$GLOBAL_CFG"} \
+    >>"$RC_RUN_LOG" 2>&1
+then
+  say "✗ Configuration migration failed. Research-Claw was not started."
+  say "  Details: $RC_RUN_LOG"
+  exit 1
+fi
 
 # --- Resolve relative paths in config to absolute ---
 # OpenClaw's agent runner calls process.chdir(workspace/) during runs (attempt.ts:774).
@@ -164,6 +171,24 @@ fi
 dbg "Using Node: $GW_NODE ($("$GW_NODE" -v))"
 dbg "Config: $OPENCLAW_CONFIG_PATH"
 export RESEARCH_CLAW_UI_VERSION="$("$GW_NODE" -p "require('./package.json').version" 2>/dev/null)"
+
+# Refuse to launch on a configuration that the exact bundled OpenClaw runtime
+# rejects. In particular, a missing or partial optional research plugin must be
+# removed by the migration above instead of becoming a fatal load path.
+if ! "$GW_NODE" ./node_modules/openclaw/dist/entry.js \
+    config validate --json >>"$RC_RUN_LOG" 2>&1
+then
+  say "✗ Configuration validation failed. Research-Claw was not started."
+  say "  Details: $RC_RUN_LOG"
+  exit 1
+fi
+if ! "$GW_NODE" ./scripts/install-research-plugins.cjs \
+    --check --quiet \
+    --target "$HOME/.openclaw/extensions/research-plugins" 2>/dev/null
+then
+  say "⚠ Research features are temporarily unavailable; the core assistant will still start."
+  say "  Run the installer again to restore research features."
+fi
 
 # Repair stale RC preset jobs before OpenClaw opens the cron JSON store.
 if ! "$GW_NODE" "$(dirname "$0")/reconcile-cron-upgrade.cjs" \

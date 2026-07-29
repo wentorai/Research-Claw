@@ -32,6 +32,10 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const {
+  isManagedResearchPluginsPath,
+  isUsableResearchPluginsInstall,
+} = require('./research-plugins-install-utils.cjs');
 const RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS = fs.readFileSync(
   path.join(__dirname, '../config/research-compaction-instructions.txt'),
   'utf8',
@@ -45,10 +49,18 @@ const RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS = fs.readFileSync(
 // all browser-driven skills (CNKI) fail. So `browser` MUST be allow-listed.
 // `research-superpower` is an RC path extension (rp_* tools); it needs allow +
 // load.paths + install record like the other RC extensions.
-const REQUIRED_ALLOW = ['browser', 'research-claw-core', 'research-plugins', 'openclaw-weixin', 'dual-model-supervisor', 'research-superpower'];
+const REQUIRED_ALLOW = ['browser', 'research-claw-core', 'openclaw-weixin', 'dual-model-supervisor', 'research-superpower'];
 const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins', 'dual-model-supervisor', 'research-superpower'];
 const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin', 'extensions/dual-model-supervisor', 'extensions/research-superpower'];
 const RESEARCH_PLUGINS_PATH = path.join(os.homedir(), '.openclaw', 'extensions', 'research-plugins');
+
+function isLegacyResearchPluginsNodeModulesPath(candidate) {
+  if (typeof candidate !== 'string') return false;
+  const normalized = candidate.replace(/\\/g, '/');
+  return /(?:^|\/)node_modules\/@wentorai\/research-plugins(?:\/|$)/.test(
+    normalized,
+  );
+}
 const RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
 // Provenance install records for all RC plugins (eliminates "loaded without
 // install/load-path provenance" warnings from OC's plugin loader)
@@ -100,8 +112,13 @@ function ensureConfig(filePath) {
   // Detect global config: RC-specific plugin paths/entries must NOT be written here.
   // OC 2026.3.28+ strictly validates plugins.load.paths — RC extension paths in the
   // global config cause "Config invalid" fatal errors for standalone openclaw users.
-  const globalDir = path.join(os.homedir(), '.openclaw');
-  const isGlobal = path.resolve(filePath).startsWith(globalDir);
+  const globalDir = path.resolve(os.homedir(), '.openclaw');
+  const resolvedFilePath = path.resolve(filePath);
+  const isGlobal =
+    resolvedFilePath === globalDir
+    || resolvedFilePath.startsWith(`${globalDir}${path.sep}`);
+  const researchPluginsUsable =
+    !isGlobal && isUsableResearchPluginsInstall(RESEARCH_PLUGINS_PATH);
 
   // 0. Global config cleanup — remove previously synced RC-specific plugin data
   if (isGlobal) {
@@ -116,6 +133,7 @@ function ensureConfig(filePath) {
       const before = c.plugins.load.paths.length;
       c.plugins.load.paths = c.plugins.load.paths.filter(p =>
         !RC_EXTENSION_DIRS.some(d => p === './' + d || p.endsWith('/' + d))
+        && !isManagedResearchPluginsPath(p)
       );
       if (c.plugins.load.paths.length !== before) changed = true;
     }
@@ -131,11 +149,21 @@ function ensureConfig(filePath) {
   if (!isGlobal) {
     if (!c.plugins) c.plugins = {};
     if (!Array.isArray(c.plugins.allow)) c.plugins.allow = [];
-    for (const id of REQUIRED_ALLOW) {
+    const requiredAllow = researchPluginsUsable
+      ? [...REQUIRED_ALLOW, 'research-plugins']
+      : REQUIRED_ALLOW;
+    for (const id of requiredAllow) {
       if (!c.plugins.allow.includes(id)) {
         c.plugins.allow.push(id);
         changed = true;
       }
+    }
+    if (
+      !researchPluginsUsable
+      && c.plugins.allow.includes('research-plugins')
+    ) {
+      c.plugins.allow = c.plugins.allow.filter(id => id !== 'research-plugins');
+      changed = true;
     }
   }
 
@@ -275,10 +303,13 @@ function ensureConfig(filePath) {
     }
   }
 
-  // 7. Remove node_modules references from plugin load paths
+  // 7. Remove only the obsolete npm-managed research-plugins path. Other
+  // node_modules plugin paths may be intentional operator configuration.
   if (c.plugins?.load?.paths) {
     const before = c.plugins.load.paths.length;
-    c.plugins.load.paths = c.plugins.load.paths.filter(p => !p.includes('node_modules'));
+    c.plugins.load.paths = c.plugins.load.paths.filter(
+      p => !isLegacyResearchPluginsNodeModulesPath(p),
+    );
     if (c.plugins.load.paths.length !== before) changed = true;
   }
 
@@ -297,8 +328,18 @@ function ensureConfig(filePath) {
         changed = true;
       }
     }
-    if (!c.plugins.load.paths.includes(RESEARCH_PLUGINS_PATH)) {
-      c.plugins.load.paths.push(RESEARCH_PLUGINS_PATH);
+    const withoutManagedResearchPlugins = c.plugins.load.paths.filter(
+      p => !isManagedResearchPluginsPath(p),
+    );
+    const desiredLoadPaths = researchPluginsUsable
+      ? [...withoutManagedResearchPlugins, RESEARCH_PLUGINS_PATH]
+      : withoutManagedResearchPlugins;
+    if (
+      desiredLoadPaths.length !== c.plugins.load.paths.length
+      || desiredLoadPaths.some((entry, index) =>
+        entry !== c.plugins.load.paths[index])
+    ) {
+      c.plugins.load.paths = desiredLoadPaths;
       changed = true;
     }
   }
@@ -404,6 +445,14 @@ function ensureConfig(filePath) {
     };
     changed = true;
   }
+  if (
+    !isGlobal
+    && !researchPluginsUsable
+    && c.plugins?.entries?.['research-plugins']
+  ) {
+    delete c.plugins.entries['research-plugins'];
+    changed = true;
+  }
 
   if (!isGlobal && c.plugins?.entries?.['research-claw-core']) {
     const entry = c.plugins.entries['research-claw-core'];
@@ -429,15 +478,35 @@ function ensureConfig(filePath) {
 
   // 14. plugins.installs — provenance records so OC's loader treats each plugin
   //     as intentionally tracked (eliminates "loaded without install/load-path
-  //     provenance" warnings). Idempotent: only adds missing records.
+  //     provenance" warnings). The canonical research-plugins install is
+  //     managed by RC, so stale OC npm-project provenance is corrected too.
   if (!isGlobal) {
     if (!c.plugins) c.plugins = {};
     if (!c.plugins.installs) c.plugins.installs = {};
-    for (const [id, record] of Object.entries(PLUGIN_INSTALL_RECORDS)) {
-      if (!c.plugins.installs[id]) {
+    const installRecords = researchPluginsUsable
+      ? PLUGIN_INSTALL_RECORDS
+      : Object.fromEntries(
+        Object.entries(PLUGIN_INSTALL_RECORDS)
+          .filter(([id]) => id !== 'research-plugins'),
+      );
+    for (const [id, record] of Object.entries(installRecords)) {
+      if (
+        !c.plugins.installs[id]
+        || (
+          id === 'research-plugins'
+          && JSON.stringify(c.plugins.installs[id]) !== JSON.stringify(record)
+        )
+      ) {
         c.plugins.installs[id] = { ...record };
         changed = true;
       }
+    }
+    if (
+      !researchPluginsUsable
+      && c.plugins.installs['research-plugins']
+    ) {
+      delete c.plugins.installs['research-plugins'];
+      changed = true;
     }
   }
 

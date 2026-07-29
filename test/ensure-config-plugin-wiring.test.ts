@@ -70,6 +70,7 @@ function pluginsOf(configPath: string) {
 describe('ensure-config.cjs — plugin wiring (browser + research-superpower)', () => {
   let tmpDir: string;
   let configPath: string;
+  let isolatedEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     // Project layout: <root>/config/openclaw.json (NOT under ~/.openclaw → isGlobal=false)
@@ -77,60 +78,105 @@ describe('ensure-config.cjs — plugin wiring (browser + research-superpower)', 
     const configDir = path.join(tmpDir, 'config');
     fs.mkdirSync(configDir, { recursive: true });
     configPath = path.join(configDir, 'openclaw.json');
+    isolatedEnv = {
+      ...process.env,
+      HOME: path.join(tmpDir, 'home'),
+      XDG_CACHE_HOME: path.join(tmpDir, 'xdg-cache'),
+      XDG_CONFIG_HOME: path.join(tmpDir, 'xdg-config'),
+      XDG_DATA_HOME: path.join(tmpDir, 'xdg-data'),
+      XDG_STATE_HOME: path.join(tmpDir, 'xdg-state'),
+    };
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  function runEnsure(): void {
+    execFileSync('node', [ENSURE_CONFIG, configPath], {
+      env: isolatedEnv,
+    });
+  }
+
   it('adds browser to plugins.allow so the browser control service starts', () => {
     fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure();
     expect(pluginsOf(configPath).allow).toContain('browser');
   });
 
   it('wires research-superpower into allow + load.paths', () => {
     fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure();
     const plugins = pluginsOf(configPath);
     expect(plugins.allow).toContain('research-superpower');
     expect(
       plugins.load.paths.some((p: string) => p.endsWith('/extensions/research-superpower')),
     ).toBe(true);
-    expect(
-      plugins.load.paths.some((p: string) =>
-        p.endsWith('/.openclaw/extensions/research-plugins')),
-    ).toBe(true);
   });
 
   it('preserves user-added Telegram and explicitly configured Discord trust', () => {
     fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure();
     const allow = pluginsOf(configPath).allow;
     expect(allow).toContain('telegram');
     expect(allow).toContain('discord');
   });
 
+  it('preserves unrelated custom plugins installed under node_modules', () => {
+    const config = legacyProjectConfig();
+    const customPlugin = '/opt/lab/node_modules/custom-plugin';
+    const staleResearchPlugins =
+      '/opt/openclaw/node_modules/@wentorai/research-plugins';
+    config.plugins.load.paths.push(customPlugin, staleResearchPlugins);
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    runEnsure();
+
+    const paths = pluginsOf(configPath).load.paths;
+    expect(paths).toContain(customPlugin);
+    expect(paths).not.toContain(staleResearchPlugins);
+  });
+
   it('allows the core agent_end hook to read post-run conversation metadata', () => {
     fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure();
     const coreEntry = pluginsOf(configPath).entries['research-claw-core'];
     expect(coreEntry.hooks?.allowConversationAccess).toBe(true);
   });
 
   it('is idempotent — no duplicate allow / load.paths entries across two boots', () => {
     fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
-    execFileSync('node', [ENSURE_CONFIG, configPath]);
+    runEnsure();
+    runEnsure();
     const plugins = pluginsOf(configPath);
     expect(plugins.allow.filter((id: string) => id === 'browser')).toHaveLength(1);
     expect(plugins.allow.filter((id: string) => id === 'research-superpower')).toHaveLength(1);
     expect(
       plugins.load.paths.filter((p: string) => p.endsWith('/extensions/research-superpower')),
     ).toHaveLength(1);
+  });
+
+  it('does not mistake a project beside .openclaw for the global config', () => {
+    const homeDir = String(isolatedEnv.HOME);
+    configPath = path.join(
+      homeDir,
+      '.openclaw-research-claw',
+      'config',
+      'openclaw.json',
+    );
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify(legacyProjectConfig(), null, 2));
+
+    runEnsure();
+
+    const plugins = pluginsOf(configPath);
+    expect(plugins.allow).toContain('research-claw-core');
+    expect(plugins.allow).toContain('browser');
     expect(
-      plugins.load.paths.filter((p: string) =>
-        p.endsWith('/.openclaw/extensions/research-plugins')),
-    ).toHaveLength(1);
+      plugins.load.paths.some(
+        (entry: string) =>
+          entry.endsWith('/extensions/research-claw-core'),
+      ),
+    ).toBe(true);
   });
 });
