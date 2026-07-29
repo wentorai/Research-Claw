@@ -29,6 +29,9 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.12)(@types/node@25.4.0)(happy-dom@16.8.1)(jiti@2.7.0)(sass@1.98.0)(yaml@2.9.0)
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
 
   dashboard:
     dependencies:

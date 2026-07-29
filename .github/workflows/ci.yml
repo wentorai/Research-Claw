@@ -5,21 +5,30 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  unit:
+    name: CI / Unit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      # v7.0.1; its action.yml uses the current Node 24 action runtime.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Secret scan
         run: bash scripts/secret-scan.sh --all
 
-      - uses: actions/setup-node@v4
+      # v7.0.0, pinned rather than using a mutable major tag.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@v4
+      # v6.0.9; reads the exact packageManager declaration from package.json.
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -30,9 +39,27 @@ jobs:
       - name: Test
         run: pnpm test
 
-      # Boot a real gateway on 28799 against a stub provider on 28801 and assert
-      # observable end state. Unit tests cannot prove that error classification,
-      # self-check reconciliation and cron model fallback survive the plugin
-      # boundary. The scripts share those ports, so they must stay sequential.
+  e2e:
+    name: CI / E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # Boot real isolated gateways against local stub providers and assert
+      # observable runtime results. The scripts share ports, so they stay
+      # sequential inside this independent job.
       - name: Verify (end-to-end)
         run: pnpm verify:e2e
