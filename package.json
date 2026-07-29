@@ -9,7 +9,7 @@
   },
   "packageManager": "pnpm@10.34.4",
   "scripts": {
-    "prepare": "git config core.hooksPath git-hooks 2>/dev/null || true",
+    "prepare": "node scripts/prepare-package-manager.cjs",
     "start": "bash scripts/run.sh",
     "dev": "concurrently \"pnpm --filter dashboard dev\" \"bash scripts/run.sh\"",
     "build": "pnpm build:extensions && pnpm build:dashboard",

@@ -60,8 +60,8 @@ if [ "$(git rev-parse HEAD)" = "$OLD_HEAD" ]; then
   fi
 fi
 
-pnpm install
-pnpm build
+node "$ROOT/scripts/run-pnpm.cjs" install
+node "$ROOT/scripts/run-pnpm.cjs" build
 
 # Finish the same idempotent config migration used by install/startup before
 # claiming the update succeeded. The next restart therefore never sees a

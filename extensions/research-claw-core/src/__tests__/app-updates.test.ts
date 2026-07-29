@@ -48,8 +48,10 @@ describe('app-updates scripts', () => {
     const content = fs.readFileSync(psScript, 'utf8');
 
     expect(content).toContain('git pull --ff-only');
-    expect(content).toContain('pnpm install');
-    expect(content).toContain('pnpm build');
+    expect(content).toContain("'run-pnpm.cjs'");
+    expect(content).toMatch(/run-pnpm\.cjs'\)\s+install/);
+    expect(content).toMatch(/run-pnpm\.cjs'\)\s+build/);
+    expect(content).not.toMatch(/^\s*pnpm\s+(?:install|build)\b/m);
     expect(content).toContain('ErrorActionPreference');
   });
 
@@ -58,8 +60,10 @@ describe('app-updates scripts', () => {
     const content = fs.readFileSync(bashScript, 'utf8');
 
     expect(content).toContain('git pull --ff-only');
-    expect(content).toContain('pnpm install');
-    expect(content).toContain('pnpm build');
+    expect(content).toContain('scripts/run-pnpm.cjs');
+    expect(content).toMatch(/run-pnpm\.cjs"\s+install/);
+    expect(content).toMatch(/run-pnpm\.cjs"\s+build/);
+    expect(content).not.toMatch(/^\s*pnpm\s+(?:install|build)\b/m);
     expect(content).toContain('set -euo pipefail');
   });
 });

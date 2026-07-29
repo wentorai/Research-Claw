@@ -55,24 +55,14 @@ try {
     }
 
     Write-Host "[update-research-claw] Installing dependencies..." -ForegroundColor Cyan
-    # Use pnpm from local node_modules if available, otherwise from PATH
-    $pnpmPath = Join-Path $ProjectRoot 'node_modules' '.bin' 'pnpm'
-    if (Test-Path $pnpmPath) {
-        & $pnpmPath install
-    } else {
-        pnpm install
-    }
+    & node (Join-Path $ProjectRoot 'scripts' 'run-pnpm.cjs') install
 
     if ($LASTEXITCODE -ne 0) {
         throw "pnpm install failed with exit code $LASTEXITCODE"
     }
 
     Write-Host "[update-research-claw] Building project..." -ForegroundColor Cyan
-    if (Test-Path $pnpmPath) {
-        & $pnpmPath build
-    } else {
-        pnpm build
-    }
+    & node (Join-Path $ProjectRoot 'scripts' 'run-pnpm.cjs') build
 
     if ($LASTEXITCODE -ne 0) {
         throw "pnpm build failed with exit code $LASTEXITCODE"
