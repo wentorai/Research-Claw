@@ -1,11 +1,4 @@
-/**
- * SupervisorPanel — Audit log & stats for dual-model supervision
- *
- * Layout:
- *   - Stats overview (4 cards)
- *   - Filter bar (type / action / search)
- *   - Grouped audit log list (collapsible by type)
- */
+/** Review history and status for Research-Claw's trusted review layer. */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, Select, Tag, Typography } from 'antd';
@@ -170,8 +163,11 @@ function LogEntryCard({ entry, tokens, locale, t }: { entry: AuditLogEntry; toke
           flexShrink: 0,
           fontWeight: 600,
         }}>
-          {entry.action.toUpperCase()}
+          {actionLabel}
         </Tag>
+        <Text style={{ fontSize: 10, color: tokens.text.muted, flexShrink: 0 }}>
+          {typeLabel}
+        </Text>
         {/* Details */}
         <Text ellipsis style={{ fontSize: 11, color: entry.details ? tokens.text.secondary : tokens.text.muted, flex: 1, minWidth: 0, fontStyle: entry.details ? undefined : 'italic' }}>
           {displayText}
@@ -258,7 +254,7 @@ export default function SupervisorPanel() {
   const { t, i18n } = useTranslation();
   const theme = useConfigStore((s) => s.theme);
   const tokens = getThemeTokens(theme);
-  const locale = i18n.language;
+  const locale = i18n.language ?? 'en';
   const isConnected = useGatewayStore((s) => s.state === 'connected');
 
   const { status, auditLog, auditLogTotal, loadStatus, loadAuditLog, startPolling, stopPolling } = useSupervisorStore();
@@ -290,7 +286,8 @@ export default function SupervisorPanel() {
     loadAuditLog({ limit: 200 });
   }, [loadAuditLog]);
 
-  // Client-side filtered + grouped entries
+  // Keep the default view chronological. Type and action remain available as
+  // filters, but no longer hide the decision sequence in collapsed groups.
   const filteredEntries = useMemo(() => {
     let entries = auditLog;
 
@@ -310,28 +307,12 @@ export default function SupervisorPanel() {
     return entries;
   }, [auditLog, searchKeyword, filterType, filterAction]);
 
-  const groupedEntries = useMemo(() => {
-    const groups: Record<string, AuditLogEntry[]> = {};
-    for (const entry of filteredEntries) {
-      const type = entry.type || 'unknown';
-      if (!groups[type]) groups[type] = [];
-      groups[type].push(entry);
-    }
-    // Sort groups by type order defined in LOG_TYPE_META
-    const orderedKeys = Object.keys(LOG_TYPE_META);
-    const sortedKeys = [
-      ...orderedKeys.filter((k) => groups[k]),
-      ...Object.keys(groups).filter((k) => !orderedKeys.includes(k)),
-    ];
-    return sortedKeys.map((key) => ({ type: key, entries: groups[key] }));
-  }, [filteredEntries]);
-
   const stats = status?.stats ?? { total: 0, blocked: 0, corrected: 0, warnings: 0 };
 
   if (!isConnected) {
     return (
       <div style={{ padding: 16, textAlign: 'center' }}>
-        <Text style={{ color: tokens.text.muted }}>{t('supervisor.disconnected', 'Connect to gateway to view audit logs')}</Text>
+        <Text style={{ color: tokens.text.muted }}>{t('supervisor.disconnected', 'Connect to gateway to view review history')}</Text>
       </div>
     );
   }
@@ -350,7 +331,7 @@ export default function SupervisorPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <SafetyCertificateOutlined style={{ color: tokens.accent.blue }} />
           <Text strong style={{ color: tokens.text.primary, fontSize: 14 }}>
-            {t('supervisor.title', 'Audit Log')}
+            {t('supervisor.title', 'Review History')}
           </Text>
           {status && (
             <Tag style={{
@@ -361,7 +342,7 @@ export default function SupervisorPanel() {
               background: status.enabled ? '#10B98122' : tokens.bg.surfaceHover,
               color: status.enabled ? '#10B981' : tokens.text.muted,
             }}>
-              {status.enabled ? t('supervisor.statusOn', 'ON') : t('supervisor.statusOff', 'OFF')}
+              {status.enabled ? t('supervisor.statusOn', 'Review on') : t('supervisor.statusOff', 'Review off')}
             </Tag>
           )}
         </div>
@@ -375,7 +356,7 @@ export default function SupervisorPanel() {
           showIcon
           message={
             <span>
-              {t('supervisor.disabledBanner', 'Quality control is disabled.')}
+              {t('supervisor.disabledBanner', 'Response and action review is off.')}
               {' '}
               <a
                 onClick={() => useUiStore.getState().setRightPanelTab('settings')}
@@ -393,45 +374,45 @@ export default function SupervisorPanel() {
         />
       )}
 
-      {/* ── Status bar ────────────────────────────────────────── */}
+      {/* User-facing status first; implementation details remain available on demand. */}
+      {status?.enabled && (
+        <Alert
+          type={status.reviewerReady === false ? 'warning' : 'success'}
+          showIcon
+          message={t('supervisor.enabledBanner')}
+          description={status.reviewerReady === false
+            ? t('supervisor.reviewerUnavailable', { reason: status.reviewerUnavailableReason ?? '' })
+            : t('supervisor.enabledDescription')}
+          style={{ margin: '8px 12px 0', fontSize: 12, flexShrink: 0 }}
+        />
+      )}
+
       {status && (
-        <div style={{
-          padding: '6px 16px',
-          borderBottom: `1px solid ${tokens.border.default}`,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexShrink: 0,
-          flexWrap: 'wrap',
-        }}>
-          <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 5px', border: 'none', background: tokens.bg.surfaceHover, color: tokens.text.secondary }}>
-            {status.reviewMode}
-          </Tag>
-          {/* An empty supervisorModel means "inherit the main model", not "no reviewer" —
-              show the model a review would actually call, and label where it came from. */}
-          {(status.effectiveSupervisorModel || status.supervisorModel) && (
-            <Text style={{ fontSize: 10, color: tokens.text.muted, fontFamily: "'Fira Code', monospace" }}>
-              {status.effectiveSupervisorModel || status.supervisorModel}
-            </Text>
-          )}
-          {status.modelSource === 'inherited' && (
-            <Text style={{ fontSize: 10, color: tokens.text.muted }}>
-              {t('supervisor.modelInherited', 'inherited from main model')}
-            </Text>
-          )}
-          {/* Deep review down ≠ supervision off: the deterministic gate keeps running,
-              so the reason is stated here instead of silently blanking the model chip. */}
-          {status.reviewerReady === false && (
-            <Text style={{ fontSize: 10, color: '#F59E0B' }}>
-              {t('supervisor.reviewerUnavailable', { reason: status.reviewerUnavailableReason ?? '' })}
-            </Text>
-          )}
-          {status.activeSessions > 0 && (
-            <Text style={{ fontSize: 10, color: tokens.text.muted }}>
-              {status.activeSessions} {t('supervisor.activeSessions', 'active session(s)')}
-            </Text>
-          )}
-        </div>
+        <details style={{ padding: '6px 16px', borderBottom: `1px solid ${tokens.border.default}`, flexShrink: 0 }}>
+          <summary style={{ cursor: 'pointer', color: tokens.text.muted, fontSize: 11 }}>
+            {t('supervisor.technicalDetails')}
+          </summary>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingTop: 6 }}>
+            <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 5px', border: 'none', background: tokens.bg.surfaceHover, color: tokens.text.secondary }}>
+              {status.reviewMode}
+            </Tag>
+            {(status.effectiveSupervisorModel || status.supervisorModel) && (
+              <Text style={{ fontSize: 10, color: tokens.text.muted, fontFamily: "'Fira Code', monospace" }}>
+                {status.effectiveSupervisorModel || status.supervisorModel}
+              </Text>
+            )}
+            {status.modelSource === 'inherited' && (
+              <Text style={{ fontSize: 10, color: tokens.text.muted }}>
+                {t('supervisor.modelInherited', 'inherited from main model')}
+              </Text>
+            )}
+            {status.activeSessions > 0 && (
+              <Text style={{ fontSize: 10, color: tokens.text.muted }}>
+                {status.activeSessions} {t('supervisor.activeSessions', 'active session(s)')}
+              </Text>
+            )}
+          </div>
+        </details>
       )}
 
       {/* ── Stats overview ────────────────────────────────────── */}
@@ -494,26 +475,25 @@ export default function SupervisorPanel() {
         />
       </div>
 
-      {/* ── Audit log groups ──────────────────────────────────── */}
+      {/* ── Chronological review history ──────────────────────── */}
       <div style={{ flex: 1, overflow: 'auto', padding: '8px 8px' }}>
-        {groupedEntries.length === 0 ? (
+        {filteredEntries.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 16px' }}>
             <SafetyCertificateOutlined style={{ fontSize: 32, color: tokens.text.muted, display: 'block', marginBottom: 12 }} />
             <Text style={{ color: tokens.text.muted, fontSize: 13 }}>
-              {t('supervisor.empty', 'No audit logs yet.')}
+              {t('supervisor.empty', 'No review history yet.')}
             </Text>
             <br />
             <Text style={{ color: tokens.text.muted, fontSize: 12 }}>
-              {t('supervisor.emptyHint', 'Audit entries will appear here when the supervisor reviews outputs.')}
+              {t('supervisor.emptyHint', 'Review entries will appear here after responses or actions are checked.')}
             </Text>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {groupedEntries.map(({ type, entries }) => (
-              <TypeGroupWrapper
-                key={type}
-                type={type}
-                entries={entries}
+            {filteredEntries.map((entry) => (
+              <LogEntryCard
+                key={entry.id}
+                entry={entry}
                 tokens={tokens}
                 locale={locale}
                 t={t}
@@ -535,83 +515,6 @@ export default function SupervisorPanel() {
           <Text style={{ fontSize: 11, color: tokens.text.muted }}>
             {t('supervisor.showingCount', 'Showing {{count}} of {{total}}', { count: filteredEntries.length, total: auditLogTotal })}
           </Text>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── TypeGroupWrapper ─────────────────────────────────────────────────────
-
-function TypeGroupWrapper({
-  type,
-  entries,
-  tokens,
-  locale,
-  t,
-}: {
-  type: string;
-  entries: AuditLogEntry[];
-  tokens: ReturnType<typeof getThemeTokens>;
-  locale: string;
-  t: TFunction;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  const meta = LOG_TYPE_META[type];
-  const icon = meta?.icon ?? <SafetyCertificateOutlined />;
-  const color = meta?.color ?? '#71717A';
-  const label = t(meta?.labelKey ?? 'supervisor.typeUnknown', type);
-
-  return (
-    <div style={{ marginBottom: 4 }}>
-      <div
-        onClick={() => setExpanded(!expanded)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 10px',
-          cursor: 'pointer',
-          borderRadius: 6,
-          borderLeft: `3px solid ${color}`,
-          background: expanded ? tokens.bg.surfaceHover : 'transparent',
-          transition: 'background 0.15s',
-        }}
-      >
-        <span style={{ color, fontSize: 14 }}>{icon}</span>
-        <Text strong style={{ fontSize: 12, color: tokens.text.primary, flex: 1 }}>{label}</Text>
-        <Tag style={{
-          fontSize: 10,
-          lineHeight: '16px',
-          padding: '0 5px',
-          border: 'none',
-          background: `${color}22`,
-          color,
-        }}>
-          {entries.length}
-        </Tag>
-        <span style={{ color: tokens.text.muted, fontSize: 10 }}>
-          {expanded ? <UpOutlined /> : <DownOutlined />}
-        </span>
-      </div>
-
-      {expanded && (
-        <div style={{
-          padding: '4px 4px 4px 14px',
-          borderLeft: `3px solid ${color}`,
-          background: tokens.bg.surfaceHover,
-          borderRadius: '0 0 6px 6px',
-          marginTop: -2,
-          maxHeight: 320,
-          overflowY: 'auto',
-        }}>
-            {entries.map((entry) => (
-            <LogEntryCard key={entry.id} entry={entry} tokens={tokens} locale={locale} t={t} />
-          ))}
         </div>
       )}
     </div>

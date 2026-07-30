@@ -411,7 +411,7 @@ const COST_COPY: Record<string, CopySpec[]> = {
       // An unusable reviewer must never read as "supervision is off".
       key: 'settings.supervisorReviewerUnavailable',
       approved:
-        'AI review is unavailable. Dangerous-command protection is still active. Choose a reviewer model in Supervisor settings, or check its API key and balance.',
+        'AI deep review is unavailable. Dangerous-command protection is still active. Choose a deep-review model, or check its API key and balance.',
       required: [/dangerous-command protection[^.;]*\bstill\b[^.;]*\bactive/i, /(choose|check)[^.;]*(model|API key|balance)/i],
       forbidden: [
         /\bAI review\b[^.;]*\bdisabled\b/i,
@@ -434,8 +434,8 @@ const COST_COPY: Record<string, CopySpec[]> = {
     {
       // Same promise on the audit panel — the two surfaces must not disagree.
       key: 'supervisor.reviewerUnavailable',
-      approved: 'AI review is unavailable. Dangerous-command protection is still active. Open Supervisor settings to choose a reviewer model.',
-      required: [/dangerous-command protection[^.;]*\bstill\b[^.;]*\bactive/i, /supervisor settings[^.;]*(choose|model)/i],
+      approved: 'AI deep review is unavailable. Dangerous-command protection is still active. Open review settings to choose a deep-review model.',
+      required: [/dangerous-command protection[^.;]*\bstill\b[^.;]*\bactive/i, /review settings[^.;]*(choose|model)/i],
       forbidden: [
         /\bAI review\b[^.;]*\bdisabled\b/i,
         /\bAI review\b[^.;]*turned off/i,
@@ -443,15 +443,15 @@ const COST_COPY: Record<string, CopySpec[]> = {
         /\bguarantee(?:s|d)?\b/i,
       ],
       rejects: [
-        'AI review is unavailable. Dangerous-command protection is still active. Open Supervisor settings to choose a reviewer model. models.providers is invalid.',
-        'AI review is disabled. Dangerous-command protection is still active. Open Supervisor settings to choose a reviewer model.',
-        'AI review is turned off. Dangerous-command protection is still active. Open Supervisor settings to choose a reviewer model.',
-        'AI review is unavailable. Dangerous-command protection is still active. Open Supervisor settings to choose a reviewer model. This guarantees safety.',
-        'AI review is unavailable. Open Supervisor settings to choose a reviewer model.',
-        'AI review is unavailable. Dangerous-command protection is still active.',
-        'AI review is unavailable. Dangerous-command protection is not active. Open settings.',
-        'AI review is unavailable. Dangerous-command protection is still active. Choose a reviewer model.',
-        'AI review is unavailable. Dangerous-command protection guarantees safety. Open Supervisor settings.',
+        'AI deep review is unavailable. Dangerous-command protection is still active. Open review settings to choose a deep-review model. models.providers is invalid.',
+        'AI review is disabled. Dangerous-command protection is still active. Open review settings to choose a deep-review model.',
+        'AI review is turned off. Dangerous-command protection is still active. Open review settings to choose a deep-review model.',
+        'AI deep review is unavailable. Dangerous-command protection is still active. Open review settings to choose a deep-review model. This guarantees safety.',
+        'AI deep review is unavailable. Open review settings to choose a deep-review model.',
+        'AI deep review is unavailable. Dangerous-command protection is still active.',
+        'AI deep review is unavailable. Dangerous-command protection is not active. Open review settings to choose a deep-review model.',
+        'AI deep review is unavailable. Dangerous-command protection is still active. Choose a deep-review model.',
+        'AI deep review is unavailable. Dangerous-command protection guarantees safety. Open review settings to choose a deep-review model.',
       ],
     },
     // The threshold comparison is `>=` (course-corrector.ts), so a deviation exactly
@@ -551,7 +551,7 @@ const COST_COPY: Record<string, CopySpec[]> = {
     },
     {
       key: 'settings.supervisorReviewerUnavailable',
-      approved: 'AI 深度复核暂未启动，危险命令保护仍正常工作。请重新选择监督模型，或检查该模型的 API 密钥和余额。',
+      approved: 'AI 深度复核暂未启动，危险命令保护仍正常工作。请重新选择深度审查模型，或检查该模型的 API 密钥和余额。',
       required: [/危险命令保护[^，,。；;]*仍[^，,。；;]*(工作|生效|运行)/, /(选择|检查)[^，,。；;]*(模型|API 密钥|余额)/],
       forbidden: [
         /AI 深度复核[^，,。；;]*已关闭/,
@@ -573,8 +573,8 @@ const COST_COPY: Record<string, CopySpec[]> = {
     },
     {
       key: 'supervisor.reviewerUnavailable',
-      approved: 'AI 深度复核暂未启动，危险命令保护仍正常工作。请在 Supervisor 设置中重新选择监督模型。',
-      required: [/危险命令保护[^，,。；;]*仍[^，,。；;]*(工作|生效|运行)/, /Supervisor 设置[^，,。；;]*(选择|模型)/],
+      approved: 'AI 深度复核暂未启动，危险命令保护仍正常工作。请在审查设置中重新选择深度审查模型。',
+      required: [/危险命令保护[^，,。；;]*仍[^，,。；;]*(工作|生效|运行)/, /审查设置[^，,。；;]*(选择|模型)/],
       forbidden: [
         /AI 深度复核[^，,。；;]*已关闭/,
         /AI 深度复核[^，,。；;]*已停用/,
@@ -582,15 +582,15 @@ const COST_COPY: Record<string, CopySpec[]> = {
         /保证|一定/,
       ],
       rejects: [
-        'AI 深度复核暂未启动，危险命令保护仍正常工作。请在 Supervisor 设置中重新选择监督模型。models.providers 配置错误。',
-        'AI 深度复核已关闭，危险命令保护仍正常工作。请在 Supervisor 设置中重新选择监督模型。',
-        'AI 深度复核已停用，危险命令保护仍正常工作。请在 Supervisor 设置中重新选择监督模型。',
-        'AI 深度复核暂未启动，危险命令保护仍正常工作。请在 Supervisor 设置中重新选择监督模型。此能力保证安全。',
-        'AI 深度复核暂未启动。请在 Supervisor 设置中重新选择监督模型。',
+        'AI 深度复核暂未启动，危险命令保护仍正常工作。请在审查设置中重新选择深度审查模型。models.providers 配置错误。',
+        'AI 深度复核已关闭，危险命令保护仍正常工作。请在审查设置中重新选择深度审查模型。',
+        'AI 深度复核已停用，危险命令保护仍正常工作。请在审查设置中重新选择深度审查模型。',
+        'AI 深度复核暂未启动，危险命令保护仍正常工作。请在审查设置中重新选择深度审查模型。此能力保证安全。',
+        'AI 深度复核暂未启动。请在审查设置中重新选择深度审查模型。',
         'AI 深度复核暂未启动，危险命令保护仍正常工作。',
-        'AI 深度复核暂未启动，危险命令保护未正常工作。请打开设置。',
-        'AI 深度复核暂未启动，危险命令保护仍正常工作。请重新选择监督模型。',
-        'AI 深度复核暂未启动，危险命令保护一定正常工作。请打开 Supervisor 设置。',
+        'AI 深度复核暂未启动，危险命令保护未正常工作。请在审查设置中重新选择深度审查模型。',
+        'AI 深度复核暂未启动，危险命令保护仍正常工作。请重新选择深度审查模型。',
+        'AI 深度复核暂未启动，危险命令保护一定正常工作。请在审查设置中重新选择深度审查模型。',
       ],
     },
     // 同上:比较是 `>=`,偏离分数正好等于阈值也会触发纠正。
