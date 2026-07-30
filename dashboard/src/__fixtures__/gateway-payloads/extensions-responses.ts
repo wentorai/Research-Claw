@@ -1,6 +1,13 @@
 /**
  * Fixtures for extensions store tests.
- * Based on real OpenClaw gateway RPC response shapes.
+ * Anonymized from OpenClaw 2026.6.1 gateway RPC response shapes.
+ *
+ * Important parity details:
+ * - `source` is a structured loader origin such as `openclaw-extra`; it is
+ *   never a filesystem path or npm package name.
+ * - plugin identity must therefore be derived from filePath/baseDir until the
+ *   gateway exposes first-class provenance.
+ * - model/command visibility are distinct from configured enabled state.
  */
 
 import type { SkillStatusEntry, ChannelAccount } from '../../stores/extensions';
@@ -14,7 +21,7 @@ export const SKILLS_STATUS_RESPONSE = {
     {
       name: 'research-sop',
       description: 'Research methodology & SOP guide',
-      source: '/Users/test/research-claw/skills',
+      source: 'openclaw-extra',
       bundled: false,
       filePath: '/Users/test/research-claw/skills/research-sop/SKILL.md',
       baseDir: '/Users/test/research-claw/skills/research-sop',
@@ -23,7 +30,11 @@ export const SKILLS_STATUS_RESPONSE = {
       always: true,
       disabled: false,
       blockedByAllowlist: false,
+      blockedByAgentFilter: false,
       eligible: true,
+      modelVisible: true,
+      userInvocable: true,
+      commandVisible: true,
       requirements: { bins: [], anyBins: [], env: [], config: [], os: [] },
       missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
       configChecks: [],
@@ -32,18 +43,64 @@ export const SKILLS_STATUS_RESPONSE = {
     {
       name: 'search_arxiv',
       description: 'Search arXiv preprint database',
-      source: '@wentorai/research-plugins',
+      source: 'openclaw-extra',
       bundled: false,
-      filePath: '/Users/test/.openclaw/skills/research-plugins/curated/academic-search/arxiv/SKILL.md',
-      baseDir: '/Users/test/.openclaw/skills/research-plugins/curated/academic-search/arxiv',
+      filePath: '/Users/test/.openclaw/extensions/research-plugins/skills/literature/search/arxiv/SKILL.md',
+      baseDir: '/Users/test/.openclaw/extensions/research-plugins/skills/literature/search/arxiv',
       skillKey: 'search_arxiv',
       emoji: '📄',
       homepage: 'https://arxiv.org',
       always: false,
       disabled: false,
       blockedByAllowlist: false,
+      blockedByAgentFilter: false,
       eligible: true,
+      modelVisible: true,
+      userInvocable: false,
+      commandVisible: false,
       requirements: { bins: ['node'], anyBins: [], env: [], config: [], os: [] },
+      missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+      configChecks: [],
+      install: [],
+    },
+    {
+      name: 'style-journal-rewrite',
+      description: 'Workspace-authored journal style rewrite',
+      source: 'openclaw-workspace',
+      bundled: false,
+      filePath: '/Users/test/research-claw/workspace/skills/style-journal-rewrite/SKILL.md',
+      baseDir: '/Users/test/research-claw/workspace/skills/style-journal-rewrite',
+      skillKey: 'style-journal-rewrite',
+      always: false,
+      disabled: false,
+      blockedByAllowlist: false,
+      blockedByAgentFilter: false,
+      eligible: true,
+      modelVisible: true,
+      userInvocable: true,
+      commandVisible: true,
+      requirements: { bins: [], anyBins: [], env: [], config: [], os: [] },
+      missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+      configChecks: [],
+      install: [],
+    },
+    {
+      name: 'managed-private-skill',
+      description: 'A managed skill hidden from the current agent',
+      source: 'openclaw-managed',
+      bundled: false,
+      filePath: '/Users/test/.openclaw/skills/managed-private-skill/SKILL.md',
+      baseDir: '/Users/test/.openclaw/skills/managed-private-skill',
+      skillKey: 'managed-private-skill',
+      always: false,
+      disabled: false,
+      blockedByAllowlist: false,
+      blockedByAgentFilter: true,
+      eligible: true,
+      modelVisible: false,
+      userInvocable: true,
+      commandVisible: false,
+      requirements: { bins: [], anyBins: [], env: [], config: [], os: [] },
       missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
       configChecks: [],
       install: [],
@@ -60,7 +117,11 @@ export const SKILLS_STATUS_RESPONSE = {
       always: false,
       disabled: false,
       blockedByAllowlist: false,
+      blockedByAgentFilter: false,
       eligible: true,
+      modelVisible: true,
+      userInvocable: true,
+      commandVisible: true,
       requirements: { bins: [], anyBins: [], env: [], config: [], os: ['darwin'] },
       missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
       configChecks: [],
@@ -79,7 +140,11 @@ export const SKILLS_STATUS_RESPONSE = {
       always: false,
       disabled: true,
       blockedByAllowlist: false,
+      blockedByAgentFilter: false,
       eligible: false,
+      modelVisible: false,
+      userInvocable: true,
+      commandVisible: false,
       requirements: { bins: [], anyBins: [], env: ['DISCORD_BOT_TOKEN'], config: ['channels.discord.token'], os: [] },
       missing: { bins: [], anyBins: [], env: ['DISCORD_BOT_TOKEN'], config: ['channels.discord.token'], os: [] },
       configChecks: [{ path: 'channels.discord.token', satisfied: false }],
@@ -172,8 +237,17 @@ export const CONFIG_GET_RESPONSE = {
   config: {
     plugins: {
       enabled: true,
+      allow: [
+        'browser',
+        'research-claw-core',
+        'research-plugins',
+        'openclaw-weixin',
+      ],
       load: {
-        paths: ['/Users/test/research-claw/extensions/research-claw-core'],
+        paths: [
+          '/Users/test/research-claw/extensions/research-claw-core',
+          '/Users/test/.openclaw/extensions/research-plugins',
+        ],
       },
       entries: {
         'research-claw-core': {
@@ -185,6 +259,31 @@ export const CONFIG_GET_RESPONSE = {
             heartbeatDeadlineWarningHours: 48,
           },
         },
+      },
+      installs: {
+        'research-claw-core': {
+          source: 'path',
+          sourcePath: './extensions/research-claw-core',
+        },
+        'research-plugins': {
+          source: 'npm',
+          spec: '@wentorai/research-plugins',
+          installPath: '~/.openclaw/extensions/research-plugins',
+        },
+      },
+    },
+    skills: {
+      load: {
+        extraDirs: [
+          '/Users/test/research-claw/skills',
+          '/Users/test/research-claw/workspace/skills',
+        ],
+      },
+      workshop: {
+        autonomous: { enabled: false },
+        approvalPolicy: 'pending',
+        maxPending: 50,
+        maxSkillBytes: 40000,
       },
     },
   },

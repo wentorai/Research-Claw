@@ -39,6 +39,7 @@ import { useConfigStore } from '../../stores/config';
 import {
   useExtensionsStore,
   classifySkill,
+  getSkillRuntimeState,
   GROUP_ORDER,
   type SkillStatusEntry,
   type SkillGroup,
@@ -82,6 +83,7 @@ const GROUP_HEADER_HEIGHT = 36;
 function estimateExpandedHeight(skill: SkillStatusEntry): number {
   let h = 50; // collapsed row
   h += 22; // detail padding (8 top + 12 bottom + marginTop -2 overlap)
+  h += 76; // explicit runtime status matrix
   h += 20; // key line + margin
   h += 20; // source line + margin
   h += 20; // path line + margin
@@ -98,6 +100,34 @@ function estimateExpandedHeight(skill: SkillStatusEntry): number {
   h += 44; // action buttons + marginTop
   h += 16; // safety buffer
   return h;
+}
+
+function RuntimeFact({
+  label,
+  state,
+  positive,
+  tokens,
+}: {
+  label: string;
+  state: string;
+  positive: boolean;
+  tokens: ReturnType<typeof getThemeTokens>;
+}) {
+  return (
+    <span
+      aria-label={`${label}: ${state}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        fontSize: 10,
+        color: positive ? tokens.accent.green : tokens.text.muted,
+      }}
+    >
+      {positive ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+      <span>{label}</span>
+    </span>
+  );
 }
 
 // ── Skill Card (memoized) ────────────────────────────────────────────────────
@@ -118,11 +148,34 @@ const SkillCard = React.memo(function SkillCard({
   const { t } = useTranslation();
   const { message: messageApi } = App.useApp();
 
-  const isActive = !skill.disabled && skill.eligible;
+  const runtimeState = getSkillRuntimeState(skill);
+  const isActive = skill.modelVisible || skill.commandVisible;
   const hasMissing =
     skill.missing.bins.length > 0 ||
+    skill.missing.anyBins.length > 0 ||
     skill.missing.env.length > 0 ||
-    skill.missing.config.length > 0;
+    skill.missing.config.length > 0 ||
+    skill.missing.os.length > 0;
+  const runtimePresentation = useMemo(() => {
+    switch (runtimeState) {
+      case 'disabled':
+        return { label: t('extensions.skills.runtime.disabled', 'Disabled'), color: tokens.text.muted };
+      case 'allowlist-blocked':
+        return { label: t('extensions.skills.runtime.allowlistBlocked', 'Blocked by allowlist'), color: tokens.accent.red };
+      case 'agent-blocked':
+        return { label: t('extensions.skills.runtime.agentBlocked', 'Blocked for this agent'), color: tokens.accent.amber };
+      case 'requirements-missing':
+        return { label: t('extensions.skills.runtime.requirementsMissing', 'Missing requirements'), color: tokens.accent.amber };
+      case 'model-and-command':
+        return { label: t('extensions.skills.runtime.modelAndCommand', 'Model + command ready'), color: tokens.accent.green };
+      case 'model-visible':
+        return { label: t('extensions.skills.runtime.modelVisible', 'Model ready'), color: tokens.accent.green };
+      case 'command-only':
+        return { label: t('extensions.skills.runtime.commandOnly', 'Command only'), color: tokens.accent.blue };
+      default:
+        return { label: t('extensions.skills.runtime.enabledHidden', 'Enabled, not exposed'), color: tokens.text.muted };
+    }
+  }, [runtimeState, t, tokens]);
 
   const handleToggle = useCallback(
     (checked: boolean) => {
@@ -197,6 +250,20 @@ const SkillCard = React.memo(function SkillCard({
             <Text strong style={{ color: tokens.text.primary, fontSize: 13 }} ellipsis>
               {skill.name}
             </Text>
+            <Tag
+              style={{
+                margin: 0,
+                padding: '0 5px',
+                border: `1px solid ${runtimePresentation.color}`,
+                background: 'transparent',
+                color: runtimePresentation.color,
+                fontSize: 9,
+                lineHeight: '14px',
+                flexShrink: 0,
+              }}
+            >
+              {runtimePresentation.label}
+            </Tag>
           </div>
           <Text
             style={{ color: tokens.text.muted, fontSize: 11, display: 'block' }}
@@ -238,6 +305,58 @@ const SkillCard = React.memo(function SkillCard({
             marginTop: -2,
           }}
         >
+          {/* Runtime truth: configuration, eligibility and exposure are separate. */}
+          <div style={{ marginBottom: 8 }}>
+            <Text style={{ color: tokens.text.muted, fontSize: 11, display: 'block', marginBottom: 4 }}>
+              {t('extensions.skills.runtime.title', 'Runtime status')}
+            </Text>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                rowGap: 4,
+                columnGap: 8,
+              }}
+            >
+              <RuntimeFact
+                label={t('extensions.skills.runtime.configured', 'Configured')}
+                state={skill.disabled ? 'disabled' : 'enabled'}
+                positive={!skill.disabled}
+                tokens={tokens}
+              />
+              <RuntimeFact
+                label={t('extensions.skills.runtime.eligibility', 'Eligibility')}
+                state={skill.eligible ? 'eligible' : 'ineligible'}
+                positive={skill.eligible}
+                tokens={tokens}
+              />
+              <RuntimeFact
+                label={t('extensions.skills.runtime.agentFilter', 'Agent filter')}
+                state={skill.blockedByAgentFilter ? 'blocked' : 'allowed'}
+                positive={!skill.blockedByAgentFilter}
+                tokens={tokens}
+              />
+              <RuntimeFact
+                label={t('extensions.skills.runtime.modelVisibility', 'Model visibility')}
+                state={skill.modelVisible ? 'visible' : 'hidden'}
+                positive={skill.modelVisible}
+                tokens={tokens}
+              />
+              <RuntimeFact
+                label={t('extensions.skills.runtime.userInvocable', 'User invocable')}
+                state={skill.userInvocable ? 'yes' : 'no'}
+                positive={skill.userInvocable}
+                tokens={tokens}
+              />
+              <RuntimeFact
+                label={t('extensions.skills.runtime.commandVisibility', 'Command visibility')}
+                state={skill.commandVisible ? 'visible' : 'hidden'}
+                positive={skill.commandVisible}
+                tokens={tokens}
+              />
+            </div>
+          </div>
+
           {/* Key */}
           <div style={{ marginBottom: 4 }}>
             <Text style={{ color: tokens.text.muted, fontSize: 11 }}>
@@ -800,9 +919,21 @@ function PluginCard({
         </span>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <Text strong style={{ color: tokens.text.primary, fontSize: 13 }} ellipsis>
-            {plugin.name}
-          </Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Text strong style={{ color: tokens.text.primary, fontSize: 13 }} ellipsis>
+              {plugin.name}
+            </Text>
+            {plugin.installed && (
+              <Tag color="blue" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 4px' }}>
+                {t('extensions.plugins.installed', 'Installed')}
+              </Tag>
+            )}
+            {plugin.configured && (
+              <Tag color="green" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 4px' }}>
+                {t('extensions.plugins.configured', 'Configured')}
+              </Tag>
+            )}
+          </div>
           <Text style={{ color: tokens.text.muted, fontSize: 11, display: 'block' }} ellipsis>
             {shortPath}
           </Text>
@@ -830,6 +961,25 @@ function PluginCard({
             marginTop: -2,
           }}
         >
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+            <Tag color={plugin.enabled ? 'green' : 'default'} style={{ margin: 0 }}>
+              {plugin.enabled
+                ? t('extensions.plugins.enabled', 'Enabled in config')
+                : t('extensions.plugins.disabled', 'Disabled in config')}
+            </Tag>
+            <Tag color={plugin.allowed === false ? 'red' : 'default'} style={{ margin: 0 }}>
+              {plugin.allowed === undefined
+                ? t('extensions.plugins.allowUnknown', 'Allowlist not explicit')
+                : plugin.allowed
+                  ? t('extensions.plugins.allowed', 'Allowed')
+                  : t('extensions.plugins.notAllowed', 'Not allowed')}
+            </Tag>
+            {plugin.installSource && (
+              <Tag style={{ margin: 0 }}>
+                {t('extensions.plugins.installSource', 'Install source')}: {plugin.installSource}
+              </Tag>
+            )}
+          </div>
           <div style={{ marginBottom: 4 }}>
             <Text style={{ color: tokens.text.muted, fontSize: 11 }}>
               {t('extensions.plugins.path', 'Path')}:{' '}
@@ -924,6 +1074,7 @@ function SkillsTab({
   const groupLabels = useMemo(() => ({
     local: t('extensions.skills.group.local', 'local'),
     'research-plugins': t('extensions.skills.group.research-plugins', 'research-plugins'),
+    workspace: t('extensions.skills.group.workspace', 'workspace'),
     managed: t('extensions.skills.group.managed', 'managed'),
     bundled: t('extensions.skills.group.bundled', 'bundled'),
   }), [t]);
@@ -1713,7 +1864,7 @@ export default function ExtensionsPanel() {
   const skillsLoaded = useExtensionsStore((s) => s.skillsLoaded);
   const channelsLoaded = useExtensionsStore((s) => s.channelsLoaded);
   const pluginsLoaded = useExtensionsStore((s) => s.pluginsLoaded);
-  const { loadSkills, loadChannels, loadPlugins } = useExtensionsStore();
+  const { loadSkills, loadChannels, loadPlugins, invalidate } = useExtensionsStore();
 
   const [activeTab, setActiveTab] = useState<SubTab>('skills');
   // Track which tabs have been visited — render once, then keep in DOM with display:none
@@ -1732,6 +1883,13 @@ export default function ExtensionsPanel() {
   // Load data on connection
   const workshopLoading = useSkillWorkshopStore((s) => s.loading);
   const loadWorkshopProposals = useSkillWorkshopStore((s) => s.loadProposals);
+
+  // Gateway restart/reconnect can change plugin and skill discovery. Keep the
+  // last data visible while disconnected, but mark every snapshot stale so the
+  // next connected render must fetch authoritative state.
+  useEffect(() => {
+    if (!isConnected) invalidate();
+  }, [isConnected, invalidate]);
 
   useEffect(() => {
     if (isConnected && !skillsLoaded) loadSkills();
@@ -1761,7 +1919,7 @@ export default function ExtensionsPanel() {
   const totalCount = useMemo(() => skills.length + channels.length, [skills, channels]);
   const activeCount = useMemo(
     () =>
-      skills.filter((s) => !s.disabled && s.eligible).length +
+      skills.filter((s) => s.modelVisible).length +
       channels.filter((c) => {
         const account = c.accounts.find((a) => a.accountId === c.defaultAccountId) ?? c.accounts[0];
         return account?.connected === true;

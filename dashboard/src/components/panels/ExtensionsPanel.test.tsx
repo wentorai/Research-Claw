@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { App as AntdApp, ConfigProvider } from 'antd';
 import ExtensionsPanel from './ExtensionsPanel';
 import { useExtensionsStore } from '../../stores/extensions';
@@ -8,6 +8,7 @@ import { useConfigStore } from '../../stores/config';
 import {
   SKILLS_STATUS_RESPONSE,
   CHANNELS_STATUS_RESPONSE,
+  CONFIG_GET_RESPONSE,
 } from '../../__fixtures__/gateway-payloads/extensions-responses';
 
 // Mock react-window — render all items without virtualization (jsdom has no layout engine)
@@ -60,6 +61,8 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+const gatewayRequest = vi.fn();
+
 /** Set up store with data loaded and auto-load prevented */
 function setupLoadedState() {
   useExtensionsStore.setState({
@@ -77,10 +80,11 @@ function setupLoadedState() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  gatewayRequest.mockReset();
   useConfigStore.setState({ theme: 'dark' });
   useGatewayStore.setState({
     state: 'connected',
-    client: { isConnected: true, request: vi.fn() } as never,
+    client: { isConnected: true, request: gatewayRequest } as never,
   });
   useExtensionsStore.setState({
     skills: [],
@@ -151,7 +155,26 @@ describe('ExtensionsPanel', () => {
     // t('extensions.skills.group.local', 'local') → returns 'local' (fallback string)
     expect(screen.getByText('local')).toBeTruthy();
     expect(screen.getByText('research-plugins')).toBeTruthy();
+    expect(screen.getByText('workspace')).toBeTruthy();
+    expect(screen.getByText('managed')).toBeTruthy();
     expect(screen.getByText('bundled')).toBeTruthy();
+  });
+
+  it('shows configured, eligible, model, invocation, command, and agent-filter runtime semantics', () => {
+    setupLoadedState();
+
+    render(<Wrapper><ExtensionsPanel /></Wrapper>);
+
+    const blockedRow = screen.getByLabelText('managed-private-skill');
+    expect(within(blockedRow).getByText('Blocked for this agent')).toBeTruthy();
+    fireEvent.click(blockedRow);
+
+    expect(screen.getByLabelText('Configured: enabled')).toBeTruthy();
+    expect(screen.getByLabelText('Eligibility: eligible')).toBeTruthy();
+    expect(screen.getByLabelText('Agent filter: blocked')).toBeTruthy();
+    expect(screen.getByLabelText('Model visibility: hidden')).toBeTruthy();
+    expect(screen.getByLabelText('User invocable: yes')).toBeTruthy();
+    expect(screen.getByLabelText('Command visibility: hidden')).toBeTruthy();
   });
 
   it('shows empty state for skills', () => {
@@ -214,6 +237,8 @@ describe('ExtensionsPanel', () => {
           enabled: true,
           path: 'extensions/research-claw-core',
           config: { dbPath: '~/.research-claw/library.db' },
+          configured: true,
+          installed: true,
         },
       ],
       pluginsLoaded: true,
@@ -243,7 +268,41 @@ describe('ExtensionsPanel', () => {
 
     render(<Wrapper><ExtensionsPanel /></Wrapper>);
 
-    // 3 eligible skills out of 4 total (discord is disabled)
-    expect(screen.getByText('3 / 4')).toBeTruthy();
+    // Count is model-visible capabilities, not merely eligibility.
+    expect(screen.getByText('4 / 6')).toBeTruthy();
+  });
+
+  it('invalidates cached data on disconnect and reloads it after reconnect', async () => {
+    setupLoadedState();
+    gatewayRequest.mockImplementation((method: string) => {
+      if (method === 'skills.status') return Promise.resolve(SKILLS_STATUS_RESPONSE);
+      if (method === 'channels.status') return Promise.resolve(CHANNELS_STATUS_RESPONSE);
+      if (method === 'config.get') return Promise.resolve(CONFIG_GET_RESPONSE);
+      throw new Error(`unexpected RPC ${method}`);
+    });
+
+    render(<Wrapper><ExtensionsPanel /></Wrapper>);
+
+    act(() => {
+      useGatewayStore.setState({ state: 'disconnected', client: null });
+    });
+    expect(useExtensionsStore.getState()).toEqual(expect.objectContaining({
+      skillsLoaded: false,
+      channelsLoaded: false,
+      pluginsLoaded: false,
+    }));
+
+    act(() => {
+      useGatewayStore.setState({
+        state: 'connected',
+        client: { isConnected: true, request: gatewayRequest } as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(gatewayRequest).toHaveBeenCalledWith('skills.status', {});
+      expect(gatewayRequest).toHaveBeenCalledWith('channels.status', { probe: false });
+      expect(gatewayRequest).toHaveBeenCalledWith('config.get', {});
+    });
   });
 });
