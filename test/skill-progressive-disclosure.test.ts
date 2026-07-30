@@ -163,6 +163,9 @@ describe('progressive Skill disclosure defaults', () => {
       maxSkillsInPrompt: 100,
       maxSkillsPromptChars: 26000,
     });
+    expect(config.skills.install).toEqual({
+      allowUploadedArchives: true,
+    });
     expect(config.tools.toolSearch).toBe(false);
   });
 
@@ -171,6 +174,7 @@ describe('progressive Skill disclosure defaults', () => {
     const before = JSON.parse(fs.readFileSync(fixture.configPath, 'utf8'));
     before.skills.load.extraDirs = ['./skills', './workspace/skills'];
     delete before.skills.limits;
+    delete before.skills.install;
     delete before.skills.entries;
     delete before.tools.toolSearch;
     fs.writeFileSync(fixture.configPath, JSON.stringify(before, null, 2));
@@ -192,6 +196,9 @@ describe('progressive Skill disclosure defaults', () => {
       maxSkillsInPrompt: 100,
       maxSkillsPromptChars: 26000,
     });
+    expect(config.skills.install).toEqual({
+      allowUploadedArchives: true,
+    });
     expect(config.tools.toolSearch).toBe(false);
     expect(fs.readFileSync(fixture.configPath, 'utf8')).toBe(first);
   });
@@ -206,6 +213,9 @@ describe('progressive Skill disclosure defaults', () => {
       maxSkillsInPrompt: 75,
       maxSkillsPromptChars: 22000,
     };
+    config.skills.install = {
+      allowUploadedArchives: false,
+    };
     config.tools.toolSearch = false;
     fs.writeFileSync(fixture.configPath, JSON.stringify(config, null, 2));
 
@@ -219,6 +229,9 @@ describe('progressive Skill disclosure defaults', () => {
     expect(migrated.skills.limits).toEqual({
       maxSkillsInPrompt: 75,
       maxSkillsPromptChars: 22000,
+    });
+    expect(migrated.skills.install).toEqual({
+      allowUploadedArchives: false,
     });
     expect(migrated.tools.toolSearch).toBe(false);
   });

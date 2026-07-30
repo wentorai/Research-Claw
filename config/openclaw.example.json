@@ -86,6 +86,9 @@
       "maxSkillsInPrompt": 100,
       "maxSkillsPromptChars": 26000
     },
+    "install": {
+      "allowUploadedArchives": true
+    },
     "workshop": {
       "autonomous": {
         "enabled": false

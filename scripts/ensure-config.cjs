@@ -479,6 +479,17 @@ function ensureConfig(filePath) {
     c.skills.limits.maxSkillsPromptChars = RC_SKILLS_PROMPT_CHARS;
     changed = true;
   }
+  // Dashboard local-ZIP installs use OpenClaw's staged upload RPC. RC ships a
+  // mandatory before_install security hook, so enable the transport for fresh
+  // project configs while preserving an operator's explicit opt-out.
+  if (!c.skills.install) {
+    c.skills.install = {};
+    changed = true;
+  }
+  if (c.skills.install.allowUploadedArchives === undefined) {
+    c.skills.install.allowUploadedArchives = true;
+    changed = true;
+  }
   // Once the two-phase Registry is available, RP's 40 leaf-list routers are
   // redundant prompt entries. Disable only previously-unconfigured routers so
   // an explicit operator enable/disable choice always wins.
