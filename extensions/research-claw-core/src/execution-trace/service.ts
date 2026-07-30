@@ -338,7 +338,14 @@ export class ExecutionTraceService {
   skillLifecycleDetail(runId: string): ExecutionSkillEvent[] {
     return this.db.prepare(`
       SELECT * FROM rc_execution_skill_events WHERE run_id = ?
-      ORDER BY observed_at ASC, id ASC
+      ORDER BY observed_at ASC,
+        CASE lifecycle
+          WHEN 'candidate' THEN 0
+          WHEN 'selected' THEN 1
+          WHEN 'loaded' THEN 2
+          WHEN 'executed' THEN 3
+        END ASC,
+        id ASC
     `).all(runId) as ExecutionSkillEvent[];
   }
 }

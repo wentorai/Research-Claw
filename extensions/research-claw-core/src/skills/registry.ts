@@ -306,20 +306,36 @@ function toCandidate(entry: RegistrySkillEntry, lifecycle: SkillLifecycle): Skil
   };
 }
 
-function searchTerms(query: string): string[] {
-  const normalized = normalize(query);
-  const expanded = [normalized];
-  for (const [phrase, aliases] of CHINESE_QUERY_EXPANSIONS) {
-    if (normalized.includes(normalize(phrase))) expanded.push(...aliases.map(normalize));
-  }
-  const tokens = expanded.flatMap((value) => [
-    value,
-    ...value.split(/[^\p{L}\p{N}._-]+/u).filter((token) => token.length >= 2),
-  ]);
-  return unique(tokens.map(normalize));
+interface WeightedSearchTerm {
+  value: string;
+  weight: number;
 }
 
-function scoreEntry(entry: RegistrySkillEntry, query: string, terms: string[]): number {
+function searchTerms(query: string): WeightedSearchTerm[] {
+  const normalized = normalize(query);
+  const weighted = new Map<string, number>();
+  const add = (value: string, weight: number) => {
+    const term = normalize(value);
+    if (!term) return;
+    weighted.set(term, Math.max(weighted.get(term) ?? 0, weight));
+  };
+  add(normalized, 4);
+  for (const token of normalized.split(/[^\p{L}\p{N}._-]+/u)) {
+    if (token.length >= 2) add(token, 1);
+  }
+  for (const [phrase, aliases] of CHINESE_QUERY_EXPANSIONS) {
+    if (!normalized.includes(normalize(phrase))) continue;
+    for (const alias of aliases) {
+      add(alias, 6);
+      for (const token of normalize(alias).split(/[^\p{L}\p{N}._-]+/u)) {
+        if (token.length >= 2) add(token, 2);
+      }
+    }
+  }
+  return Array.from(weighted, ([value, weight]) => ({ value, weight }));
+}
+
+function scoreEntry(entry: RegistrySkillEntry, query: string, terms: WeightedSearchTerm[]): number {
   const queryNormalized = normalize(query);
   const id = normalize(entry.id);
   const name = normalize(entry.name);
@@ -333,14 +349,15 @@ function scoreEntry(entry: RegistrySkillEntry, query: string, terms: string[]): 
   if (name === queryNormalized) score += 1_500;
   if (aliases.includes(queryNormalized)) score += 1_100;
 
-  for (const term of terms) {
-    if (name === term) score += 700;
-    else if (name.includes(term)) score += 260;
-    if (aliases.some((alias) => alias === term)) score += 320;
-    else if (aliases.some((alias) => alias.includes(term))) score += 130;
-    if (category === term || subcategory === term) score += 180;
-    else if (category.includes(term) || subcategory.includes(term)) score += 70;
-    if (description.includes(term)) score += 45;
+  for (const signal of terms) {
+    const { value: term, weight } = signal;
+    if (name === term) score += 700 * weight;
+    else if (name.includes(term)) score += 260 * weight;
+    if (aliases.some((alias) => alias === term)) score += 320 * weight;
+    else if (aliases.some((alias) => alias.includes(term))) score += 130 * weight;
+    if (category === term || subcategory === term) score += 180 * weight;
+    else if (category.includes(term) || subcategory.includes(term)) score += 70 * weight;
+    if (description.includes(term)) score += 45 * weight;
   }
 
   return score;

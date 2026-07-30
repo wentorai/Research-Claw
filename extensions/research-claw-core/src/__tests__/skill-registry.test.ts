@@ -297,6 +297,11 @@ describe('unified Skill Registry', () => {
     expect((await registry.search('观察性研究报告规范')).candidates[0]).toMatchObject({
       id: 'rp:clinical-research-guide',
     });
+    expect((await registry.search(
+      'observational cohort study reporting guideline STROBE 观察性队列研究 报告规范 writing planning',
+    )).candidates[0]).toMatchObject({
+      id: 'rp:clinical-research-guide',
+    });
     expect((await registry.search('workspace-medical-protocol')).candidates[0]).toMatchObject({
       id: 'oc:workspace:workspace-medical-protocol',
     });
@@ -553,6 +558,9 @@ describe('unified Skill Registry', () => {
     ]));
     expect(reconstructed.skillLifecycleDetail('run-router-leaf')
       .filter((event) => event.lifecycle === 'candidate')).toHaveLength(5);
+    expect(reconstructed.skillLifecycleDetail('run-router-leaf')
+      .filter((event) => event.skill_key === 'rp:systematic-review-guide')
+      .map((event) => event.lifecycle)).toEqual(['candidate', 'selected', 'loaded']);
     expect(reconstructed.skillDetail('run-router-leaf')).toEqual(expect.arrayContaining([
       expect.objectContaining({
         skill_key: 'workspace:deep-research-skills',

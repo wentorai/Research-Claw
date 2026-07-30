@@ -163,12 +163,7 @@ describe('progressive Skill disclosure defaults', () => {
       maxSkillsInPrompt: 100,
       maxSkillsPromptChars: 26000,
     });
-    expect(config.tools.toolSearch).toEqual({
-      enabled: true,
-      mode: 'tools',
-      searchDefaultLimit: 5,
-      maxSearchLimit: 8,
-    });
+    expect(config.tools.toolSearch).toBe(false);
   });
 
   it('migrates defaults once, disables RP leaf routers, and stays idempotent', () => {
@@ -197,12 +192,7 @@ describe('progressive Skill disclosure defaults', () => {
       maxSkillsInPrompt: 100,
       maxSkillsPromptChars: 26000,
     });
-    expect(config.tools.toolSearch).toEqual({
-      enabled: true,
-      mode: 'tools',
-      searchDefaultLimit: 5,
-      maxSearchLimit: 8,
-    });
+    expect(config.tools.toolSearch).toBe(false);
     expect(fs.readFileSync(fixture.configPath, 'utf8')).toBe(first);
   });
 

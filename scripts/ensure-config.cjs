@@ -57,12 +57,7 @@ const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw
 const RESEARCH_PLUGINS_PATH = path.join(os.homedir(), '.openclaw', 'extensions', 'research-plugins');
 const RC_SKILLS_PROMPT_MAX = 100;
 const RC_SKILLS_PROMPT_CHARS = 26000;
-const RC_TOOL_SEARCH_DEFAULT = {
-  enabled: true,
-  mode: 'tools',
-  searchDefaultLimit: 5,
-  maxSearchLimit: 8,
-};
+const RC_TOOL_SEARCH_DEFAULT = false;
 
 function isLegacyResearchPluginsNodeModulesPath(candidate) {
   if (typeof candidate !== 'string') return false;
@@ -283,15 +278,15 @@ function ensureConfig(filePath) {
     }
   }
   // OC 2026.6.1 can compact large eligible tool catalogs behind three
-  // structured search/describe/call tools. Apply this only to RC project
-  // configs and only when the operator has not made an explicit choice.
+  // structured search/describe/call tools. Real-model A/B showed degraded
+  // natural Skill recall, so keep it opt-in and preserve operator choices.
   if (!isGlobal) {
     if (!c.tools) {
       c.tools = {};
       changed = true;
     }
     if (c.tools.toolSearch === undefined) {
-      c.tools.toolSearch = { ...RC_TOOL_SEARCH_DEFAULT };
+      c.tools.toolSearch = RC_TOOL_SEARCH_DEFAULT;
       changed = true;
     }
   }
