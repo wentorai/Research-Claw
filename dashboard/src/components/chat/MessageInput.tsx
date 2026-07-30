@@ -11,11 +11,13 @@ import type { ChatAttachment, ChatReference } from '../../gateway/types';
 import SlashCommandMenu, { useSlashCommandMenu } from './SlashCommandMenu';
 import ReferenceMenu, { useReferenceMenu } from './ReferenceMenu';
 import InputHistoryPopup from './InputHistoryPopup';
+import QuickCommands from './QuickCommands';
 import { useInputHistory } from '../../hooks/useInputHistory';
 import { abortChatShortcutLabel } from '../../utils/keyboard-shortcut';
 import { useUiStore } from '../../stores/ui';
 import { useSessionsStore } from '../../stores/sessions';
 import { resizeComposerInput } from '../../utils/composer-input';
+import { insertTextAtSelection, type TextSelection } from '../../utils/insert-text-at-selection';
 import { uploadFileToWorkspace } from '../../gateway/upload';
 import {
   CHAT_DROP_DIR,
@@ -83,11 +85,13 @@ export default function MessageInput() {
 
   const inputHistory = useInputHistory();
   const [historyPopupOpen, setHistoryPopupOpen] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   /** Stashed draft text when browsing history — restored on ArrowDown past end. */
   const draftRef = useRef<string | null>(null);
   /** Explicit IME composition tracking — protects against remote desktop tools
    *  (e.g. ToDesk) that break React's built-in composition detection. */
   const composingRef = useRef(false);
+  const lastSelectionRef = useRef<TextSelection>({ start: 0, end: 0 });
 
   const isConnected = connState === 'connected';
   const hasReadyReference = references.some((r) => r.status === 'ready');
@@ -661,10 +665,12 @@ export default function MessageInput() {
 
   const handleCompositionStart = () => {
     composingRef.current = true;
+    setIsComposing(true);
   };
 
   const handleCompositionEnd = () => {
     composingRef.current = false;
+    setIsComposing(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -747,7 +753,24 @@ export default function MessageInput() {
   // Keep the caret position in sync for the `@`-mention detector (clicks, arrows).
   const syncCaret = useCallback(() => {
     const el = textareaRef.current;
-    if (el) setCaret(el.selectionStart ?? 0);
+    if (el) {
+      const start = el.selectionStart ?? 0;
+      const end = el.selectionEnd ?? start;
+      setCaret(start);
+      lastSelectionRef.current = { start, end };
+    }
+  }, []);
+
+  const insertQuickCommand = useCallback((preset: { content: string }) => {
+    if (composingRef.current) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    const result = insertTextAtSelection(el, preset.content, lastSelectionRef.current);
+    setText(result.value);
+    setCaret(result.caret);
+    lastSelectionRef.current = { start: result.caret, end: result.caret };
+    el.style.height = 'auto';
+    resizeComposerInput(el);
   }, []);
 
   return (
@@ -901,6 +924,12 @@ export default function MessageInput() {
               disabled={!isConnected || sending}
             />
           </Tooltip>
+          <QuickCommands
+            disabled={!isConnected || sending}
+            composing={isComposing}
+            onTriggerMouseDown={syncCaret}
+            onInsert={insertQuickCommand}
+          />
           <div className="chat-composer-history" ref={historyAnchorRef}>
             <InputHistoryPopup
               items={inputHistory.items()}
