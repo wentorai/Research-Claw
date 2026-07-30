@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — SQLite Schema DDL
  *
- * 29 tables + FTS5 virtual table + triggers + indexes.
+ * 30 tables + FTS5 virtual table + triggers + indexes.
  * All table names prefixed with `rc_` to avoid collision with OpenClaw internals.
  *
  * Tables:
@@ -34,12 +34,13 @@
  *  27. rc_periph_observations — Peripheral observation records (snapshot/check/note)
  *  28. rc_prompt_presets    — User-managed reusable chat commands
  *  29. rc_execution_tools   — Per-run tool invocation trace
+ *  30. rc_execution_skills  — Per-run verified Skill activation trace
  *
  * FTS5: rc_papers_fts (title, authors, abstract, notes, keywords)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -428,6 +429,20 @@ CREATE TABLE IF NOT EXISTS rc_execution_tools (
   UNIQUE(run_id, tool_call_id)
 );`;
 
+export const CREATE_RC_EXECUTION_SKILLS_SQL = `
+CREATE TABLE IF NOT EXISTS rc_execution_skills (
+  id           TEXT PRIMARY KEY,
+  session_key  TEXT NOT NULL,
+  run_id       TEXT NOT NULL,
+  skill_key    TEXT NOT NULL,
+  skill_name   TEXT NOT NULL,
+  skill_source TEXT NOT NULL DEFAULT 'research-plugins',
+  activation   TEXT NOT NULL DEFAULT 'read' CHECK(activation IN ('read', 'command')),
+  tool_call_id TEXT,
+  first_used_at INTEGER NOT NULL,
+  UNIQUE(run_id, skill_key)
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -460,6 +475,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   CREATE_RC_PERIPH_OBSERVATIONS_SQL,
   CREATE_RC_PROMPT_PRESETS_SQL,
   CREATE_RC_EXECUTION_TOOLS_SQL,
+  CREATE_RC_EXECUTION_SKILLS_SQL,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -561,6 +577,7 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
     ON rc_prompt_presets(favorite DESC, sort_order ASC);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_run ON rc_execution_tools(run_id);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_session ON rc_execution_tools(session_key);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_execution_skills_run ON rc_execution_skills(run_id);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────

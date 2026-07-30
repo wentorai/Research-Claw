@@ -60,7 +60,7 @@ import {
   selectModelVisibleEligibleSkills,
   type RuntimeProbeConfigLike,
 } from './src/self-check/runtime-probe.js';
-import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
+import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary, resolveIndexedSkillRead } from './src/skills/search.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
   oauthInitiate,
@@ -2496,6 +2496,19 @@ const plugin: PluginDefinition = {
           toolCallId: evt.toolCallId ?? ctx?.toolCallId,
           toolName: evt.toolName,
         });
+        if (evt.toolName === 'read') {
+          const eventWithParams = event as { params?: Record<string, unknown> };
+          const skill = resolveIndexedSkillRead(eventWithParams.params?.path, wsRoot);
+          if (skill) {
+            _executionTraceService.recordSkill({
+              sessionKey: ctx?.sessionKey ?? 'unknown',
+              runId,
+              skillKey: skill.id,
+              skillName: skill.name,
+              toolCallId: evt.toolCallId ?? ctx?.toolCallId,
+            });
+          }
+        }
       } catch (err) {
         api.logger.warn(`[ExecutionTrace] before_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -2521,6 +2534,23 @@ const plugin: PluginDefinition = {
           durationMs: evt.durationMs,
           error: evt.error,
         });
+        if (evt.toolName === 'skill_search') {
+          const result = (event as { result?: { details?: { skills?: unknown[] } } }).result;
+          const skills = result?.details?.skills;
+          if (Array.isArray(skills)) {
+            for (const item of skills) {
+              const skill = item as { id?: unknown; name?: unknown };
+              if (typeof skill.id !== 'string' || typeof skill.name !== 'string') continue;
+              _executionTraceService.recordSkill({
+                sessionKey: ctx?.sessionKey ?? 'unknown',
+                runId,
+                skillKey: skill.id,
+                skillName: skill.name,
+                toolCallId: evt.toolCallId ?? ctx?.toolCallId,
+              });
+            }
+          }
+        }
       } catch (err) {
         api.logger.warn(`[ExecutionTrace] after_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);
       }

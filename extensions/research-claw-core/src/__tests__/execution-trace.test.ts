@@ -39,7 +39,7 @@ describe('execution trace parity with OpenClaw 2026.6.1 hook payloads', () => {
       timestamp: 112,
     });
     expect(new ExecutionTraceService(db).summary(['run-fixture'])).toEqual({
-      'run-fixture': { toolCount: 1, errorCount: 0 },
+      'run-fixture': { toolCount: 1, errorCount: 0, skillCount: 0 },
     });
     expect(service.detail('run-fixture')[0]).toMatchObject({
       tool_name: 'read',

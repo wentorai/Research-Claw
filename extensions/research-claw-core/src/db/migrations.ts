@@ -24,6 +24,7 @@ import {
   CREATE_RC_PERIPH_OBSERVATIONS_SQL,
   CREATE_RC_PROMPT_PRESETS_SQL,
   CREATE_RC_EXECUTION_TOOLS_SQL,
+  CREATE_RC_EXECUTION_SKILLS_SQL,
 } from './schema.js';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -462,6 +463,14 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE_RC_EXECUTION_TOOLS_SQL,
       `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_run ON rc_execution_tools(run_id);`,
       `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_session ON rc_execution_tools(session_key);`,
+    ].join('\n'),
+  },
+  {
+    version: 20,
+    name: 'add_execution_skill_trace',
+    sql: [
+      CREATE_RC_EXECUTION_SKILLS_SQL,
+      `CREATE INDEX IF NOT EXISTS idx_rc_execution_skills_run ON rc_execution_skills(run_id);`,
     ].join('\n'),
   },
 ];

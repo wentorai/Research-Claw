@@ -13,6 +13,10 @@ export function registerExecutionTraceRpc(
   });
   registerMethod('rc.execution.detail', async (params) => {
     if (typeof params.runId !== 'string' || !params.runId) throw new Error('runId is required');
-    return { runId: params.runId, tools: service.detail(params.runId) };
+    return {
+      runId: params.runId,
+      tools: service.detail(params.runId),
+      skills: service.skillDetail(params.runId),
+    };
   });
 }
