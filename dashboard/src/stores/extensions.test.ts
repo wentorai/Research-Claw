@@ -168,6 +168,19 @@ describe('skill provenance and runtime state', () => {
     const local = SKILLS_STATUS_RESPONSE.skills.find((entry) => entry.skillKey === 'research-sop')!;
     expect(local.source).toBe('openclaw-extra');
     expect(classifySkill(local)).toBe('local');
+    expect(classifySkill({
+      ...local,
+      skillKey: 'third-party-extra',
+      baseDir: '/opt/science-skills/third-party-extra',
+      filePath: '/opt/science-skills/third-party-extra/SKILL.md',
+    })).toBe('extra');
+    expect(classifySkill({
+      ...local,
+      source: 'future-loader',
+      skillKey: 'future-source',
+      baseDir: '/opt/future-source',
+      filePath: '/opt/future-source/SKILL.md',
+    })).toBe('other');
   });
 
   it('derives an explicit runtime state instead of treating eligible as model-visible', () => {

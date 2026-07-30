@@ -56,8 +56,11 @@ import SkillWorkshopTab from './SkillWorkshopTab';
 
 const { Text } = Typography;
 const { Search } = Input;
+// Keep ZIP/YAML parsing out of the initial dashboard bundle. It is needed only
+// after the user explicitly opens the Install tab.
+const SkillInstallCenter = React.lazy(() => import('./SkillInstallCenter'));
 
-type SubTab = 'skills' | 'workshop' | 'channels' | 'plugins' | 'ppt';
+type SubTab = 'skills' | 'install' | 'workshop' | 'channels' | 'plugins' | 'ppt';
 
 /** Channels that support QR code login via web.login.start / web.login.wait */
 const QR_LOGIN_CHANNELS = new Set(['openclaw-weixin', 'whatsapp']);
@@ -1075,8 +1078,10 @@ function SkillsTab({
     local: t('extensions.skills.group.local', 'local'),
     'research-plugins': t('extensions.skills.group.research-plugins', 'research-plugins'),
     workspace: t('extensions.skills.group.workspace', 'workspace'),
+    extra: t('extensions.skills.group.extra', 'plugins / extra directories'),
     managed: t('extensions.skills.group.managed', 'managed'),
     bundled: t('extensions.skills.group.bundled', 'bundled'),
+    other: t('extensions.skills.group.other', 'other / unknown source'),
   }), [t]);
 
   // Row height calculator — receives current rowProps so heights update when expandedKey changes
@@ -1905,6 +1910,7 @@ export default function ExtensionsPanel() {
 
   const handleRefresh = useCallback(() => {
     if (activeTab === 'skills') loadSkills();
+    else if (activeTab === 'install') loadSkills();
     else if (activeTab === 'workshop') void loadWorkshopProposals();
     else if (activeTab === 'channels') loadChannels(true); // probe on manual refresh
     else loadPlugins();
@@ -1912,6 +1918,7 @@ export default function ExtensionsPanel() {
 
   const isLoading =
     activeTab === 'skills' ? skillsLoading
+    : activeTab === 'install' ? skillsLoading
     : activeTab === 'workshop' ? workshopLoading
     : activeTab === 'channels' ? channelsLoading
     : false;
@@ -1980,6 +1987,7 @@ export default function ExtensionsPanel() {
           onChange={(val) => handleTabChange(val as SubTab)}
           options={[
             { label: t('extensions.tabs.skills', 'Skills'), value: 'skills' },
+            { label: t('extensions.tabs.install', 'Install'), value: 'install' },
             { label: t('extensions.tabs.workshop', 'Workshop'), value: 'workshop' },
             { label: t('extensions.tabs.channels', 'Channels'), value: 'channels' },
             { label: t('extensions.tabs.plugins', 'Plugins'), value: 'plugins' },
@@ -1994,6 +2002,19 @@ export default function ExtensionsPanel() {
         {visited.has('skills') && (
           <div style={{ display: activeTab === 'skills' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
             <SkillsTab tokens={tokens} onOpenWorkshop={() => handleTabChange('workshop')} />
+          </div>
+        )}
+        {visited.has('install') && (
+          <div style={{ display: activeTab === 'install' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
+            <React.Suspense
+              fallback={(
+                <div style={{ textAlign: 'center', padding: '40px 16px' }}>
+                  <LoadingOutlined style={{ fontSize: 24, color: tokens.text.muted }} />
+                </div>
+              )}
+            >
+              <SkillInstallCenter tokens={tokens} />
+            </React.Suspense>
           </div>
         )}
         {visited.has('workshop') && (

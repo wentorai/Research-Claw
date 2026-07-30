@@ -159,6 +159,80 @@ export const SKILLS_UPDATE_RESPONSE = {
   config: { enabled: true },
 };
 
+// ── skills.search / detail / install / upload (OC 2026.6.1) ───────────────
+
+export const SKILLS_SEARCH_RESPONSE = {
+  results: [
+    {
+      score: 0.95,
+      slug: 'pubmed-research',
+      displayName: 'PubMed Research',
+      summary: 'Search and synthesize biomedical literature',
+      version: '1.2.3',
+      updatedAt: 1_700_000_000,
+    },
+  ],
+};
+
+export const SKILLS_DETAIL_RESPONSE = {
+  skill: {
+    slug: 'pubmed-research',
+    displayName: 'PubMed Research',
+    summary: 'Search and synthesize biomedical literature',
+    tags: { latest: '1.2.3' },
+    createdAt: 1_690_000_000,
+    updatedAt: 1_700_000_000,
+  },
+  latestVersion: {
+    version: '1.2.3',
+    createdAt: 1_700_000_000,
+    changelog: 'Improved evidence extraction',
+  },
+  metadata: {
+    os: ['darwin', 'win32'],
+    systems: ['openclaw'],
+  },
+  owner: {
+    handle: 'wentorai',
+    displayName: 'Wentor AI',
+    image: null,
+  },
+};
+
+export const SKILLS_CLAWHUB_INSTALL_RESPONSE = {
+  ok: true,
+  message: 'Installed pubmed-research@1.2.3',
+  stdout: '',
+  stderr: '',
+  code: 0,
+  slug: 'pubmed-research',
+  version: '1.2.3',
+  targetDir: '/Users/test/research-claw/workspace/skills/pubmed-research',
+};
+
+export const SKILLS_UPLOAD_BEGIN_RESPONSE = {
+  uploadId: '019-upload-id',
+  receivedBytes: 0,
+  expiresAt: 1_700_086_400_000,
+};
+
+export const SKILLS_UPLOAD_COMMIT_RESPONSE = {
+  uploadId: '019-upload-id',
+  sizeBytes: 1024,
+  sha256: 'a'.repeat(64),
+};
+
+export const SKILLS_UPLOAD_INSTALL_RESPONSE = {
+  ok: true,
+  message: 'Installed clinical-trial-review',
+  stdout: '',
+  stderr: '',
+  code: 0,
+  slug: 'clinical-trial-review',
+  targetDir: '/Users/test/research-claw/workspace/skills/clinical-trial-review',
+  sha256: 'a'.repeat(64),
+};
+
 // ── channels.status ─────────────────────────────────────────────────────────
 
 export const CHANNELS_STATUS_RESPONSE = {
@@ -290,4 +364,17 @@ export const CONFIG_GET_RESPONSE = {
   resolved: {},
   raw: null,
   hash: 'abc123',
+};
+
+export const CONFIG_GET_UPLOAD_ENABLED_RESPONSE = {
+  ...CONFIG_GET_RESPONSE,
+  config: {
+    ...CONFIG_GET_RESPONSE.config,
+    skills: {
+      ...CONFIG_GET_RESPONSE.config.skills,
+      install: {
+        allowUploadedArchives: true,
+      },
+    },
+  },
 };

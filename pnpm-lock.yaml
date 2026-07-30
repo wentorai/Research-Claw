@@ -68,6 +68,9 @@ importers:
       i18next:
         specifier: ^24.0.0
         version: 24.2.3(typescript@5.9.3)
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
       katex:
         specifier: ^0.16
         version: 0.16.47
@@ -98,6 +101,9 @@ importers:
       shiki:
         specifier: ^1.24.0
         version: 1.29.2
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
       zustand:
         specifier: ^5.0.0
         version: 5.0.11(@types/react@18.3.28)(react@18.3.1)

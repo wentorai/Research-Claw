@@ -251,6 +251,23 @@ describe('ExtensionsPanel', () => {
     expect(screen.getByText('research-claw-core')).toBeTruthy();
   });
 
+  it('mounts the native ClawHub and local ZIP install center from the Install tab', async () => {
+    setupLoadedState();
+    gatewayRequest.mockImplementation((method: string) => {
+      if (method === 'config.get') return Promise.resolve(CONFIG_GET_RESPONSE);
+      return Promise.resolve({});
+    });
+
+    render(<Wrapper><ExtensionsPanel /></Wrapper>);
+
+    clickSegmentedTab('Install');
+
+    expect(await screen.findByText('Native OpenClaw source')).toBeTruthy();
+    expect(screen.getByText('ClawHub')).toBeTruthy();
+    expect(screen.getByText('Local ZIP')).toBeTruthy();
+    expect(gatewayRequest).toHaveBeenCalledWith('config.get', {});
+  });
+
   it('filters skills by search', () => {
     setupLoadedState();
 

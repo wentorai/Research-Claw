@@ -97,14 +97,23 @@ export interface PluginEntry {
 
 // ── Skill grouping ──────────────────────────────────────────────────────────
 
-export type SkillGroup = 'local' | 'research-plugins' | 'workspace' | 'managed' | 'bundled';
+export type SkillGroup =
+  | 'local'
+  | 'research-plugins'
+  | 'workspace'
+  | 'extra'
+  | 'managed'
+  | 'bundled'
+  | 'other';
 
 export const GROUP_ORDER: SkillGroup[] = [
   'local',
   'research-plugins',
   'workspace',
+  'extra',
   'managed',
   'bundled',
+  'other',
 ];
 
 function normalizeSkillPath(value: string): string {
@@ -131,7 +140,15 @@ export function classifySkill(entry: SkillStatusEntry): SkillGroup {
   if (source === 'openclaw-workspace') return 'workspace';
   if (provenancePath.includes('/research-claw/workspace/skills/')) return 'workspace';
   if (provenancePath.includes('/research-claw/skills/')) return 'local';
-  return 'managed';
+  if (source === 'openclaw-extra') return 'extra';
+  if (
+    source === 'openclaw-managed' ||
+    source === 'agents-skills-personal' ||
+    source === 'agents-skills-project'
+  ) {
+    return 'managed';
+  }
+  return 'other';
 }
 
 export type SkillRuntimeState =

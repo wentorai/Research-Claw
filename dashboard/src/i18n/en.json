@@ -1458,6 +1458,7 @@
     "disconnected": "Connect to gateway to view extensions",
     "tabs": {
       "skills": "Skills",
+      "install": "Install",
       "workshop": "Skill Workshop",
       "channels": "Channels",
       "plugins": "Plugins",
@@ -1576,8 +1577,77 @@
       "group": {
         "local": "Research-Claw Local",
         "research-plugins": "Research-Plugins",
-        "managed": "Research-Claw Built-in",
-        "bundled": "OpenClaw Bundled"
+        "workspace": "Workspace Skills",
+        "extra": "Plugins / Extra Directories",
+        "managed": "Managed / Personal Skills",
+        "bundled": "OpenClaw Bundled",
+        "other": "Other / Unknown Source"
+      },
+      "runtime": {
+        "disabled": "Disabled",
+        "allowlistBlocked": "Blocked by allowlist",
+        "agentBlocked": "Blocked for this agent",
+        "requirementsMissing": "Missing requirements",
+        "modelAndCommand": "Model + command ready",
+        "modelVisible": "Model ready",
+        "commandOnly": "Command only",
+        "enabledHidden": "Enabled, not exposed",
+        "title": "Runtime status",
+        "configured": "Configured",
+        "eligibility": "Eligibility",
+        "agentFilter": "Agent filter",
+        "modelVisibility": "Model visibility",
+        "userInvocable": "User invocable",
+        "commandVisibility": "Command visibility"
+      }
+    },
+    "install": {
+      "search": "Search",
+      "review": "Review",
+      "install": "Install",
+      "installNow": "Install now",
+      "clawhub": {
+        "tab": "ClawHub",
+        "native": "Native OpenClaw source",
+        "description": "Searches ClawHub, loads registry details, then installs through skills.install.",
+        "searchPlaceholder": "Search ClawHub skills",
+        "empty": "No matching Skills found.",
+        "confirmTitle": "Confirm Skill installation",
+        "confirmDescription": "OpenClaw will download, verify, scan, and install this Skill into the current workspace.",
+        "installedFallback": "Installed {{slug}}"
+      },
+      "local": {
+        "tab": "Local ZIP",
+        "selectCandidate": "Select {{name}}",
+        "invalidSlug": "Invalid slug",
+        "existing": "Existing Skill",
+        "scanPassed": "Local scan passed",
+        "scanWarning": "Local scan warnings",
+        "scanBlocked": "Local scan blocked",
+        "noDependencies": "No declared dependencies",
+        "overwrite": "Overwrite the existing Skill",
+        "partial": "{{installed}} installed, {{failed}} failed",
+        "allFailed": "No Skills were installed",
+        "complete": "{{count}} Skills installed",
+        "disabled": "Local archive upload is disabled by the Gateway configuration.",
+        "disabledDescription": "Enable skills.install.allowUploadedArchives in openclaw.json, then reconnect. You can still inspect a ZIP while installation is blocked.",
+        "preflightTitle": "Local structure preflight",
+        "preflightBoundary": "This browser check is not a security boundary. Every selected Skill is installed atomically and receives the Gateway security scan during installation.",
+        "chooseZip": "Choose Skill ZIP",
+        "skillsFound": "{{count}} Skills found",
+        "multiSkillZip": "Multi-Skill ZIP",
+        "singleSkillZip": "Single-Skill ZIP",
+        "gatewayScan": "Gateway security scan runs during installation.",
+        "noPreview": "OpenClaw 2026.6.1 has no scan-only verdict RPC, so no pre-install security verdict is fabricated here.",
+        "review": "Review installation",
+        "resolveConflict": "Confirm overwrite for every selected conflicting Skill.",
+        "confirmTitle": "Confirm local Skill installation",
+        "installSelected": "Install selected",
+        "selectedCount": "{{count}} Skill selected",
+        "atomicPartial": "Skills are installed one by one. If one fails, successful items remain installed and every result is reported separately.",
+        "securityAcknowledge": "I understand that the Gateway security verdict is produced during installation.",
+        "resultInstalled": "Installed: {{name}}",
+        "resultFailed": "Failed: {{name}}"
       }
     },
     "channels": {
@@ -1623,7 +1693,15 @@
       "config": "Config",
       "copyConfigPath": "Copy openclaw.json Path",
       "toggleFailed": "Plugin toggle failed — the gateway may be restarting. Try again shortly",
-      "packages": "Installed Skill Packages"
+      "packages": "Installed Skill Packages",
+      "installed": "Installed",
+      "configured": "Configured",
+      "enabled": "Enabled in config",
+      "disabled": "Disabled in config",
+      "allowUnknown": "Allowlist not explicit",
+      "allowed": "Allowed",
+      "notAllowed": "Not allowed",
+      "installSource": "Install source"
     }
   }
 }
