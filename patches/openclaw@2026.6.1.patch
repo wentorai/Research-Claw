@@ -1,26 +1,19 @@
-diff --git a/dist/command-path-policy-YVod7apR.js b/dist/command-path-policy-YVod7apR.js
---- a/dist/command-path-policy-YVod7apR.js
-+++ b/dist/command-path-policy-YVod7apR.js
-@@ -620,4 +620,5 @@
- 		commandPath: ["skills", "install"],
--		exact: true
-+		exact: true,
-+		policy: { loadPlugins: "always", pluginRegistry: { scope: "all" } }
- 	},
- 	{
-@@ -633,4 +634,10 @@
- 		commandPath: ["skills", "update"],
--		exact: true
-+		exact: true,
-+		policy: { loadPlugins: "always", pluginRegistry: { scope: "all" } }
--	}
-+	},
-+	{
-+		commandPath: ["skills", "workshop"],
-+		exact: true,
-+		policy: { loadPlugins: "always", pluginRegistry: { scope: "all" } }
-+	}
- ];
+diff --git a/dist/apply-BjWc0fck.js b/dist/apply-BjWc0fck.js
+index b632c3e3e89d08765fa791a950bbadbe627079b2..4f3abcac3972abb416409723533cdec733f4ec22 100644
+--- a/dist/apply-BjWc0fck.js
++++ b/dist/apply-BjWc0fck.js
+@@ -24,7 +24,10 @@ async function applyClaudePlan(params) {
+ 		else if (item.kind === "manual") items.push(applyManualItem(item));
+ 		else if (item.action === "archive") items.push(await archiveMigrationItem(item, reportDir));
+ 		else if (item.action === "append") items.push(await appendItem(item));
+-		else if (item.action === "create" && item.kind === "skill") items.push(await applyGeneratedSkillItem(item, { overwrite: params.ctx.overwrite }));
++		else if (item.action === "create" && item.kind === "skill") items.push(await applyGeneratedSkillItem(item, {
++			overwrite: params.ctx.overwrite,
++			reportDir
++		}));
+ 		else items.push(await copyMigrationFileItem(item, reportDir, { overwrite: params.ctx.overwrite }));
+ 	}
+ 	const result = {
 diff --git a/dist/chat-display-projection-CMTVNdR4.js b/dist/chat-display-projection-CMTVNdR4.js
 index d19aba1a5e8a9fb58fa09789dc5c41884e44a0b5..c41419637a5016b77bb4126a640581e8cae41629 100644
 --- a/dist/chat-display-projection-CMTVNdR4.js
@@ -33,6 +26,90 @@ index d19aba1a5e8a9fb58fa09789dc5c41884e44a0b5..c41419637a5016b77bb4126a640581e8
  	if (roleContent.role === "user" && isSubagentAnnounceInterSessionUserMessage(message)) return true;
  	if (roleContent.role === "user" && isEmptyTextOnlyContent(message.content ?? message.text) && !hasTranscriptMediaPaths(message)) return true;
  	if (roleContent.role === "assistant" && isEmptyTextOnlyContent(message.content ?? message.text)) return false;
+diff --git a/dist/command-execution-startup-vDv7YBAw.js b/dist/command-execution-startup-vDv7YBAw.js
+index 65d322ec66ee56cddf63cb97e1ce963882c4f368..8de4907806a3d52f9d511aa783a0ebe0f12ea330 100644
+--- a/dist/command-execution-startup-vDv7YBAw.js
++++ b/dist/command-execution-startup-vDv7YBAw.js
+@@ -16,6 +16,7 @@ async function ensureCliPluginRegistryLoaded(params) {
+ 	try {
+ 		ensurePluginRegistryLoaded({
+ 			scope: params.scope,
++			...params.onlyPluginIds ? { onlyPluginIds: params.onlyPluginIds } : {},
+ 			...params.config ? { config: params.config } : {},
+ 			...params.activationSourceConfig ? { activationSourceConfig: params.activationSourceConfig } : {}
+ 		});
+@@ -40,8 +41,10 @@ async function ensureCliCommandBootstrap(params) {
+ 		});
+ 	}
+ 	if (!params.loadPlugins) return;
++	const pluginRegistry = params.pluginRegistry ?? resolveCliCommandPathPolicy(params.commandPath).pluginRegistry;
+ 	await ensureCliPluginRegistryLoaded({
+-		scope: (params.pluginRegistry ?? resolveCliCommandPathPolicy(params.commandPath).pluginRegistry).scope,
++		scope: pluginRegistry.scope,
++		...pluginRegistry.onlyPluginIds ? { onlyPluginIds: pluginRegistry.onlyPluginIds } : {},
+ 		routeLogsToStderr: params.suppressDoctorStdout
+ 	});
+ }
+diff --git a/dist/command-path-policy-YVod7apR.js b/dist/command-path-policy-YVod7apR.js
+index 22dedc85168dd98cca2b25df51919fd51a748e2b..f7c62a20290dd3dc1aaccb65b6caa5c3c2f63fa4 100644
+--- a/dist/command-path-policy-YVod7apR.js
++++ b/dist/command-path-policy-YVod7apR.js
+@@ -174,7 +174,11 @@ const cliCommandCatalog = [
+ 		commandPath: ["migrate"],
+ 		policy: {
+ 			bypassConfigGuard: true,
+-			loadPlugins: "never",
++			loadPlugins: "always",
++			pluginRegistry: {
++				scope: "all",
++				onlyPluginIds: ["research-claw-core"]
++			},
+ 			networkProxy: "bypass"
+ 		}
+ 	},
+@@ -618,7 +622,14 @@ const cliCommandCatalog = [
+ 	},
+ 	{
+ 		commandPath: ["skills", "install"],
+-		exact: true
++		exact: true,
++		policy: {
++			loadPlugins: "always",
++			pluginRegistry: {
++				scope: "all",
++				onlyPluginIds: ["research-claw-core"]
++			}
++		}
+ 	},
+ 	{
+ 		commandPath: ["skills", "list"],
+@@ -631,7 +642,25 @@ const cliCommandCatalog = [
+ 	},
+ 	{
+ 		commandPath: ["skills", "update"],
+-		exact: true
++		exact: true,
++		policy: {
++			loadPlugins: "always",
++			pluginRegistry: {
++				scope: "all",
++				onlyPluginIds: ["research-claw-core"]
++			}
++		}
++	},
++	{
++		commandPath: ["skills", "workshop"],
++		exact: true,
++		policy: {
++			loadPlugins: "always",
++			pluginRegistry: {
++				scope: "all",
++				onlyPluginIds: ["research-claw-core"]
++			}
++		}
+ 	}
+ ];
+ //#endregion
 diff --git a/dist/embedded-agent-eUaVGd6D.js b/dist/embedded-agent-eUaVGd6D.js
 index 8b6e1342cdfd6f9539f1eada48fefdf658055936..9fd36d55fe9b5c6502a04a2a8066f8397b62d0b6 100644
 --- a/dist/embedded-agent-eUaVGd6D.js
@@ -220,6 +297,345 @@ index a2e13c59bb9803a88a80a6250d07455cee9cd706..e454d3c386eeb5d5375703a467ea2a74
  	if (providerRuntimeFailureKind === "proxy") return "LLM request failed: proxy or tunnel configuration blocked the provider request.";
  	if (isContextOverflowError(raw)) return "Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session, or use a larger-context model.";
  	if (isReasoningConstraintErrorMessage(raw)) return "Reasoning is required for this model endpoint. Use /think minimal (or any non-off level) and try again.";
+diff --git a/dist/hook-runner-global-CBGmN_LW.js b/dist/hook-runner-global-CBGmN_LW.js
+index ef34f3c0727c0859e301eeb3e397cd92c1a2ce9d..24c260ccce52ff4304a16c94d1977da5bbf0302e 100644
+--- a/dist/hook-runner-global-CBGmN_LW.js
++++ b/dist/hook-runner-global-CBGmN_LW.js
+@@ -170,6 +170,7 @@ function createHookRunner(registry, options = {}) {
+ 	const catchErrors = options.catchErrors ?? true;
+ 	const failurePolicyByHook = {
+ 		before_agent_run: "fail-closed",
++		before_install: "fail-closed",
+ 		...options.failurePolicyByHook
+ 	};
+ 	const voidHookTimeoutMsByHook = {
+diff --git a/dist/http-common-DuE8kH2j.js b/dist/http-common-DuE8kH2j.js
+index a21960ceceea662e2e9d77e8ed271b7a0670753c..647693ce966b7f6ea375228be15bb4197becdf83 100644
+--- a/dist/http-common-DuE8kH2j.js
++++ b/dist/http-common-DuE8kH2j.js
+@@ -10,7 +10,7 @@ import { d as readJsonBody } from "./hooks-BByyPpU2.js";
+ function setDefaultSecurityHeaders(res, opts) {
+ 	res.setHeader("X-Content-Type-Options", "nosniff");
+ 	res.setHeader("Referrer-Policy", "no-referrer");
+-	res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
++	res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()");
+ 	const strictTransportSecurity = opts?.strictTransportSecurity;
+ 	if (typeof strictTransportSecurity === "string" && strictTransportSecurity.length > 0) res.setHeader("Strict-Transport-Security", strictTransportSecurity);
+ }
+diff --git a/dist/install-security-scan.runtime-DLCLNQ_S.js b/dist/install-security-scan.runtime-DLCLNQ_S.js
+index ab4c2f065155c60a5a9309f45d2eb891638baa3b..a017de119aca0fd91bff8b3619b24e3ace6330fe 100644
+--- a/dist/install-security-scan.runtime-DLCLNQ_S.js
++++ b/dist/install-security-scan.runtime-DLCLNQ_S.js
+@@ -7,8 +7,8 @@ import { i as isPathInside } from "./path-BlG8lhgR.js";
+ import { o as tryReadJson } from "./json-files-BhHaMcRK.js";
+ import { n as listBuiltRuntimeEntryCandidates } from "./package-entrypoints-DErnoq1J.js";
+ import { t as extensionUsesSkippedScannerPath } from "./scan-paths-BJFKmVji.js";
+-import { t as getGlobalHookRunner } from "./hook-runner-global-CBGmN_LW.js";
+-import { i as scanDirectoryWithSummary } from "./scanner-CCQg3MsL.js";
++import { n as getGlobalPluginRegistry, t as getGlobalHookRunner } from "./hook-runner-global-CBGmN_LW.js";
++import { a as scanSkillContent, i as scanDirectoryWithSummary, n as isScannable } from "./scanner-CCQg3MsL.js";
+ import path from "node:path";
+ import fs from "node:fs/promises";
+ const blockedInstallDependencyPackageNames = [...["plain-crypto-js"]];
+@@ -751,7 +751,11 @@ async function runBeforeInstallHook(params) {
+ 		if (hookResult?.findings) {
+ 			for (const finding of hookResult.findings) if (finding.severity === "critical" || finding.severity === "warn") params.logger.warn?.(`Plugin scanner: ${finding.message} (${finding.file}:${finding.line})`);
+ 		}
+-	} catch {}
++	} catch (error) {
++		const reason = `Installation security hook failed: ${error instanceof Error ? error.message : String(error)}`;
++		params.logger.warn?.(`WARNING: ${params.installLabel} blocked because ${reason}`);
++		if (params.targetType === "skill") return { blocked: { reason } };
++	}
+ }
+ async function scanBundleInstallSourceRuntime(params) {
+ 	const dependencyBlocked = await scanManifestDependencyDenylist({
+@@ -909,14 +913,284 @@ async function scanFileInstallSourceRuntime(params) {
+ 	});
+ 	return hookResult?.blocked ? hookResult : builtinBlocked;
+ }
++const SKILL_INSTALL_MAX_ENTRIES = 2e3;
++const SKILL_INSTALL_MAX_DIRECTORIES = 1e3;
++const SKILL_INSTALL_MAX_FILES = 1e3;
++const SKILL_INSTALL_MAX_DEPTH = 16;
++const SKILL_INSTALL_MAX_TOTAL_BYTES = 128 * 1024 * 1024;
++const SKILL_INSTALL_MAX_CODE_FILE_BYTES = 1024 * 1024;
++const SKILL_INSTALL_MAX_PROMPT_FILES = 500;
++const SKILL_INSTALL_MAX_PROMPT_TOTAL_BYTES = 16 * 1024 * 1024;
++const SKILL_INSTALL_MAX_PROMPT_FILE_BYTES = 1024 * 1024;
++const SKILL_INSTALL_PROMPT_EXTENSIONS = /* @__PURE__ */ new Set([
++	".md",
++	".mdx",
++	".txt",
++	".rst",
++	".adoc",
++	".org"
++]);
++const SKILL_INSTALL_FORBIDDEN_DIRECTORIES = /* @__PURE__ */ new Set([
++	"node_modules",
++	".git",
++	".hg",
++	".svn"
++]);
++const SKILL_INSTALL_NATIVE_EXTENSIONS = /* @__PURE__ */ new Set([
++	".exe",
++	".dll",
++	".dylib",
++	".so",
++	".node",
++	".o",
++	".obj",
++	".a",
++	".lib",
++	".msi",
++	".msix",
++	".appx",
++	".com",
++	".scr",
++	".sys",
++	".lnk",
++	".url",
++	".pkg",
++	".dmg",
++	".xip",
++	".jar",
++	".class",
++	".wasm",
++	".apk",
++	".dex",
++	".whl",
++	".pyc",
++	".pyo"
++]);
++const SKILL_INSTALL_NESTED_ARCHIVE_EXTENSIONS = /* @__PURE__ */ new Set([
++	".zip",
++	".tar",
++	".tgz",
++	".gz",
++	".bz2",
++	".xz",
++	".7z",
++	".rar",
++	".pyz"
++]);
++const SKILL_INSTALL_PYTHON_EXTENSIONS = /* @__PURE__ */ new Set([
++	".py",
++	".pyw"
++]);
++const SKILL_INSTALL_SHELL_EXTENSIONS = /* @__PURE__ */ new Set([
++	".sh",
++	".bash",
++	".zsh",
++	".fish",
++	".ksh",
++	".command",
++	".ps1",
++	".psm1",
++	".bat",
++	".cmd"
++]);
++const SKILL_INSTALL_UNSUPPORTED_EXECUTABLE_EXTENSIONS = /* @__PURE__ */ new Set([
++	".vbs",
++	".vbe",
++	".wsf",
++	".wsc",
++	".hta",
++	".reg",
++	".scpt",
++	".applescript",
++	".ipynb",
++	".r",
++	".rmd",
++	".qmd",
++	".lua",
++	".rb",
++	".pl",
++	".php",
++	".jl",
++	".m",
++	".do",
++	".sas"
++]);
++const SKILL_INSTALL_UNSUPPORTED_EXECUTABLE_BASENAMES = /* @__PURE__ */ new Set([
++	"makefile",
++	"gnumakefile",
++	"justfile"
++]);
++function skillInstallFinding(ruleId, file, message) {
++	return {
++		ruleId,
++		severity: "critical",
++		message,
++		file,
++		line: 1
++	};
++}
++function skillInstallNativeMagic(prefix) {
++	if (prefix.length >= 4 && prefix[0] === 127 && prefix[1] === 69 && prefix[2] === 76 && prefix[3] === 70) return "ELF";
++	if (prefix.length >= 2 && prefix[0] === 77 && prefix[1] === 90) return "PE";
++	if (prefix.length < 4) return;
++	const signature = Buffer.from(prefix.subarray(0, 4)).toString("hex");
++	return {
++		feedface: "Mach-O",
++		feedfacf: "Mach-O",
++		cefaedfe: "Mach-O",
++		cffaedfe: "Mach-O",
++		cafebabe: "fat Mach-O or Java class",
++		cafebabf: "fat Mach-O",
++		bebafeca: "fat Mach-O",
++		bfbafeca: "fat Mach-O",
++		"0061736d": "WebAssembly"
++	}[signature];
++}
++function skillInstallFirstLine(prefix) {
++	return Buffer.from(prefix).toString("utf8").split(/\r?\n/, 1)[0] ?? "";
++}
++function skillInstallHasPythonShebang(prefix) {
++	return /^#!.*\b(?:python(?:\d+(?:\.\d+)*)?|uv)(?:\s|$)/i.test(skillInstallFirstLine(prefix));
++}
++function skillInstallHasShellShebang(prefix) {
++	return /^#!.*\b(?:sh|bash|zsh|dash|fish|ksh|pwsh|powershell)(?:\s|$)/i.test(skillInstallFirstLine(prefix));
++}
++function hasTrustedSkillInstallScanner() {
++	return getGlobalPluginRegistry()?.typedHooks?.some((hook) => hook.pluginId === "research-claw-core" && hook.hookName === "before_install") === true;
++}
++async function packageManifestHasScripts(filePath, size) {
++	if (size > SKILL_INSTALL_MAX_CODE_FILE_BYTES) return true;
++	try {
++		const parsed = JSON.parse(await fs.readFile(filePath, "utf8"));
++		return Boolean(parsed && typeof parsed === "object" && parsed.scripts && typeof parsed.scripts === "object" && Object.keys(parsed.scripts).length > 0);
++	} catch {
++		return true;
++	}
++}
++function mergeSkillBuiltinScans(...scans) {
++	const failed = scans.find((scan) => scan.status === "error");
++	if (failed) return failed;
++	return {
++		status: "ok",
++		scannedFiles: scans.reduce((total, scan) => total + scan.scannedFiles, 0),
++		critical: scans.reduce((total, scan) => total + scan.critical, 0),
++		warn: scans.reduce((total, scan) => total + scan.warn, 0),
++		info: scans.reduce((total, scan) => total + scan.info, 0),
++		findings: scans.flatMap((scan) => scan.findings)
++	};
++}
++async function scanSkillInstallEnvelope(sourceDir, trustedExecutableScanner) {
++	const root = path.resolve(sourceDir);
++	const queue = [{
++		dir: root,
++		depth: 0
++	}];
++	let entriesSeen = 0;
++	let directoriesSeen = 0;
++	let filesSeen = 0;
++	let totalBytes = 0;
++	let promptFiles = 0;
++	let promptBytes = 0;
++	const findings = [];
++	try {
++		while (queue.length > 0) {
++			const current = queue.shift();
++			if (!current) continue;
++			const currentStats = await fs.lstat(current.dir);
++			if (currentStats.isSymbolicLink() || !currentStats.isDirectory()) throw new Error(`skill install source contains a non-directory or symlink at ${path.relative(root, current.dir) || "."}`);
++			const entries = await fs.readdir(current.dir, { withFileTypes: true });
++			for (const entry of entries.toSorted((left, right) => left.name.localeCompare(right.name))) {
++				entriesSeen += 1;
++				if (entriesSeen > SKILL_INSTALL_MAX_ENTRIES) throw new Error(`skill install source exceeded max entries (${SKILL_INSTALL_MAX_ENTRIES})`);
++				const absolutePath = path.join(current.dir, entry.name);
++				const relativePath = path.relative(root, absolutePath).split(path.sep).join("/");
++				if (entry.isSymbolicLink()) throw new Error(`skill install source contains a symlink at ${relativePath}`);
++				if (entry.isDirectory()) {
++					directoriesSeen += 1;
++					if (directoriesSeen > SKILL_INSTALL_MAX_DIRECTORIES) throw new Error(`skill install source exceeded max directories (${SKILL_INSTALL_MAX_DIRECTORIES})`);
++					if (SKILL_INSTALL_FORBIDDEN_DIRECTORIES.has(entry.name.toLowerCase())) throw new Error(`skill install source contains forbidden vendored directory ${relativePath}`);
++					if (current.depth + 1 > SKILL_INSTALL_MAX_DEPTH) throw new Error(`skill install source exceeded max depth (${SKILL_INSTALL_MAX_DEPTH}) at ${relativePath}`);
++					queue.push({
++						dir: absolutePath,
++						depth: current.depth + 1
++					});
++					continue;
++				}
++				if (!entry.isFile()) throw new Error(`skill install source contains a special filesystem entry at ${relativePath}`);
++				const stats = await fs.lstat(absolutePath);
++				if (stats.isSymbolicLink() || !stats.isFile()) throw new Error(`skill install source changed type while scanning ${relativePath}`);
++				filesSeen += 1;
++				if (filesSeen > SKILL_INSTALL_MAX_FILES) throw new Error(`skill install source exceeded max files (${SKILL_INSTALL_MAX_FILES})`);
++				totalBytes += stats.size;
++				if (totalBytes > SKILL_INSTALL_MAX_TOTAL_BYTES) throw new Error(`skill install source exceeded max bytes (${SKILL_INSTALL_MAX_TOTAL_BYTES})`);
++				if (isScannable(relativePath) && stats.size > SKILL_INSTALL_MAX_CODE_FILE_BYTES) throw new Error(`skill code file exceeds scanner byte limit at ${relativePath}`);
++				const extension = path.extname(relativePath).toLowerCase();
++				const basename = path.basename(relativePath).toLowerCase();
++				const handle = await fs.open(absolutePath, "r");
++				let prefix;
++				try {
++					const buffer = Buffer.alloc(Math.min(stats.size, 4096));
++					const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
++					prefix = buffer.subarray(0, bytesRead);
++				} finally {
++					await handle.close();
++				}
++				const nativeMagic = skillInstallNativeMagic(prefix);
++				if (SKILL_INSTALL_NATIVE_EXTENSIONS.has(extension) || nativeMagic) {
++					findings.push(skillInstallFinding("skill-install-native-artifact", relativePath, nativeMagic ? `${nativeMagic} executable or compiled payload is not allowed` : `Executable or compiled ${extension || "native"} payload is not allowed`));
++					continue;
++				}
++				if (SKILL_INSTALL_NESTED_ARCHIVE_EXTENSIONS.has(extension)) {
++					findings.push(skillInstallFinding("skill-install-nested-archive", relativePath, `Opaque nested archive ${extension} cannot be fully reviewed`));
++					continue;
++				}
++				if (SKILL_INSTALL_UNSUPPORTED_EXECUTABLE_EXTENSIONS.has(extension) || SKILL_INSTALL_UNSUPPORTED_EXECUTABLE_BASENAMES.has(basename) || basename === "package.json" && await packageManifestHasScripts(absolutePath, stats.size)) {
++					findings.push(skillInstallFinding("skill-install-unsupported-executable", relativePath, "Executable file uses a language or manifest without a supported security scanner"));
++					continue;
++				}
++				const anyShebang = prefix.length >= 2 && prefix[0] === 35 && prefix[1] === 33;
++				if (!trustedExecutableScanner && (SKILL_INSTALL_PYTHON_EXTENSIONS.has(extension) || skillInstallHasPythonShebang(prefix) || SKILL_INSTALL_SHELL_EXTENSIONS.has(extension) || skillInstallHasShellShebang(prefix) || anyShebang || (stats.mode & 73) !== 0)) {
++					findings.push(skillInstallFinding("skill-install-trusted-scanner-required", relativePath, "Executable scripts require the Research-Claw install security scanner"));
++					continue;
++				}
++				if (!SKILL_INSTALL_PROMPT_EXTENSIONS.has(extension)) continue;
++				promptFiles += 1;
++				promptBytes += stats.size;
++				if (promptFiles > SKILL_INSTALL_MAX_PROMPT_FILES) throw new Error(`skill install source exceeded max prompt files (${SKILL_INSTALL_MAX_PROMPT_FILES})`);
++				if (stats.size > SKILL_INSTALL_MAX_PROMPT_FILE_BYTES) throw new Error(`skill prompt file exceeds scanner byte limit at ${relativePath}`);
++				if (promptBytes > SKILL_INSTALL_MAX_PROMPT_TOTAL_BYTES) throw new Error(`skill install source exceeded prompt text byte limit (${SKILL_INSTALL_MAX_PROMPT_TOTAL_BYTES})`);
++				const content = await fs.readFile(absolutePath, "utf8");
++				if (content.includes("\0")) throw new Error(`skill prompt file contains binary content at ${relativePath}`);
++				findings.push(...scanSkillContent(content, relativePath));
++			}
++		}
++	} catch (error) {
++		return buildBuiltinScanFromError(error);
++	}
++	return buildBuiltinScanFromSummary({
++		scannedFiles: promptFiles,
++		critical: findings.filter((finding) => finding.severity === "critical").length,
++		warn: findings.filter((finding) => finding.severity === "warn").length,
++		info: findings.filter((finding) => finding.severity === "info").length,
++		findings
++	});
++}
+ async function scanSkillInstallSourceRuntime(params) {
+-	const builtinScan = await scanDirectoryTarget({
++	const trustedBundledDependencyRecipe = params.origin === "openclaw-bundled" && params.installSpec != null;
++	const envelopeScan = await scanSkillInstallEnvelope(params.sourceDir, hasTrustedSkillInstallScanner() || trustedBundledDependencyRecipe);
++	const codeScan = envelopeScan.status === "error" ? envelopeScan : await scanDirectoryTarget({
++		excludeTestFiles: false,
++		failOnTruncated: true,
++		includeHiddenDirectories: true,
++		includeNodeModules: true,
+ 		logger: params.logger,
++		maxFiles: SKILL_INSTALL_MAX_FILES,
+ 		path: params.sourceDir,
+ 		suspiciousMessage: "Skill \"{target}\" has {count} suspicious code pattern(s). Run \"openclaw security audit --deep\" for details.",
+ 		targetName: params.skillName,
+ 		warningMessage: `WARNING: Skill "${params.skillName}" contains dangerous code patterns`
+ 	});
++	const builtinScan = mergeSkillBuiltinScans(envelopeScan, codeScan);
+ 	const builtinBlocked = buildBlockedScanResult({
+ 		builtinScan,
+ 		dangerouslyForceUnsafeInstall: params.dangerouslyForceUnsafeInstall,
 diff --git a/dist/isolated-agent-Cw8sZTVo.js b/dist/isolated-agent-Cw8sZTVo.js
 index b3cc0ca9032b3a93c42a28bf217082e204328538..03a41513a62b7f8238fc852d65898244d80a3649 100644
 --- a/dist/isolated-agent-Cw8sZTVo.js
@@ -261,6 +677,89 @@ index b3cc0ca9032b3a93c42a28bf217082e204328538..03a41513a62b7f8238fc852d65898244
  		});
  		if (finalized.status === "error") {
  			outcome = "error";
+diff --git a/dist/message-handler-Du1uvc4A.js b/dist/message-handler-Du1uvc4A.js
+index f1fbb70c63eab7881589bb99fb503b549bf4e7bf..19c0a9de751397e9fd623fea99b08145a5cc4e70 100644
+--- a/dist/message-handler-Du1uvc4A.js
++++ b/dist/message-handler-Du1uvc4A.js
+@@ -1573,6 +1573,21 @@ function attachGatewayWsMessageHandler(params) {
+ 						}
+ 					}
+ 				}
++				const expectedControlUiVersion = process.env.RESEARCH_CLAW_UI_VERSION?.trim();
++				if (
++					expectedControlUiVersion
++					&& connectParams.client.id === GATEWAY_CLIENT_IDS.CONTROL_UI
++					&& connectParams.client.version !== expectedControlUiVersion
++				) {
++					logWsControl.warn(`stale Research-Claw Dashboard rejected conn=${connId} clientVersion=${formatForLog(connectParams.client.version)} expected=${formatForLog(expectedControlUiVersion)}`);
++					sendHandshakeErrorResponse("FORBIDDEN", `Research-Claw was updated to v${expectedControlUiVersion}. Refresh this page to load the current Dashboard.`, { details: {
++						code: "RESEARCH_CLAW_UI_VERSION_MISMATCH",
++						clientVersion: connectParams.client.version,
++						expectedVersion: expectedControlUiVersion
++					} });
++					close(1008, "stale Research-Claw Dashboard");
++					return;
++				}
+ 				if (!setClient(nextClient)) {
+ 					setCloseCause("connect-aborted-before-register", {
+ 						...clientMeta,
+diff --git a/dist/migration-runtime-D-5vGkaP.js b/dist/migration-runtime-D-5vGkaP.js
+index 8a9aa6e82c82546be7863b3218aff4812f723ec7..05a8b4dec91fbcbbc8dd0efe9c4117db6bc24df6 100644
+--- a/dist/migration-runtime-D-5vGkaP.js
++++ b/dist/migration-runtime-D-5vGkaP.js
+@@ -1,5 +1,7 @@
+ import { w as pathExists } from "./fs-safe-aqmM_n6V.js";
+ import { g as redactMigrationPlan, l as markMigrationItemConflict, n as MIGRATION_REASON_TARGET_EXISTS, t as MIGRATION_REASON_MISSING_SOURCE_OR_TARGET, u as markMigrationItemError } from "./migration-DTmck0VH.js";
++import { t as installPackageDir } from "./install-package-dir-Cb2Qw78Z.js";
++import { a as scanSkillInstallSource } from "./install-security-scan-jlzAVrl9.js";
+ import path from "node:path";
+ import fs from "node:fs/promises";
+ import crypto from "node:crypto";
+@@ -107,6 +109,44 @@ async function copyMigrationFileItem(item, reportDir, opts = {}) {
+ 	if (!item.source || !item.target) return markMigrationItemError(item, MIGRATION_REASON_MISSING_SOURCE_OR_TARGET);
+ 	try {
+ 		if (await exists(item.target) && !opts.overwrite) return markMigrationItemConflict(item, MIGRATION_REASON_TARGET_EXISTS);
++		if (item.kind === "skill") {
++			let stagedScanBlocked;
++			let backupPath;
++			const install = await installPackageDir({
++				sourceDir: item.source,
++				targetDir: item.target,
++				mode: opts.overwrite ? "update" : "install",
++				timeoutMs: 12e4,
++				logger: {},
++				copyErrorPrefix: "failed to migrate skill",
++				hasDeps: false,
++				depsLogMessage: "",
++				afterCopy: async (stageDir) => {
++					if (!await exists(path.join(stageDir, "SKILL.md"))) throw new Error("staged migration skill is missing SKILL.md");
++					const scanResult = await scanSkillInstallSource({
++						installId: item.id,
++						logger: {},
++						origin: "migration",
++						skillName: typeof item.details?.skillName === "string" ? item.details.skillName : item.id,
++						sourceDir: stageDir
++					});
++					if (scanResult?.blocked) {
++						stagedScanBlocked = scanResult.blocked;
++						throw new Error(scanResult.blocked.reason);
++					}
++					if (opts.overwrite) backupPath = await backupExistingMigrationTarget(item.target, reportDir);
++				}
++			});
++			if (!install.ok) return markMigrationItemError(item, stagedScanBlocked?.reason ?? install.error);
++			return {
++				...item,
++				status: "migrated",
++				details: {
++					...item.details,
++					...backupPath ? { backupPath } : {}
++				}
++			};
++		}
+ 		const backupPath = opts.overwrite ? await backupExistingMigrationTarget(item.target, reportDir) : void 0;
+ 		await fs.mkdir(path.dirname(item.target), { recursive: true });
+ 		await fs.cp(item.source, item.target, {
 diff --git a/dist/openai-transport-stream-BN2CKZjs.js b/dist/openai-transport-stream-BN2CKZjs.js
 index ead7d378ce86c31f483e84fff2dbb9dd40380ffc..779ec4ec59a6c05dfbe5e62ff5d3d8853d2d1e35 100644
 --- a/dist/openai-transport-stream-BN2CKZjs.js
@@ -273,6 +772,41 @@ index ead7d378ce86c31f483e84fff2dbb9dd40380ffc..779ec4ec59a6c05dfbe5e62ff5d3d885
  	const body = await readResponseTextLimited(params.response).catch(() => "");
  	await params.release().catch(() => void 0);
  	params.localServiceLease?.release();
+diff --git a/dist/program-GRZ2W39w.js b/dist/program-GRZ2W39w.js
+index e1614c5e7b2b096795e880128dc836f93b31c066..2e36c6f6f3aecdfd7b13867c23f56c582cbe5496 100644
+--- a/dist/program-GRZ2W39w.js
++++ b/dist/program-GRZ2W39w.js
+@@ -100,13 +100,14 @@ function registerPreActionHooks(program, programVersion) {
+ 		const cliLogLevel = getCliLogLevel(actionCommand);
+ 		if (cliLogLevel) process.env.OPENCLAW_LOG_LEVEL = cliLogLevel;
+ 		if (!verbose) process.env.NODE_NO_WARNINGS ??= "1";
+-		if (shouldBypassConfigGuardForCommandPath(commandPath) || isGuidedConfigAction(actionCommand) || isGuidedConfigCommandPath(commandPath)) return;
++		const bypassConfigGuard = shouldBypassConfigGuardForCommandPath(commandPath);
++		if ((bypassConfigGuard || isGuidedConfigAction(actionCommand) || isGuidedConfigCommandPath(commandPath)) && !startupPolicy.loadPlugins) return;
+ 		await ensureCliExecutionBootstrap({
+ 			runtime: defaultRuntime,
+ 			commandPath,
+ 			startupPolicy,
+ 			allowInvalid: shouldAllowInvalidConfigForAction(actionCommand, commandPath),
+-			skipConfigGuard: shouldBypassConfigGuardForCommandPath(commandPath)
++			skipConfigGuard: bypassConfigGuard
+ 		});
+ 	});
+ }
+diff --git a/dist/register.subclis-core-D0EOSNz5.js b/dist/register.subclis-core-D0EOSNz5.js
+index 6d1813dbb4409d7c76d38b0989c1d4d5f8843019..003620c1c79c7f3d82fb266e18ae1625a04cd9aa 100644
+--- a/dist/register.subclis-core-D0EOSNz5.js
++++ b/dist/register.subclis-core-D0EOSNz5.js
+@@ -60,7 +60,8 @@ async function registerGatewayRunOnly(program) {
+ }
+ async function registerSubCliWithPluginCommands(program, argv, registerSubCli, pluginCliPosition) {
+ 	const invocation = resolveCliArgvInvocation(argv);
+-	const shouldRegisterPluginCommands = !invocation.hasHelpOrVersion && resolveCliCommandPathPolicy(invocation.commandPath).loadPlugins !== "never";
++	const commandPolicy = resolveCliCommandPathPolicy(invocation.commandPath);
++	const shouldRegisterPluginCommands = !invocation.hasHelpOrVersion && commandPolicy.loadPlugins !== "never" && !commandPolicy.pluginRegistry.onlyPluginIds;
+ 	if (pluginCliPosition === "before" && shouldRegisterPluginCommands) {
+ 		const { registerPluginCliCommandsFromValidatedConfig } = await pluginCliLoader.load();
+ 		await registerPluginCliCommandsFromValidatedConfig(program);
 diff --git a/dist/run-executor.runtime-BRvg_sz_.js b/dist/run-executor.runtime-BRvg_sz_.js
 index 150d97b2a270d1b3c97fdbe56feab98779a7c86d..64c8f849ec8b8f146eec95988624863f52835f35 100644
 --- a/dist/run-executor.runtime-BRvg_sz_.js
@@ -315,6 +849,33 @@ index 150d97b2a270d1b3c97fdbe56feab98779a7c86d..64c8f849ec8b8f146eec95988624863f
  					onExecutionStarted: params.onExecutionStarted,
  					onExecutionPhase: params.onExecutionPhase,
  					bootstrapPromptWarningSignaturesSeen,
+diff --git a/dist/scanner-CCQg3MsL.js b/dist/scanner-CCQg3MsL.js
+index 752450f49c5a2870c97aa4a2e5ec0fbd87545160..5b9771cbdca1204c01c09143ef9b8277d93bd41c 100644
+--- a/dist/scanner-CCQg3MsL.js
++++ b/dist/scanner-CCQg3MsL.js
+@@ -127,19 +127,19 @@ const SKILL_CONTENT_RULES = [
+ 		ruleId: "prompt-injection-ignore-instructions",
+ 		severity: "critical",
+ 		message: "Prompt-injection wording attempts to override higher-priority instructions",
+-		pattern: /ignore (all|any|previous|above|prior) instructions/i
++		pattern: /ignore (all|any|previous|above|prior) instructions|(?:忽略|无视|覆盖|绕过|替换).{0,20}(?:此前|之前|以上|上面|先前|所有).{0,20}(?:指令|指示|规则|要求)/iu
+ 	},
+ 	{
+ 		ruleId: "prompt-injection-system",
+ 		severity: "critical",
+ 		message: "Skill text references hidden prompt layers",
+-		pattern: /\b(system prompt|developer message|hidden instructions)\b/i
++		pattern: /\b(?:reveal|show|print|display|expose|disclose|extract|access|read|override|replace|change|modify|leak)\b.{0,80}\b(?:system prompt|developer message|hidden instructions)\b|\b(?:system prompt|developer message|hidden instructions)\b.{0,80}\b(?:reveal|show|print|display|expose|disclose|extract|access|read|override|replace|change|modify|leak)\b|(?:输出|泄露|显示|揭示|打印|暴露|提取|读取|访问|覆盖|替换|修改).{0,40}(?:系统提示词|系统提示|开发者消息|开发者指令|隐藏指令)|(?:系统提示词|系统提示|开发者消息|开发者指令|隐藏指令).{0,40}(?:输出|泄露|显示|揭示|打印|暴露|提取|读取|访问|覆盖|替换|修改)/iu
+ 	},
+ 	{
+ 		ruleId: "prompt-injection-tool",
+ 		severity: "critical",
+ 		message: "Skill text encourages bypassing tool approval",
+-		pattern: /\b(run|execute|invoke|call)\b.{0,50}\btool\b.{0,50}\bwithout\b.{0,30}\b(permission|approval)/i
++		pattern: /\b(run|execute|invoke|call)\b.{0,50}\btool\b.{0,50}\bwithout\b.{0,30}\b(permission|approval)|(?:未经|无需|不经|绕过).{0,15}(?:许可|批准|授权|确认).{0,30}(?:调用|运行|执行|使用).{0,20}(?:工具|tool)|(?:调用|运行|执行|使用).{0,20}(?:工具|tool).{0,30}(?:无需|不需|不用|绕过).{0,15}(?:许可|批准|授权|确认)/iu
+ 	},
+ 	{
+ 		ruleId: "shell-pipe-to-shell",
 diff --git a/dist/server-cron-CJwAiILI.js b/dist/server-cron-CJwAiILI.js
 index 1a515ff1ef454274e7046d51bc29f561d843d004..b752bc58dc9b34df8cf8473e3d937f3bc46374ce 100644
 --- a/dist/server-cron-CJwAiILI.js
@@ -345,10 +906,10 @@ index 1a515ff1ef454274e7046d51bc29f561d843d004..b752bc58dc9b34df8cf8473e3d937f3b
  		return {
  			status: "error",
 diff --git a/dist/service-yYn6i75I.js b/dist/service-yYn6i75I.js
-index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c66b20b40 100644
+index fab20d49454b27369355b247f5f7875d9f6b2b73..88164e34564e4af32b7020716225c8c5ef7c5485 100644
 --- a/dist/service-yYn6i75I.js
 +++ b/dist/service-yYn6i75I.js
-@@ -13,6 +13,7 @@
+@@ -13,6 +13,7 @@ import { t as resolveSkillWorkshopConfig } from "./config-BzmFRVJh.js";
  import { n as resolveSkillStatusEntry, t as buildWorkspaceSkillStatus } from "./status-BeKxEZi4.js";
  import { t as bumpSkillsSnapshotVersion } from "./refresh-state-DzUL33ps.js";
  import { a as scanSkillContent, o as scanSource } from "./scanner-CCQg3MsL.js";
@@ -356,7 +917,7 @@ index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c
  import path from "node:path";
  import fs from "node:fs/promises";
  import crypto from "node:crypto";
-@@ -132,7 +132,11 @@ const SKILL_WORKSHOP_LOCK_OPTIONS = {
+@@ -132,7 +133,11 @@ const SKILL_WORKSHOP_LOCK_OPTIONS = {
  };
  const skillWorkshopProcessLocks = /* @__PURE__ */ new Map();
  function createSkillProposalId(name, now = /* @__PURE__ */ new Date()) {
@@ -369,7 +930,7 @@ index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c
  	const date = now.toISOString().slice(0, 10).replaceAll("-", "");
  	const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 10);
  	return `${normalized.slice(0, 60)}-${date}-${suffix}`;
-@@ -831,6 +836,8 @@ async function applySkillProposal(input) {
+@@ -827,6 +832,8 @@ async function applySkillProposal(input) {
  		if (hashSkillProposalContent(content) !== record.draftHash) throw new Error("Proposal draft changed without updating proposal metadata.");
  		const supportFiles = await readProposalSupportFiles(record);
  		if (!readProposalFrontmatter(content)) throw new Error("Proposal draft must include proposal frontmatter.");
@@ -378,17 +939,15 @@ index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c
  		const scan = scanProposalBundle(content, supportFiles);
  		if (scan.state !== "clean") {
  			await updateSkillProposalRecord({ record: {
-@@ -860,6 +867,5 @@ async function applySkillProposal(input) {
+@@ -856,7 +863,6 @@ async function applySkillProposal(input) {
+ 			proposalId: record.id,
  			rollback
  		});
 -		const skillContent = stripProposalFrontmatterForSkill(content);
  		await publishProposalTarget({
  			workspaceDir: input.workspaceDir,
  			record,
-@@ -986,9 +992,49 @@ async function restoreUpdatedSupportFiles(params) {
- 		else await removeWorkspaceSupportFile({
- 			skillDir: params.record.target.skillDir,
- 			relativePath
+@@ -982,6 +988,46 @@ async function restoreUpdatedSupportFiles(params) {
  		});
  	}));
  }
@@ -448,6 +1007,127 @@ index 0be286a1199da7aa73fe235969712a5eb58a1f93..c3c16feb9c62303c140a8816267aebfd
  		const resolvedCurrent = await resolveSessionReferenceByKeyOrSessionId({
  			raw: rawInput,
  			alias: params.alias,
+diff --git a/dist/skills-CBjrx14I.js b/dist/skills-CBjrx14I.js
+index 6c793ea07f7fb09fb1f074b005a442b7a49a03f9..712b45cf9c72b271d6d393ec0ba8b906282a24b9 100644
+--- a/dist/skills-CBjrx14I.js
++++ b/dist/skills-CBjrx14I.js
+@@ -1,7 +1,9 @@
+ import { l as markMigrationItemConflict, n as MIGRATION_REASON_TARGET_EXISTS, o as createMigrationItem, t as MIGRATION_REASON_MISSING_SOURCE_OR_TARGET, u as markMigrationItemError } from "./migration-DTmck0VH.js";
+ import { l as sanitizeName, r as exists, s as readText } from "./helpers-Cj9pbeXK.js";
++import { n as copyMigrationFileItem } from "./migration-runtime-D-5vGkaP.js";
+ import path from "node:path";
+ import fs from "node:fs/promises";
++import os from "node:os";
+ //#region extensions/migrate-claude/skills.ts
+ async function listMarkdownFiles(root) {
+ 	const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+@@ -99,6 +101,7 @@ function generatedCommandSkillContent(params) {
+ }
+ async function applyGeneratedSkillItem(item, opts = {}) {
+ 	if (!item.source || !item.target) return markMigrationItemError(item, MIGRATION_REASON_MISSING_SOURCE_OR_TARGET);
++	let stagingRoot;
+ 	try {
+ 		if (await exists(item.target) && !opts.overwrite) return markMigrationItemConflict(item, MIGRATION_REASON_TARGET_EXISTS);
+ 		const sourceLabel = typeof item.details?.sourceLabel === "string" ? item.details.sourceLabel : path.basename(item.source);
+@@ -107,14 +110,28 @@ async function applyGeneratedSkillItem(item, opts = {}) {
+ 			sourceLabel,
+ 			commandContent: await readText(item.source) ?? ""
+ 		});
+-		await fs.mkdir(item.target, { recursive: true });
+-		await fs.writeFile(path.join(item.target, "SKILL.md"), content, "utf8");
+-		return {
++		stagingRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-migration-skill-"));
++		const sourceDir = path.join(stagingRoot, "source");
++		await fs.mkdir(sourceDir, { recursive: true });
++		await fs.writeFile(path.join(sourceDir, "SKILL.md"), content, "utf8");
++		const migrated = await copyMigrationFileItem({
+ 			...item,
+-			status: "migrated"
++			source: sourceDir
++		}, opts.reportDir ?? path.join(stagingRoot, "report"), {
++			overwrite: opts.overwrite
++		});
++		return {
++			...migrated,
++			source: item.source,
++			action: item.action
+ 		};
+ 	} catch (err) {
+ 		return markMigrationItemError(item, err instanceof Error ? err.message : String(err));
++	} finally {
++		if (stagingRoot) await fs.rm(stagingRoot, {
++			recursive: true,
++			force: true
++		}).catch(() => void 0);
+ 	}
+ }
+ //#endregion
+diff --git a/dist/status-BeKxEZi4.js b/dist/status-BeKxEZi4.js
+index 6d38ca694b0efd0815a0ffa30496dc38268cb85e..5000767b1b2832c69c732773bbf659d96a24ea23 100644
+--- a/dist/status-BeKxEZi4.js
++++ b/dist/status-BeKxEZi4.js
+@@ -89,17 +89,8 @@ async function installExtractedSkillRoot(params) {
+ 			return installFailure(formatErrorMessage(err), "invalid-request");
+ 		}
+ 		if (params.mode === "install" && await pathExists(targetDir)) return installFailure(`Skill already exists at ${targetDir}. Re-run with force/update.`, "invalid-request");
+-		if (params.scan) {
+-			const scanResult = await scanSkillInstallSource({
+-				dangerouslyForceUnsafeInstall: params.scan.dangerouslyForceUnsafeInstall,
+-				installId: params.scan.installId ?? "archive",
+-				logger: params.logger ?? {},
+-				origin: params.scan.origin,
+-				skillName: params.slug,
+-				sourceDir: params.extractedRoot
+-			});
+-			if (scanResult?.blocked) return installFailure(scanResult.blocked.reason, scanBlockedFailureKind(scanResult.blocked));
+-		}
++		let stagedScanBlocked;
++		let stagedRootInvalid = false;
+ 		const install = await installPackageDir({
+ 			sourceDir: params.extractedRoot,
+ 			targetDir,
+@@ -108,9 +99,27 @@ async function installExtractedSkillRoot(params) {
+ 			logger: params.logger,
+ 			copyErrorPrefix: "failed to install skill",
+ 			hasDeps: false,
+-			depsLogMessage: ""
++			depsLogMessage: "",
++			afterCopy: async (stageDir) => {
++				if (!await hasSkillArchiveRoot(stageDir, params.rootMarkers ?? DEFAULT_SKILL_ARCHIVE_ROOT_MARKERS)) {
++					stagedRootInvalid = true;
++					throw new Error("staged skill source is missing SKILL.md");
++				}
++				const scan = params.scan ?? {};
++				const scanResult = await scanSkillInstallSource({
++					dangerouslyForceUnsafeInstall: scan.dangerouslyForceUnsafeInstall,
++					installId: scan.installId ?? "archive",
++					logger: params.logger ?? {},
++					origin: scan.origin ?? "archive",
++					skillName: params.slug,
++					sourceDir: stageDir
++				});
++				if (!scanResult?.blocked) return;
++				stagedScanBlocked = scanResult.blocked;
++				throw new Error(scanResult.blocked.reason);
++			}
+ 		});
+-		if (!install.ok) return installFailure(install.error, "unavailable");
++		if (!install.ok) return installFailure(install.error, stagedScanBlocked ? scanBlockedFailureKind(stagedScanBlocked) : stagedRootInvalid ? "invalid-request" : "unavailable");
+ 		return {
+ 			ok: true,
+ 			targetDir
+@@ -594,7 +603,10 @@ async function performClawHubSkillInstall(params) {
+ 					extractedRoot: rootDir,
+ 					mode: params.force ? "update" : "install",
+ 					logger: params.logger,
+-					scan: false,
++					scan: {
++						installId: "clawhub",
++						origin: "clawhub"
++					},
+ 					rootMarkers: CLAWHUB_SKILL_ARCHIVE_ROOT_MARKERS
+ 				})
+ 			});
 diff --git a/dist/workspace-CgsM_arl.js b/dist/workspace-CgsM_arl.js
 index d03d8c1d80264fee95aeb9dd62bc0efefa1b3773..3331b2dcd97d1a5be95386b7816dbdd8307742b4 100644
 --- a/dist/workspace-CgsM_arl.js
@@ -522,53 +1202,3 @@ index 348ea2271570f7be08616a385bcb1c2697701cac..46a2b9a883e5ca505820e35b703fb605
  		}
  	];
  	const result = [];
---- a/dist/http-common-DuE8kH2j.js
-+++ b/dist/http-common-DuE8kH2j.js
-@@ -10,7 +10,7 @@
- function setDefaultSecurityHeaders(res, opts) {
- 	res.setHeader("X-Content-Type-Options", "nosniff");
- 	res.setHeader("Referrer-Policy", "no-referrer");
--	res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
-+	res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()");
- 	const strictTransportSecurity = opts?.strictTransportSecurity;
- 	if (typeof strictTransportSecurity === "string" && strictTransportSecurity.length > 0) res.setHeader("Strict-Transport-Security", strictTransportSecurity);
- }
-diff --git a/dist/message-handler-Du1uvc4A.js b/dist/message-handler-Du1uvc4A.js
---- a/dist/message-handler-Du1uvc4A.js
-+++ b/dist/message-handler-Du1uvc4A.js
-@@ -1575,5 +1575,20 @@
- 					}
- 				}
-+				const expectedControlUiVersion = process.env.RESEARCH_CLAW_UI_VERSION?.trim();
-+				if (
-+					expectedControlUiVersion
-+					&& connectParams.client.id === GATEWAY_CLIENT_IDS.CONTROL_UI
-+					&& connectParams.client.version !== expectedControlUiVersion
-+				) {
-+					logWsControl.warn(`stale Research-Claw Dashboard rejected conn=${connId} clientVersion=${formatForLog(connectParams.client.version)} expected=${formatForLog(expectedControlUiVersion)}`);
-+					sendHandshakeErrorResponse("FORBIDDEN", `Research-Claw was updated to v${expectedControlUiVersion}. Refresh this page to load the current Dashboard.`, { details: {
-+						code: "RESEARCH_CLAW_UI_VERSION_MISMATCH",
-+						clientVersion: connectParams.client.version,
-+						expectedVersion: expectedControlUiVersion
-+					} });
-+					close(1008, "stale Research-Claw Dashboard");
-+					return;
-+				}
- 				if (!setClient(nextClient)) {
- 					setCloseCause("connect-aborted-before-register", {
- 						...clientMeta,
-diff --git a/dist/status-BeKxEZi4.js b/dist/status-BeKxEZi4.js
---- a/dist/status-BeKxEZi4.js
-+++ b/dist/status-BeKxEZi4.js
-@@ -594,7 +594,10 @@ async function performClawHubSkillInstall(params) {
- 					extractedRoot: rootDir,
- 					mode: params.force ? "update" : "install",
- 					logger: params.logger,
--					scan: false,
-+					scan: {
-+						installId: "clawhub",
-+						origin: "clawhub"
-+					},
- 					rootMarkers: CLAWHUB_SKILL_ARCHIVE_ROOT_MARKERS
- 				})
- 			});

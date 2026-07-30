@@ -2027,7 +2027,7 @@ const plugin: PluginDefinition = {
     api.on('before_install', async (event: unknown) => {
       return await runSkillBeforeInstall(
         event as Parameters<typeof runSkillBeforeInstall>[0],
-        { config: api.runtime.config.current() },
+        { getConfig: () => api.runtime.config.current() },
       );
     }, { priority: 1_000 });
 

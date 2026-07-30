@@ -30,13 +30,21 @@ export interface SkillDependencyPreflight {
 export interface SkillInstallPreflight {
   /** Security approval only. This does not imply that runtime dependencies exist. */
   installAllowed: boolean;
-  /** True only when every declared runtime gate is currently satisfied. */
+  /**
+   * Best-effort check of the strict metadata.openclaw requires/os subset used
+   * by this preflight. It is not OpenClaw's canonical Skill eligibility result.
+   */
   runtimeReady: boolean;
   blockReason?: string;
   findings: SkillInstallFinding[];
   dependencies: SkillDependencyPreflight;
   pythonFiles: string[];
+  scriptFiles: string[];
+  promptFiles: string[];
+  nativeFiles: string[];
   scannedFiles: number;
+  scannedEntries: number;
+  totalBytes: number;
 }
 
 export interface SkillBeforeInstallEvent {
@@ -64,13 +72,16 @@ interface SkillBeforeInstallDependencies {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   config?: Record<string, unknown>;
+  getConfig?: () => Record<string, unknown>;
   hasBinary?: (binary: string) => boolean | Promise<boolean>;
 }
 
 interface CollectedSkillFiles {
-  files: Array<{ absolutePath: string; relativePath: string; size: number }>;
+  files: Array<{ absolutePath: string; relativePath: string; size: number; mode: number }>;
   findings: SkillInstallFinding[];
   scannedFiles: number;
+  scannedEntries: number;
+  totalBytes: number;
 }
 
 interface OpenClawRequirements {
@@ -97,12 +108,147 @@ type PythonRule = {
   patterns: RegExp[];
 };
 
+type ScriptRule = Omit<PythonRule, 'source'>;
+type PromptRule = Omit<PythonRule, 'source'>;
+
 const MAX_SCAN_FILES = 1_000;
+const MAX_SCAN_ENTRIES = 2_000;
+const MAX_SCAN_DIRECTORIES = 1_000;
 const MAX_SCAN_DEPTH = 16;
+const MAX_SKILL_TOTAL_BYTES = 128 * 1024 * 1024;
 const MAX_PYTHON_FILE_BYTES = 1024 * 1024;
+const MAX_SCRIPT_FILE_BYTES = 1024 * 1024;
+const MAX_OPENCLAW_CODE_FILE_BYTES = 1024 * 1024;
+const MAX_PROMPT_FILE_BYTES = 1024 * 1024;
 const MAX_SKILL_CARD_BYTES = 256 * 1024;
 const SKILL_CARD_NAMES = ['SKILL.md', 'skill.md', 'skills.md', 'SKILL.MD'] as const;
 const PYTHON_RUNTIME_PATTERN = /^(?:python(?:\d+(?:\.\d+)*)?|uv)$/i;
+const DANGEROUS_PYTHON_MODULES = [
+  'builtins',
+  'pickle',
+  'dill',
+  'cloudpickle',
+  'marshal',
+  'yaml',
+  'ctypes',
+  'importlib',
+  'os',
+  'subprocess',
+  'asyncio',
+] as const;
+const NETWORK_PYTHON_MODULES = [
+  'requests',
+  'httpx',
+  'urllib.request',
+  'socket',
+  'aiohttp',
+  'http.client',
+] as const;
+const SCRIPT_EXTENSIONS = new Set([
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.fish',
+  '.ksh',
+  '.command',
+  '.ps1',
+  '.psm1',
+  '.bat',
+  '.cmd',
+]);
+/**
+ * These formats can be executed explicitly by runtimes available on our
+ * supported desktop platforms, but do not yet have a parser-backed scanner.
+ * Treating a missing executable bit as safety is incorrect (especially after
+ * ZIP extraction on Windows), so external installs fail closed.
+ */
+const UNSUPPORTED_EXECUTABLE_EXTENSIONS = new Set([
+  '.vbs',
+  '.vbe',
+  '.wsf',
+  '.wsc',
+  '.hta',
+  '.reg',
+  '.scpt',
+  '.applescript',
+  '.ipynb',
+  '.r',
+  '.rmd',
+  '.qmd',
+  '.lua',
+  '.rb',
+  '.pl',
+  '.php',
+  '.jl',
+  '.m',
+  '.do',
+  '.sas',
+]);
+const UNSUPPORTED_EXECUTABLE_BASENAMES = new Set([
+  'makefile',
+  'gnumakefile',
+  'justfile',
+]);
+const OPENCLAW_SCANNABLE_CODE_EXTENSIONS = new Set([
+  '.js',
+  '.ts',
+  '.mjs',
+  '.cjs',
+  '.mts',
+  '.cts',
+  '.jsx',
+  '.tsx',
+]);
+const PROMPT_TEXT_EXTENSIONS = new Set([
+  '.md',
+  '.mdx',
+  '.txt',
+  '.rst',
+  '.adoc',
+  '.org',
+]);
+const NATIVE_OR_EXECUTABLE_EXTENSIONS = new Set([
+  '.exe',
+  '.dll',
+  '.dylib',
+  '.so',
+  '.node',
+  '.o',
+  '.obj',
+  '.a',
+  '.lib',
+  '.msi',
+  '.msix',
+  '.appx',
+  '.com',
+  '.scr',
+  '.sys',
+  '.lnk',
+  '.url',
+  '.pkg',
+  '.dmg',
+  '.xip',
+  '.jar',
+  '.class',
+  '.wasm',
+  '.apk',
+  '.dex',
+  '.whl',
+]);
+const NESTED_ARCHIVE_EXTENSIONS = new Set([
+  '.zip',
+  '.tar',
+  '.tgz',
+  '.gz',
+  '.bz2',
+  '.xz',
+  '.7z',
+  '.rar',
+  '.pyz',
+]);
+const NATIVE_BUNDLE_EXTENSIONS = new Set(['.app']);
+const FORBIDDEN_DIRECTORY_NAMES = new Set(['node_modules', '.git', '.hg', '.svn']);
+const PYTHON_IDENTIFIER_SOURCE = String.raw`(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*`;
 
 const PYTHON_RULES: PythonRule[] = [
   {
@@ -144,6 +290,125 @@ const PYTHON_RULES: PythonRule[] = [
       /(?:\\x[0-9a-fA-F]{2}){16,}/,
       /\bcodecs\.decode\s*\([^)]{0,300}["'](?:rot[-_]?13|hex|base64)["']/i,
     ],
+  },
+];
+
+const SCRIPT_RULES: ScriptRule[] = [
+  {
+    ruleId: 'rc-script-download-exec',
+    severity: 'critical',
+    message: 'Downloaded content is piped to or immediately launched by a shell',
+    patterns: [
+      /\b(?:curl|wget)\b[^\r\n|]{0,1000}\|\s*(?:[^\s|]*\/)?(?:sh|bash|zsh|dash|fish|ksh)\b/i,
+      /\b(?:Invoke-WebRequest|iwr|curl)\b[^\r\n|]{0,1000}\|\s*(?:Invoke-Expression|iex)\b/i,
+      /\b(?:curl|wget)\b[\s\S]{0,1000}(?:chmod\s+\+x\s+\S+|\.\s*\/\S+|(?:sh|bash|zsh|dash|fish|ksh)\s+\S+)/i,
+    ],
+  },
+  {
+    ruleId: 'rc-script-dynamic-exec',
+    severity: 'critical',
+    message: 'Dynamic shell or PowerShell expression execution detected',
+    patterns: [
+      /(^|[;&|]\s*)eval\s+/im,
+      /\b(?:Invoke-Expression|iex)\b/i,
+    ],
+  },
+  {
+    ruleId: 'rc-script-encoded-command',
+    severity: 'critical',
+    message: 'Encoded PowerShell command execution detected',
+    patterns: [
+      /\b(?:powershell|pwsh)(?:\.exe)?\b[^\r\n]{0,500}-(?:EncodedCommand|enc)\b/i,
+    ],
+  },
+  {
+    ruleId: 'rc-script-shell-launcher',
+    severity: 'critical',
+    message: 'Nested command-shell launcher detected',
+    patterns: [
+      /\b(?:sh|bash|zsh|dash|fish|ksh)\b[^\r\n]{0,200}\s-(?:c|lc|ic)\b/i,
+      /\bcmd(?:\.exe)?\b[^\r\n]{0,200}\/c\b/i,
+      /\b(?:powershell|pwsh)(?:\.exe)?\b[^\r\n]{0,200}-(?:Command|c)\b/i,
+    ],
+  },
+  {
+    ruleId: 'rc-script-destructive-command',
+    severity: 'critical',
+    message: 'Destructive filesystem or disk command detected',
+    patterns: [
+      /\brm\b[^\r\n]{0,120}-(?:[A-Za-z]*r[A-Za-z]*f|[A-Za-z]*f[A-Za-z]*r)[^\r\n]{0,120}(?:\/(?:\s|$)|~(?:\/|\s|$)|\.\.(?:\/|\s|$))/i,
+      /\bRemove-Item\b[^\r\n]{0,300}-Recurse\b[^\r\n]{0,300}-Force\b/i,
+      /\b(?:mkfs(?:\.\w+)?|shred|diskpart)\b/i,
+      /\bdd\b[^\r\n]{0,200}\bof\s*=\s*\/dev\//i,
+    ],
+  },
+  {
+    ruleId: 'rc-script-persistence',
+    severity: 'critical',
+    message: 'System persistence command detected',
+    patterns: [
+      /\bcrontab\b/i,
+      /\blaunchctl\b[^\r\n]{0,200}\b(?:load|bootstrap|enable)\b/i,
+      /\bschtasks(?:\.exe)?\b[^\r\n]{0,200}\/create\b/i,
+      /\breg(?:\.exe)?\b[^\r\n]{0,300}\badd\b[^\r\n]{0,300}\\Run(?:Once)?\b/i,
+    ],
+  },
+];
+
+const PROMPT_RULES: PromptRule[] = [
+  {
+    ruleId: 'rc-prompt-injection-ignore-instructions',
+    severity: 'critical',
+    message: 'Prompt-injection wording attempts to override higher-priority instructions',
+    patterns: [
+      /\bignore\s+(?:all|any|previous|above|prior)\s+instructions\b/i,
+      /(?:忽略|无视|覆盖|绕过|替换).{0,20}(?:此前|之前|以上|上面|先前|所有).{0,20}(?:指令|指示|规则|要求)/u,
+    ],
+  },
+  {
+    ruleId: 'rc-prompt-injection-hidden-layer',
+    severity: 'critical',
+    message: 'Skill text attempts to access or override hidden prompt layers',
+    patterns: [
+      /\b(?:reveal|show|print|display|expose|disclose|extract|access|read|override|replace|change|modify|leak)\b.{0,80}\b(?:system prompt|developer message|hidden instructions)\b/i,
+      /\b(?:system prompt|developer message|hidden instructions)\b.{0,80}\b(?:reveal|show|print|display|expose|disclose|extract|access|read|override|replace|change|modify|leak)\b/i,
+      /(?:输出|泄露|显示|揭示|打印|暴露|提取|读取|访问|覆盖|替换|修改).{0,40}(?:系统提示词|系统提示|开发者消息|开发者指令|隐藏指令)/u,
+      /(?:系统提示词|系统提示|开发者消息|开发者指令|隐藏指令).{0,40}(?:输出|泄露|显示|揭示|打印|暴露|提取|读取|访问|覆盖|替换|修改)/u,
+    ],
+  },
+  {
+    ruleId: 'rc-prompt-injection-tool-bypass',
+    severity: 'critical',
+    message: 'Skill text encourages bypassing tool approval',
+    patterns: [
+      /\b(?:run|execute|invoke|call)\b.{0,50}\btool\b.{0,50}\bwithout\b.{0,30}\b(?:permission|approval)\b/i,
+      /(?:未经|无需|不经|绕过).{0,15}(?:许可|批准|授权|确认).{0,30}(?:调用|运行|执行|使用).{0,20}(?:工具|tool)/iu,
+      /(?:调用|运行|执行|使用).{0,20}(?:工具|tool).{0,30}(?:无需|不需|不用|绕过).{0,15}(?:许可|批准|授权|确认)/iu,
+    ],
+  },
+  {
+    ruleId: 'rc-prompt-shell-pipe',
+    severity: 'critical',
+    message: 'Skill text includes a pipe-to-shell execution pattern',
+    patterns: [/\b(?:curl|wget)\b[^|\n]{0,120}\|\s*(?:sh|bash|zsh)\b/i],
+  },
+  {
+    ruleId: 'rc-prompt-secret-exfiltration',
+    severity: 'critical',
+    message: 'Skill text may exfiltrate environment variables',
+    patterns: [/\b(?:process\.env|env)\b.{0,80}\b(?:fetch|curl|wget|http|https)\b/i],
+  },
+  {
+    ruleId: 'rc-prompt-destructive-delete',
+    severity: 'warn',
+    message: 'Skill text contains a broad destructive delete command',
+    patterns: [/\brm\s+-rf\s+(?:\/|\$HOME|~|\.)/i],
+  },
+  {
+    ruleId: 'rc-prompt-unsafe-permissions',
+    severity: 'warn',
+    message: 'Skill text contains an unsafe permission change',
+    patterns: [/\bchmod\s+(?:-R\s+)?777\b/i],
   },
 ];
 
@@ -276,19 +541,84 @@ function maskPythonCommentsAndStrings(source: string): string {
   return output.join('');
 }
 
+/**
+ * Python evaluates expressions inside f-string braces. The general string
+ * masker intentionally hides literal text, then this overlay restores only
+ * brace expressions at their original offsets so dangerous calls remain
+ * visible without treating ordinary prose as code.
+ */
+function preservePythonFStringExpressions(source: string, masked: string): string {
+  const output = masked.split('');
+  const prefixPattern = /^(?:[fF][rR]?|[rR][fF])("""|'''|"|')/;
+
+  for (let index = 0; index < source.length; index += 1) {
+    if (index > 0 && /[_\p{XID_Continue}]/u.test(source[index - 1] ?? '')) continue;
+    if (masked[index] !== source[index]) continue;
+    const match = prefixPattern.exec(source.slice(index));
+    if (!match) continue;
+    const quote = match[1]!;
+    const bodyStart = index + match[0].length;
+    let cursor = bodyStart;
+    while (cursor < source.length) {
+      if (source.startsWith(quote, cursor)) {
+        cursor += quote.length;
+        break;
+      }
+      if (source[cursor] === '\\') {
+        cursor += 2;
+        continue;
+      }
+      if (source.startsWith('{{', cursor) || source.startsWith('}}', cursor)) {
+        cursor += 2;
+        continue;
+      }
+      if (source[cursor] !== '{') {
+        cursor += 1;
+        continue;
+      }
+
+      let depth = 1;
+      const expressionStart = cursor + 1;
+      cursor += 1;
+      while (cursor < source.length && depth > 0) {
+        if (source[cursor] === '\\') {
+          cursor += 2;
+          continue;
+        }
+        if (source[cursor] === '{') depth += 1;
+        else if (source[cursor] === '}') depth -= 1;
+        cursor += 1;
+      }
+      if (depth !== 0) break;
+      const expressionEnd = cursor - 1;
+      for (
+        let expressionIndex = expressionStart;
+        expressionIndex < expressionEnd;
+        expressionIndex += 1
+      ) {
+        output[expressionIndex] = source[expressionIndex]!;
+      }
+    }
+    index = Math.max(index, cursor - 1);
+  }
+
+  return output.join('');
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function moduleAliases(source: string, moduleName: string): string[] {
   const aliases = new Set<string>();
-  const importPattern = /\bimport\s+([^\n;]+)/g;
+  const importPattern = /\bimport\s+([^\n;]+)/gu;
+  const importMemberPattern = new RegExp(
+    `^([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*)(?:\\s+as\\s+(${PYTHON_IDENTIFIER_SOURCE}))?$`,
+    'u',
+  );
   for (const match of source.matchAll(importPattern)) {
     for (const part of (match[1] ?? '').split(',')) {
-      const parsed =
-        /^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\s+as\s+([A-Za-z_]\w*))?$/.exec(
-          part.trim(),
-        );
+      const parsed = importMemberPattern.exec(part.trim());
       if (!parsed) continue;
       const importedModule = parsed[1];
       if (
@@ -313,7 +643,11 @@ function importedCallNames(
   const names = new Set<string>();
   const importPattern = new RegExp(
     `\\bfrom\\s+${escapeRegExp(moduleName)}\\s+import\\s+(\\([\\s\\S]{0,2000}?\\)|[^\\n;]+)`,
-    'g',
+    'gu',
+  );
+  const importedMemberPattern = new RegExp(
+    `^([A-Za-z_]\\w*)(?:\\s+as\\s+(${PYTHON_IDENTIFIER_SOURCE}))?$`,
+    'u',
   );
   for (const match of source.matchAll(importPattern)) {
     const importedNames = (match[1] ?? '')
@@ -321,23 +655,70 @@ function importedCallNames(
       .replace(/\)\s*$/, '')
       .replace(/\\\r?\n/g, ' ');
     for (const part of importedNames.split(',')) {
-      const parsed = /^([A-Za-z_]\w*)(?:\s+as\s+([A-Za-z_]\w*))?$/.exec(part.trim());
+      const parsed = importedMemberPattern.exec(part.trim());
       if (parsed && allowedNames.includes(parsed[1])) names.add(parsed[2] ?? parsed[1]);
     }
   }
   return [...names];
 }
 
+function wildcardImport(
+  source: string,
+  moduleNames: readonly string[],
+): { index: number; moduleName: string } | undefined {
+  let first: { index: number; moduleName: string } | undefined;
+  for (const moduleName of moduleNames) {
+    const pattern = new RegExp(
+      `\\bfrom\\s+${escapeRegExp(moduleName)}\\s+import\\s+(?:\\(\\s*)?\\*`,
+    );
+    const match = pattern.exec(source);
+    if (match && (!first || match.index < first.index)) {
+      first = { index: match.index, moduleName };
+    }
+  }
+  return first;
+}
+
 function memberCallPattern(aliases: string[], members: readonly string[]): RegExp | undefined {
   if (aliases.length === 0) return undefined;
   return new RegExp(
-    `\\b(?:${aliases.map(escapeRegExp).join('|')})\\.(?:${members.map(escapeRegExp).join('|')})\\s*\\(`,
+    `(?<![_\\p{XID_Continue}])(?:${aliases.map(escapeRegExp).join('|')})\\.(?:${members.map(escapeRegExp).join('|')})\\s*\\(`,
+    'u',
   );
 }
 
 function directCallPattern(names: string[]): RegExp | undefined {
   if (names.length === 0) return undefined;
-  return new RegExp(`(?<![\\w.])(?:${names.map(escapeRegExp).join('|')})\\s*\\(`);
+  return new RegExp(
+    `(?<![._\\p{XID_Continue}])(?:${names.map(escapeRegExp).join('|')})\\s*\\(`,
+    'u',
+  );
+}
+
+function assignedMemberCallNames(
+  source: string,
+  aliases: string[],
+  members: readonly string[],
+): string[] {
+  if (aliases.length === 0 || members.length === 0) return [];
+  const aliasAlternation = aliases.map(escapeRegExp).join('|');
+  const memberAlternation = members.map(escapeRegExp).join('|');
+  const pattern = new RegExp(
+    `(?<![_\\p{XID_Continue}])(${PYTHON_IDENTIFIER_SOURCE})\\s*=\\s*(?:(?:${aliasAlternation})\\.(?:${memberAlternation})|getattr\\s*\\(\\s*(?:${aliasAlternation})\\s*,\\s*["'](?:${memberAlternation})["']\\s*\\))`,
+    'gu',
+  );
+  return [...source.matchAll(pattern)].map((match) => match[1]!).filter(Boolean);
+}
+
+function getattrCallPattern(
+  aliases: string[],
+  members: readonly string[],
+): RegExp | undefined {
+  if (aliases.length === 0 || members.length === 0) return undefined;
+  return new RegExp(
+    `\\bgetattr\\s*\\(\\s*(?:${aliases.map(escapeRegExp).join('|')})\\s*,\\s*["'](?:${members.map(escapeRegExp).join('|')})["']\\s*\\)\\s*\\(`,
+    'u',
+  );
 }
 
 function allMatchIndexes(source: string, patterns: RegExp[]): number[] {
@@ -350,8 +731,56 @@ function allMatchIndexes(source: string, patterns: RegExp[]): number[] {
   return [...indexes].sort((left, right) => left - right);
 }
 
+function slicePythonCallExpression(source: string, callIndex: number): string {
+  const openingIndex = source.indexOf('(', callIndex);
+  if (openingIndex < 0) return source.slice(callIndex, callIndex + 800);
+  const scanLimit = Math.min(source.length, openingIndex + 64 * 1024);
+  let depth = 0;
+  let quote: "'" | '"' | undefined;
+  let triple = false;
+  let escaped = false;
+
+  for (let index = openingIndex; index < scanLimit; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (triple && source.slice(index, index + 3) === quote.repeat(3)) {
+        index += 2;
+        quote = undefined;
+        triple = false;
+        escaped = false;
+        continue;
+      }
+      if (!triple && char === quote && !escaped) {
+        quote = undefined;
+        escaped = false;
+        continue;
+      }
+      if (char === '\\' && !escaped) escaped = true;
+      else escaped = false;
+      continue;
+    }
+    if (char === '#') {
+      while (index < scanLimit && source[index] !== '\n') index += 1;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      triple = source.slice(index, index + 3) === char.repeat(3);
+      if (triple) index += 2;
+      continue;
+    }
+    if (char === '(') depth += 1;
+    else if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return source.slice(callIndex, index + 1);
+    }
+  }
+
+  return source.slice(callIndex, scanLimit);
+}
+
 function isExplicitShellLauncher(source: string, callIndex: number): boolean {
-  const call = source.slice(callIndex, callIndex + 800);
+  const call = slicePythonCallExpression(source, callIndex);
   const stringPrefix = String.raw`(?:[rRuUbBfF]{0,2})?["']`;
   const listPrefix = String.raw`\(\s*[\[(]\s*`;
   const executablePath = String.raw`(?:[^"'\r\n]*[\\/])?`;
@@ -379,24 +808,335 @@ function isExplicitShellLauncher(source: string, callIndex: number): boolean {
   return patterns.some((pattern) => pattern.test(call));
 }
 
-function scanPythonSource(source: string, relativePath: string): SkillInstallFinding[] {
-  const code = maskPythonCommentsAndStrings(source);
-  const findings: SkillInstallFinding[] = [];
+function maskScriptComments(source: string): string {
+  return source
+    .split(/\r?\n/)
+    .map((line, index) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith('#!') && index === 0) return line;
+      if (
+        trimmed.startsWith('#')
+        || /^(?:rem(?:\s|$)|::)/i.test(trimmed)
+      ) {
+        return ' '.repeat(line.length);
+      }
+      return line;
+    })
+    .join('\n');
+}
 
-  for (const rule of PYTHON_RULES) {
-    const scannedSource = rule.source === 'code' ? code : source;
-    const match = firstMatch(scannedSource, rule.patterns);
-    if (match) {
+function scanScriptSource(source: string, relativePath: string): SkillInstallFinding[] {
+  const code = maskScriptComments(source);
+  const findings: SkillInstallFinding[] = [];
+  for (const rule of SCRIPT_RULES) {
+    const match = firstMatch(code, rule.patterns);
+    if (!match) continue;
+    findings.push(
+      createFinding(
+        rule.ruleId,
+        rule.severity,
+        relativePath,
+        lineNumberAt(code, match.index),
+        rule.message,
+      ),
+    );
+  }
+  const networkMatch = firstMatch(code, [
+    /\b(?:curl|wget|Invoke-WebRequest|iwr|Start-BitsTransfer)\b/i,
+  ]);
+  if (networkMatch) {
+    findings.push(
+      createFinding(
+        'rc-script-network',
+        'warn',
+        relativePath,
+        lineNumberAt(code, networkMatch.index),
+        'Script network access requires review',
+      ),
+    );
+  }
+  return findings;
+}
+
+function scanPromptSource(source: string, relativePath: string): SkillInstallFinding[] {
+  const findings: SkillInstallFinding[] = [];
+  for (const rule of PROMPT_RULES) {
+    const match = firstMatch(source, rule.patterns);
+    if (!match) continue;
+    findings.push(
+      createFinding(
+        rule.ruleId,
+        rule.severity,
+        relativePath,
+        lineNumberAt(source, match.index),
+        rule.message,
+      ),
+    );
+  }
+  return findings;
+}
+
+async function inspectPromptPayloads(
+  files: CollectedSkillFiles['files'],
+): Promise<{ findings: SkillInstallFinding[]; promptFiles: string[] }> {
+  const findings: SkillInstallFinding[] = [];
+  const promptFiles: string[] = [];
+
+  for (const file of files) {
+    const extension = path.extname(file.relativePath).toLowerCase();
+    if (!PROMPT_TEXT_EXTENSIONS.has(extension)) continue;
+    promptFiles.push(file.relativePath);
+    if (file.size > MAX_PROMPT_FILE_BYTES) {
       findings.push(
         createFinding(
-          rule.ruleId,
-          rule.severity,
-          relativePath,
-          lineNumberAt(scannedSource, match.index),
-          rule.message,
+          'rc-prompt-file-too-large',
+          'critical',
+          file.relativePath,
+          1,
+          `Instruction-bearing text exceeds the ${MAX_PROMPT_FILE_BYTES}-byte prompt scan limit`,
+        ),
+      );
+      continue;
+    }
+    try {
+      const source = await fs.readFile(file.absolutePath, 'utf8');
+      if (source.includes('\0')) {
+        findings.push(
+          createFinding(
+            'rc-prompt-binary-content',
+            'critical',
+            file.relativePath,
+            1,
+            'Instruction-bearing text contains binary data and cannot be reviewed safely',
+          ),
+        );
+        continue;
+      }
+      findings.push(...scanPromptSource(source, file.relativePath));
+    } catch (error) {
+      findings.push(
+        createFinding(
+          'rc-skill-scan-failed',
+          'critical',
+          file.relativePath,
+          1,
+          `Unable to scan instruction-bearing text: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         ),
       );
     }
+  }
+
+  return { findings, promptFiles };
+}
+
+function nativeMagicName(prefix: Uint8Array): string | undefined {
+  if (
+    prefix.length >= 4
+    && prefix[0] === 0x7f
+    && prefix[1] === 0x45
+    && prefix[2] === 0x4c
+    && prefix[3] === 0x46
+  ) return 'ELF';
+  if (prefix.length >= 2 && prefix[0] === 0x4d && prefix[1] === 0x5a) return 'PE';
+  if (prefix.length < 4) return undefined;
+  const signature = Array.from(prefix.slice(0, 4))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  const signatures: Record<string, string> = {
+    feedface: 'Mach-O',
+    feedfacf: 'Mach-O',
+    cefaedfe: 'Mach-O',
+    cffaedfe: 'Mach-O',
+    cafebabe: 'fat Mach-O or Java class',
+    cafebabf: 'fat Mach-O',
+    bebafeca: 'fat Mach-O',
+    bfbafeca: 'fat Mach-O',
+    '0061736d': 'WebAssembly',
+  };
+  return signatures[signature];
+}
+
+async function readFilePrefix(filePath: string, maxBytes: number): Promise<Buffer> {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+function hasShellShebang(prefix: Uint8Array): boolean {
+  const firstLine = Buffer.from(prefix).toString('utf8').split(/\r?\n/, 1)[0] ?? '';
+  return /^#!.*\b(?:sh|bash|zsh|dash|fish|ksh|pwsh|powershell)(?:\s|$)/i.test(firstLine);
+}
+
+function hasPythonShebang(prefix: Uint8Array): boolean {
+  const firstLine = Buffer.from(prefix).toString('utf8').split(/\r?\n/, 1)[0] ?? '';
+  return /^#!.*\b(?:python(?:\d+(?:\.\d+)*)?|uv)(?:\s|$)/i.test(firstLine);
+}
+
+function hasAnyShebang(prefix: Uint8Array): boolean {
+  return prefix.length >= 2 && prefix[0] === 0x23 && prefix[1] === 0x21;
+}
+
+async function packageManifestDeclaresScripts(filePath: string): Promise<boolean> {
+  try {
+    const content = await fs.readFile(filePath, 'utf8');
+    if (Buffer.byteLength(content, 'utf8') > MAX_SCRIPT_FILE_BYTES) return true;
+    const parsed = JSON.parse(content) as { scripts?: unknown };
+    return Boolean(
+      parsed
+      && typeof parsed === 'object'
+      && parsed.scripts
+      && typeof parsed.scripts === 'object'
+      && Object.keys(parsed.scripts).length > 0,
+    );
+  } catch {
+    // A package manifest that cannot be inspected must not silently cross the
+    // same execution boundary as a reviewed script.
+    return true;
+  }
+}
+
+function scanPythonSource(source: string, relativePath: string): SkillInstallFinding[] {
+  const code = preservePythonFStringExpressions(
+    source,
+    maskPythonCommentsAndStrings(source),
+  );
+  const findings: SkillInstallFinding[] = [];
+
+  const addRuleFinding = (
+    rule: Omit<PythonRule, 'source' | 'patterns'>,
+    patterns: RegExp[],
+    scannedSource = code,
+  ) => {
+    if (findings.some((entry) => entry.ruleId === rule.ruleId)) return;
+    const match = firstMatch(scannedSource, patterns);
+    if (!match) return;
+    findings.push(
+      createFinding(
+        rule.ruleId,
+        rule.severity,
+        relativePath,
+        lineNumberAt(scannedSource, match.index),
+        rule.message,
+      ),
+    );
+  };
+
+  for (const rule of PYTHON_RULES) {
+    addRuleFinding(
+      rule,
+      rule.patterns,
+      rule.source === 'code' ? code : source,
+    );
+  }
+
+  const dynamicExecMembers = ['eval', 'exec', 'compile', '__import__'] as const;
+  const builtinsAliases = moduleAliases(code, 'builtins');
+  addRuleFinding(
+    {
+      ruleId: 'rc-python-dynamic-exec',
+      severity: 'critical',
+      message: 'Dynamic Python code execution detected',
+    },
+    [
+      memberCallPattern(builtinsAliases, dynamicExecMembers),
+      directCallPattern(importedCallNames(code, 'builtins', dynamicExecMembers)),
+      directCallPattern(
+        assignedMemberCallNames(code, builtinsAliases, dynamicExecMembers),
+      ),
+      getattrCallPattern(builtinsAliases, dynamicExecMembers),
+      memberCallPattern(moduleAliases(code, 'importlib'), ['import_module', 'reload']),
+      directCallPattern(importedCallNames(code, 'importlib', ['import_module', 'reload'])),
+    ].filter((pattern): pattern is RegExp => Boolean(pattern)),
+  );
+  addRuleFinding(
+    {
+      ruleId: 'rc-python-dynamic-exec',
+      severity: 'critical',
+      message: 'Dynamic Python code execution detected',
+    },
+    [getattrCallPattern(builtinsAliases, dynamicExecMembers)].filter(
+      (pattern): pattern is RegExp => Boolean(pattern),
+    ),
+    source,
+  );
+
+  const deserializationPatterns: RegExp[] = [];
+  for (const moduleName of ['pickle', 'dill', 'cloudpickle', 'marshal'] as const) {
+    deserializationPatterns.push(
+      ...[
+        memberCallPattern(moduleAliases(code, moduleName), ['load', 'loads']),
+        directCallPattern(importedCallNames(code, moduleName, ['load', 'loads'])),
+      ].filter((pattern): pattern is RegExp => Boolean(pattern)),
+    );
+  }
+  deserializationPatterns.push(
+    ...[
+      memberCallPattern(moduleAliases(code, 'yaml'), ['load', 'unsafe_load', 'unsafe_load_all']),
+      directCallPattern(importedCallNames(
+        code,
+        'yaml',
+        ['load', 'unsafe_load', 'unsafe_load_all'],
+      )),
+    ].filter((pattern): pattern is RegExp => Boolean(pattern)),
+  );
+  addRuleFinding(
+    {
+      ruleId: 'rc-python-unsafe-deserialization',
+      severity: 'critical',
+      message: 'Unsafe Python deserialization detected',
+    },
+    deserializationPatterns,
+  );
+
+  addRuleFinding(
+    {
+      ruleId: 'rc-python-native-library-load',
+      severity: 'critical',
+      message: 'Dynamic native-library loading detected',
+    },
+    [
+      memberCallPattern(
+        moduleAliases(code, 'ctypes'),
+        ['CDLL', 'PyDLL', 'WinDLL', 'OleDLL'],
+      ),
+      directCallPattern(importedCallNames(
+        code,
+        'ctypes',
+        ['CDLL', 'PyDLL', 'WinDLL', 'OleDLL'],
+      )),
+    ].filter((pattern): pattern is RegExp => Boolean(pattern)),
+  );
+
+  const dangerousWildcard = wildcardImport(code, DANGEROUS_PYTHON_MODULES);
+  if (dangerousWildcard) {
+    findings.push(
+      createFinding(
+        'rc-python-wildcard-dangerous-import',
+        'critical',
+        relativePath,
+        lineNumberAt(code, dangerousWildcard.index),
+        `Wildcard import from dangerous capability module "${dangerousWildcard.moduleName}" detected`,
+      ),
+    );
+  }
+  const networkWildcard = wildcardImport(code, NETWORK_PYTHON_MODULES);
+  if (networkWildcard) {
+    findings.push(
+      createFinding(
+        'rc-python-wildcard-network-import',
+        'warn',
+        relativePath,
+        lineNumberAt(code, networkWildcard.index),
+        `Wildcard import from network-capable module "${networkWildcard.moduleName}" requires review`,
+      ),
+    );
   }
 
   const osAliases = moduleAliases(code, 'os');
@@ -526,6 +1266,177 @@ function scanPythonSource(source: string, relativePath: string): SkillInstallFin
   return findings;
 }
 
+async function inspectExecutablePayloads(
+  files: CollectedSkillFiles['files'],
+): Promise<{
+  findings: SkillInstallFinding[];
+  pythonFiles: string[];
+  scriptFiles: string[];
+  nativeFiles: string[];
+}> {
+  const findings: SkillInstallFinding[] = [];
+  const pythonFiles: string[] = [];
+  const scriptFiles: string[] = [];
+  const nativeFiles: string[] = [];
+
+  for (const file of files) {
+    const extension = path.extname(file.relativePath).toLowerCase();
+    let prefix: Buffer;
+    try {
+      prefix = await readFilePrefix(file.absolutePath, Math.min(file.size, 4096));
+    } catch (error) {
+      findings.push(
+        createFinding(
+          'rc-skill-scan-failed',
+          'critical',
+          file.relativePath,
+          1,
+          `Unable to inspect executable payload signature: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+      );
+      continue;
+    }
+
+    const magic = nativeMagicName(prefix);
+    if (NATIVE_OR_EXECUTABLE_EXTENSIONS.has(extension) || magic) {
+      nativeFiles.push(file.relativePath);
+      findings.push(
+        createFinding(
+          'rc-native-compiled-artifact',
+          'critical',
+          file.relativePath,
+          1,
+          magic
+            ? `${magic} executable or compiled payloads are not allowed in externally installed skills`
+            : `Executable or compiled ${extension || 'native'} payloads are not allowed in externally installed skills`,
+        ),
+      );
+      continue;
+    }
+
+    if (
+      OPENCLAW_SCANNABLE_CODE_EXTENSIONS.has(extension)
+      && file.size > MAX_OPENCLAW_CODE_FILE_BYTES
+    ) {
+      findings.push(
+        createFinding(
+          'rc-code-file-too-large',
+          'critical',
+          file.relativePath,
+          1,
+          `JavaScript/TypeScript file exceeds the ${MAX_OPENCLAW_CODE_FILE_BYTES}-byte OpenClaw scanner limit`,
+        ),
+      );
+      continue;
+    }
+
+    if (NESTED_ARCHIVE_EXTENSIONS.has(extension)) {
+      findings.push(
+        createFinding(
+          'rc-nested-archive',
+          'critical',
+          file.relativePath,
+          1,
+          `Opaque nested archive ${extension} cannot be fully reviewed during installation`,
+        ),
+      );
+      continue;
+    }
+
+    const executableBasename = path.basename(file.relativePath).toLowerCase();
+    if (
+      UNSUPPORTED_EXECUTABLE_EXTENSIONS.has(extension)
+      || UNSUPPORTED_EXECUTABLE_BASENAMES.has(executableBasename)
+      || (
+        executableBasename === 'package.json'
+        && await packageManifestDeclaresScripts(file.absolutePath)
+      )
+    ) {
+      scriptFiles.push(file.relativePath);
+      findings.push(
+        createFinding(
+          'rc-unsupported-executable',
+          'critical',
+          file.relativePath,
+          1,
+          'Executable file uses a language or manifest without a supported security scanner',
+        ),
+      );
+      continue;
+    }
+
+    if (extension === '.py' || extension === '.pyw' || hasPythonShebang(prefix)) {
+      pythonFiles.push(file.relativePath);
+      continue;
+    }
+
+    if (SCRIPT_EXTENSIONS.has(extension) || hasShellShebang(prefix)) {
+      scriptFiles.push(file.relativePath);
+      if (file.size > MAX_SCRIPT_FILE_BYTES) {
+        findings.push(
+          createFinding(
+            'rc-script-file-too-large',
+            'critical',
+            file.relativePath,
+            1,
+            `Executable script exceeds the ${MAX_SCRIPT_FILE_BYTES}-byte scan limit`,
+          ),
+        );
+        continue;
+      }
+      try {
+        const source = await fs.readFile(file.absolutePath, 'utf8');
+        if (source.includes('\0')) {
+          findings.push(
+            createFinding(
+              'rc-script-binary-content',
+              'critical',
+              file.relativePath,
+              1,
+              'Executable script contains binary data and cannot be reviewed safely',
+            ),
+          );
+          continue;
+        }
+        findings.push(...scanScriptSource(source, file.relativePath));
+      } catch (error) {
+        findings.push(
+          createFinding(
+            'rc-skill-scan-failed',
+            'critical',
+            file.relativePath,
+            1,
+            `Unable to scan executable script: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ),
+        );
+      }
+      continue;
+    }
+
+    const markedExecutable = (file.mode & 0o111) !== 0;
+    if (
+      (markedExecutable || hasAnyShebang(prefix))
+      && !OPENCLAW_SCANNABLE_CODE_EXTENSIONS.has(extension)
+    ) {
+      findings.push(
+        createFinding(
+          'rc-unsupported-executable',
+          'critical',
+          file.relativePath,
+          1,
+          'Executable file uses a language or format without a supported security scanner',
+        ),
+      );
+    }
+  }
+
+  return { findings, pythonFiles, scriptFiles, nativeFiles };
+}
+
 async function collectSkillFiles(sourcePath: string): Promise<CollectedSkillFiles> {
   const root = path.resolve(sourcePath);
   const files: CollectedSkillFiles['files'] = [];
@@ -534,11 +1445,42 @@ async function collectSkillFiles(sourcePath: string): Promise<CollectedSkillFile
     { absolutePath: root, relativePath: '', depth: 0 },
   ];
   let scannedFiles = 0;
+  let scannedEntries = 0;
+  let scannedDirectories = 0;
+  let totalBytes = 0;
   let truncated = false;
 
   while (queue.length > 0 && !truncated) {
     const current = queue.shift();
     if (!current) break;
+    try {
+      const currentStat = await fs.lstat(current.absolutePath);
+      if (currentStat.isSymbolicLink() || !currentStat.isDirectory()) {
+        findings.push(
+          createFinding(
+            currentStat.isSymbolicLink() ? 'rc-skill-symlink' : 'rc-skill-special-file',
+            'critical',
+            current.relativePath || '.',
+            1,
+            currentStat.isSymbolicLink()
+              ? 'Symbolic links are not allowed in externally installed skills'
+              : 'Skill directory changed type while it was being scanned',
+          ),
+        );
+        continue;
+      }
+    } catch (error) {
+      findings.push(
+        createFinding(
+          'rc-skill-scan-failed',
+          'critical',
+          current.relativePath || '.',
+          1,
+          `Unable to inspect skill directory: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+      continue;
+    }
     let entries: Dirent[];
     try {
       entries = await fs.readdir(current.absolutePath, { withFileTypes: true });
@@ -563,6 +1505,21 @@ async function collectSkillFiles(sourcePath: string): Promise<CollectedSkillFile
       const absolutePath = path.join(current.absolutePath, entry.name);
       const normalizedPath = normalizeRelativePath(relativePath);
 
+      scannedEntries += 1;
+      if (scannedEntries > MAX_SCAN_ENTRIES) {
+        findings.push(
+          createFinding(
+            'rc-skill-entry-limit',
+            'critical',
+            relativePath,
+            1,
+            `Skill package exceeds the ${MAX_SCAN_ENTRIES}-entry scan limit`,
+          ),
+        );
+        truncated = true;
+        break;
+      }
+
       if (entry.isSymbolicLink()) {
         findings.push(
           createFinding(
@@ -577,6 +1534,43 @@ async function collectSkillFiles(sourcePath: string): Promise<CollectedSkillFile
       }
 
       if (entry.isDirectory()) {
+        scannedDirectories += 1;
+        if (scannedDirectories > MAX_SCAN_DIRECTORIES) {
+          findings.push(
+            createFinding(
+              'rc-skill-directory-limit',
+              'critical',
+              relativePath,
+              1,
+              `Skill package exceeds the ${MAX_SCAN_DIRECTORIES}-directory scan limit`,
+            ),
+          );
+          truncated = true;
+          break;
+        }
+        if (FORBIDDEN_DIRECTORY_NAMES.has(entry.name.toLowerCase())) {
+          findings.push(
+            createFinding(
+              'rc-skill-vendored-tree',
+              'critical',
+              relativePath,
+              1,
+              `Vendored dependency or repository directory "${entry.name}" is not allowed in externally installed skills`,
+            ),
+          );
+          continue;
+        }
+        if (NATIVE_BUNDLE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+          findings.push(
+            createFinding(
+              'rc-native-compiled-artifact',
+              'critical',
+              relativePath,
+              1,
+              'Native application bundles are not allowed in externally installed skills',
+            ),
+          );
+        }
         if (entry.name.toLowerCase() === '__pycache__') {
           findings.push(
             createFinding(
@@ -636,9 +1630,9 @@ async function collectSkillFiles(sourcePath: string): Promise<CollectedSkillFile
         break;
       }
 
-      let stat: Awaited<ReturnType<typeof fs.stat>>;
+      let stat: Awaited<ReturnType<typeof fs.lstat>>;
       try {
-        stat = await fs.stat(absolutePath);
+        stat = await fs.lstat(absolutePath);
       } catch (error) {
         findings.push(
           createFinding(
@@ -651,7 +1645,40 @@ async function collectSkillFiles(sourcePath: string): Promise<CollectedSkillFile
         );
         continue;
       }
-      files.push({ absolutePath, relativePath: normalizedPath, size: stat.size });
+      if (stat.isSymbolicLink() || !stat.isFile()) {
+        findings.push(
+          createFinding(
+            stat.isSymbolicLink() ? 'rc-skill-symlink' : 'rc-skill-special-file',
+            'critical',
+            relativePath,
+            1,
+            stat.isSymbolicLink()
+              ? 'Symbolic links are not allowed in externally installed skills'
+              : 'Skill file changed type while it was being scanned',
+          ),
+        );
+        continue;
+      }
+      totalBytes += stat.size;
+      if (totalBytes > MAX_SKILL_TOTAL_BYTES) {
+        findings.push(
+          createFinding(
+            'rc-skill-total-bytes',
+            'critical',
+            relativePath,
+            1,
+            `Skill package exceeds the ${MAX_SKILL_TOTAL_BYTES}-byte total size limit`,
+          ),
+        );
+        truncated = true;
+        break;
+      }
+      files.push({
+        absolutePath,
+        relativePath: normalizedPath,
+        size: stat.size,
+        mode: stat.mode,
+      });
 
       const extension = path.extname(entry.name).toLowerCase();
       const inPycache = normalizedPath
@@ -671,7 +1698,7 @@ async function collectSkillFiles(sourcePath: string): Promise<CollectedSkillFile
     }
   }
 
-  return { files, findings, scannedFiles };
+  return { files, findings, scannedFiles, scannedEntries, totalBytes };
 }
 
 function extractFrontmatter(content: string): string | undefined {
@@ -871,12 +1898,14 @@ export async function preflightSkillInstall(
 ): Promise<SkillInstallPreflight> {
   const collected = await collectSkillFiles(options.sourcePath);
   const findings = [...collected.findings];
+  const executablePayloads = await inspectExecutablePayloads(collected.files);
+  findings.push(...executablePayloads.findings);
+  const promptPayloads = await inspectPromptPayloads(collected.files);
+  findings.push(...promptPayloads.findings);
   const parsed = await parseSkillMetadata(collected.files);
   findings.push(...parsed.findings);
 
-  const pythonFiles = collected.files
-    .filter((file) => path.extname(file.relativePath).toLowerCase() === '.py')
-    .map((file) => file.relativePath);
+  const pythonFiles = executablePayloads.pythonFiles;
 
   for (const relativePath of pythonFiles) {
     const file = collected.files.find((candidate) => candidate.relativePath === relativePath);
@@ -931,6 +1960,20 @@ export async function preflightSkillInstall(
         cardPath,
         requirementsLine,
         'Python-bearing skills must declare python, python3, or uv in requires.bins/anyBins',
+      ),
+    );
+  }
+  if (
+    executablePayloads.scriptFiles.length > 0
+    && !metadata?.requiresDeclared
+  ) {
+    findings.push(
+      createFinding(
+        'rc-skill-runtime-undeclared',
+        'warn',
+        cardPath,
+        requirementsLine,
+        'Executable script-bearing skills must declare metadata.openclaw.requires',
       ),
     );
   }
@@ -1026,9 +2069,12 @@ export async function preflightSkillInstall(
   const pythonRuntimeDeclared =
     pythonFiles.length === 0 ||
     (Boolean(metadata?.requiresDeclared) && hasDeclaredPythonRuntime(requires));
+  const scriptRuntimeDeclared =
+    executablePayloads.scriptFiles.length === 0 || Boolean(metadata?.requiresDeclared);
   const runtimeReady =
     installAllowed &&
     pythonRuntimeDeclared &&
+    scriptRuntimeDeclared &&
     missingBins.length === 0 &&
     anyBinSatisfied &&
     missingEnv.length === 0 &&
@@ -1042,7 +2088,12 @@ export async function preflightSkillInstall(
     findings,
     dependencies,
     pythonFiles,
+    scriptFiles: executablePayloads.scriptFiles,
+    promptFiles: promptPayloads.promptFiles,
+    nativeFiles: executablePayloads.nativeFiles,
     scannedFiles: collected.scannedFiles,
+    scannedEntries: collected.scannedEntries,
+    totalBytes: collected.totalBytes,
   };
 }
 
@@ -1071,11 +2122,14 @@ export async function runSkillBeforeInstall(
   }
 
   try {
+    const config = dependencies.getConfig
+      ? dependencies.getConfig()
+      : dependencies.config;
     const preflight = await preflightSkillInstall({
       sourcePath: event.sourcePath,
       env: dependencies.env,
       platform: dependencies.platform,
-      config: dependencies.config,
+      config,
       hasBinary: dependencies.hasBinary,
     });
     return {
