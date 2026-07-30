@@ -97,6 +97,8 @@ import { RtspPreviewManager, PREVIEW_PLAYLIST_NAME } from './src/periph/rtsp-pre
 import { resolveWithinRoot } from './src/workspace/path-guard.js';
 import { PromptPresetService } from './src/prompt-presets/service.js';
 import { registerPromptPresetRpc } from './src/prompt-presets/rpc.js';
+import { ExecutionTraceService } from './src/execution-trace/service.js';
+import { registerExecutionTraceRpc } from './src/execution-trace/rpc.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -204,6 +206,7 @@ let _reviewService: PaperReviewService | null = null;
 let _jobService: JobService | null = null;
 let _periphService: PeriphService | null = null;
 let _promptPresetService: PromptPresetService | null = null;
+let _executionTraceService: ExecutionTraceService | null = null;
 
 // ── Plaud MCP manager ──────────────────────────────────────────────────────
 // Real mini stdio MCP client. Construction is pure (no process spawns until a
@@ -1118,6 +1121,7 @@ const plugin: PluginDefinition = {
       _monitorService = new MonitorService(_dbManager.db);
       _jobService = new JobService(_dbManager.db);
       _promptPresetService = new PromptPresetService(_dbManager.db);
+      _executionTraceService = new ExecutionTraceService(_dbManager.db);
       _monitorService.seedDefaults();
       const repairedMonitorPrompts = _monitorService.repairLegacyDefaultPrompts();
       if (repairedMonitorPrompts > 0) {
@@ -1205,6 +1209,7 @@ const plugin: PluginDefinition = {
     const pptService = _pptService!;
     const wsConfig = _wsConfig!;
     const promptPresetService = _promptPresetService!;
+    const executionTraceService = _executionTraceService!;
 
     // Single coalescing entry point for the OpenClaw subagent sync. Reads the
     // live JobService from module state (robust across restart cycles) and skips
@@ -1486,6 +1491,7 @@ const plugin: PluginDefinition = {
     }); // 1 method
     registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!, _rtspPreviewManager!); // 14 methods
     registerPromptPresetRpc(registerMethod, promptPresetService); // 6 methods
+    registerExecutionTraceRpc(registerMethod, executionTraceService); // 2 methods
 
     if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
     const memoryService = _memoryService;
@@ -2473,6 +2479,52 @@ const plugin: PluginDefinition = {
     // a single response. Track consecutive identical calls and block
     // after TOOL_DEDUP_MAX repeats to prevent transcript bloat.
     const TOOL_DEDUP_MAX = 3;
+
+    // OpenClaw 2026.6.1 supplies runId/toolCallId on both the event and tool
+    // context. before_tool_call covers built-ins; after_tool_call may be absent
+    // for them, so an honest lingering "invoked" state is preferable to a
+    // fabricated success.
+    api.on('before_tool_call', (event: unknown, context: unknown) => {
+      try {
+        const evt = event as { toolName?: string; runId?: string; toolCallId?: string } | undefined;
+        const ctx = context as { sessionKey?: string; runId?: string; toolCallId?: string } | undefined;
+        const runId = evt?.runId ?? ctx?.runId;
+        if (!evt?.toolName || !runId || !_executionTraceService) return;
+        _executionTraceService.recordBefore({
+          sessionKey: ctx?.sessionKey ?? 'unknown',
+          runId,
+          toolCallId: evt.toolCallId ?? ctx?.toolCallId,
+          toolName: evt.toolName,
+        });
+      } catch (err) {
+        api.logger.warn(`[ExecutionTrace] before_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+    api.on('after_tool_call', (event: unknown, context: unknown) => {
+      try {
+        const evt = event as {
+          toolName?: string;
+          runId?: string;
+          toolCallId?: string;
+          durationMs?: number;
+          error?: string;
+        } | undefined;
+        const ctx = context as { sessionKey?: string; runId?: string; toolCallId?: string } | undefined;
+        const runId = evt?.runId ?? ctx?.runId;
+        if (!evt?.toolName || !runId || !_executionTraceService) return;
+        _executionTraceService.recordAfter({
+          sessionKey: ctx?.sessionKey ?? 'unknown',
+          runId,
+          toolCallId: evt.toolCallId ?? ctx?.toolCallId,
+          toolName: evt.toolName,
+          durationMs: evt.durationMs,
+          error: evt.error,
+        });
+      } catch (err) {
+        api.logger.warn(`[ExecutionTrace] after_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
 
     api.on('before_tool_call', (event: unknown) => {
       const evt = event as { toolName?: string; params?: Record<string, unknown> } | undefined;

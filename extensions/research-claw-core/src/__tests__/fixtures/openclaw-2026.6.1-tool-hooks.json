@@ -1,0 +1,10 @@
+{
+  "before": {
+    "event": { "toolName": "read", "params": { "path": "paper.md" }, "runId": "run-fixture", "toolCallId": "call-1" },
+    "context": { "sessionKey": "agent:main:fixture", "runId": "run-fixture", "toolName": "read", "toolCallId": "call-1" }
+  },
+  "after": {
+    "event": { "toolName": "read", "params": { "path": "paper.md" }, "runId": "run-fixture", "toolCallId": "call-1", "durationMs": 12 },
+    "context": { "sessionKey": "agent:main:fixture", "runId": "run-fixture", "toolName": "read", "toolCallId": "call-1" }
+  }
+}

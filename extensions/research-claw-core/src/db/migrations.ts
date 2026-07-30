@@ -23,6 +23,7 @@ import {
   CREATE_RC_PERIPH_DEVICES_SQL,
   CREATE_RC_PERIPH_OBSERVATIONS_SQL,
   CREATE_RC_PROMPT_PRESETS_SQL,
+  CREATE_RC_EXECUTION_TOOLS_SQL,
 } from './schema.js';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -452,6 +453,15 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE_RC_PROMPT_PRESETS_SQL,
       `CREATE INDEX IF NOT EXISTS idx_rc_prompt_presets_order
         ON rc_prompt_presets(favorite DESC, sort_order ASC);`,
+    ].join('\n'),
+  },
+  {
+    version: 19,
+    name: 'add_execution_tool_trace',
+    sql: [
+      CREATE_RC_EXECUTION_TOOLS_SQL,
+      `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_run ON rc_execution_tools(run_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_session ON rc_execution_tools(session_key);`,
     ].join('\n'),
   },
 ];

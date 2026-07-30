@@ -108,7 +108,7 @@ function buildV16Database(): BetterSqlite3.Database {
 
 describe('peripherals schema (v16 tables + v17 local-camera)', () => {
   it('SCHEMA_VERSION includes all migrations through prompt presets', () => {
-    expect(SCHEMA_VERSION).toBe(18);
+    expect(SCHEMA_VERSION).toBe(19);
   });
 
   it('fresh install (empty DB) creates both periph tables', () => {

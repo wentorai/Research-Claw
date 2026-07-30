@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — SQLite Schema DDL
  *
- * 28 tables + FTS5 virtual table + triggers + indexes.
+ * 29 tables + FTS5 virtual table + triggers + indexes.
  * All table names prefixed with `rc_` to avoid collision with OpenClaw internals.
  *
  * Tables:
@@ -33,12 +33,13 @@
  *  26. rc_periph_devices   — External peripheral devices (camera/audio/lab/embodied)
  *  27. rc_periph_observations — Peripheral observation records (snapshot/check/note)
  *  28. rc_prompt_presets    — User-managed reusable chat commands
+ *  29. rc_execution_tools   — Per-run tool invocation trace
  *
  * FTS5: rc_papers_fts (title, authors, abstract, notes, keywords)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -411,6 +412,22 @@ CREATE TABLE IF NOT EXISTS rc_prompt_presets (
   updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );`;
 
+export const CREATE_RC_EXECUTION_TOOLS_SQL = `
+CREATE TABLE IF NOT EXISTS rc_execution_tools (
+  id           TEXT PRIMARY KEY,
+  session_key  TEXT NOT NULL,
+  run_id       TEXT NOT NULL,
+  tool_call_id TEXT NOT NULL,
+  tool_name    TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'invoked'
+                 CHECK(status IN ('invoked', 'completed', 'error')),
+  started_at   INTEGER NOT NULL,
+  ended_at     INTEGER,
+  duration_ms  INTEGER,
+  error        TEXT,
+  UNIQUE(run_id, tool_call_id)
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -442,6 +459,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   CREATE_RC_PERIPH_DEVICES_SQL,
   CREATE_RC_PERIPH_OBSERVATIONS_SQL,
   CREATE_RC_PROMPT_PRESETS_SQL,
+  CREATE_RC_EXECUTION_TOOLS_SQL,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -541,6 +559,8 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   // rc_prompt_presets indexes
   `CREATE INDEX IF NOT EXISTS idx_rc_prompt_presets_order
     ON rc_prompt_presets(favorite DESC, sort_order ASC);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_run ON rc_execution_tools(run_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_session ON rc_execution_tools(session_key);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────
