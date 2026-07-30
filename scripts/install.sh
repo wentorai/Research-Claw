@@ -1192,6 +1192,8 @@ if ! $UPDATE_FAILED; then
       ok "Dashboard rebuilt"
     fi
   fi
+else
+  ok "Existing dependencies and build kept"
 fi
 
 step 7 "Native modules check"
@@ -1291,6 +1293,8 @@ else
   if ! test_sqlite3; then
     warn "Native module (better-sqlite3) may be corrupted. Gateway may fail to start."
     warn "Fix: cd $INSTALL_DIR && pnpm install && pnpm build"
+  else
+    ok "Existing native modules OK"
   fi
 fi
 
@@ -1399,6 +1403,8 @@ if ! node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
     --check --quiet --target "$PLUGIN_DIR" 2>/dev/null; then
   warn "Research features are temporarily unavailable; the core assistant can still start."
   warn "Run this installer again to restore research features."
+elif $UPDATE_FAILED; then
+  ok "Existing research plugins kept"
 fi
 
 # --- Persist OPENCLAW_CONFIG_PATH in shell profile ---
