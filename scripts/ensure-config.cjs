@@ -26,6 +26,8 @@
  *  20. agents.defaults.compaction.customInstructions — add RC scientific default
  *  21. dual-model-supervisor — remove withdrawn settings and validation placeholders
  *  22. agents.defaults.memorySearch — default off until embeddings are configured
+ *  23. Skills disclosure — native workspace source, bounded rich catalog, RP router compaction
+ *  24. Tool Search — compact large tool catalogs behind search/describe/call
  */
 'use strict';
 
@@ -53,6 +55,14 @@ const REQUIRED_ALLOW = ['browser', 'research-claw-core', 'openclaw-weixin', 'dua
 const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins', 'dual-model-supervisor', 'research-superpower'];
 const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin', 'extensions/dual-model-supervisor', 'extensions/research-superpower'];
 const RESEARCH_PLUGINS_PATH = path.join(os.homedir(), '.openclaw', 'extensions', 'research-plugins');
+const RC_SKILLS_PROMPT_MAX = 100;
+const RC_SKILLS_PROMPT_CHARS = 26000;
+const RC_TOOL_SEARCH_DEFAULT = {
+  enabled: true,
+  mode: 'tools',
+  searchDefaultLimit: 5,
+  maxSearchLimit: 8,
+};
 
 function isLegacyResearchPluginsNodeModulesPath(candidate) {
   if (typeof candidate !== 'string') return false;
@@ -95,6 +105,58 @@ function normalizeRcDbPath(configPath, rawPath) {
   }
 
   return normalized;
+}
+
+function readSkillFrontmatterName(skillPath) {
+  let source;
+  try {
+    source = fs.readFileSync(skillPath, 'utf8');
+  } catch {
+    return null;
+  }
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(source)?.[1];
+  if (!frontmatter) return null;
+  const rawName = /^name:\s*(.+?)\s*$/m.exec(frontmatter)?.[1]?.trim();
+  if (!rawName) return null;
+  if (
+    (rawName.startsWith('"') && rawName.endsWith('"'))
+    || (rawName.startsWith("'") && rawName.endsWith("'"))
+  ) {
+    return rawName.slice(1, -1).trim() || null;
+  }
+  return rawName;
+}
+
+/**
+ * research-plugins exposes category routers at depth 1-2 under skills/.
+ * Leaves are deeper and remain discoverable through the unified Registry.
+ * Deriving names from the installed package avoids a hard-coded 40-name list.
+ */
+function discoverResearchPluginRouterNames(pluginRoot) {
+  const skillsRoot = path.join(pluginRoot, 'skills');
+  const names = new Set();
+  const visit = (directory, depth) => {
+    if (depth > 2) return;
+    const skillPath = path.join(directory, 'SKILL.md');
+    if (depth > 0 && fs.existsSync(skillPath)) {
+      const name = readSkillFrontmatterName(skillPath);
+      if (name) names.add(name);
+      return;
+    }
+    let entries;
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        visit(path.join(directory, entry.name), depth + 1);
+      }
+    }
+  };
+  visit(skillsRoot, 0);
+  return [...names].sort();
 }
 
 function ensureConfig(filePath) {
@@ -217,6 +279,19 @@ function ensureConfig(filePath) {
   for (const k of ['commands', 'channels', 'cron']) {
     if (c.tools?.[k]) {
       delete c.tools[k];
+      changed = true;
+    }
+  }
+  // OC 2026.6.1 can compact large eligible tool catalogs behind three
+  // structured search/describe/call tools. Apply this only to RC project
+  // configs and only when the operator has not made an explicit choice.
+  if (!isGlobal) {
+    if (!c.tools) {
+      c.tools = {};
+      changed = true;
+    }
+    if (c.tools.toolSearch === undefined) {
+      c.tools.toolSearch = { ...RC_TOOL_SEARCH_DEFAULT };
       changed = true;
     }
   }
@@ -375,15 +450,54 @@ function ensureConfig(filePath) {
   if (!c.gateway.bind) { c.gateway.bind = 'loopback'; changed = true; }
   if (!c.ui) { c.ui = { assistant: { name: 'Research-Claw' } }; changed = true; }
   if (!c.skills) { c.skills = { load: { extraDirs: ['./skills'] } }; changed = true; }
-  // Skill Workshop (OC 2026.6.1): applied skills live under workspace/skills — load alongside repo ./skills
+  // OpenClaw already scans <workspace>/skills as the authoritative
+  // openclaw-workspace source. Loading it again as an extraDir duplicates work
+  // and erases provenance by reclassifying it as openclaw-extra.
   if (!c.skills.load) { c.skills.load = { extraDirs: ['./skills'] }; changed = true; }
   if (!Array.isArray(c.skills.load.extraDirs)) {
     c.skills.load.extraDirs = ['./skills'];
     changed = true;
   }
-  if (!c.skills.load.extraDirs.includes('./workspace/skills')) {
-    c.skills.load.extraDirs.push('./workspace/skills');
+  const normalizedExtraDirs = c.skills.load.extraDirs.filter((entry) => (
+    typeof entry === 'string'
+    && !['workspace/skills', './workspace/skills'].includes(
+      entry.replace(/\\/g, '/').replace(/\/+$/, ''),
+    )
+  ));
+  if (!normalizedExtraDirs.includes('./skills')) normalizedExtraDirs.unshift('./skills');
+  if (
+    normalizedExtraDirs.length !== c.skills.load.extraDirs.length
+    || normalizedExtraDirs.some((entry, index) => entry !== c.skills.load.extraDirs[index])
+  ) {
+    c.skills.load.extraDirs = normalizedExtraDirs;
     changed = true;
+  }
+  if (!c.skills.limits) {
+    c.skills.limits = {};
+    changed = true;
+  }
+  if (c.skills.limits.maxSkillsInPrompt === undefined) {
+    c.skills.limits.maxSkillsInPrompt = RC_SKILLS_PROMPT_MAX;
+    changed = true;
+  }
+  if (c.skills.limits.maxSkillsPromptChars === undefined) {
+    c.skills.limits.maxSkillsPromptChars = RC_SKILLS_PROMPT_CHARS;
+    changed = true;
+  }
+  // Once the two-phase Registry is available, RP's 40 leaf-list routers are
+  // redundant prompt entries. Disable only previously-unconfigured routers so
+  // an explicit operator enable/disable choice always wins.
+  if (researchPluginsUsable) {
+    if (!c.skills.entries) {
+      c.skills.entries = {};
+      changed = true;
+    }
+    for (const routerName of discoverResearchPluginRouterNames(RESEARCH_PLUGINS_PATH)) {
+      if (c.skills.entries[routerName] === undefined) {
+        c.skills.entries[routerName] = { enabled: false };
+        changed = true;
+      }
+    }
   }
   if (!c.skills.workshop) {
     c.skills.workshop = {

@@ -79,9 +79,12 @@
   "skills": {
     "load": {
       "extraDirs": [
-        "./skills",
-        "./workspace/skills"
+        "./skills"
       ]
+    },
+    "limits": {
+      "maxSkillsInPrompt": 100,
+      "maxSkillsPromptChars": 26000
     },
     "workshop": {
       "autonomous": {
@@ -154,6 +157,12 @@
     }
   },
   "tools": {
-    "profile": "full"
+    "profile": "full",
+    "toolSearch": {
+      "enabled": true,
+      "mode": "tools",
+      "searchDefaultLimit": 5,
+      "maxSearchLimit": 8
+    }
   }
 }
