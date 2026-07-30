@@ -245,38 +245,124 @@ export function recordLoadedSkillFromToolResult(
     sessionKey: string;
     runId: string;
     toolCallId?: string;
+    timestamp?: number;
   },
 ): boolean {
-  if (params.toolName !== 'skill_load') return false;
+  return recordSkillLifecycleFromToolResult(service, params).loaded > 0;
+}
+
+type TraceableSkill = {
+  id: string;
+  name: string;
+  source: string;
+  lifecycle: 'candidate' | 'selected' | 'loaded';
+};
+
+function traceableSkill(value: unknown, lifecycle: TraceableSkill['lifecycle']): TraceableSkill | null {
+  if (!value || typeof value !== 'object') return null;
+  const skill = value as Record<string, unknown>;
+  if (
+    typeof skill.id !== 'string'
+    || typeof skill.name !== 'string'
+    || typeof skill.source !== 'string'
+    || skill.lifecycle !== lifecycle
+  ) {
+    return null;
+  }
+  return {
+    id: skill.id,
+    name: skill.name,
+    source: skill.source,
+    lifecycle,
+  };
+}
+
+export function recordSkillLifecycleFromToolResult(
+  service: ExecutionTraceService,
+  params: {
+    toolName: string;
+    result?: unknown;
+    sessionKey: string;
+    runId: string;
+    toolCallId?: string;
+    timestamp?: number;
+  },
+): { candidate: number; selected: number; loaded: number } {
+  const counts = { candidate: 0, selected: 0, loaded: 0 };
   const result = params.result as {
     details?: {
       lifecycle?: unknown;
-      skill?: {
-        id?: unknown;
-        name?: unknown;
-        source?: unknown;
-        lifecycle?: unknown;
-      };
+      skills?: unknown;
+      selected?: unknown;
+      skill?: unknown;
+      candidates?: unknown;
     };
   } | undefined;
-  const skill = result?.details?.skill;
-  if (
-    result?.details?.lifecycle !== 'loaded'
-    || skill?.lifecycle !== 'loaded'
-    || typeof skill.id !== 'string'
-    || typeof skill.name !== 'string'
-    || typeof skill.source !== 'string'
-  ) {
-    return false;
+  const details = result?.details;
+
+  if (params.toolName === 'skill_search' && details?.lifecycle === 'candidate') {
+    const candidates = Array.isArray(details.skills)
+      ? details.skills
+        .map((skill) => traceableSkill(skill, 'candidate'))
+        .filter((skill): skill is TraceableSkill => skill !== null)
+      : [];
+    counts.candidate = service.recordSkillCandidates(candidates.map((skill) => ({
+      sessionKey: params.sessionKey,
+      runId: params.runId,
+      skillKey: skill.id,
+      skillName: skill.name,
+      skillSource: skill.source,
+      lifecycle: 'candidate',
+      toolCallId: params.toolCallId,
+      timestamp: params.timestamp,
+    })));
+    return counts;
   }
-  service.recordSkill({
-    sessionKey: params.sessionKey,
-    runId: params.runId,
-    skillKey: skill.id,
-    skillName: skill.name,
-    skillSource: skill.source,
-    activation: 'command',
-    toolCallId: params.toolCallId,
-  });
-  return true;
+
+  if (params.toolName !== 'skill_load') return counts;
+
+  const selected = traceableSkill(details?.selected, 'selected');
+  const loaded = traceableSkill(details?.skill, 'loaded');
+  if (
+    details?.lifecycle === 'loaded'
+    && selected
+    && loaded
+    && selected.id === loaded.id
+    && selected.name === loaded.name
+    && selected.source === loaded.source
+  ) {
+    const recorded = service.recordLoadedSkill({
+      sessionKey: params.sessionKey,
+      runId: params.runId,
+      skillKey: loaded.id,
+      skillName: loaded.name,
+      skillSource: loaded.source,
+      activation: 'command',
+      toolCallId: params.toolCallId,
+      timestamp: params.timestamp,
+    });
+    counts.selected = recorded.selected ? 1 : 0;
+    counts.loaded = recorded.loaded ? 1 : 0;
+    return counts;
+  }
+
+  if (details?.lifecycle === 'selected' && Array.isArray(details.candidates)) {
+    for (const value of details.candidates) {
+      const candidate = traceableSkill(value, 'selected');
+      if (!candidate) continue;
+      if (service.recordSkillLifecycle({
+        sessionKey: params.sessionKey,
+        runId: params.runId,
+        skillKey: candidate.id,
+        skillName: candidate.name,
+        skillSource: candidate.source,
+        lifecycle: 'selected',
+        toolCallId: params.toolCallId,
+        timestamp: params.timestamp,
+      })) {
+        counts.selected += 1;
+      }
+    }
+  }
+  return counts;
 }

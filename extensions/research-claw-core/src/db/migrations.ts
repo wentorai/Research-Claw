@@ -26,6 +26,7 @@ import {
   CREATE_RC_EXECUTION_TOOLS_SQL,
   CREATE_RC_EXECUTION_SKILLS_SQL,
   CREATE_RC_EXECUTION_REPLIES_SQL,
+  CREATE_RC_EXECUTION_SKILL_EVENTS_SQL,
 } from './schema.js';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -481,6 +482,15 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE_RC_EXECUTION_REPLIES_SQL,
       `CREATE INDEX IF NOT EXISTS idx_rc_execution_replies_session
         ON rc_execution_replies(session_key, reply_timestamp);`,
+    ].join('\n'),
+  },
+  {
+    version: 22,
+    name: 'add_execution_skill_lifecycle',
+    sql: [
+      CREATE_RC_EXECUTION_SKILL_EVENTS_SQL,
+      `CREATE INDEX IF NOT EXISTS idx_rc_execution_skill_events_run
+        ON rc_execution_skill_events(run_id, lifecycle, observed_at);`,
     ].join('\n'),
   },
 ];

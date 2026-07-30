@@ -62,7 +62,7 @@ import {
 } from './src/self-check/runtime-probe.js';
 import { SkillRegistry } from './src/skills/registry.js';
 import { OpenClawCliStatusProvider } from './src/skills/openclaw-status.js';
-import { createSkillTools, recordLoadedSkillFromToolResult } from './src/skills/tools.js';
+import { createSkillTools, recordSkillLifecycleFromToolResult } from './src/skills/tools.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
   oauthInitiate,
@@ -2475,12 +2475,13 @@ const plugin: PluginDefinition = {
           durationMs: evt.durationMs,
           error: evt.error,
         });
-        recordLoadedSkillFromToolResult(_executionTraceService, {
+        recordSkillLifecycleFromToolResult(_executionTraceService, {
           toolName: evt.toolName,
           result: (event as { result?: unknown }).result,
           sessionKey: ctx?.sessionKey ?? 'unknown',
           runId,
           toolCallId: evt.toolCallId ?? ctx?.toolCallId,
+          timestamp: Date.now(),
         });
       } catch (err) {
         api.logger.warn(`[ExecutionTrace] after_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);

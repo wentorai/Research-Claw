@@ -14,6 +14,7 @@ import {
 import {
   createSkillTools,
   recordLoadedSkillFromToolResult,
+  recordSkillLifecycleFromToolResult,
   type SkillTool,
 } from '../skills/tools.js';
 import { createTestDb } from './setup.js';
@@ -107,6 +108,18 @@ function makeFixture() {
     'Design clinical studies and report using CONSORT and STROBE.',
     'REAL_CLINICAL_BODY: choose an appropriate clinical study design.',
   );
+  for (const id of [
+    'evidence-screening-workflow',
+    'evidence-bias-assessment',
+    'evidence-meta-analysis',
+  ]) {
+    writeSkill(
+      path.join(rpRoot, 'skills', 'research', 'deep-research', id, 'SKILL.md'),
+      id,
+      'Systematic review methodology, evidence synthesis, and PRISMA workflow.',
+      `REAL_FIXTURE_BODY: ${id}.`,
+    );
+  }
   fs.mkdirSync(rpRoot, { recursive: true });
   fs.writeFileSync(
     path.join(rpRoot, 'openclaw.plugin.json'),
@@ -140,6 +153,21 @@ function makeFixture() {
           path: 'skills/domains/biomedical/clinical-research-guide',
           source: 'fixture',
         },
+        ...[
+          'evidence-screening-workflow',
+          'evidence-bias-assessment',
+          'evidence-meta-analysis',
+        ].map((id) => ({
+          id,
+          type: 'skill',
+          name: id,
+          description: 'Systematic review methodology, evidence synthesis, and PRISMA workflow.',
+          category: 'research',
+          subcategory: 'deep-research',
+          keywords: ['systematic review', 'PRISMA', 'evidence synthesis'],
+          path: `skills/research/deep-research/${id}`,
+          source: 'fixture',
+        })),
         {
           id: 'path-traversal-must-not-index',
           type: 'skill',
@@ -465,6 +493,14 @@ describe('unified Skill Registry', () => {
     const db = createTestDb();
     const service = new ExecutionTraceService(db);
 
+    expect(recordSkillLifecycleFromToolResult(service, {
+      toolName: 'skill_search',
+      result: searchResult,
+      sessionKey: 'agent:main:fixture',
+      runId: 'run-router-leaf',
+      toolCallId: 'search-call',
+      timestamp: 100,
+    })).toEqual({ candidate: 5, selected: 0, loaded: 0 });
     expect(recordLoadedSkillFromToolResult(service, {
       toolName: 'skill_search',
       result: searchResult,
@@ -492,7 +528,32 @@ describe('unified Skill Registry', () => {
       toolCallId: 'load-call',
     })).toBe(true);
 
-    expect(service.skillDetail('run-router-leaf')).toEqual(expect.arrayContaining([
+    const reconstructed = new ExecutionTraceService(db);
+    expect(reconstructed.skillLifecycleDetail('run-router-leaf')).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        skill_key: 'rp:systematic-review-guide',
+        lifecycle: 'candidate',
+        tool_call_id: 'search-call',
+      }),
+      expect.objectContaining({
+        skill_key: 'rp:systematic-review-guide',
+        lifecycle: 'selected',
+        tool_call_id: 'load-call',
+      }),
+      expect.objectContaining({
+        skill_key: 'rp:systematic-review-guide',
+        lifecycle: 'loaded',
+        tool_call_id: 'load-call',
+      }),
+      expect.objectContaining({
+        skill_key: 'workspace:deep-research-skills',
+        lifecycle: 'executed',
+        tool_call_id: 'router-read',
+      }),
+    ]));
+    expect(reconstructed.skillLifecycleDetail('run-router-leaf')
+      .filter((event) => event.lifecycle === 'candidate')).toHaveLength(5);
+    expect(reconstructed.skillDetail('run-router-leaf')).toEqual(expect.arrayContaining([
       expect.objectContaining({
         skill_key: 'workspace:deep-research-skills',
         skill_name: 'deep-research-skills',
@@ -504,7 +565,31 @@ describe('unified Skill Registry', () => {
         activation: 'command',
       }),
     ]));
-    expect(service.summary(['run-router-leaf'])['run-router-leaf'].skillCount).toBe(2);
+    expect(reconstructed.summary(['run-router-leaf'])['run-router-leaf'].skillCount).toBe(2);
+    db.close();
+  });
+
+  it('keeps search-only candidates out of the used Skill count after reconstruction', async () => {
+    const { rpRoot, provider } = makeFixture();
+    const searchResult = await toolByName(createSkillTools(
+      new SkillRegistry({ researchPluginsRoot: rpRoot, openClaw: provider }),
+    ), 'skill_search').execute('search-only-call', { query: 'systematic review' });
+    const db = createTestDb();
+    const service = new ExecutionTraceService(db);
+
+    expect(recordSkillLifecycleFromToolResult(service, {
+      toolName: 'skill_search',
+      result: searchResult,
+      sessionKey: 'agent:main:fixture',
+      runId: 'run-search-only',
+      toolCallId: 'search-only-call',
+    })).toEqual({ candidate: 5, selected: 0, loaded: 0 });
+
+    const reconstructed = new ExecutionTraceService(db);
+    expect(reconstructed.summary(['run-search-only'])).toEqual({});
+    expect(reconstructed.skillDetail('run-search-only')).toEqual([]);
+    expect(reconstructed.skillLifecycleDetail('run-search-only')
+      .filter((event) => event.lifecycle === 'candidate')).toHaveLength(5);
     db.close();
   });
 });

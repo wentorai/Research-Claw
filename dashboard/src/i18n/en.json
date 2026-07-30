@@ -229,13 +229,20 @@
     "title": "Execution details",
     "summary": "{{tools}} tool(s), {{skills}} Skill(s) detected",
     "tools": "Tools used",
-    "skills": "Skills detected",
+    "skills": "Skills actually loaded or executed",
+    "candidates": "Search candidates",
     "review": "Trusted review",
     "noneDetected": "No Skill activation was detected",
     "noLinkedReview": "No review result is linked to this run",
     "activation": {
       "read": "Activated by read",
       "command": "Activated by command"
+    },
+    "lifecycle": {
+      "candidate": "Candidate",
+      "selected": "Selected",
+      "loaded": "Loaded",
+      "executed": "Executed"
     },
     "skillSource": {
       "workspace": "Workspace",

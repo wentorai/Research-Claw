@@ -229,13 +229,20 @@
     "title": "执行详情",
     "summary": "调用 {{tools}} 个工具，检测到 {{skills}} 个 Skill",
     "tools": "使用的工具",
-    "skills": "检测到的 Skills",
+    "skills": "实际加载或执行的 Skills",
+    "candidates": "检索候选",
     "review": "可信审查",
     "noneDetected": "本次未检测到 Skill 激活",
     "noLinkedReview": "本次运行暂无可关联的审查结果",
     "activation": {
       "read": "读取启用",
       "command": "指令启用"
+    },
+    "lifecycle": {
+      "candidate": "候选",
+      "selected": "已选择",
+      "loaded": "已加载",
+      "executed": "已执行"
     },
     "skillSource": {
       "workspace": "工作区",
