@@ -8,7 +8,7 @@
  *   - 57 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 2 Skill Registry + 4 job + 3 periph)
  *   - 138 WS RPC methods + 3 HTTP routes = 141 interface methods
  *     (including rc.execution.summary/detail/resolve; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
- *   - 14 typed hook handlers (7 hook names; agent_end ×3, after_tool_call ×5)
+ *   - 15 typed hook handlers (8 hook names; agent_end ×3, after_tool_call ×5)
  *     + 1 legacy agent:bootstrap hook
  *   - 1 service (research-claw-db lifecycle)
  *   - 1 session monitoring service (automatic memory extraction)
@@ -63,6 +63,7 @@ import {
 import { SkillRegistry } from './src/skills/registry.js';
 import { OpenClawCliStatusProvider } from './src/skills/openclaw-status.js';
 import { createSkillTools, recordSkillLifecycleFromToolResult } from './src/skills/tools.js';
+import { runSkillBeforeInstall } from './src/skills/install-security.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
   oauthInitiate,
@@ -2019,6 +2020,17 @@ const plugin: PluginDefinition = {
     // Hooks MUST only be registered once — duplicate registration causes
     // handlers to fire multiple times per event.
     if (!_hooksRegistered) {
+    // Hook 0: Close OpenClaw's Python scanning gap for every external Skill
+    // install source. The ClawHub path is routed here by the small pnpm patch;
+    // local directory, Git, upload, and dependency-installer paths already call
+    // scanSkillInstallSource in OpenClaw 2026.6.1.
+    api.on('before_install', async (event: unknown) => {
+      return await runSkillBeforeInstall(
+        event as Parameters<typeof runSkillBeforeInstall>[0],
+        { config: api.runtime.config.current() },
+      );
+    }, { priority: 1_000 });
+
     // Extends the probe's own config view rather than restating it: the tool
     // projection shapes are subtle enough that a second hand-written copy would
     // drift, and a drifted copy reads as "no projection configured".
@@ -3116,7 +3128,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (56 tools, 138 WS RPC + 3 HTTP = 141 interfaces, 14 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
+    api.logger.info('Research-Claw Core registered (56 tools, 138 WS RPC + 3 HTTP = 141 interfaces, 15 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
     _hooksRegistered = true;
     }
   },

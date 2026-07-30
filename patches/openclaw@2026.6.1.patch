@@ -1,3 +1,26 @@
+diff --git a/dist/command-path-policy-YVod7apR.js b/dist/command-path-policy-YVod7apR.js
+--- a/dist/command-path-policy-YVod7apR.js
++++ b/dist/command-path-policy-YVod7apR.js
+@@ -620,4 +620,5 @@
+ 		commandPath: ["skills", "install"],
+-		exact: true
++		exact: true,
++		policy: { loadPlugins: "always", pluginRegistry: { scope: "all" } }
+ 	},
+ 	{
+@@ -633,4 +634,10 @@
+ 		commandPath: ["skills", "update"],
+-		exact: true
++		exact: true,
++		policy: { loadPlugins: "always", pluginRegistry: { scope: "all" } }
+-	}
++	},
++	{
++		commandPath: ["skills", "workshop"],
++		exact: true,
++		policy: { loadPlugins: "always", pluginRegistry: { scope: "all" } }
++	}
+ ];
 diff --git a/dist/chat-display-projection-CMTVNdR4.js b/dist/chat-display-projection-CMTVNdR4.js
 index d19aba1a5e8a9fb58fa09789dc5c41884e44a0b5..c41419637a5016b77bb4126a640581e8cae41629 100644
 --- a/dist/chat-display-projection-CMTVNdR4.js
@@ -325,6 +348,14 @@ diff --git a/dist/service-yYn6i75I.js b/dist/service-yYn6i75I.js
 index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c66b20b40 100644
 --- a/dist/service-yYn6i75I.js
 +++ b/dist/service-yYn6i75I.js
+@@ -13,6 +13,7 @@
+ import { n as resolveSkillStatusEntry, t as buildWorkspaceSkillStatus } from "./status-BeKxEZi4.js";
+ import { t as bumpSkillsSnapshotVersion } from "./refresh-state-DzUL33ps.js";
+ import { a as scanSkillContent, o as scanSource } from "./scanner-CCQg3MsL.js";
++import { a as scanSkillInstallSource } from "./install-security-scan-jlzAVrl9.js";
+ import path from "node:path";
+ import fs from "node:fs/promises";
+ import crypto from "node:crypto";
 @@ -132,7 +132,11 @@ const SKILL_WORKSHOP_LOCK_OPTIONS = {
  };
  const skillWorkshopProcessLocks = /* @__PURE__ */ new Map();
@@ -338,6 +369,72 @@ index fab20d49454b27369355b247f5f7875d9f6b2b73..bb31a2bd62fa7e8a8f7599b096ddd35c
  	const date = now.toISOString().slice(0, 10).replaceAll("-", "");
  	const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 10);
  	return `${normalized.slice(0, 60)}-${date}-${suffix}`;
+@@ -831,6 +836,8 @@ async function applySkillProposal(input) {
+ 		if (hashSkillProposalContent(content) !== record.draftHash) throw new Error("Proposal draft changed without updating proposal metadata.");
+ 		const supportFiles = await readProposalSupportFiles(record);
+ 		if (!readProposalFrontmatter(content)) throw new Error("Proposal draft must include proposal frontmatter.");
++		const skillContent = stripProposalFrontmatterForSkill(content);
++		await assertSkillProposalInstallScan({ record, skillContent });
+ 		const scan = scanProposalBundle(content, supportFiles);
+ 		if (scan.state !== "clean") {
+ 			await updateSkillProposalRecord({ record: {
+@@ -860,6 +867,5 @@ async function applySkillProposal(input) {
+ 			rollback
+ 		});
+-		const skillContent = stripProposalFrontmatterForSkill(content);
+ 		await publishProposalTarget({
+ 			workspaceDir: input.workspaceDir,
+ 			record,
+@@ -986,9 +992,49 @@ async function restoreUpdatedSupportFiles(params) {
+ 		else await removeWorkspaceSupportFile({
+ 			skillDir: params.record.target.skillDir,
+ 			relativePath
+ 		});
+ 	}));
+ }
++async function assertSkillProposalInstallScan(params) {
++	const stagingParent = await fs.mkdtemp(path.join(resolveSkillWorkshopStateDir(), ".install-scan-"));
++	const sourceDir = path.join(stagingParent, "proposal");
++	try {
++		await fs.cp(resolveProposalDir(params.record.id), sourceDir, {
++			recursive: true,
++			dereference: false,
++			force: false,
++			errorOnExist: true
++		});
++		await fs.writeFile(path.join(sourceDir, "SKILL.md"), params.skillContent, "utf8");
++		const result = await scanSkillInstallSource({
++			installId: params.record.id,
++			logger: {},
++			origin: "skill-workshop",
++			skillName: params.record.target.skillKey,
++			sourceDir
++		});
++		if (!result?.blocked) return;
++		const now = (/* @__PURE__ */ new Date()).toISOString();
++		await updateSkillProposalRecord({ record: {
++			...params.record,
++			status: "quarantined",
++			updatedAt: now,
++			quarantinedAt: now,
++			scan: {
++				...params.record.scan,
++				state: "quarantined",
++				scannedAt: now
++			},
++			statusReason: result.blocked.reason
++		} });
++		throw new Error(`Proposal install scan failed; proposal was quarantined: ${result.blocked.reason}`);
++	} finally {
++		await fs.rm(stagingParent, {
++			recursive: true,
++			force: true
++		});
++	}
++}
+ function scanProposalBundle(content, supportFiles = []) {
+ 	const scannedAt = (/* @__PURE__ */ new Date()).toISOString();
+ 	const findings = [
 diff --git a/dist/sessions-helpers-BHxfvpmm.js b/dist/sessions-helpers-BHxfvpmm.js
 index 0be286a1199da7aa73fe235969712a5eb58a1f93..c3c16feb9c62303c140a8816267aebfdfd534208 100644
 --- a/dist/sessions-helpers-BHxfvpmm.js
@@ -460,3 +557,18 @@ diff --git a/dist/message-handler-Du1uvc4A.js b/dist/message-handler-Du1uvc4A.js
  				if (!setClient(nextClient)) {
  					setCloseCause("connect-aborted-before-register", {
  						...clientMeta,
+diff --git a/dist/status-BeKxEZi4.js b/dist/status-BeKxEZi4.js
+--- a/dist/status-BeKxEZi4.js
++++ b/dist/status-BeKxEZi4.js
+@@ -594,7 +594,10 @@ async function performClawHubSkillInstall(params) {
+ 					extractedRoot: rootDir,
+ 					mode: params.force ? "update" : "install",
+ 					logger: params.logger,
+-					scan: false,
++					scan: {
++						installId: "clawhub",
++						origin: "clawhub"
++					},
+ 					rootMarkers: CLAWHUB_SKILL_ARCHIVE_ROOT_MARKERS
+ 				})
+ 			});
