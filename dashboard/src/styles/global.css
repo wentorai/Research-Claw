@@ -129,7 +129,7 @@ html, body {
 /* Empty-state suggestion chips — click prefills the composer */
 .chat-suggestion-chip {
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 16px;
   font-family: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
   color: var(--text-secondary);
   background: transparent;

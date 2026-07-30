@@ -473,7 +473,9 @@ export default function ChatView() {
               <MessageOutlined
                 style={{ fontSize: 48, color: 'var(--text-tertiary)', opacity: 0.5 }}
               />
-              <Text type="secondary">{t('chat.empty')}</Text>
+              <Text type="secondary" style={{ fontSize: 16 }}>
+                {t('chat.empty')}
+              </Text>
               <div
                 style={{
                   display: 'flex',
