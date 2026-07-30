@@ -874,6 +874,50 @@ describe('Chat store', () => {
       expect(persisted).not.toContain('带执行详情的回答');
     });
 
+    it('keeps an exact local reply binding when transcript timestamps drift by more than five seconds', async () => {
+      useChatStore.setState({ runId: 'run-drifted', streaming: true });
+      useChatStore.getState().handleChatEvent({
+        runId: 'run-drifted',
+        sessionKey: 'main',
+        state: 'final',
+        message: { role: 'assistant', text: '时间戳漂移但内容一致', timestamp: 2_000 },
+      });
+      mockGatewayClient.request.mockResolvedValueOnce({
+        messages: [
+          { role: 'assistant', text: '时间戳漂移但内容一致', timestamp: 62_000 },
+        ],
+      });
+
+      await useChatStore.getState().loadHistory();
+
+      expect(useChatStore.getState().messages[0].executionRunId).toBe('run-drifted');
+    });
+
+    it('restores a durable server reply binding when browser storage is empty', async () => {
+      localStorage.removeItem('rc-execution-bindings:main');
+      mockGatewayClient.request
+        .mockResolvedValueOnce({
+          messages: [
+            { role: 'assistant', content: [{ type: 'text', text: '刷新后仍有执行详情' }], timestamp: 20_000 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          bindings: [{ index: 0, runId: 'run-from-server' }],
+        });
+
+      await useChatStore.getState().loadHistory();
+
+      expect(mockGatewayClient.request).toHaveBeenNthCalledWith(2, 'rc.execution.resolve', {
+        sessionKey: 'agent:main:main',
+        candidates: [{
+          index: 0,
+          timestamp: 20_000,
+          textHashes: [expect.stringMatching(/^[0-9a-f]{8}$/)],
+        }],
+      });
+      expect(useChatStore.getState().messages[0].executionRunId).toBe('run-from-server');
+    });
+
     it('is a no-op when disconnected', async () => {
       mockGatewayClient.isConnected = false;
 

@@ -26,6 +26,22 @@ export interface ExecutionSkill {
   first_used_at: number;
 }
 
+export interface ExecutionReplyCandidate {
+  index: number;
+  timestamp: number;
+  textHashes: string[];
+  turnStartedAt?: number;
+}
+
+export function hashExecutionReplyText(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 export class ExecutionTraceService {
   constructor(private readonly db: Database.Database) {}
 
@@ -95,6 +111,112 @@ export class ExecutionTraceService {
       input.skillSource ?? 'research-plugins', input.activation ?? 'read',
       input.toolCallId ?? null, input.timestamp ?? Date.now(),
     );
+  }
+
+  recordReply(input: {
+    sessionKey: string;
+    runId: string;
+    text: string;
+    timestamp?: number;
+  }): void {
+    const text = input.text.trim();
+    if (!text) return;
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT INTO rc_execution_replies
+        (run_id, session_key, reply_hash, reply_timestamp, recorded_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(run_id) DO UPDATE SET
+        session_key = excluded.session_key,
+        reply_hash = excluded.reply_hash,
+        reply_timestamp = excluded.reply_timestamp,
+        recorded_at = excluded.recorded_at
+    `).run(
+      input.runId,
+      input.sessionKey,
+      hashExecutionReplyText(text),
+      input.timestamp ?? now,
+      now,
+    );
+  }
+
+  resolveReplies(
+    sessionKey: string,
+    candidates: ExecutionReplyCandidate[],
+  ): Array<{ index: number; runId: string }> {
+    if (candidates.length === 0) return [];
+
+    const replies = this.db.prepare(`
+      SELECT run_id, reply_hash, reply_timestamp
+      FROM rc_execution_replies
+      WHERE session_key = ?
+      ORDER BY reply_timestamp ASC
+    `).all(sessionKey) as Array<{
+      run_id: string;
+      reply_hash: string;
+      reply_timestamp: number;
+    }>;
+    const resolved = new Map<number, string>();
+    const usedReplyRuns = new Set<string>();
+
+    // Primary path: a privacy-safe exact content hash written by agent_end.
+    for (const candidate of candidates) {
+      let best: typeof replies[number] | undefined;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const reply of replies) {
+        if (usedReplyRuns.has(reply.run_id) || !candidate.textHashes.includes(reply.reply_hash)) continue;
+        const distance = Math.abs(reply.reply_timestamp - candidate.timestamp);
+        if (distance < bestDistance) {
+          best = reply;
+          bestDistance = distance;
+        }
+      }
+      if (best) {
+        resolved.set(candidate.index, best.run_id);
+        usedReplyRuns.add(best.run_id);
+      }
+    }
+
+    // Compatibility/backfill path for runs created before rc_execution_replies:
+    // require the tool run to start inside the same user turn. A broad
+    // "nearest tool in this session" heuristic would falsely attach a previous
+    // turn's tools to a later no-tool reply.
+    const runs = this.db.prepare(`
+      SELECT run_id, MIN(started_at) AS started_at,
+             MAX(COALESCE(ended_at, started_at)) AS last_activity_at
+      FROM rc_execution_tools
+      WHERE session_key = ?
+      GROUP BY run_id
+      ORDER BY started_at ASC
+    `).all(sessionKey) as Array<{
+      run_id: string;
+      started_at: number;
+      last_activity_at: number;
+    }>;
+    for (const candidate of candidates) {
+      if (
+        resolved.has(candidate.index)
+        || !Number.isFinite(candidate.timestamp)
+        || candidate.timestamp <= 0
+        || !Number.isFinite(candidate.turnStartedAt)
+        || (candidate.turnStartedAt ?? 0) <= 0
+      ) {
+        continue;
+      }
+      let match: typeof runs[number] | undefined;
+      for (const run of runs) {
+        if (
+          run.started_at >= (candidate.turnStartedAt ?? 0) - 5_000
+          && run.started_at <= candidate.timestamp + 5_000
+        ) {
+          match = run;
+        }
+      }
+      if (match) resolved.set(candidate.index, match.run_id);
+    }
+
+    return Array.from(resolved, ([index, runId]) => ({ index, runId }))
+      .sort((a, b) => a.index - b.index);
   }
 
   summary(runIds: string[]): Record<string, { toolCount: number; errorCount: number; skillCount: number }> {

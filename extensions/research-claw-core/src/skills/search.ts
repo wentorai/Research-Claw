@@ -140,32 +140,6 @@ export function readSkillContent(entry: SkillIndexEntry): string | null {
 }
 
 /**
- * Match a real read-tool path to the exact SKILL.md of an indexed catalog entry.
- * A filename named SKILL.md is never sufficient evidence on its own.
- */
-export function resolveIndexedSkillRead(
-  candidate: unknown,
-  cwd: string,
-): SkillIndexEntry | null {
-  if (!_pluginRoot || typeof candidate !== 'string' || !candidate.trim()) return null;
-  const raw = candidate.trim();
-  const expanded = raw.startsWith('~/')
-    ? path.join(process.env.HOME ?? process.env.USERPROFILE ?? '', raw.slice(2))
-    : raw;
-  const resolvedCandidate = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(cwd, expanded));
-  let canonicalCandidate = resolvedCandidate;
-  try { canonicalCandidate = fs.realpathSync(resolvedCandidate); } catch { return null; }
-
-  for (const entry of _skillIndex) {
-    const expected = path.resolve(_pluginRoot, entry.path, 'SKILL.md');
-    let canonicalExpected = expected;
-    try { canonicalExpected = fs.realpathSync(expected); } catch { continue; }
-    if (canonicalCandidate === canonicalExpected) return entry;
-  }
-  return null;
-}
-
-/**
  * Get a brief listing of all skills organized by category.
  */
 export function getSkillCatalogSummary(): string {

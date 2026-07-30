@@ -233,6 +233,16 @@
     "review": "Trusted review",
     "noneDetected": "No Skill activation was detected",
     "noLinkedReview": "No review result is linked to this run",
+    "activation": {
+      "read": "Activated by read",
+      "command": "Activated by command"
+    },
+    "skillSource": {
+      "workspace": "Workspace",
+      "bundled": "OpenClaw bundled",
+      "unknown": "Other source",
+      "research-plugins": "Research Plugins"
+    },
     "status": {
       "invoked": "Called",
       "completed": "Completed",
@@ -1132,6 +1142,11 @@
     "maxRegenerateAttemptsHint": "Maximum number of corrective instructions queued per session while deviation persists",
     "maxRegenerateAttemptsTooltip": "When the deviation reaches or exceeds the threshold and strong correction is enabled, this is the maximum number of corrective instructions queued per session. Past this limit only a warning is recorded.",
     "supervisorSaveHint": "Save config and restart for changes to take effect",
+    "restoreDefaults": "Restore defaults",
+    "supervisorRestoreDefaultsConfirmTitle": "Restore review defaults?",
+    "supervisorRestoreDefaultsConfirmContent": "This turns off Response and Action Review and restores its review mode, correction threshold, high-risk tool rules, and evidence policy. Saved model API keys and other settings are not deleted.",
+    "supervisorRestoreDefaultsSuccess": "Review defaults restored",
+    "supervisorRestoreDefaultsFailed": "Failed to restore review defaults",
     "supervisorGoalParsed": "Research goal identified",
     "supervisorGoalPending": "Goal pending — the deep-review model will parse it on the next message",
     "supervisorTargetConclusions": "Target Conclusions",

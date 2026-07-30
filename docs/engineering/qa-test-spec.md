@@ -3,7 +3,7 @@ doc: engineering/qa-test-spec.md
 audience: 开发者 / QA — 渠道 B(仓库按需阅读,不注入运行时)
 status: 现行 · 全量功能清单与验收用例(唯一 QA 清单)
 source-of-truth: 代码 + 飞书使用指南;功能以当前代码实现为准
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 20
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 21
 ---
 
 # Research-Claw 功能清单与测试用例
@@ -483,6 +483,10 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 20
 | TC-C-13 | P1 | 流式生成中按 Esc / Ctrl+C | run 中止，draft 恢复 |
 | TC-C-14 | P1 | 多工具对话运行中 | TaskFlowTimeline 显示 understand/execute/respond |
 | TC-C-15 | P2 | Agent 调用 `task_flow_stage` | 时间线显示显式阶段标签 |
+| TC-C-16 | P0 | Agent 调用工具并回复 → 刷新 Dashboard | 回复左下执行详情徽标仍在，工具数与刷新前一致 |
+| TC-C-17 | P1 | 清空浏览器执行绑定后刷新 | `rc.execution.resolve` 从服务端回复哈希恢复 runId |
+| TC-C-18 | P1 | 打开 schema 21 前已有的带工具回复 | 按同会话工具活动时间窗恢复执行详情 |
+| TC-C-19 | P0 | Agent 真实读取 workspace Skill 的 `SKILL.md` | OpenClaw `skill.used` 被持久化，刷新后 Skill 数与明细一致 |
 
 ### 模块 D：结构化卡片
 
@@ -586,6 +590,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 20
 | TC-K-03 | P1 | 主模型偏离研究目标 | 当前回答不被替换；下一轮收到 course_correction 注入，达到上限后不再重复 |
 | TC-K-04 | P2 | correct 模式下继续多轮研究对话 | 后续提示仍含研究目标、目标结论和方法约束；不产生专用压缩保护审计 |
 | TC-K-05 | P1 | 面板筛选 action=block | 仅显示拦截记录 |
+| TC-K-06 | P1 | Settings → 回复与操作审查 → 恢复默认 | 二次确认后读取插件默认值并立即恢复；API Key 与其他设置不变 |
 
 ### 模块 L：扩展与 IM
 

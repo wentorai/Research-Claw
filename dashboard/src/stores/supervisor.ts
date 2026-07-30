@@ -60,6 +60,10 @@ export interface SupervisorConfig {
   };
   highRiskTools: string[];
   dangerousToolPolicy?: 'block' | 'approve';
+  grounding?: {
+    networkPolicy: 'off' | 'metadata-only' | 'verify';
+    verdictMode: 'flag' | 'block';
+  };
   /**
    * Absent = whatever the plugin's own default is. The number lives in
    * openclaw.plugin.json, mirrored by SUPERVISOR_GATE_DEFAULT_MS (which a test pins to
@@ -93,6 +97,7 @@ interface SupervisorState {
   loadStatus: () => Promise<void>;
   loadConfig: () => Promise<void>;
   updateConfig: (partial: Partial<SupervisorConfig>) => Promise<void>;
+  restoreDefaults: () => Promise<SupervisorConfig>;
   toggleSupervisor: (enabled?: boolean) => Promise<void>;
   loadAuditLog: (params?: { limit?: number; offset?: number; type?: string; action?: string; sessionId?: string }) => Promise<void>;
   clearAuditLog: () => Promise<number>;
@@ -148,6 +153,31 @@ export const useSupervisorStore = create<SupervisorState>()((set, get) => ({
       await get().loadStatus();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Failed to update supervisor config' });
+    }
+  },
+
+  restoreDefaults: async () => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) throw new Error('Gateway is not connected');
+    set({ configLoading: true, error: null });
+    try {
+      // The Supervisor owns its defaults. Fetch them at click time so the UI
+      // cannot silently drift when the plugin adds or changes a policy field.
+      const defaultsResult = await client.request<{ defaults: SupervisorConfig }>(
+        'rc.supervisor.defaults',
+        {},
+      );
+      const result = await client.request<{ ok: boolean; config: SupervisorConfig }>(
+        'rc.supervisor.config',
+        defaultsResult.defaults as unknown as Record<string, unknown>,
+      );
+      set({ config: result.config, configLoading: false });
+      await get().loadStatus();
+      return result.config;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to restore review defaults';
+      set({ configLoading: false, error: message });
+      throw err;
     }
   },
 

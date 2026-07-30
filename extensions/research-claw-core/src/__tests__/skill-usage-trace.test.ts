@@ -1,47 +1,94 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import type {
+  DiagnosticEventMetadata,
+  DiagnosticEventPayload,
+} from 'openclaw/plugin-sdk/diagnostic-runtime';
+import {
+  emitTrustedDiagnosticEvent,
+  waitForDiagnosticEventsDrained,
+} from 'openclaw/plugin-sdk/diagnostic-runtime';
 import { createTestDb } from './setup.js';
 import { ExecutionTraceService } from '../execution-trace/service.js';
-import { initSkillIndex, resolveIndexedSkillRead } from '../skills/search.js';
+import {
+  recordSkillUsedDiagnostic,
+  subscribeExecutionSkillDiagnostics,
+} from '../execution-trace/skill-diagnostic.js';
 
-const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
+const workspaceSkillRead = {
+  type: 'skill.used',
+  ts: 1_785_428_109_707,
+  seq: 42,
+  runId: 'run-real-read',
+  sessionKey: 'agent:main:project-fixture',
+  skillName: 'searching-literature',
+  skillSource: 'workspace',
+  activation: 'read',
+  toolName: 'read',
+  toolCallId: 'call-skill-read',
+} satisfies DiagnosticEventPayload;
 
-describe('verified SKILL.md read activation', () => {
-  it('records only exact reads from the authoritative catalog and deduplicates per run', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-skill-trace-'));
-    roots.push(root);
-    const skillDir = path.join(root, 'skills', 'demo');
-    fs.mkdirSync(skillDir, { recursive: true });
-    const skillPath = path.join(skillDir, 'SKILL.md');
-    fs.writeFileSync(skillPath, '# Demo');
-    fs.writeFileSync(path.join(root, 'catalog.json'), JSON.stringify({
-      version: '1',
-      stats: { skills: 1, agent_tools: 0, curated_lists: 0, total: 1 },
-      items: [{
-        id: 'demo', type: 'skill', name: 'Demo Skill', description: 'Demo',
-        category: 'test', subcategory: 'test', keywords: [], path: 'skills/demo',
-      }],
-    }));
-    expect(initSkillIndex(root)).toBe(1);
-    expect(resolveIndexedSkillRead(skillPath, root)?.id).toBe('demo');
-    const unregistered = path.join(root, 'unregistered', 'SKILL.md');
-    fs.mkdirSync(path.dirname(unregistered), { recursive: true });
-    fs.writeFileSync(unregistered, '# Not catalogued');
-    expect(resolveIndexedSkillRead(unregistered, root)).toBeNull();
-
+describe('OpenClaw-resolved Skill activation trace', () => {
+  it('records a trusted workspace SKILL.md read and deduplicates repeated telemetry', () => {
     const db = createTestDb();
     const service = new ExecutionTraceService(db);
-    for (const timestamp of [1, 2]) {
-      service.recordSkill({
-        sessionKey: 's', runId: 'r', skillKey: 'demo', skillName: 'Demo Skill',
-        toolCallId: `call-${timestamp}`, timestamp,
-      });
-    }
-    expect(service.summary(['r']).r).toEqual({ toolCount: 0, errorCount: 0, skillCount: 1 });
-    expect(service.skillDetail('r')).toHaveLength(1);
+    const trusted = { trusted: true } satisfies DiagnosticEventMetadata;
+
+    expect(recordSkillUsedDiagnostic(service, workspaceSkillRead, trusted)).toBe(true);
+    expect(recordSkillUsedDiagnostic(service, workspaceSkillRead, trusted)).toBe(true);
+
+    expect(service.summary(['run-real-read'])['run-real-read']).toEqual({
+      toolCount: 0,
+      errorCount: 0,
+      skillCount: 1,
+    });
+    expect(service.skillDetail('run-real-read')[0]).toMatchObject({
+      skill_key: 'workspace:searching-literature',
+      skill_name: 'searching-literature',
+      skill_source: 'workspace',
+      activation: 'read',
+      tool_call_id: 'call-skill-read',
+    });
     db.close();
+  });
+
+  it('rejects untrusted lookalike events and events without run correlation', () => {
+    const db = createTestDb();
+    const service = new ExecutionTraceService(db);
+    expect(recordSkillUsedDiagnostic(service, workspaceSkillRead, { trusted: false })).toBe(false);
+    expect(recordSkillUsedDiagnostic(
+      service,
+      { ...workspaceSkillRead, runId: undefined },
+      { trusted: true },
+    )).toBe(false);
+    expect(service.skillDetail('run-real-read')).toEqual([]);
+    db.close();
+  });
+
+  it('observes a real trusted OpenClaw diagnostic-bus emission end to end', async () => {
+    const db = createTestDb();
+    const service = new ExecutionTraceService(db);
+    const unsubscribe = subscribeExecutionSkillDiagnostics(service);
+    try {
+      emitTrustedDiagnosticEvent({
+        type: 'skill.used',
+        runId: 'run-real-bus',
+        sessionKey: 'agent:main:project-fixture',
+        skillName: 'multi-search-engine',
+        skillSource: 'workspace',
+        activation: 'read',
+        toolName: 'read',
+        toolCallId: 'call-real-bus',
+      });
+      await waitForDiagnosticEventsDrained();
+
+      expect(service.skillDetail('run-real-bus')[0]).toMatchObject({
+        skill_name: 'multi-search-engine',
+        skill_source: 'workspace',
+        activation: 'read',
+      });
+    } finally {
+      unsubscribe();
+      db.close();
+    }
   });
 });

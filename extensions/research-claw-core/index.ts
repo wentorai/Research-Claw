@@ -6,9 +6,9 @@
  *
  * Registration totals:
  *   - 56 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job + 3 periph)
- *   - 137 WS RPC methods + 3 HTTP routes = 140 interface methods
- *     (rc.lit.* + rc.task.* + rc.cron.* + rc.notifications.* + rc.heartbeat.* + rc.ws.* + rc.monitor.* + rc.ppt.* + rc.oauth.* + rc.model.* + rc.app.* + rc.session.* + rc.onboarding.* + rc.periph.* = 137 WS; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
- *   - 11 typed hook handlers (7 hook names; agent_end ×2, after_tool_call ×4)
+ *   - 138 WS RPC methods + 3 HTTP routes = 141 interface methods
+ *     (including rc.execution.summary/detail/resolve; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
+ *   - 14 typed hook handlers (7 hook names; agent_end ×3, after_tool_call ×5)
  *     + 1 legacy agent:bootstrap hook
  *   - 1 service (research-claw-db lifecycle)
  *   - 1 session monitoring service (automatic memory extraction)
@@ -60,7 +60,7 @@ import {
   selectModelVisibleEligibleSkills,
   type RuntimeProbeConfigLike,
 } from './src/self-check/runtime-probe.js';
-import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary, resolveIndexedSkillRead } from './src/skills/search.js';
+import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
   oauthInitiate,
@@ -99,6 +99,7 @@ import { PromptPresetService } from './src/prompt-presets/service.js';
 import { registerPromptPresetRpc } from './src/prompt-presets/rpc.js';
 import { ExecutionTraceService } from './src/execution-trace/service.js';
 import { registerExecutionTraceRpc } from './src/execution-trace/rpc.js';
+import { subscribeExecutionSkillDiagnostics } from './src/execution-trace/skill-diagnostic.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -207,6 +208,7 @@ let _jobService: JobService | null = null;
 let _periphService: PeriphService | null = null;
 let _promptPresetService: PromptPresetService | null = null;
 let _executionTraceService: ExecutionTraceService | null = null;
+let _executionSkillDiagnosticUnsubscribe: (() => void) | null = null;
 
 // ── Plaud MCP manager ──────────────────────────────────────────────────────
 // Real mini stdio MCP client. Construction is pure (no process spawns until a
@@ -420,6 +422,20 @@ function extractMessageText(message: unknown): string {
       .trim();
   }
   return '';
+}
+
+/** Match OpenClaw/Dashboard visible text-block concatenation for reply hashing. */
+function extractExecutionReplyText(message: unknown): string {
+  if (!isRecord(message)) return '';
+  if (typeof message.text === 'string') return message.text.trim();
+  const content = message.content;
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((part) => isRecord(part) && part.type === 'text' && typeof part.text === 'string')
+    .map((part) => (part as Record<string, unknown>).text as string)
+    .join('')
+    .trim();
 }
 
 function summarizeForMemory(text: string, maxLength = 700): string {
@@ -1122,6 +1138,20 @@ const plugin: PluginDefinition = {
       _jobService = new JobService(_dbManager.db);
       _promptPresetService = new PromptPresetService(_dbManager.db);
       _executionTraceService = new ExecutionTraceService(_dbManager.db);
+      // OpenClaw already resolves the exact per-run Skill snapshot and emits a
+      // trusted `skill.used` event when a read/command really activates one.
+      // Consuming that host-owned signal avoids false negatives for workspace,
+      // managed, bundled, and extra-dir Skills without reimplementing discovery.
+      if (!_executionSkillDiagnosticUnsubscribe) {
+        _executionSkillDiagnosticUnsubscribe = subscribeExecutionSkillDiagnostics(
+          _executionTraceService,
+          (err) => {
+            api.logger.warn(
+              `[ExecutionTrace] skill.used capture failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          },
+        );
+      }
       _monitorService.seedDefaults();
       const repairedMonitorPrompts = _monitorService.repairLegacyDefaultPrompts();
       if (repairedMonitorPrompts > 0) {
@@ -1491,7 +1521,7 @@ const plugin: PluginDefinition = {
     }); // 1 method
     registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!, _rtspPreviewManager!); // 14 methods
     registerPromptPresetRpc(registerMethod, promptPresetService); // 6 methods
-    registerExecutionTraceRpc(registerMethod, executionTraceService); // 2 methods
+    registerExecutionTraceRpc(registerMethod, executionTraceService); // 3 methods
 
     if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
     const memoryService = _memoryService;
@@ -2496,19 +2526,6 @@ const plugin: PluginDefinition = {
           toolCallId: evt.toolCallId ?? ctx?.toolCallId,
           toolName: evt.toolName,
         });
-        if (evt.toolName === 'read') {
-          const eventWithParams = event as { params?: Record<string, unknown> };
-          const skill = resolveIndexedSkillRead(eventWithParams.params?.path, wsRoot);
-          if (skill) {
-            _executionTraceService.recordSkill({
-              sessionKey: ctx?.sessionKey ?? 'unknown',
-              runId,
-              skillKey: skill.id,
-              skillName: skill.name,
-              toolCallId: evt.toolCallId ?? ctx?.toolCallId,
-            });
-          }
-        }
       } catch (err) {
         api.logger.warn(`[ExecutionTrace] before_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -2546,6 +2563,8 @@ const plugin: PluginDefinition = {
                 runId,
                 skillKey: skill.id,
                 skillName: skill.name,
+                skillSource: 'research-plugins',
+                activation: 'command',
                 toolCallId: evt.toolCallId ?? ctx?.toolCallId,
               });
             }
@@ -2553,6 +2572,37 @@ const plugin: PluginDefinition = {
         }
       } catch (err) {
         api.logger.warn(`[ExecutionTrace] after_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+    // Persist only a hash of the delivered reply body. This is the durable
+    // history→runId join used by the Dashboard after refresh; no reply content
+    // is duplicated into the execution database.
+    api.on('agent_end', (event: unknown, context: unknown) => {
+      try {
+        const evt = event as { runId?: string; messages?: unknown[] } | undefined;
+        const ctx = context as { sessionKey?: string; runId?: string } | undefined;
+        const runId = evt?.runId ?? ctx?.runId;
+        if (!runId || !ctx?.sessionKey || !_executionTraceService || !Array.isArray(evt?.messages)) return;
+        const finalAssistant = [...evt.messages].reverse().find((message) => (
+          isRecord(message)
+          && message.role === 'assistant'
+          && Boolean(extractExecutionReplyText(message))
+        ));
+        if (!finalAssistant || !isRecord(finalAssistant)) return;
+        const timestamp = typeof finalAssistant.timestamp === 'number'
+          ? finalAssistant.timestamp
+          : Date.now();
+        _executionTraceService.recordReply({
+          sessionKey: ctx.sessionKey,
+          runId,
+          text: extractExecutionReplyText(finalAssistant),
+          timestamp,
+        });
+      } catch (err) {
+        api.logger.warn(
+          `[ExecutionTrace] reply binding capture failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     });
 
@@ -3153,7 +3203,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (56 tools, 137 WS RPC + 3 HTTP = 140 interfaces, 11 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
+    api.logger.info('Research-Claw Core registered (56 tools, 138 WS RPC + 3 HTTP = 141 interfaces, 14 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
     _hooksRegistered = true;
     }
   },

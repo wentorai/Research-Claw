@@ -49,4 +49,71 @@ describe('execution trace parity with OpenClaw 2026.6.1 hook payloads', () => {
     expect(JSON.stringify(service.detail('run-fixture'))).not.toContain('paper.md');
     db.close();
   });
+
+  it('persists a reply hash, resolves it after reconstruction, and never stores reply text', () => {
+    const db = createTestDb();
+    const service = new ExecutionTraceService(db);
+    service.recordReply({
+      sessionKey: 'agent:main:fixture',
+      runId: 'run-reply',
+      text: '这是只应以哈希形式保存的回复',
+      timestamp: 2_000,
+    });
+
+    const reconstructed = new ExecutionTraceService(db);
+    expect(reconstructed.resolveReplies('agent:main:fixture', [{
+      index: 7,
+      timestamp: 9_000,
+      textHashes: ['af932326', '9c5660d4'],
+    }])).toEqual([]);
+
+    const row = db.prepare('SELECT * FROM rc_execution_replies WHERE run_id = ?')
+      .get('run-reply') as Record<string, unknown>;
+    expect(row.reply_hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(JSON.stringify(row)).not.toContain('这是只应以哈希形式保存的回复');
+    expect(reconstructed.resolveReplies('agent:main:fixture', [{
+      index: 7,
+      timestamp: 20_000,
+      textHashes: [String(row.reply_hash)],
+    }])).toEqual([{ index: 7, runId: 'run-reply' }]);
+    db.close();
+  });
+
+  it('backfills pre-migration replies from the real tool activity interval', () => {
+    const db = createTestDb();
+    const service = new ExecutionTraceService(db);
+    service.recordBefore({
+      sessionKey: 'agent:main:fixture',
+      runId: 'run-legacy',
+      toolCallId: 'call-legacy',
+      toolName: 'read',
+      timestamp: 10_000,
+    });
+    expect(service.resolveReplies('agent:main:fixture', [{
+      index: 0,
+      timestamp: 15_000,
+      textHashes: ['00000000'],
+      turnStartedAt: 9_000,
+    }])).toEqual([{ index: 0, runId: 'run-legacy' }]);
+    db.close();
+  });
+
+  it('does not attach a previous turn tool run to a later no-tool reply', () => {
+    const db = createTestDb();
+    const service = new ExecutionTraceService(db);
+    service.recordBefore({
+      sessionKey: 'agent:main:fixture',
+      runId: 'run-previous-turn',
+      toolCallId: 'call-previous-turn',
+      toolName: 'read',
+      timestamp: 10_000,
+    });
+    expect(service.resolveReplies('agent:main:fixture', [{
+      index: 2,
+      timestamp: 30_000,
+      textHashes: ['00000000'],
+      turnStartedAt: 25_000,
+    }])).toEqual([]);
+    db.close();
+  });
 });

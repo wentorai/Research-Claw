@@ -4,6 +4,7 @@ import React from 'react';
 import SettingsPanel from './SettingsPanel';
 import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
+import { useSupervisorStore, type SupervisorConfig } from '../../stores/supervisor';
 import { serializeConfigForGatewayApply } from '../../utils/config-patch';
 
 // Mock antd App.useApp (modal.confirm + message)
@@ -176,6 +177,67 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel />);
     // The primary model label should be visible
     expect(screen.getByText('settings.primaryModel')).toBeTruthy();
+  });
+
+  it('confirms and restores only the plugin-owned review defaults', async () => {
+    const reviewDefaults: SupervisorConfig = {
+      enabled: false,
+      supervisorModel: '',
+      reviewMode: 'off',
+      courseCorrection: {
+        enabled: true,
+        deviationThreshold: 0.5,
+        forceRegenerate: false,
+        maxRegenerateAttempts: 3,
+      },
+      highRiskTools: ['exec', 'write'],
+      dangerousToolPolicy: 'block',
+      toolReviewGateMs: 4000,
+      grounding: { networkPolicy: 'off', verdictMode: 'flag' },
+    };
+    const request = vi.fn(async (...args: unknown[]) => {
+      const [method, params] = args as [string, Record<string, unknown>];
+      if (method === 'rc.supervisor.defaults') return { defaults: reviewDefaults };
+      if (method === 'rc.supervisor.config' && Object.keys(params).length > 0) {
+        return { ok: true, config: reviewDefaults };
+      }
+      if (method === 'rc.supervisor.config') return { ok: true, config: reviewDefaults };
+      if (method === 'rc.supervisor.status') {
+        return {
+          enabled: false,
+          reviewMode: 'off',
+          supervisorModel: '',
+          courseCorrectionEnabled: true,
+          deviationThreshold: 0.5,
+          forceRegenerate: false,
+          maxRegenerateAttempts: 3,
+          highRiskTools: reviewDefaults.highRiskTools,
+          stats: { total: 0, blocked: 0, corrected: 0, warnings: 0 },
+          activeSessions: 0,
+          sessionsInfo: [],
+        };
+      }
+      return {};
+    });
+    useSupervisorStore.setState({ status: null, config: null, error: null });
+    useGatewayStore.setState({
+      state: 'connected',
+      client: createMockClient(request),
+    });
+    useConfigStore.setState({ gatewayConfig: makeGatewayConfig() });
+    render(<SettingsPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /settings\.restoreDefaults/i }));
+    expect(mockModalConfirm).toHaveBeenCalledOnce();
+    const confirmation = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+
+    await act(async () => {
+      await confirmation.onOk();
+    });
+
+    expect(request).toHaveBeenCalledWith('rc.supervisor.defaults', {});
+    expect(request).toHaveBeenCalledWith('rc.supervisor.config', reviewDefaults);
+    expect(mockMessageSuccess).toHaveBeenCalledWith('settings.supervisorRestoreDefaultsSuccess');
   });
 });
 

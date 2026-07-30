@@ -233,6 +233,16 @@
     "review": "可信审查",
     "noneDetected": "本次未检测到 Skill 激活",
     "noLinkedReview": "本次运行暂无可关联的审查结果",
+    "activation": {
+      "read": "读取启用",
+      "command": "指令启用"
+    },
+    "skillSource": {
+      "workspace": "工作区",
+      "bundled": "OpenClaw 内置",
+      "unknown": "其他来源",
+      "research-plugins": "Research Plugins"
+    },
     "status": {
       "invoked": "已调用",
       "completed": "已完成",
@@ -1132,6 +1142,11 @@
     "maxRegenerateAttemptsHint": "偏离持续时，每次会话最多注入的纠偏指令条数",
     "maxRegenerateAttemptsTooltip": "当偏离达到或超过阈值且开启强化纠偏时，每次会话最多注入的纠偏指令条数。超过此上限后仅记录警告",
     "supervisorSaveHint": "修改后需保存配置并重启生效",
+    "restoreDefaults": "恢复默认",
+    "supervisorRestoreDefaultsConfirmTitle": "恢复审查默认配置？",
+    "supervisorRestoreDefaultsConfirmContent": "将关闭“回复与操作审查”，并恢复其审查方式、纠偏阈值、高风险工具规则和可信依据策略。已保存的模型 API Key 与其他设置不会被删除。",
+    "supervisorRestoreDefaultsSuccess": "已恢复审查默认配置",
+    "supervisorRestoreDefaultsFailed": "恢复审查默认配置失败",
     "supervisorGoalParsed": "已识别研究目标",
     "supervisorGoalPending": "目标待确认 — 深度审查模型将在下次消息时解析",
     "supervisorTargetConclusions": "目标结论",

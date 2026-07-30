@@ -25,6 +25,7 @@ import {
   CREATE_RC_PROMPT_PRESETS_SQL,
   CREATE_RC_EXECUTION_TOOLS_SQL,
   CREATE_RC_EXECUTION_SKILLS_SQL,
+  CREATE_RC_EXECUTION_REPLIES_SQL,
 } from './schema.js';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -471,6 +472,15 @@ const MIGRATIONS: readonly Migration[] = [
     sql: [
       CREATE_RC_EXECUTION_SKILLS_SQL,
       `CREATE INDEX IF NOT EXISTS idx_rc_execution_skills_run ON rc_execution_skills(run_id);`,
+    ].join('\n'),
+  },
+  {
+    version: 21,
+    name: 'add_execution_reply_binding',
+    sql: [
+      CREATE_RC_EXECUTION_REPLIES_SQL,
+      `CREATE INDEX IF NOT EXISTS idx_rc_execution_replies_session
+        ON rc_execution_replies(session_key, reply_timestamp);`,
     ].join('\n'),
   },
 ];

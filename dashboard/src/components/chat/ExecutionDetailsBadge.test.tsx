@@ -53,7 +53,7 @@ describe('ExecutionDetailsBadge', () => {
             id: 's1',
             skill_name: 'wentor-network',
             activation: 'read',
-            skill_source: '/plugins/wentor-network/SKILL.md',
+            skill_source: 'workspace',
           }],
           reviews: [{
             reviewId: 'r1',
@@ -75,6 +75,8 @@ describe('ExecutionDetailsBadge', () => {
     }));
     expect(await screen.findByText('read')).toBeInTheDocument();
     expect(screen.getByText('wentor-network')).toBeInTheDocument();
+    expect(screen.getByText(/读取启用/)).toBeInTheDocument();
+    expect(screen.getByText(/工作区/)).toBeInTheDocument();
     expect(screen.getByText('pass')).toBeInTheDocument();
   });
 });

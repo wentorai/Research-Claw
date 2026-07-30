@@ -548,6 +548,7 @@ export default function SettingsPanel() {
   // (openclaw.plugin.json → toolReviewGateMs). A value outside the presets — set by
   // hand or over RPC — is kept as-is and simply leaves no preset selected.
   const [toolReviewGateMs, setToolReviewGateMs] = useState(SUPERVISOR_GATE_DEFAULT_MS);
+  const [restoringSupervisorDefaults, setRestoringSupervisorDefaults] = useState(false);
 
   // Cache for supervisor API keys per provider
   const supervisorApiKeyCacheRef = useRef<Record<string, string>>({});
@@ -625,6 +626,11 @@ export default function SettingsPanel() {
       // re-applies (reconnects) must not re-baseline, or they'd swallow core edits.
       if (!supervisorBaselinedRef.current) {
         supervisorBaselinedRef.current = true;
+        setBaselineTick((t) => t + 1);
+      } else if (supervisorRestoreBaselineRef.current) {
+        // The restore RPC has already persisted these values. Once they hydrate,
+        // make them the new baseline instead of offering a redundant global save.
+        supervisorRestoreBaselineRef.current = false;
         setBaselineTick((t) => t + 1);
       }
     }
@@ -771,6 +777,7 @@ export default function SettingsPanel() {
   const [baselineProvider, setBaselineProvider] = useState<string | null>(null);
   const [baselineTick, setBaselineTick] = useState(0);
   const supervisorBaselinedRef = useRef(false);
+  const supervisorRestoreBaselineRef = useRef(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [supervisorAdvancedOpen, setSupervisorAdvancedOpen] = useState(false);
   const [supervisorBehaviorOpen, setSupervisorBehaviorOpen] = useState(false);
@@ -1813,6 +1820,36 @@ export default function SettingsPanel() {
     });
   }, [performSave, baseUrl, textModel, t, modal, message]);
 
+  const handleRestoreSupervisorDefaults = useCallback(() => {
+    if (restoringSupervisorDefaults) return;
+    modal.confirm({
+      title: t('settings.supervisorRestoreDefaultsConfirmTitle'),
+      content: t('settings.supervisorRestoreDefaultsConfirmContent'),
+      okText: t('settings.restoreDefaults'),
+      cancelText: t('settings.cancel'),
+      centered: true,
+      styles: buildThemedModalStyles(useConfigStore.getState().theme),
+      onOk: async () => {
+        setRestoringSupervisorDefaults(true);
+        supervisorRestoreBaselineRef.current = true;
+        try {
+          await useSupervisorStore.getState().restoreDefaults();
+          message.success(t('settings.supervisorRestoreDefaultsSuccess'));
+        } catch (error) {
+          supervisorRestoreBaselineRef.current = false;
+          message.error(
+            error instanceof Error
+              ? error.message
+              : t('settings.supervisorRestoreDefaultsFailed'),
+          );
+          throw error;
+        } finally {
+          setRestoringSupervisorDefaults(false);
+        }
+      },
+    });
+  }, [message, modal, restoringSupervisorDefaults, t]);
+
   if (state !== 'connected') {
     return (
       <div style={{ padding: '24px 16px', textAlign: 'center' }}>
@@ -2439,13 +2476,23 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <SettingRow label={t('settings.supervisor')} description={t('settings.supervisorHint')}>
-        <Switch
-          checked={supervisorEnabled}
-          onChange={(enabled) => {
-            setSupervisorEnabled(enabled);
-          }}
-          size="small"
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={restoringSupervisorDefaults}
+            onClick={handleRestoreSupervisorDefaults}
+          >
+            {t('settings.restoreDefaults')}
+          </Button>
+          <Switch
+            checked={supervisorEnabled}
+            onChange={(enabled) => {
+              setSupervisorEnabled(enabled);
+            }}
+            size="small"
+          />
+        </div>
       </SettingRow>
 
       {supervisorEnabled && (

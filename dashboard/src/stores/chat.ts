@@ -32,13 +32,13 @@ import { useStagedWritingStore } from './staged-writing';
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 const EXECUTION_BINDINGS_PREFIX = 'rc-execution-bindings:';
 const MAX_EXECUTION_BINDINGS = 500;
-const EXECUTION_BINDING_TIMESTAMP_TOLERANCE_MS = 5_000;
 
 import { normalizeSessionKey, toGatewaySessionKey } from '../utils/session-key';
 
 interface ExecutionBinding {
   timestamp: number;
   textHash: string;
+  rawTextHash?: string;
   runId: string;
 }
 
@@ -64,6 +64,7 @@ function readExecutionBindings(sessionKey: string): ExecutionBinding[] {
       item
       && typeof item.timestamp === 'number'
       && typeof item.textHash === 'string'
+      && (item.rawTextHash === undefined || typeof item.rawTextHash === 'string')
       && typeof item.runId === 'string'
     ));
   } catch {
@@ -77,6 +78,7 @@ function rememberExecutionBinding(sessionKey: string, message: ChatMessage, runI
   const binding: ExecutionBinding = {
     timestamp,
     textHash: hashMessageText(extractText(message)),
+    rawTextHash: hashMessageText(extractRawText(message)),
     runId,
   };
   const bindings = readExecutionBindings(sessionKey)
@@ -101,12 +103,20 @@ function restoreExecutionBindings(sessionKey: string, messages: ChatMessage[]): 
     if (message.role !== 'assistant' || message.executionRunId) return message;
     const timestamp = message.timestamp ?? 0;
     const textHash = hashMessageText(extractText(message));
+    const rawTextHash = hashMessageText(extractRawText(message));
     let bestIndex = -1;
     let bestDistance = Number.POSITIVE_INFINITY;
     bindings.forEach((binding, index) => {
-      if (!available.has(index) || binding.textHash !== textHash) return;
+      const hashMatches = binding.textHash === textHash
+        || binding.textHash === rawTextHash
+        || binding.rawTextHash === textHash
+        || binding.rawTextHash === rawTextHash;
+      if (!available.has(index) || !hashMatches) return;
       const distance = Math.abs(binding.timestamp - timestamp);
-      if (distance <= EXECUTION_BINDING_TIMESTAMP_TOLERANCE_MS && distance < bestDistance) {
+      // Exact content is the primary identity. Timestamp only disambiguates
+      // duplicate replies; a hard 5s cutoff broke refresh when gateway and
+      // transcript timestamps represented different points in the same turn.
+      if (distance < bestDistance) {
         bestIndex = index;
         bestDistance = distance;
       }
@@ -474,22 +484,27 @@ function extractCardNotifications(text: string): void {
  * Source: openclaw/ui/src/ui/chat/message-extract.ts:18-26 (extractText)
  * Source: openclaw/ui/src/ui/chat/message-extract.ts:85-109 (extractRawText — only joins type:'text' blocks)
  */
-function extractText(msg: ChatMessage): string {
+function extractRawText(msg: ChatMessage): string {
   // Get raw text — only from type:'text' blocks (NOT type:'thinking')
   // This matches OpenClaw's extractRawText (message-extract.ts:92-100)
-  let raw: string;
   if (msg.text) {
-    raw = msg.text;
-  } else if (typeof msg.content === 'string') {
-    raw = msg.content;
-  } else if (Array.isArray(msg.content)) {
-    raw = msg.content
+    return msg.text.trim();
+  }
+  if (typeof msg.content === 'string') {
+    return msg.content.trim();
+  }
+  if (Array.isArray(msg.content)) {
+    return msg.content
       .filter((c) => c.type === 'text' && c.text)
       .map((c) => c.text!)
-      .join('');
-  } else {
-    raw = '';
+      .join('')
+      .trim();
   }
+  return '';
+}
+
+function extractText(msg: ChatMessage): string {
+  const raw = extractRawText(msg);
 
   // For assistant messages, apply unified sanitization pipeline.
   // Strips all internal scaffolding: thinking tags, final tags, memory tags, model tokens.
@@ -1242,7 +1257,53 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       if (get().sessionKey !== requestedKey) return;
       // Filter out toolResult messages — they are tool internals, not user-visible.
       // This matches OpenClaw Lit UI behavior (chat.ts:566).
-      const restored = restoreExecutionBindings(requestedKey, result.messages ?? []);
+      let restored = restoreExecutionBindings(requestedKey, result.messages ?? []);
+      try {
+        let turnStartedAt: number | undefined;
+        const candidates: Array<{
+          index: number;
+          timestamp: number;
+          textHashes: string[];
+          turnStartedAt?: number;
+        }> = [];
+        restored.forEach((message, index) => {
+          if (message.role === 'user') {
+            turnStartedAt = message.timestamp;
+            return;
+          }
+          if (message.role !== 'assistant' || message.executionRunId) return;
+          candidates.push({
+            index,
+            timestamp: message.timestamp ?? 0,
+            textHashes: Array.from(new Set([
+              hashMessageText(extractRawText(message)),
+              hashMessageText(extractText(message)),
+            ])),
+            ...(turnStartedAt !== undefined ? { turnStartedAt } : {}),
+          });
+        });
+        if (candidates.length > 0) {
+          const resolution = await client.request<{
+            bindings?: Array<{ index: number; runId: string }>;
+          }>('rc.execution.resolve', {
+            sessionKey: toGatewaySessionKey(requestedKey),
+            candidates,
+          });
+          if (get().sessionKey !== requestedKey) return;
+          const byIndex = new Map(
+            (resolution?.bindings ?? []).map((binding) => [binding.index, binding.runId]),
+          );
+          restored = restored.map((message, index) => {
+            const executionRunId = byIndex.get(index);
+            return executionRunId && !message.executionRunId
+              ? { ...message, executionRunId }
+              : message;
+          });
+        }
+      } catch {
+        // Older gateways do not expose the durable resolver. The privacy-safe
+        // browser binding above remains a compatible best-effort fallback.
+      }
       const visible = restored.filter((m) => isVisibleRole(m.role));
       // Strip system-injected context and channel relay attribution from user messages.
       // Uses unified sanitizeUserMessage() which handles all known injection patterns:

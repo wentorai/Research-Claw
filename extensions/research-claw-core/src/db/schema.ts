@@ -35,12 +35,13 @@
  *  28. rc_prompt_presets    — User-managed reusable chat commands
  *  29. rc_execution_tools   — Per-run tool invocation trace
  *  30. rc_execution_skills  — Per-run verified Skill activation trace
+ *  31. rc_execution_replies — Privacy-safe reply hash → run binding
  *
  * FTS5: rc_papers_fts (title, authors, abstract, notes, keywords)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 21;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -443,6 +444,15 @@ CREATE TABLE IF NOT EXISTS rc_execution_skills (
   UNIQUE(run_id, skill_key)
 );`;
 
+export const CREATE_RC_EXECUTION_REPLIES_SQL = `
+CREATE TABLE IF NOT EXISTS rc_execution_replies (
+  run_id          TEXT PRIMARY KEY,
+  session_key     TEXT NOT NULL,
+  reply_hash      TEXT NOT NULL,
+  reply_timestamp INTEGER NOT NULL,
+  recorded_at     INTEGER NOT NULL
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -476,6 +486,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   CREATE_RC_PROMPT_PRESETS_SQL,
   CREATE_RC_EXECUTION_TOOLS_SQL,
   CREATE_RC_EXECUTION_SKILLS_SQL,
+  CREATE_RC_EXECUTION_REPLIES_SQL,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -578,6 +589,8 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_run ON rc_execution_tools(run_id);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_execution_tools_session ON rc_execution_tools(session_key);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_execution_skills_run ON rc_execution_skills(run_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_execution_replies_session
+    ON rc_execution_replies(session_key, reply_timestamp);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────

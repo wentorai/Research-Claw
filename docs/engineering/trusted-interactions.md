@@ -1,9 +1,9 @@
 ---
 doc: engineering/trusted-interactions.md
 audience: 开发者 / QA / RC Agent 排障
-status: 现行 · 2026-07-30
+status: 现行 · 2026-07-31
 source-of-truth: dashboard、research-claw-core、dual-model-supervisor 代码与测试
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 20
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 21
 ---
 
 # 可信交互：可信审查、快捷指令与执行详情
@@ -29,6 +29,9 @@ Reviewer、模式、模型来源和 session 等实现信息位于“技术详情
 - 全量清理必须调用 `rc.supervisor.log.clear` 且显式传入 `{ scope: "all" }`。
 - Dashboard 必须二次确认；清理只删除审查日志，不关闭审查、不删除聊天。
 - 清理后广播 `plugin.supervisor.review.cleared`，其他 Dashboard 实例应重载状态。
+- Settings 的“恢复默认”只作用于“回复与操作审查”。点击后必须二次确认，
+  通过 `rc.supervisor.defaults` 读取插件权威默认值，再写入
+  `rc.supervisor.config`；不得删除模型 API Key 或修改其他设置。
 
 ## 3. 快捷指令
 
@@ -58,26 +61,27 @@ Reviewer、模式、模型来源和 session 等实现信息位于“技术详情
 
 ### 4.2 Skill 识别
 
-Skill 识别不使用聊天关键词或工具名称猜测。只有以下真实证据可记入
-`rc_execution_skills`：
+Skill 识别不使用聊天关键词、工具名称或文件名猜测。真实证据来自：
 
-- `read` 精确读取权威 research-plugins 索引中已登记 Skill 的 canonical `SKILL.md`；
+- OpenClaw 2026.6.1 根据本次 run 的 `resolvedSkills` 精确判定真实 read/command，
+  并发出可信 `skill.used` 诊断事件；
 - `skill_search` 的真实返回值明确包含该 Skill。
 
-任意未登记的 `SKILL.md`、普通 Markdown、同名目录均不得命中。重复读取以
-`(run_id, skill_key)` 去重。该策略与 OpenClaw 2026.6.1
-`agent-tools.before-tool-call.ts` 的精确读取识别原则对齐。
+Core 通过 `openclaw/plugin-sdk/diagnostic-runtime` 消费该宿主权威事件，因此
+workspace、managed、bundled 与 extra-dir Skill 均可覆盖，且不会把未进入
+`resolvedSkills` 的同名文件算作调用。重复事件以 `(run_id, skill_key)` 去重。
 
 ### 4.3 回复绑定与 UI
 
 - 当前 final assistant event 直接绑定 `executionRunId=event.runId`。
 - 服务端轨迹是事实源；Dashboard 通过 `rc.execution.summary/detail` 批量汇总、按需取详情。
-- 为抵抗 `chat.history` 不返回 runId，Dashboard 保存每会话最多 500 条
-  `{timestamp, textHash, runId}` 索引；不重复保存回答正文。
-- 历史恢复要求文本哈希相同且时间差不超过 5 秒；匹配项一次性消费，避免相同回答串线。
+- `agent_end` 把 `{session_key, run_id, reply_hash, reply_timestamp}` 写入
+  `rc_execution_replies`；只存回复哈希，不重复保存回答正文。
+- `chat.history` 不返回 runId 时，Dashboard 调用 `rc.execution.resolve` 批量恢复。
+  新数据优先精确哈希；schema 21 以前的数据按同会话工具活动时间窗回填。
+- 浏览器仍保留每会话最多 500 条哈希绑定作为旧网关兼容层。精确文本哈希是主键，
+  时间戳只用于消解重复回答，不再以 5 秒作为硬阈值。
 - 仅 Agent 非流式回复显示非零数字徽标。点击后合并同一 runId 的工具、Skills 和可信审查。
-
-限制：升级前已经存在、且没有 runId 绑定索引的旧聊天不会补造执行徽标。
 
 ## 5. 排障
 
@@ -85,14 +89,14 @@ Skill 识别不使用聊天关键词或工具名称猜测。只有以下真实�
 |------|------|
 | 回复无徽标 | 确认该回复升级后生成、存在 `executionRunId`，且 summary 的工具/Skill 非零 |
 | 工具一直“已调用” | 检查 OpenClaw 是否为该内建工具发出 `after_tool_call`；不得手工改成“完成” |
-| Skill 漏记 | 检查实际读取路径是否在 research-plugins 权威索引；再检查 `_pluginRoot` 初始化 |
-| Skill 误记 | 核对 canonical realpath；未登记文件必须无记录 |
-| 刷新后徽标消失 | 检查会话 localStorage 的 `rc-execution-bindings:*` 与 history 时间戳 |
+| Skill 漏记 | 检查 OpenClaw 是否发出可信 `skill.used`，以及事件是否带 runId/sessionKey |
+| Skill 误记 | 对照该 run 的 `resolvedSkills`；非可信诊断事件必须被拒绝 |
+| 刷新后徽标消失 | 检查 `rc_execution_replies`、`rc.execution.resolve` 和该会话工具时间窗；localStorage 仅为兼容回退 |
 | 清理后其他窗口未更新 | 检查 `plugin.supervisor.review.cleared` 广播和 listener 重载 |
 
 ## 6. 发布验收
 
-1. Core：新装与 v17 迁移到 schema 20；快捷指令、工具追踪、Skill 精确识别测试通过。
+1. Core：新装与旧库迁移到 schema 21；快捷指令、工具追踪、宿主 Skill 诊断、回复绑定测试通过。
 2. Supervisor：total、显式全量清理、广播、同 runId review 查询测试通过。
 3. Dashboard：CRUD、IME、回复绑定、详情弹层和中英文语义测试通过。
 4. 真实 Chromium：光标插入后 undo 恢复原文本，redo 恢复插入结果。

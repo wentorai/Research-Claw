@@ -29,9 +29,20 @@ export default function ExecutionDetailsBadge({ runId }: { runId: string }) {
         ))}
       </div>
       <Text strong>{t('executionDetails.skills')}</Text>
-      <div style={{ margin: '6px 0 12px' }}>
+      <div style={{ margin: '6px 0 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {detail.skills.length > 0
-          ? detail.skills.map((skill) => <Tag key={skill.id} color="blue">{skill.skill_name}</Tag>)
+          ? detail.skills.map((skill) => (
+            <div key={skill.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Tag color="blue" style={{ marginInlineEnd: 0 }}>{skill.skill_name}</Tag>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {t(`executionDetails.activation.${skill.activation}`)}
+                {' · '}
+                {t(`executionDetails.skillSource.${skill.skill_source}`, {
+                  defaultValue: skill.skill_source,
+                })}
+              </Text>
+            </div>
+          ))
           : <Text type="secondary">{t('executionDetails.noneDetected')}</Text>}
       </div>
       <Text strong>{t('executionDetails.review')}</Text>
