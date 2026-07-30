@@ -143,6 +143,48 @@ export class AuditLogService {
   }
 
   /**
+   * Count entries matching the same filters as list(). Pagination is deliberately
+   * excluded: callers use this as the complete result count, not the current page size.
+   */
+  count(params: {
+    sessionId?: string;
+    type?: AuditLogType;
+    action?: string;
+  } = {}): number {
+    const db = this.getDb();
+    if (!db) return 0;
+
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    if (params.sessionId) {
+      conditions.push('sessionId = ?');
+      values.push(params.sessionId);
+    }
+    if (params.type) {
+      conditions.push('type = ?');
+      values.push(params.type);
+    }
+    if (params.action) {
+      conditions.push('action = ?');
+      values.push(params.action);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = db
+      .prepare(`SELECT COUNT(*) as count FROM supervisor_audit_log ${where}`)
+      .get(...values) as { count: number };
+    return result.count;
+  }
+
+  /** Delete every locally persisted audit entry. This is intentionally separate
+   * from purge(), because its RPC caller requires an explicit `scope: "all"` guard. */
+  clear(): number {
+    const db = this.getDb();
+    if (!db) return 0;
+    return db.prepare('DELETE FROM supervisor_audit_log').run().changes;
+  }
+
+  /**
    * Get audit statistics, computed from database for accuracy after restart.
    */
   getStats(): { total: number; blocked: number; corrected: number; warnings: number } {

@@ -31,6 +31,7 @@ export function registerSupervisorRpc(
   persistConfig?: (cfg: SupervisorConfig) => Promise<void>,
   getReviewStoreAvailable?: () => boolean,
   getReviewerReadiness?: () => ReviewerReadiness,
+  onAuditCleared?: (deleted: number) => void,
 ): void {
   registerMethod('rc.supervisor.status', async () => {
     const cfg = getActiveConfig();
@@ -128,7 +129,26 @@ export function registerSupervisorRpc(
       type: p.type,
       action: p.action,
     });
-    return { entries, total: entries.length };
+    const total = auditLog.count({
+      sessionId: p.sessionId,
+      type: p.type,
+      action: p.action,
+    });
+    return { entries, total };
+  });
+
+  registerMethod('rc.supervisor.log.clear', async (params) => {
+    const scope = (params as { scope?: unknown } | undefined)?.scope;
+    if (scope !== 'all') {
+      throw new Error('rc.supervisor.log.clear requires explicit scope: "all"');
+    }
+    const deleted = auditLog.clear();
+    try {
+      onAuditCleared?.(deleted);
+    } catch (err) {
+      logger.error(`Audit clear notification failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { ok: true, deleted };
   });
 
   registerMethod('rc.supervisor.stats', async () => {

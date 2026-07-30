@@ -18,10 +18,16 @@ export default function SupervisorReviewListener() {
     // Initial hydration also gives the plugin this live connection's gateway
     // request context, whose broadcast function is used only as a change signal.
     hydrateFromDatabase();
-    const unsubscribe = client.subscribe('plugin.supervisor.review.updated', () => {
+    const unsubscribeUpdated = client.subscribe('plugin.supervisor.review.updated', () => {
       hydrateFromDatabase();
     });
-    return unsubscribe;
+    const unsubscribeCleared = client.subscribe('plugin.supervisor.review.cleared', () => {
+      hydrateFromDatabase();
+    });
+    return () => {
+      unsubscribeUpdated();
+      unsubscribeCleared();
+    };
   }, [client]);
 
   return null;

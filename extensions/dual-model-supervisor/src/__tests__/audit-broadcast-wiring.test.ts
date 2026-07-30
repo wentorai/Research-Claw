@@ -86,4 +86,44 @@ describe('supervisor audit broadcast wiring', () => {
       },
     }]);
   });
+
+  it('returns the unpaginated total and only clears after explicit all-scope confirmation', async () => {
+    const h = await loadPluginFresh({
+      enabled: true,
+      reviewMode: 'correct',
+      dangerousToolPolicy: 'block',
+    });
+    await h.rpc.get('rc.supervisor.status')!({});
+    for (const sessionKey of ['agent:main:one', 'agent:main:two']) {
+      await h.fire(
+        'before_tool_call',
+        { toolName: 'exec', params: { command: 'rm -rf /' } },
+        { sessionKey, toolName: 'exec' },
+      );
+    }
+
+    const page = await h.rpc.get('rc.supervisor.log')!({ limit: 1, type: 'tool_review' }) as {
+      entries: unknown[];
+      total: number;
+    };
+    expect(page.entries).toHaveLength(1);
+    expect(page.total).toBe(2);
+
+    await expect(h.rpc.get('rc.supervisor.log.clear')!({})).rejects.toThrow(/scope.*all/i);
+    expect((await h.rpc.get('rc.supervisor.log')!({ type: 'tool_review' }) as { total: number }).total).toBe(2);
+
+    expect(await h.rpc.get('rc.supervisor.log.clear')!({ scope: 'all' })).toEqual({
+      ok: true,
+      deleted: 3,
+    });
+    expect((await h.rpc.get('rc.supervisor.log')!({}) as { total: number }).total).toBe(0);
+    expect(h.broadcasts.at(-1)).toEqual({
+      event: 'plugin.supervisor.review.cleared',
+      payload: { deleted: 3, timestamp: expect.any(Number) },
+    });
+    expect(await h.rpc.get('rc.supervisor.status')!({})).toMatchObject({
+      enabled: true,
+      reviewMode: 'correct',
+    });
+  });
 });

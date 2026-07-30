@@ -107,4 +107,21 @@ describe('SupervisorReviewListener', () => {
       expect(useSupervisorStore.getState().auditLog).toHaveLength(1);
     });
   });
+
+  it('rehydrates after another window clears review history', async () => {
+    const h = makeClient();
+    useGatewayStore.setState({ client: h.client as never, state: 'connected' });
+    render(<SupervisorReviewListener />);
+    await waitFor(() => expect(h.request).toHaveBeenCalledWith('rc.supervisor.log', { limit: 200 }));
+    h.request.mockClear();
+
+    act(() => {
+      h.emit('plugin.supervisor.review.cleared', { deleted: 1, timestamp: 2000 });
+    });
+
+    await waitFor(() => {
+      expect(h.request).toHaveBeenCalledWith('rc.supervisor.status', {});
+      expect(h.request).toHaveBeenCalledWith('rc.supervisor.log', { limit: 200 });
+    });
+  });
 });

@@ -946,8 +946,16 @@
       "actionCorrect": "已纠正",
       "actionWarn": "已提醒",
       "actionInfo": "已记录",
-      "disabledBanner": "回复与操作审查已关闭。",
-      "goToSettings": "前往设置"
+    "disabledBanner": "回复与操作审查已关闭。",
+    "goToSettings": "前往设置",
+    "moreActions": "审查记录操作",
+    "refresh": "刷新",
+    "clearAll": "清理全部记录",
+    "clearTitle": "清理全部审查记录？",
+    "clearDescription": "将永久删除本机保存的 {{count}} 条审查记录。不会关闭审查功能，也不会删除聊天记录。",
+    "clearConfirm": "清理全部",
+    "clearSuccess": "已清理 {{count}} 条审查记录",
+    "clearError": "未能清理审查记录"
     },
   "settings": {
     "title": "设置",

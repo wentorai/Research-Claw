@@ -57,4 +57,20 @@ describe('AuditLogService.record observability', () => {
     expect(errors).toEqual([expect.stringMatching(/notification.*broadcast offline/i)]);
     db.close();
   });
+
+  it('reports the complete filtered count independently of pagination and clears all rows', () => {
+    const db = new Database(':memory:');
+    const svc = new AuditLogService(db, { info() {}, warn() {}, error() {} });
+    svc.record(ENTRY);
+    svc.record({ ...ENTRY, sessionId: 's2', action: 'warn', timestamp: 2000 });
+    svc.record({ ...ENTRY, sessionId: 's3', type: 'tool_review', action: 'block', timestamp: 3000 });
+
+    expect(svc.list({ limit: 1 })).toHaveLength(1);
+    expect(svc.count()).toBe(3);
+    expect(svc.count({ type: 'output_review' })).toBe(2);
+    expect(svc.count({ action: 'warn' })).toBe(1);
+    expect(svc.clear()).toBe(3);
+    expect(svc.count()).toBe(0);
+    db.close();
+  });
 });

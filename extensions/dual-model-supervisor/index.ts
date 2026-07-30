@@ -543,6 +543,12 @@ const plugin: PluginDefinition = {
       persistConfig,
       () => reviewStore.isAvailable(),
       () => reviewerClient.getReadiness(),
+      (deleted) => {
+        _sharedRuntimeConfig.broadcast?.('plugin.supervisor.review.cleared', {
+          deleted,
+          timestamp: Date.now(),
+        });
+      },
     );
 
     // rc.supervisor.review — manual grounding check for arbitrary inline text.

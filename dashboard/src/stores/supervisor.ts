@@ -86,6 +86,7 @@ interface SupervisorState {
   auditLogTotal: number;
   statusLoading: boolean;
   configLoading: boolean;
+  auditLogClearing: boolean;
   error: string | null;
   pollingTimer: ReturnType<typeof setInterval> | null;
 
@@ -94,6 +95,7 @@ interface SupervisorState {
   updateConfig: (partial: Partial<SupervisorConfig>) => Promise<void>;
   toggleSupervisor: (enabled?: boolean) => Promise<void>;
   loadAuditLog: (params?: { limit?: number; offset?: number; type?: string; action?: string; sessionId?: string }) => Promise<void>;
+  clearAuditLog: () => Promise<number>;
   clearError: () => void;
   startPolling: (intervalMs?: number) => void;
   stopPolling: () => void;
@@ -106,6 +108,7 @@ export const useSupervisorStore = create<SupervisorState>()((set, get) => ({
   auditLogTotal: 0,
   statusLoading: false,
   configLoading: false,
+  auditLogClearing: false,
   error: null,
   pollingTimer: null,
 
@@ -170,6 +173,25 @@ export const useSupervisorStore = create<SupervisorState>()((set, get) => ({
       set({ auditLog: result.entries, auditLogTotal: result.total });
     } catch {
       // silently ignore
+    }
+  },
+
+  clearAuditLog: async () => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) throw new Error('Gateway is not connected');
+    set({ auditLogClearing: true, error: null });
+    try {
+      const result = await client.request<{ ok: boolean; deleted: number }>(
+        'rc.supervisor.log.clear',
+        { scope: 'all' },
+      );
+      set({ auditLog: [], auditLogTotal: 0, auditLogClearing: false });
+      await Promise.all([get().loadStatus(), get().loadAuditLog({ limit: 200 })]);
+      return result.deleted;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to clear review history';
+      set({ auditLogClearing: false, error: message });
+      throw err;
     }
   },
 

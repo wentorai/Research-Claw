@@ -946,8 +946,16 @@
       "actionCorrect": "Corrected",
       "actionWarn": "Alerted",
       "actionInfo": "Recorded",
-      "disabledBanner": "Response and action review is off.",
-      "goToSettings": "Open settings"
+    "disabledBanner": "Response and action review is off.",
+    "goToSettings": "Open settings",
+    "moreActions": "Review history actions",
+    "refresh": "Refresh",
+    "clearAll": "Clear all history",
+    "clearTitle": "Clear all review history?",
+    "clearDescription": "This permanently deletes {{count}} local review record(s). It does not turn off review or delete any chat.",
+    "clearConfirm": "Clear all",
+    "clearSuccess": "Cleared {{count}} review record(s)",
+    "clearError": "Could not clear review history"
     },
   "settings": {
     "title": "Settings",

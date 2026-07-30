@@ -1,7 +1,7 @@
 /** Review history and status for Research-Claw's trusted review layer. */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Input, Select, Tag, Typography } from 'antd';
+import { Alert, App, Button, Dropdown, Input, Select, Tag, Typography } from 'antd';
 import {
   ReloadOutlined,
   SafetyCertificateOutlined,
@@ -17,6 +17,8 @@ import {
   AuditOutlined,
   LinkOutlined,
   HeartOutlined,
+  MoreOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -252,12 +254,23 @@ function LogEntryCard({ entry, tokens, locale, t }: { entry: AuditLogEntry; toke
 
 export default function SupervisorPanel() {
   const { t, i18n } = useTranslation();
+  const { modal, message } = App.useApp();
   const theme = useConfigStore((s) => s.theme);
   const tokens = getThemeTokens(theme);
   const locale = i18n.language ?? 'en';
   const isConnected = useGatewayStore((s) => s.state === 'connected');
 
-  const { status, auditLog, auditLogTotal, loadStatus, loadAuditLog, startPolling, stopPolling } = useSupervisorStore();
+  const {
+    status,
+    auditLog,
+    auditLogTotal,
+    auditLogClearing,
+    loadStatus,
+    loadAuditLog,
+    clearAuditLog,
+    startPolling,
+    stopPolling,
+  } = useSupervisorStore();
 
   const [filterType, setFilterType] = useState<string | undefined>(undefined);
   const [filterAction, setFilterAction] = useState<string | undefined>(undefined);
@@ -277,6 +290,24 @@ export default function SupervisorPanel() {
     loadStatus();
     loadAuditLog({ limit: 200 });
   }, [loadStatus, loadAuditLog]);
+
+  const handleClear = useCallback(() => {
+    modal.confirm({
+      title: t('supervisor.clearTitle'),
+      content: t('supervisor.clearDescription', { count: auditLogTotal }),
+      okText: t('supervisor.clearConfirm'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      async onOk() {
+        try {
+          const deleted = await clearAuditLog();
+          message.success(t('supervisor.clearSuccess', { count: deleted }));
+        } catch {
+          message.error(t('supervisor.clearError'));
+        }
+      },
+    });
+  }, [auditLogTotal, clearAuditLog, message, modal, t]);
 
   // Apply RPC-level filters (OR logic: match type OR action)
   const handleFilterChange = useCallback((type?: string, action?: string) => {
@@ -346,7 +377,34 @@ export default function SupervisorPanel() {
             </Tag>
           )}
         </div>
-        <Button size="small" icon={<ReloadOutlined />} onClick={handleRefresh} />
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              {
+                key: 'refresh',
+                icon: <ReloadOutlined />,
+                label: t('supervisor.refresh'),
+                onClick: handleRefresh,
+              },
+              {
+                key: 'clear',
+                icon: <DeleteOutlined />,
+                label: t('supervisor.clearAll'),
+                danger: true,
+                disabled: auditLogTotal === 0 || auditLogClearing,
+                onClick: handleClear,
+              },
+            ],
+          }}
+        >
+          <Button
+            size="small"
+            icon={<MoreOutlined />}
+            aria-label={t('supervisor.moreActions')}
+            loading={auditLogClearing}
+          />
+        </Dropdown>
       </div>
 
       {/* ── Disabled banner ─────────────────────────────────────── */}
