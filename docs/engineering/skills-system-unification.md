@@ -36,13 +36,13 @@
 | Task | 范围 | 状态 | 完成提交 |
 |---|---|---|---|
 | T0 | 隔离、证据、SOP、基线 | 已完成 | `docs(skills): define unification delivery SOP` |
-| T1 | 统一 Registry 与 provenance 契约 | 待开始 | — |
-| T2 | 跨来源 search → 单项 load | 待开始 | — |
-| T3 | candidate/selected/loaded/executed 追踪 | 待开始 | — |
+| T1 | 统一 Registry 与 provenance 契约 | 已完成 | `8070b14` |
+| T2 | 跨来源 search → 单项 load | 已完成 | `8070b14` |
+| T3 | candidate/selected/loaded/executed 追踪 | 代码完成；真实 Gateway 门禁待 T8 | `5fc0a7b` |
 | T4 | Python、pyc 与依赖安全预检 | 待开始 | — |
 | T5 | 安装预检与原子安装 RPC | 待开始 | — |
 | T6 | Extensions 安装中心与真实状态 | 待开始 | — |
-| T7 | 注入预算与渐进式披露降噪 | 待开始 | — |
+| T7 | 注入预算与渐进式披露降噪 | 进行中 | `e7b1c0e`（默认值仍待真实 A/B） |
 | T8 | 全量、真实 Gateway/模型、文档验收 | 待开始 | — |
 
 ## 3. 每个 Task 的问题、改动、收益、风险与验收
@@ -417,6 +417,26 @@ Extensions 不能正确解释来源和真实可用性，也没有统一安装流
   - 首次在未构建的 clean worktree 中，有 4 项因 `openclaw-weixin/dist/index.js` 不存在而失败。
   - 完成 `pnpm install --offline --frozen-lockfile` 与 `pnpm build:extensions` 后重跑，12/12 通过。
   - 该失败已归类为干净 worktree 的构建前置条件，不是产品代码回归。
+
+### T1/T2 执行记录
+
+- 先复现两套发现孤岛和旧 `skill_search` 多正文注入，再基于 OpenClaw 2026.6.1 的公开 `skills list/info --json` 状态合同实现 adapter。
+- Registry 统一发现 RP leaves/routers 与 OpenClaw workspace、managed、bundled、extra；稳定 ID 带来源 namespace，Agent 结果不返回本地路径。
+- `skill_search` v2 只返回候选元数据，默认 4,000、最高 8,000 字符，最多 8 项；`skill_load` 只接受稳定 ID 或唯一精确名称，单正文上限 40,000 UTF-8 bytes，超限拒绝而不截断。
+- 路径同时做 lexical 与 realpath containment；symlink 逃逸测试通过。
+- 真实 RP smoke：577 个统一条目，其中 RP 433 leaves、40 routers；中文“系统综述”和 STROBE 召回命中。
+- 集成验收：Registry、OpenClaw status、skill usage、execution trace 共 22/22 通过；Core build、typecheck 通过。
+- 残余风险：OpenClaw CLI adapter 首次冷调用有数秒开销，由 snapshot cache 吸收；中文 aliases 仍需从真实召回日志持续扩展。
+
+### T3 执行记录
+
+- 先写红灯合同：`search 5 → load 1`、search-only、受信 native diagnostic、v21→v22 migration、服务重建、detail RPC 与 Dashboard 恢复。
+- 新增 `rc_execution_skill_events`，用 `(run_id, skill_key, lifecycle)` 幂等保存 candidate/selected/loaded/executed；旧 `rc_execution_skills` 继续只承担角标真实使用计数，保持兼容。
+- `skill_search` 只写 candidate；成功 `skill_load` 以事务写 selected/loaded 和 used；OpenClaw 受信 `skill.used` 以事务写 executed 和 used。
+- Dashboard 将“实际加载/执行”与“检索候选”分区展示，旧 Gateway 不返回 `skillEvents` 时保持兼容。
+- OpenClaw 6.1 源码核对：`after_tool_call` 的真实 event 含 `result?: unknown`，传入的是保留结构化 `details` 的 `sanitizedResult`。
+- 验收：Core 全量 47 files passed、1 skipped，1,143 tests passed、10 skipped；Dashboard execution/chat 相关 63/63；Core build、Core/Dashboard typecheck；secret scan 均通过。
+- 未关闭门禁：隔离 Gateway 中完成真实 `skill_search → skill_load → reply → refresh/restart` 后，T3 才从“代码完成”变为“验收完成”；该步骤并入 T8。
 
 ## 6. 总体验收门槛
 
