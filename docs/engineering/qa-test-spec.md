@@ -3,7 +3,7 @@ doc: engineering/qa-test-spec.md
 audience: 开发者 / QA — 渠道 B(仓库按需阅读,不注入运行时)
 status: 现行 · 全量功能清单与验收用例(唯一 QA 清单)
 source-of-truth: 代码 + 飞书使用指南;功能以当前代码实现为准
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 20
 ---
 
 # Research-Claw 功能清单与测试用例
@@ -12,7 +12,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 > **来源：** [飞书《00-科研龙虾使用指南》](https://thesisagent.feishu.cn/docx/EN1Odi3dMoAPW2xkwWVcCAybnFg)、项目 README、`docs/00-reference-map.md` 及当前代码实现  
 > **测试入口：** Dashboard `http://127.0.0.1:28789` · Gateway `ws://127.0.0.1:28789`  
 > **优先级：** P0 = 阻塞发布 · P1 = 核心功能 · P2 = 增强/边界  
-> **左导航顺序（`LeftNav`）：** 文献库 → 工作区 → 评审 → 任务 → 监控 → 质量管控 → 扩展 → 设置  
+> **左导航顺序（`LeftNav`）：** 以组件代码为准；`supervisor` 面向用户显示为“可信审查”。
 > **图例：** 【面板】Dashboard 面板 UI · 【Agent】Chat / Agent 工具 · 【两者】均可
 
 ---
@@ -118,6 +118,9 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 | F-06-19 | Docker 文件打开降级 | 下载替代 openExternal |
 | F-06-20 | 跨面板工作区预览 | `requestWorkspacePreview(path)`：file_card / 任务 / 评审 → 工作区 Tab + `FilePreviewModal` |
 | F-06-21 | 任务流时间线 | `TaskFlowTimeline`：understand / execute / respond 推断步骤 + Agent `task_flow_stage` 显式阶段 |
+| F-06-22 | 快捷指令 | 本地 CRUD、搜索、收藏、排序；在光标处插入，不直接发送，支持 undo/redo |
+| F-06-23 | 回复执行详情 | 每条 Agent 回复显示真实工具/Skill 数量；点击查看明细与同 runId 可信审查 |
+| F-06-24 | 执行详情历史恢复 | 服务端持久化执行轨迹；Dashboard 刷新后恢复回复与 runId 绑定 |
 
 ### 7. Slash 命令（本地 RPC 执行）
 

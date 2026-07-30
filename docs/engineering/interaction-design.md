@@ -1,9 +1,9 @@
 ---
 doc: engineering/interaction-design.md
 audience: 开发者 / 设计 — 渠道 B(仓库按需阅读,不注入运行时)
-status: 现行 · 2026-06-09 依代码重建(布局对齐当前 LeftNav 八段)
+status: 现行 · 2026-07-30
 source-of-truth: 代码优先(dashboard/src/components/);本文以交互哲学 why 为主,布局清单以组件为准
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 20
 ---
 
 # Dashboard 交互设计
@@ -51,7 +51,7 @@ RC 是 **agent 中心**的交互模型——聊天窗口不是侧边功能,而�
 └────────────────────────────────────────────────────────┘
 ```
 
-- **LeftNav**:8 个功能段(权威源 `components/LeftNav.tsx` 的 `PanelTab`)——`library` 文献库 · `workspace` 工作区 · `review` 评审 · `tasks` 任务 · `monitor` 监控 · `supervisor` 质量管控 · `extensions` 扩展 · `settings` 设置。LeftNav 同时承载**会话切换器**(会话 = Session;"项目"为未来 project-scoping 预留,当前 UI 不用此词)。
+- **LeftNav**:功能段权威源为 `components/LeftNav.tsx` 的 `PanelTab`，其中 `supervisor` 面向用户显示为“可信审查”，不暴露内部 Supervisor 命名。LeftNav 同时承载**会话切换器**(会话 = Session;"项目"为未来 project-scoping 预留,当前 UI 不用此词)。
 - **中央 Chat**:始终可见,是写路径;agent 回复里嵌 `*_card`(见 [modules/cards.md](./modules/cards.md))。
 - **RightPanel**:渲染当前导航段对应面板(`components/panels/`)。
 - **可折叠**:LeftNav 可折叠为图标轨(icon rail)。
@@ -77,6 +77,15 @@ RC 是 **agent 中心**的交互模型——聊天窗口不是侧边功能,而�
 |------|--------|
 | **`Cmd+K` 搜索面板** | agent 就是搜索引擎;用户把查询打进 chat 输入框 |
 | **成本/金额显示** | token 计数仅用于上下文窗口感知;显示花费会制造焦虑、抑制探索。需成本追踪的用户去 provider 控制台看 |
+
+## 5. 可信交互
+
+- “快捷指令”属于输入辅助：只在光标处插入，不直接发送，必须保留原生 undo/redo。
+- Agent 回复的执行详情只呈现真实观测到的工具和 Skill；无数据时不显示 0 徽标。
+- “可信审查”表达检查、提醒、纠正和拦截，不承诺答案绝对正确。
+- 工具参数、结果正文和 Agent 回复正文不进入执行摘要索引。
+
+实现、数据契约与排障见 [trusted-interactions.md](./trusted-interactions.md)。
 
 ---
 

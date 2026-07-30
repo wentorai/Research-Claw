@@ -1,9 +1,9 @@
 ---
 doc: 00-reference-map.md
 audience: 全体 — RC 文档体系导航入口
-status: 现行 · 2026-06-09 随两层重构重写(engineering/ + self/ 结构)
+status: 现行 · 2026-07-30
 source-of-truth: 本文是**导航地图**,不复制任何易变清单(表/工具/方法数);具体数字一律去代码或对应模块文档数
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 20
 ---
 
 # RC 文档体系导航(00)
@@ -20,6 +20,7 @@ research-claw/docs/
 ├── engineering/                 ← 渠道 B:开发者按需阅读,不注入运行时
 │   ├── architecture.md          系统架构、L0–L3 耦合层、SQLite pragma、安全模型
 │   ├── interaction-design.md    Dashboard 交互哲学(Chat is the OS)、布局、刻意排除项
+│   ├── trusted-interactions.md  可信审查、快捷指令、回复级执行详情
 │   ├── prompt-architecture.md   Bootstrap 八件提示词系统、session-aware 过滤、AGENTS v4.1
 │   ├── plugin-integration.md    research-claw-core 单插件聚合、装载、注册、hook
 │   ├── install-startup.md       安装/启动 RC 特有设计(步骤链到根 SOP)
@@ -46,6 +47,7 @@ research-claw/docs/
 |-------|------|
 | 理解整体架构 / 耦合层 / 安全模型 | [engineering/architecture.md](engineering/architecture.md) |
 | 设计/改 Dashboard 交互 | [engineering/interaction-design.md](engineering/interaction-design.md) + [modules/dashboard-ui.md](engineering/modules/dashboard-ui.md) |
+| 维护可信审查 / 快捷指令 / 执行详情 | [engineering/trusted-interactions.md](engineering/trusted-interactions.md) |
 | 写/改 bootstrap 提示词(AGENTS 等) | [engineering/prompt-architecture.md](engineering/prompt-architecture.md) |
 | 给 core 插件加模块 / 加 RPC / 加 hook | [engineering/plugin-integration.md](engineering/plugin-integration.md) + 对应 `modules/` |
 | 做文献功能 | [modules/literature.md](engineering/modules/literature.md) |
