@@ -24,6 +24,7 @@ research-claw/docs/
 │   ├── prompt-architecture.md   Bootstrap 八件提示词系统、session-aware 过滤、AGENTS v4.1
 │   ├── plugin-integration.md    research-claw-core 单插件聚合、装载、注册、hook
 │   ├── install-startup.md       安装/启动 RC 特有设计(步骤链到根 SOP)
+│   ├── troubleshooting.md       已复现故障、判定边界与稳定规避方案
 │   ├── qa-test-spec.md          功能清单与 QA 测试用例
 │   ├── skill-workshop.md        RC 内 skill 开发
 │   ├── modules/                 各业务模块
@@ -56,6 +57,7 @@ research-claw/docs/
 | 加消息卡片类型 | [modules/cards.md](engineering/modules/cards.md) |
 | 接通记忆面板 | [modules/memory.md](engineering/modules/memory.md) + [design-backlog/memory-dashboard-ui.md](engineering/design-backlog/memory-dashboard-ui.md) |
 | 搭开发环境 / 安装调试 | [engineering/install-startup.md](engineering/install-startup.md) → 根 `docs/sop/INSTALL_SOP.md` |
+| 排查已知故障 / 浏览器与输入法兼容问题 | [engineering/troubleshooting.md](engineering/troubleshooting.md) |
 | 做后台任务 / Jobs 面板 | [engineering/changelog-jobs-panel.md](engineering/changelog-jobs-panel.md)（最近一轮加固的变更说明与文件索引） |
 | 跑功能 QA / 写测试用例 | [engineering/qa-test-spec.md](engineering/qa-test-spec.md) |
 | 了解 RC 自身是什么/能做什么 | `self/`(构建中) |
