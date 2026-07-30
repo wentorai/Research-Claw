@@ -1,0 +1,22 @@
+{
+  "schema": "research-claw.research-plugins-registry-contract.v1",
+  "manifestRoots": [
+    "analysis",
+    "domains",
+    "literature",
+    "research",
+    "tools",
+    "writing"
+  ],
+  "expectedLeaves": 433,
+  "expectedRouters": 40,
+  "representativeRecall": {
+    "query": "观察性研究报告规范",
+    "id": "rp:clinical-research-guide",
+    "keywords": [
+      "clinical research",
+      "STROBE",
+      "observational study"
+    ]
+  }
+}

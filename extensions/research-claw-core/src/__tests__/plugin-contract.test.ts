@@ -22,6 +22,8 @@ describe('research-claw-core plugin contracts', () => {
     expect(runtimeTools).toContain('monitor_list');
     expect(runtimeTools).toContain('monitor_update');
     expect(runtimeTools).toContain('monitor_collect_candidates');
+    expect(runtimeTools).toContain('skill_search');
+    expect(runtimeTools).toContain('skill_load');
   });
 
   // The HLS/upload/download route tests stand up their OWN http.Server with a
@@ -113,7 +115,9 @@ describe('research-claw-core plugin contracts', () => {
 
     expect(first.tools.map(tool => tool.name)).toContain('library_batch_add');
     expect(first.tools.map(tool => tool.name)).toContain('job_start');
+    expect(first.tools.map(tool => tool.name)).toContain('skill_load');
     expect(second.tools.map(tool => tool.name)).toContain('library_batch_add');
     expect(second.tools.map(tool => tool.name)).toContain('job_start');
+    expect(second.tools.map(tool => tool.name)).toContain('skill_load');
   });
 });
