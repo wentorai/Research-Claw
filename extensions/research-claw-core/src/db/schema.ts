@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — SQLite Schema DDL
  *
- * 27 tables + FTS5 virtual table + triggers + indexes.
+ * 28 tables + FTS5 virtual table + triggers + indexes.
  * All table names prefixed with `rc_` to avoid collision with OpenClaw internals.
  *
  * Tables:
@@ -32,12 +32,13 @@
  *  25. rc_paper_reviews    — AI paper review results
  *  26. rc_periph_devices   — External peripheral devices (camera/audio/lab/embodied)
  *  27. rc_periph_observations — Peripheral observation records (snapshot/check/note)
+ *  28. rc_prompt_presets    — User-managed reusable chat commands
  *
  * FTS5: rc_papers_fts (title, authors, abstract, notes, keywords)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -396,6 +397,20 @@ CREATE TABLE IF NOT EXISTS rc_periph_observations (
   captured_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );`;
 
+export const CREATE_RC_PROMPT_PRESETS_SQL = `
+CREATE TABLE IF NOT EXISTS rc_prompt_presets (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  content      TEXT NOT NULL,
+  category     TEXT NOT NULL DEFAULT '',
+  favorite     INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0, 1)),
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  use_count    INTEGER NOT NULL DEFAULT 0 CHECK(use_count >= 0),
+  last_used_at TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -426,6 +441,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   RC_PAPER_REVIEWS,
   CREATE_RC_PERIPH_DEVICES_SQL,
   CREATE_RC_PERIPH_OBSERVATIONS_SQL,
+  CREATE_RC_PROMPT_PRESETS_SQL,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -521,6 +537,10 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   // rc_periph_observations indexes
   `CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_device   ON rc_periph_observations(device_id);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_captured ON rc_periph_observations(captured_at);`,
+
+  // rc_prompt_presets indexes
+  `CREATE INDEX IF NOT EXISTS idx_rc_prompt_presets_order
+    ON rc_prompt_presets(favorite DESC, sort_order ASC);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────

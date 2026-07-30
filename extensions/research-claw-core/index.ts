@@ -95,6 +95,8 @@ import { createPeriphTools } from './src/periph/tools.js';
 import { PlaudManager } from './src/periph/plaud.js';
 import { RtspPreviewManager, PREVIEW_PLAYLIST_NAME } from './src/periph/rtsp-preview.js';
 import { resolveWithinRoot } from './src/workspace/path-guard.js';
+import { PromptPresetService } from './src/prompt-presets/service.js';
+import { registerPromptPresetRpc } from './src/prompt-presets/rpc.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -201,6 +203,7 @@ let _claudeMemSyncService: ClaudeMemSyncService | null = null;
 let _reviewService: PaperReviewService | null = null;
 let _jobService: JobService | null = null;
 let _periphService: PeriphService | null = null;
+let _promptPresetService: PromptPresetService | null = null;
 
 // ── Plaud MCP manager ──────────────────────────────────────────────────────
 // Real mini stdio MCP client. Construction is pure (no process spawns until a
@@ -1114,6 +1117,7 @@ const plugin: PluginDefinition = {
       _heartbeatService = new HeartbeatService(_dbManager.db);
       _monitorService = new MonitorService(_dbManager.db);
       _jobService = new JobService(_dbManager.db);
+      _promptPresetService = new PromptPresetService(_dbManager.db);
       _monitorService.seedDefaults();
       const repairedMonitorPrompts = _monitorService.repairLegacyDefaultPrompts();
       if (repairedMonitorPrompts > 0) {
@@ -1200,6 +1204,7 @@ const plugin: PluginDefinition = {
     const reviewService = _reviewService!;
     const pptService = _pptService!;
     const wsConfig = _wsConfig!;
+    const promptPresetService = _promptPresetService!;
 
     // Single coalescing entry point for the OpenClaw subagent sync. Reads the
     // live JobService from module state (robust across restart cycles) and skips
@@ -1480,6 +1485,7 @@ const plugin: PluginDefinition = {
       getTaskService: () => _taskService,
     }); // 1 method
     registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!, _rtspPreviewManager!); // 14 methods
+    registerPromptPresetRpc(registerMethod, promptPresetService); // 6 methods
 
     if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
     const memoryService = _memoryService;

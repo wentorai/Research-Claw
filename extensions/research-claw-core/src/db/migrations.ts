@@ -22,6 +22,7 @@ import {
   CREATE_TRIGGERS_SQL,
   CREATE_RC_PERIPH_DEVICES_SQL,
   CREATE_RC_PERIPH_OBSERVATIONS_SQL,
+  CREATE_RC_PROMPT_PRESETS_SQL,
 } from './schema.js';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -443,6 +444,15 @@ const MIGRATIONS: readonly Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_rc_periph_observations_captured ON rc_periph_observations(captured_at);
       `);
     },
+  },
+  {
+    version: 18,
+    name: 'add_prompt_presets',
+    sql: [
+      CREATE_RC_PROMPT_PRESETS_SQL,
+      `CREATE INDEX IF NOT EXISTS idx_rc_prompt_presets_order
+        ON rc_prompt_presets(favorite DESC, sort_order ASC);`,
+    ].join('\n'),
   },
 ];
 

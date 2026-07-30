@@ -107,8 +107,8 @@ function buildV16Database(): BetterSqlite3.Database {
 }
 
 describe('peripherals schema (v16 tables + v17 local-camera)', () => {
-  it('SCHEMA_VERSION is 17', () => {
-    expect(SCHEMA_VERSION).toBe(17);
+  it('SCHEMA_VERSION includes all migrations through prompt presets', () => {
+    expect(SCHEMA_VERSION).toBe(18);
   });
 
   it('fresh install (empty DB) creates both periph tables', () => {
@@ -119,7 +119,7 @@ describe('peripherals schema (v16 tables + v17 local-camera)', () => {
     const names = tableNames(db);
     expect(names).toContain('rc_periph_devices');
     expect(names).toContain('rc_periph_observations');
-    expect(getCurrentVersion(db)).toBe(17);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -135,7 +135,7 @@ describe('peripherals schema (v16 tables + v17 local-camera)', () => {
     const names = tableNames(db);
     expect(names).toContain('rc_periph_devices');
     expect(names).toContain('rc_periph_observations');
-    expect(getCurrentVersion(db)).toBe(17);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -152,7 +152,7 @@ describe('peripherals schema (v16 tables + v17 local-camera)', () => {
     ).toThrow();
 
     runMigrations(db);
-    expect(getCurrentVersion(db)).toBe(17);
+    expect(getCurrentVersion(db)).toBe(SCHEMA_VERSION);
 
     // Existing rows survived the table rebuild.
     expect(
