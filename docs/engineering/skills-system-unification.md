@@ -38,12 +38,12 @@
 | T0 | 隔离、证据、SOP、基线 | 已完成 | `docs(skills): define unification delivery SOP` |
 | T1 | 统一 Registry 与 provenance 契约 | 已完成 | `8070b14` |
 | T2 | 跨来源 search → 单项 load | 已完成 | `8070b14` |
-| T3 | candidate/selected/loaded/executed 追踪 | 代码完成；真实 Gateway 门禁待 T8 | `5fc0a7b` |
-| T4 | Python、pyc 与依赖安全预检 | 待开始 | — |
-| T5 | 安装预检与原子安装 RPC | 待开始 | — |
-| T6 | Extensions 安装中心与真实状态 | 待开始 | — |
-| T7 | 注入预算与渐进式披露降噪 | 进行中 | `e7b1c0e`（默认值仍待真实 A/B） |
-| T8 | 全量、真实 Gateway/模型、文档验收 | 待开始 | — |
+| T3 | candidate/selected/loaded/executed 追踪 | 已完成；真实进程重启恢复通过 | `5fc0a7b`、`960bcbd` |
+| T4 | Python、pyc 与依赖安全预检 | 已完成；独立安全复核 PASS | `8c877dd`、`6fab94d` |
+| T5 | 安装预检与原子安装 RPC | 已完成；外部 10-Skill ZIP 真实安装/阻断闭环通过 | `8c877dd`、`49d6ec1`、`6fab94d` |
+| T6 | Extensions 安装中心与真实状态 | 已完成；专项、全量与浏览器验收通过 | `b6c8932`、`e194b61` |
+| T7 | 注入预算与渐进式披露降噪 | 已完成；DeepSeek OFF/ON 与 Kimi 保守配置重复采样通过 | `e7b1c0e`、`960bcbd` |
+| T8 | 全量、真实 Gateway/模型、文档验收 | 已完成；真实安装、调用、科研工具与历史恢复闭环通过 | 本提交：`docs(skills): close unification acceptance` |
 
 ## 3. 每个 Task 的问题、改动、收益、风险与验收
 
@@ -232,17 +232,17 @@ RP catalog 与 OpenClaw 原生 Skills 是两套索引。相同 Skill 在不同�
 
 **目标代码改动**
 
-- 提供统一 preview/commit 协议。
-- 支持现有 ClawHub catalog、Git/本地导入能力及多 Skill ZIP。
-- 预检返回候选 Skill、冲突、hash、扫描、依赖、安装目标和是否需要覆盖确认。
-- commit 使用 stage → validate → atomic rename → rollback。
+- 统一 ClawHub 与本地多 Skill ZIP 的发现、预检和安装交互。
+- ClawHub 复用 OpenClaw 原生 search/detail/install RPC；本地 ZIP 在浏览器内拆成逐 Skill 的原生 archive upload。
+- 预检返回候选 Skill、冲突、hash、客户端静态扫描、依赖提示、安装目标和是否需要覆盖确认。
+- 服务端安装继续使用 stage → validate → atomic rename → rollback，并在写目标前执行 `before_install` 安全钩子。
 
 **改动方法**
 
-- 复用 OpenClaw 已有 installer 和 RC 已验证的原子安装模式。
-- ZIP 仅解压到随机临时目录，限制条目数、展开大小、单文件大小和目录深度。
-- 自动发现多个 SKILL.md 根，但不跨根共享不明确的可执行文件。
-- preview 生成短期 token；commit 必须携带 token、选中项和每项冲突决策。
+- 复用 OpenClaw 已有 installer 和 RC 已验证的原子安装模式，不伪造 Gateway 6.1 不存在的 scan-only/preview-token RPC。
+- ZIP 只在受限内存中解析，限制 archive 大小、条目数、展开大小、单文件大小、压缩比和目录深度。
+- 自动发现多个 SKILL.md 根，但不跨根共享不明确的可执行文件；每个候选独立上传、独立提交。
+- 浏览器预检负责早期反馈，服务端 `before_install` 才是写入前的权威阻断点；两层都重新计算内容摘要。
 
 **预期收益**
 
@@ -251,17 +251,18 @@ RP catalog 与 OpenClaw 原生 Skills 是两套索引。相同 Skill 在不同�
 
 **潜在风险与应对**
 
-- ZIP bomb/Zip Slip：路径规范化、大小预算、entry 数上限和 symlink 拒绝。
-- TOCTOU：preview 保存 hash；commit 重新校验。
+- ZIP bomb/Zip Slip：路径规范化、大小预算、entry 数上限、压缩比上限和 symlink 拒绝。
+- TOCTOU：客户端摘要仅用于展示与幂等；服务端基于实际上传内容重新扫描，不信任客户端结论。
 - Git/远端供应链变化：固定 resolved commit/hash，展示来源。
 - 覆盖用户 Skill：默认 keep-both，覆盖需要逐项确认并备份。
+- 多 Skill 包不是整包事务：UI 必须逐项报告成功/失败，不能把“部分成功”显示成整包成功。
 
 **验收**
 
 - 用户提供的 10 Skill ZIP 能预览为 10 项，而不是直接安装。
 - 默认阻断含 `.pyc` 项；修复后可选择单项安装。
 - 冲突默认 keep-both。
-- 人为制造中途失败后，旧版本仍完整且无 staging 残留。
+- 人为制造中途失败后，旧版本仍完整、失败项目标不存在且无 staging 残留。
 
 ### T6：Extensions 安装中心与运行态状态
 
@@ -436,7 +437,221 @@ Extensions 不能正确解释来源和真实可用性，也没有统一安装流
 - Dashboard 将“实际加载/执行”与“检索候选”分区展示，旧 Gateway 不返回 `skillEvents` 时保持兼容。
 - OpenClaw 6.1 源码核对：`after_tool_call` 的真实 event 含 `result?: unknown`，传入的是保留结构化 `details` 的 `sanitizedResult`。
 - 验收：Core 全量 47 files passed、1 skipped，1,143 tests passed、10 skipped；Dashboard execution/chat 相关 63/63；Core build、Core/Dashboard typecheck；secret scan 均通过。
-- 未关闭门禁：隔离 Gateway 中完成真实 `skill_search → skill_load → reply → refresh/restart` 后，T3 才从“代码完成”变为“验收完成”；该步骤并入 T8。
+- 真实进程重启门禁已关闭：进程 A 完成 `skill_search → skill_load → reply` 并写入 SQLite，退出后由进程 B 打开同一数据库；回复与 run 的映射、candidate/selected/loaded 生命周期、summary 和 detail 均恢复，刷新后没有把 candidate 误计为 used。
+- 提交与状态：实现提交为 `5fc0a7b`，`960bcbd` 补齐确定性顺序和渐进式默认值；T3 已完成，其全量回归仍统一纳入 T8。
+
+### T4 执行记录
+
+**复习 TODO、目标问题与证据链**
+
+- 目标不是“多扫几个扩展名”，而是消除安装前的可执行代码盲区，并保证安全组件缺席、异常或资源耗尽时不会静默放行。
+- 用户提供的医学包含 Python 源码、`.pyc` 和 `__pycache__`；旧扫描器只看 JS/TS，能够出现“扫描 0 个文件”但随后把不可审阅字节码写入 workspace 的真实缺口。
+- 源码复核还确认了四类绕过面：中文/英文 prompt injection 可藏在 `SKILL.md` 或支持文档；可执行内容可藏在 shebang、native binary 或不受支持的脚本格式；symlink/嵌套归档可越过目录边界；超大文件、超深目录和超多条目可消耗扫描资源。
+- 依赖可满足性与安全性是不同维度。RC 预检里的 `runtimeReady` 只是当前静态依赖快照，**不是 OpenClaw 的 canonical eligibility**；安装/重载后的真实状态仍以 OpenClaw `skills.status.eligible` 及其诊断为准。
+
+**观察与失败断言**
+
+- 建立了安全 Python、危险 `eval/exec/compile/import`、反序列化、动态属性/Unicode alias、native library、shell/subprocess、下载执行链的成对正负样本。
+- 对 `.py`、`.pyw`、extensionless Python shebang、`.pyc/.pyo`、`__pycache__`、ELF/Mach-O/PE/native 扩展、symlink/特殊条目、opaque nested archive、vendored `.git/node_modules` 建立阻断合同。
+- 对 VBS、R、notebook、Makefile、带 scripts 的 `package.json` 等当前无法可靠审查的可执行格式建立 fail-closed 合同，而不是以“没有命中规则”代表安全。
+- 对中文/英文越权、忽略系统指令、窃取秘密等 prompt injection 建立阻断样本，同时保留“讨论 system prompt 安全”一类良性文本，验证不是关键词即阻断。
+
+**应用修改与代码方法**
+
+- RC Core `before_install` 统一扫描 Skill 根和支持文件，检测 Python/shell/PowerShell/CMD、prompt injection、compiled/native payload、symlink、嵌套归档和不支持的可执行格式；诊断携带规则、文件和可行动原因。
+- 扫描设置总字节、文件/目录数量、目录深度、单文件大小等资源预算；读取失败、配置访问异常、内容截断或预算溢出均 fail closed。
+- OpenClaw 2026.6.1 patch 将 CLI install/update、ClawHub、archive/local/Git、依赖安装、Workshop 和 migration 的最终写入都置于 staging scan 之后，并保证阻断时不覆盖既有目标、不留下 staging。
+- 无 RC Core 的边界经过单独测试：文档型安全 Skill 可以继续安装；Python 等需要 RC 深度扫描的源代码会因缺少扫描器而拒绝；native、不支持格式和中英文 prompt injection 仍由 OpenClaw 最小防线阻断。插件 target 仍交给 OpenClaw 自己处理，RC Skill scanner 不越权接管 plugin 安装。
+
+**预期收益**
+
+- 本轮覆盖的受管安装入口在写入前共享同一 fail-closed 边界，Python、字节码、native 和隐藏脚本不再是“未扫描即通过”。
+- 安全结论、依赖声明和运行态资格分开展示，避免把“可安装”“当前可运行”“OpenClaw 已加载”混成一个绿色状态。
+
+**风险与应对**
+
+- 静态规则存在误报和未知绕过；通过良性对照、具体 ruleId/文件诊断和受控例外迭代降低误伤，但不把命中不全包装成执行安全。
+- **静态预检不是沙箱**：它不能证明 Skill 运行时无害，也不能替代最小权限、人工审查、依赖供应链控制和运行态隔离。
+- patch 触及多个 OpenClaw 安装面；复杂扫描留在 RC Core，patch 只保留 staging/调用/无 Core 最小防线，并用 frozen-lockfile 安装验证防止补丁漂移。
+
+**测试、验收、提交与状态**
+
+- 最新专项结果：RC Core 安全合同 31/31；真实 OpenClaw 安装安全合同 7/7；版本锁与安装安全联合合同 10/10。
+- OpenClaw 6.1 patch 已通过 frozen-lockfile 安装，并在官方 `openclaw@2026.6.1` tarball 上完成 apply check、实际 apply 和 reverse check；25 个 patched 文件与当前 runtime 逐文件一致，既有 `camera=(self)` 权限 hunk 由版本合同保护。
+- 官方 bundled 依赖安装采用窄例外：仅 `origin=openclaw-bundled` 且存在 OpenClaw `installSpec` 时允许脚本进入官方依赖配方；同一目录改为 managed 来源仍 fail closed，native、opaque archive、不支持格式、资源超限和 prompt injection 不受例外影响。42 个带安装配方的 bundled Skills 全部通过回归。
+- RP 433 个叶子 Skill 安全矩阵为 0 blocked、0 critical；只有两个用于安全/沙箱说明的预期 warning。外部医学 ZIP 的 3 个阻断项仍被准确阻断。
+- 独立安全复核结论为 PASS，无 P0/P1 阻断项。实现提交为 `8c877dd` 和 `6fab94d`；T4 已完成。
+- 残余边界：静态扫描不是 AST 数据流分析或沙箱。多跳 callable alias、变量化 `getattr`、无扩展名且由指令交给解释器的载荷仍可能逃逸启发式规则；手工复制、`npx-skills`、plugin bundle 内 Skills 等绕开受管安装器的路径属于另一信任边界。它们必须通过最小权限、来源审查和运行时隔离治理，不能被本预检结论覆盖。
+
+### T5 执行记录
+
+**复习 TODO、目标问题与证据链**
+
+- 真实问题是“用户能否在写入 workspace 前理解一个外部包里有什么，并让服务端独立阻断危险项”，而不是只增加一个上传按钮。
+- OpenClaw 6.1 的原生 archive install 没有 scan-only preview RPC；如果前端伪造一个“服务端已验证”预览，会造成错误信任。
+- 多 Skill ZIP 不能作为一个单 Skill archive 直接提交；若缺少拆包、预算和逐项结果，既会绕过用户选择，也无法表达部分成功。
+
+**观察**
+
+- 外部文件 `10个医学科研skills安装包.zip` 的 SHA-256 为 `e072d301e4dff5e46a4559f9bb83fd6ee5037b1ed1ed66e2cd96ca62186836a1`，可稳定发现 10 个 Skill。
+- 浏览器结构预检得到 7 项可进入后续安装、3 项因 compiled artifacts 阻断；三项分别为 `format-references-endnote`、`format-references-zotero` 和 `Medical Review Writer`。
+- 服务端语义进一步区分为：3 项安全阻断、6 项允许安装但 `runtimeReady=false`、1 项允许安装且 `runtimeReady=true`。这里的 `runtimeReady` 仅是 RC 当前依赖预检提示，不能替代 OpenClaw 安装后 canonical eligibility。
+
+**应用修改与代码方法**
+
+- 浏览器端在受限内存中解析 ZIP，执行路径规范化、entry/展开大小/单文件/目录深度/压缩比预算和 symlink/compiled-artifact 预检，并对每个候选计算内容摘要。
+- 每个选中 Skill 被重新打包为独立 archive，调用 OpenClaw 原生上传；客户端结论不被服务端信任，RC Core `before_install` 在实际写入前重新扫描上传内容。
+- ClawHub 使用原生 search/detail/install；未实现 scan-only 的来源不展示伪成功。当前 UI 没有伪造 Git 安装能力，后续若开放必须复用同一服务端门禁。
+- 原子性定义为“每个 Skill 独立 stage/validate/rename/rollback”，不是“整个 10 项安装包全有或全无”；UI 保存每项结果并明确部分成功。
+
+**预期收益**
+
+- 用户可以先看到 10 项候选、每项风险和依赖提示，只提交明确选择的项目；危险项目即使绕过浏览器也会被服务端拒绝。
+- 单项失败不会污染其他项目或覆盖已有目标，重试可依据 digest 保持幂等。
+
+**风险与应对**
+
+- ZIP bomb、Zip Slip、压缩比和内存耗尽：两层路径校验与硬资源预算，超限 fail closed。
+- TOCTOU/客户端篡改：摘要用于展示和幂等，服务端总是扫描实际 upload，不接受客户端“clean”作为授权。
+- 整包部分成功被误解：结果页逐项展示，失败项允许修复后单独重试。
+- **预检仍是静态检查，不是沙箱或运行时行为证明**；安装后还必须等待 OpenClaw 重新发现并检查真实资格。
+
+**测试、验收、提交与状态**
+
+- 最新真实 native upload：clean Skill 上传并安装成功；EndNote 项在服务端因 compiled artifact 被阻断，失败后目标目录不存在，未留下半安装目标。
+- 外部 ZIP 的 10 项发现、3 项阻断/6 项未就绪/1 项就绪、逐项选择和摘要合同均已验证；危险项不能借由前端判断差异直接写入。
+- 实现提交为 `8c877dd`、`49d6ec1` 和安装边界补强 `6fab94d`。真实上传、服务端阻断、原子回滚、最终全量回归均通过，T5 已完成。
+
+### T6 执行记录
+
+**复习 TODO、目标问题与证据链**
+
+- 目标问题是真实状态不可解释：旧 UI 用路径片段猜 provenance，把 config enabled 当成 runtime loaded，并可能在 toggle RPC 失败后保留乐观成功状态。
+- 安装入口若与状态链使用不同身份/来源语义，会出现“刚安装但找不到”“列表显示可用但模型看不到”等假闭环。
+
+**观察**
+
+- 真实 OpenClaw 6.1 payload 提供结构化 source、`modelVisible`、`userInvocable`、`commandVisible`、`blockedByAgentFilter` 和资格诊断；旧 adapter 丢弃或重新猜测了其中部分字段。
+- 重连后沿用旧 snapshot、toggle 错误被吞和本地 ZIP 只能单根处理均有对应失败合同。
+
+**应用修改与代码方法**
+
+- Extensions adapter 以 Gateway 的结构化 source/provenance 为事实源，分别呈现“已安装/已发现/允许/模型可见/命令可用/依赖与资格”，不再从路径推断。
+- toggle 使用 RPC 结果更新；失败回滚并显示错误。connection generation 变化后使旧数据失效并重拉。
+- 安装中心复用 T5 的 ClawHub 与本地 ZIP adapters，按候选项展示风险、依赖、冲突、选择和结果；安装结束后刷新原生 status。
+- 列表保留轻量综合状态，详细状态链与安装 UI 按需展开，控制 500+ 条目下的认知和渲染成本。
+
+**预期收益**
+
+- 用户能够追溯“来自哪里、装在哪里、为什么不可用、模型/命令能否看见”，安装结果与运行态不再是两套说法。
+- RPC 失败、重连和依赖缺失均表现为可恢复的真实状态，而不是 UI 假成功。
+
+**风险与应对**
+
+- OpenClaw payload 漂移：通过真实 6.1 fixture 和 adapter 边界固化，不在组件内散落兼容逻辑。
+- 状态字段过多：列表只显示综合结论，详情保留证据链；`runtimeReady` 明示为 RC 预检提示，不冒充 OpenClaw canonical eligibility。
+- 大列表和上传对主界面造成回归：安装中心按需挂载，并保留虚拟列表/现有筛选路径。
+
+**测试、验收、提交与状态**
+
+- Extensions/安装中心专项集成测试 54/54，通过 Dashboard typecheck；中英文资源各 1,481 个 key，键集合一致。
+- 提交为 `b6c8932`（Gateway truth/status）和 `e194b61`（native install center）。
+- Dashboard 全量为 154 个 test files、2,293 tests passed、1 skipped；生产 build 通过。隔离浏览器先连接 `5176 → 28833` 验证 ClawHub、本地 ZIP 与 native-upload 安装结果，再连接 `5176 → 28831` 验证模型调用同实例；工作区、托管个人和 OpenClaw 内置分组、模型/命令状态及安全边界文案均符合真实 Gateway 状态。
+- T6 已完成。
+
+### T7 执行记录
+
+**复习 TODO、目标问题与证据链**
+
+- 目标不是单纯减少 token，而是在保持真实召回率的前提下，把常驻目录、工具 schema、候选元数据和单项正文分层披露。
+- 基线同时常驻 123 个工具、约 71,099 个 schema 字符；structured ToolSearch 打开后可降到 3 个工具、约 513 个 schema 字符，但节省上下文不等于召回可靠。
+
+**观察与真实 A/B**
+
+- DeepSeek 严格正例在 ToolSearch OFF 时正确选择 `clinical-research-guide`，约 19.2 秒、2 次工具调用。
+- ToolSearch ON 的初始 scorer 误选 `scientific-writing-guide`，约 50.7 秒、10 次调用；加入中英文 alias 和加权 scorer 后，严格正例恢复为 `rp:clinical-research-guide`，约 13.0 秒、5 次调用。
+- 自然模糊 STROBE 请求先暴露稳定性问题；调整 aliases/weighted scorer 后，DeepSeek OFF/ON 的严格正例、自然模糊例各重复 3 次，12/12 都真实 selected/loaded `rp:clinical-research-guide`。
+- DeepSeek OFF/ON 负例各重复 3 次，6/6 均为 0 candidate、0 selected、0 loaded，没有为降噪制造新误触发。
+- Kimi 先前的 provider 429 已恢复；在生产保守配置 ToolSearch OFF 下重跑严格正例、自然模糊例和负例各 3 次：6/6 正例真实加载同一 Skill，3/3 负例为 0 lifecycle。
+
+| 模型/模式 | 样本 | 成功 | 首个模型输出均值 | 总耗时均值 | Prompt tokens 均值 | Tool schema chars | 工具调用均值 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| DeepSeek / OFF | 严格正例 ×3 | 3/3 | 4,855 ms | 12,621 ms | 42,792 | 71,099 | 2 |
+| DeepSeek / ON | 严格正例 ×3 | 3/3 | 3,540 ms | 13,226 ms | 14,160 | 513 | 6 |
+| DeepSeek / OFF | 自然模糊 ×3 | 3/3 | 2,612 ms | 25,330 ms | 43,633 | 71,099 | 3 |
+| DeepSeek / ON | 自然模糊 ×3 | 3/3 | 2,646 ms | 21,072 ms | 14,071 | 513 | 6 |
+| Kimi / OFF | 严格正例 ×3 | 3/3 | 8,003 ms | 17,987 ms | 36,686 | 71,377 | 2 |
+| Kimi / OFF | 自然模糊 ×3 | 3/3 | 11,239 ms | 55,413 ms | 37,174 | 71,377 | 4 |
+
+> “首个模型输出”取真实 session JSONL 中 user message 到首条 assistant event 的间隔，可能是 tool call，不冒充供应商网络层的首个可见文本 token。负例 9/9 均无工具/Skill 事件。
+
+**应用修改与代码方法**
+
+- Registry 固定 `search → load one`：搜索只返回 top-k 元数据，单项加载受正文预算、唯一 ID 和受信根校验保护。
+- 仅在用户没有显式覆盖时，把 RP Router 收敛为 6 个高层入口并限制 prompt 数量/字符预算；ToolSearch 保留可逆开关。
+- 为中英文医学意图补充 alias/weighted scoring，修复严格正例和自然模糊例的错误排序。虽然 ON 将 DeepSeek tool schema 从 71,099 chars 降至 513、prompt tokens 下降约 67%，但每次正例需要 6 次桥接调用，早期 scorer 又真实出现过误选；当前样本只覆盖一个意图族，Kimi 也只验证了保守配置。因此生产默认值继续锁定 `ToolSearch=false`，ON 保留为可逆实验开关。
+
+**预期收益**
+
+- 已实现的两阶段 Registry 消除了“搜索一次注入多个全文”；ToolSearch 在未来达标后还有显著 schema 降噪空间。
+- 默认关闭实验开关可避免为了节省 schema 牺牲模糊召回，同时保留继续采样和灰度比较的能力。
+
+**风险与应对**
+
+- scorer 对单一措辞过拟合：严格正例、自然模糊例和负例必须分组重复测试，不能只凭一个成功答案切默认。
+- 模型可能绕过 Registry 自行读取泛化 Skill：验收必须看真实 tool/Skill lifecycle，而不只看最终文本。
+- Provider 差异和限流：早期 429 与恢复后的重跑结果都保留；备用模型使用同一输入和次数，不用 DeepSeek 结果代替。
+
+**测试、验收、提交与状态**
+
+- DeepSeek OFF/ON 共 18 次最终采样（正例 12、负例 6），Kimi OFF 共 9 次最终采样（正例 6、负例 3）；正例召回/加载 18/18，负例无误触发 9/9。
+- 已记录召回率、误触发率、首个模型输出、总耗时、prompt tokens、Skills prompt chars、tool schema chars 和工具次数。数据支持“两阶段 Registry 已默认交付，ToolSearch 保留能力但默认关闭”。
+- 提交为 `e7b1c0e` 和 `960bcbd`。T7 的代码、默认值与重复采样门禁均已完成。
+
+### T8 执行记录
+
+**复习 TODO、目标问题与证据链**
+
+- T8 负责证明跨层闭环，不能用单元测试数量替代真实 upload、服务端阻断、OpenClaw 发现、模型召回、执行披露和进程重启恢复。
+- 整合阶段曾在多个专项 commit 之后追加安全补强，因此所有早期全量结果均作废，并在最终代码树上重新执行完整门禁。
+
+**观察与已完成门禁**
+
+- 安全：RC Core 31/31、真实 OpenClaw 7/7、版本锁联合合同 10/10；frozen-lockfile 与官方 tarball patch 重放通过，独立安全复核 PASS。
+- 外部包：固定 SHA 的 10 Skill ZIP 可发现为 10 项，服务端结论为 3 blocked、6 not-ready、1 ready。
+- 安装：clean native upload 成功；EndNote 被服务端阻断，目标不存在且无半安装状态。
+- 新装 Skill：`biomedical-sci-manuscript` 的源文件、native upload 目标和模型验收目标的 `SKILL.md` SHA-256 均为 `3934a0d6a1c76a96ad9718a44076ba00bd0d8f48d2de70a14e83938aeb3b478c`。自然意图 run `afb95057…` 经 search 后 selected/loaded `oc:workspace:biomedical-sci-manuscript`；显式 run `e5e78b9f…` 只调用一次 `skill_load` 并加载同一稳定 ID。SQLite 中的 source 为 `workspace`，且同一个 `28831` Gateway 的 Extensions 将其显示为“工作区技能／模型与命令均可用”，不是根据答案文本或另一实例截图推断。
+- 真实科研工具：run `921e63d6…` 只调用一次 RP `search_pubmed`；真实 tool result 返回 PMID `40845844`、PubMed 总命中 11,092、source latency 409 ms，最终回答与 tool result 一致。
+- 历史：真实 `skill_search → skill_load → reply` 在进程退出并重启后，从同一 SQLite 恢复 reply/run、生命周期、summary/detail。
+- 渐进式披露：DeepSeek OFF/ON 18 次与 Kimi OFF 9 次最终采样已完成，支持 ToolSearch 默认关闭。
+- UI：Extensions/安装中心专项 54/54、Dashboard 全量 2,293 passed/1 skipped、typecheck/build 和隔离浏览器视觉验收通过。
+
+**应用修改与整合方法**
+
+- 所有行为改动保持在独立分支/worktree；安全补强在完整回归前保持未提交，验收通过后形成独立提交 `6fab94d`，全程不 push。
+- 真实 Gateway 验收使用隔离配置、workspace、SQLite 和进程，不复用日常实例；记录的是持久化生命周期和文件系统结果，不以回答文本替代证据。
+- 文档必须区分三种事实：静态 `installAllowed`、RC advisory `runtimeReady`、OpenClaw canonical eligibility；同时始终声明静态预检不是沙箱。
+
+**预期收益**
+
+- 维护者可以从固定输入摘要、专项测试、真实安装结果和持久化记录复现关键结论。
+- 外部限制和信任边界显式留白，避免“本轮代码闭环”被包装成静态扫描、所有 provider 或所有安装渠道都已经完美。
+
+**风险与应对**
+
+- 最终补强可能破坏非安全路径：在当前树上重新执行 root/Core/Dashboard 全量与 build，而不是沿用旧结果。
+- 真实模型非确定性和 provider 限流：以 3 次重复和 run-level lifecycle 判断；保留 Kimi 早期 429 与恢复后 9 次结果，不用单次答案代替。
+- 文档与代码分支不同步：最终整合时核对 commit、测试时间点和当前 diff，禁止把计划项写成已交付。
+
+**最终验收、提交与状态**
+
+- Root/Core 全量：113 个 test files passed、4 skipped；1,593 tests passed、12 skipped、22 todo。一次将 Root 与 Dashboard 并行压测时，真实 CLI 用例被资源竞争拉长并触发 Vitest worker 的 `onTaskUpdate` 超时；仓库正式的串行命令重跑全部通过，没有产品断言失败。
+- Dashboard 全量：154 个 test files、2,293 tests passed、1 skipped。完整 `pnpm build` 与 `pnpm verify:e2e` 通过；Vite 只报告既有 chunk/dynamic-import 警告。
+- `pnpm install --offline --frozen-lockfile`、版本锁/安全合同、真实 upload、迁移、Workshop、无 Core fail-closed 和 bundled dependency recipe 均通过。
+- 浏览器视觉/交互验收完成；IME、重连、toggle 回滚、安装后刷新均由专项和全量回归覆盖。相同内容的新装 workspace Skill 已完成自然/显式调用与 lifecycle 落库。
+- RP `search_pubmed` 真实公网 smoke 通过；这证明插件工具实际挂载、调用和结果回传，不把 Registry 自身工具冒充 research-plugins 科研工具。
+- 当前代码 diff 通过 `git diff --check` 和提交前 secret scan；安全补强提交为 `6fab94d`。根文档同步在独立父仓库分支提交，不与代码 worktree 混合。
+- T8 已完成。静态扫描非沙箱、非受管安装入口和同用户进程不构成隔离边界，均不被本轮受管闭环的 PASS 结论覆盖。
 
 ## 6. 总体验收门槛
 
