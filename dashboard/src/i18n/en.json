@@ -225,6 +225,20 @@
     "deleteDescription": "This removes the local quick command. It does not affect past chats.",
     "deleteError": "Could not delete the quick command"
   },
+  "executionDetails": {
+    "title": "Execution details",
+    "summary": "{{tools}} tool(s), {{skills}} Skill(s) detected",
+    "tools": "Tools used",
+    "skills": "Skills detected",
+    "review": "Trusted review",
+    "noneDetected": "No Skill activation was detected",
+    "noLinkedReview": "No review result is linked to this run",
+    "status": {
+      "invoked": "Called",
+      "completed": "Completed",
+      "error": "Error"
+    }
+  },
   "taskFlow": {
     "title": "Task progress",
     "elapsed": "{{seconds}}s",

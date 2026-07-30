@@ -30,6 +30,7 @@ import { useStagedWritingStore } from '../../stores/staged-writing';
 import { isStagedWritingJobForSession } from '../../utils/staged-writing-run';
 import { isTaskFlowVisible } from '../../utils/task-flow';
 import { detectStagedWritingIntent } from '../../utils/staged-writing-detect';
+import { useExecutionTraceStore } from '../../stores/execution-trace';
 
 const { Text } = Typography;
 
@@ -184,9 +185,14 @@ export default function ChatView() {
   const showWritingTimeline = isStagedWritingJobForSession(writingJob, sessionKey);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<ChatMessage[]>(messages);
+  const loadExecutionSummaries = useExecutionTraceStore((state) => state.loadSummaries);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+  useEffect(() => {
+    const runIds = messages.flatMap((message) => message.executionRunId ? [message.executionRunId] : []);
+    void loadExecutionSummaries(runIds);
+  }, [messages, loadExecutionSummaries]);
 
   // Sticky "last user input" context (only one copy to avoid sticky chaos).
   const [isNearBottom, setIsNearBottom] = useState(true);

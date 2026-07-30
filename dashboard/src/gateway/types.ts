@@ -112,6 +112,8 @@ export interface ChatMessage {
    * never sent by the gateway. Survives the localStorage JSON round-trip.
    */
   localKind?: string;
+  /** Dashboard-local binding to the server-persisted execution trace for this reply. */
+  executionRunId?: string;
 }
 
 export interface ChatAttachment {

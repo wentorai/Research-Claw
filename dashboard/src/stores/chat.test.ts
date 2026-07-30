@@ -49,6 +49,7 @@ describe('Chat store', () => {
     sessionStorage.removeItem('rc-pending-user-msgs');
     sessionStorage.removeItem('rc-local-chat-msgs');
     localStorage.removeItem('rc-local-chat-msgs-v2');
+    localStorage.removeItem('rc-execution-bindings:main');
     useStagedWritingStore.setState({
       job: null,
       restored: false,
@@ -286,6 +287,7 @@ describe('Chat store', () => {
         expect(state.runId).toBeNull();
         expect(state.messages).toHaveLength(1);
         expect(state.messages[0].text).toBe('Hello world');
+        expect(state.messages[0].executionRunId).toBe('run-1');
       });
 
       it('filters NO_REPLY messages', () => {
@@ -848,6 +850,28 @@ describe('Chat store', () => {
         limit: 500,
       });
       expect(useChatStore.getState().messages).toHaveLength(2);
+    });
+
+    it('restores the persisted execution run binding after history reload', async () => {
+      useChatStore.setState({ runId: 'run-persisted', streaming: true });
+      useChatStore.getState().handleChatEvent({
+        runId: 'run-persisted',
+        sessionKey: 'main',
+        state: 'final',
+        message: { role: 'assistant', text: '带执行详情的回答', timestamp: 2_000 },
+      });
+
+      mockGatewayClient.request.mockResolvedValueOnce({
+        messages: [
+          { role: 'assistant', text: '带执行详情的回答', timestamp: 2_001 },
+        ],
+      });
+      await useChatStore.getState().loadHistory();
+
+      expect(useChatStore.getState().messages[0].executionRunId).toBe('run-persisted');
+      const persisted = localStorage.getItem('rc-execution-bindings:main') ?? '';
+      expect(persisted).toContain('run-persisted');
+      expect(persisted).not.toContain('带执行详情的回答');
     });
 
     it('is a no-op when disconnected', async () => {

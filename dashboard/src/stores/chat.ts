@@ -30,8 +30,92 @@ import { isStagedWritingJobForSession } from '../utils/staged-writing-run';
 import { useStagedWritingStore } from './staged-writing';
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
+const EXECUTION_BINDINGS_PREFIX = 'rc-execution-bindings:';
+const MAX_EXECUTION_BINDINGS = 500;
+const EXECUTION_BINDING_TIMESTAMP_TOLERANCE_MS = 5_000;
 
 import { normalizeSessionKey, toGatewaySessionKey } from '../utils/session-key';
+
+interface ExecutionBinding {
+  timestamp: number;
+  textHash: string;
+  runId: string;
+}
+
+function hashMessageText(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function executionBindingStorageKey(sessionKey: string): string {
+  return `${EXECUTION_BINDINGS_PREFIX}${normalizeSessionKey(sessionKey)}`;
+}
+
+function readExecutionBindings(sessionKey: string): ExecutionBinding[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(executionBindingStorageKey(sessionKey)) ?? '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is ExecutionBinding => (
+      item
+      && typeof item.timestamp === 'number'
+      && typeof item.textHash === 'string'
+      && typeof item.runId === 'string'
+    ));
+  } catch {
+    return [];
+  }
+}
+
+function rememberExecutionBinding(sessionKey: string, message: ChatMessage, runId: string): void {
+  if (typeof localStorage === 'undefined' || message.role !== 'assistant') return;
+  const timestamp = message.timestamp ?? Date.now();
+  const binding: ExecutionBinding = {
+    timestamp,
+    textHash: hashMessageText(extractText(message)),
+    runId,
+  };
+  const bindings = readExecutionBindings(sessionKey)
+    .filter((item) => item.runId !== runId);
+  bindings.push(binding);
+  try {
+    localStorage.setItem(
+      executionBindingStorageKey(sessionKey),
+      JSON.stringify(bindings.slice(-MAX_EXECUTION_BINDINGS)),
+    );
+  } catch {
+    // History binding is an enhancement; quota/privacy modes must not break chat.
+  }
+}
+
+function restoreExecutionBindings(sessionKey: string, messages: ChatMessage[]): ChatMessage[] {
+  const bindings = readExecutionBindings(sessionKey);
+  if (bindings.length === 0) return messages;
+  const available = new Set(bindings.map((_, index) => index));
+
+  return messages.map((message) => {
+    if (message.role !== 'assistant' || message.executionRunId) return message;
+    const timestamp = message.timestamp ?? 0;
+    const textHash = hashMessageText(extractText(message));
+    let bestIndex = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    bindings.forEach((binding, index) => {
+      if (!available.has(index) || binding.textHash !== textHash) return;
+      const distance = Math.abs(binding.timestamp - timestamp);
+      if (distance <= EXECUTION_BINDING_TIMESTAMP_TOLERANCE_MS && distance < bestDistance) {
+        bestIndex = index;
+        bestDistance = distance;
+      }
+    });
+    if (bestIndex < 0) return message;
+    available.delete(bestIndex);
+    return { ...message, executionRunId: bindings[bestIndex].runId };
+  });
+}
 
 /**
  * Debounce timer for gap-triggered history reloads.
@@ -1158,7 +1242,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       if (get().sessionKey !== requestedKey) return;
       // Filter out toolResult messages — they are tool internals, not user-visible.
       // This matches OpenClaw Lit UI behavior (chat.ts:566).
-      const visible = (result.messages ?? []).filter((m) => isVisibleRole(m.role));
+      const restored = restoreExecutionBindings(requestedKey, result.messages ?? []);
+      const visible = restored.filter((m) => isVisibleRole(m.role));
       // Strip system-injected context and channel relay attribution from user messages.
       // Uses unified sanitizeUserMessage() which handles all known injection patterns:
       // [Research-Claw] blocks, System: lines, channel attributions (ou_xxx:, [System:], etc.)
@@ -1447,7 +1532,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           ...event.message,
           text,
           timestamp: event.message.timestamp ?? Date.now(),
+          executionRunId: event.runId,
         };
+        rememberExecutionBinding(get().sessionKey, finalMsg, event.runId);
 
         if (event.runId === runId) {
           // OC surface_error finals use the exact "Agent failed before reply"

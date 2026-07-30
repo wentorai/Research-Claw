@@ -225,6 +225,20 @@
     "deleteDescription": "将删除本机保存的这条快捷指令，不会影响历史聊天。",
     "deleteError": "未能删除快捷指令"
   },
+  "executionDetails": {
+    "title": "执行详情",
+    "summary": "调用 {{tools}} 个工具，检测到 {{skills}} 个 Skill",
+    "tools": "使用的工具",
+    "skills": "检测到的 Skills",
+    "review": "可信审查",
+    "noneDetected": "本次未检测到 Skill 激活",
+    "noLinkedReview": "本次运行暂无可关联的审查结果",
+    "status": {
+      "invoked": "已调用",
+      "completed": "已完成",
+      "error": "出错"
+    }
+  },
   "taskFlow": {
     "title": "任务进度",
     "elapsed": "{{seconds}} 秒",
