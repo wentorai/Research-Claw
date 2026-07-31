@@ -179,14 +179,14 @@ export default {
       if (event?.toolName !== 'presentation_event_probe') return;
       const runId = event?.runId ?? context?.runId;
       const sessionKey = context?.sessionKey;
-      const emitted = api.emitAgentEvent({
+      const emission = api.emitAgentEvent({
         runId,
         sessionKey,
         stream: 'research-claw-core.presentation_changed',
         data: { schemaVersion: 1, runId, sessionKey, recordsRevision: 1 },
       });
       if (target) fs.appendFileSync(target, JSON.stringify({
-        kind: 'presentation_event_emitted', event: { runId, sessionKey, emitted }, capturedAt: Date.now(),
+        kind: 'presentation_event_emitted', event: { runId, sessionKey, emission }, capturedAt: Date.now(),
       }) + '\\n');
     });
   },
@@ -494,6 +494,7 @@ async function connectControlUi() {
   }));
   const response = await waitForFrame(frame => frame.type === 'res' && frame.id === id);
   if (!response.ok) throw new Error(`gateway connect failed: ${JSON.stringify(response.error)}`);
+  await controlUiCall('sessions.subscribe', {});
 }
 
 async function gatewayCall(method, params, timeoutMs = 120_000) {
@@ -704,19 +705,56 @@ async function runLifecycleProbe() {
     sessionKey,
     await controlUiCall('chat.history', { sessionKey, limit: 100 }),
   ])));
+  const presentations = Object.fromEntries(await Promise.all(historySessionKeys.map(async sessionKey => {
+    const sessionRunIds = [...completed, ...incomplete]
+      .filter(item => item.sessionKey === sessionKey)
+      .map(item => item.runId);
+    return [sessionKey, await controlUiCall('rc.execution.presentations', {
+      sessionKey,
+      runIds: sessionRunIds,
+    })];
+  })));
+  const summaries = Object.fromEntries(await Promise.all(historySessionKeys.map(async sessionKey => {
+    const sessionRunIds = [...completed, ...incomplete]
+      .filter(item => item.sessionKey === sessionKey)
+      .map(item => item.runId);
+    return [sessionKey, await controlUiCall('rc.execution.summary', {
+      sessionKey,
+      runIds: sessionRunIds,
+    })];
+  })));
   const runIds = new Set([...completed, ...incomplete].map(item => item.runId));
   const relevantFrames = frames.filter(frame => {
-    if (frame.type !== 'event' || !['agent', 'chat'].includes(frame.event)) return false;
+    if (frame.type !== 'event' || !['agent', 'chat', 'session.tool'].includes(frame.event)) return false;
     const runId = frame.payload?.runId ?? frame.payload?.data?.runId;
     return typeof runId === 'string' && runIds.has(runId);
   });
+  const presentationChangedFrames = relevantFrames.filter(frame =>
+    frame.event === 'agent'
+    && frame.payload?.stream === 'research-claw-core.presentation_changed');
+  const terminalToolFrames = relevantFrames.filter(frame =>
+    frame.event === 'session.tool'
+    && frame.payload?.stream === 'tool'
+    && ['result', 'end'].includes(frame.payload?.data?.phase)
+    && frame.payload?.data?.name === 'workspace_save');
+  const terminalToolRunIds = new Set(
+    terminalToolFrames.map(frame => frame.payload?.runId).filter(Boolean),
+  );
+  const missingTerminalEvents = [...runIds].filter(runId => !terminalToolRunIds.has(runId));
+  if (missingTerminalEvents.length > 0) {
+    throw new Error(`session.tool terminal fallback missing for: ${missingTerminalEvents.join(', ')}`);
+  }
 
   return {
     cases: Object.fromEntries([...completed, ...incomplete].map(item => [item.runId, item])),
     chatAndAgentFrames: relevantFrames,
     resolver: { normal: normalResolution, queued: queuedResolution, incomplete: incompleteResolutions },
     histories,
+    presentations,
+    summaries,
     abortResponse,
+    presentationChangedFrames,
+    terminalToolFrames,
   };
 }
 
@@ -782,6 +820,9 @@ async function main() {
   if (process.env.RC_CONTRACT_MODE === 'event') {
     const captured = await runToolCase('presentation_event_probe', {}, 1);
     const emittedCapture = await waitForCapture(captured.requestedRunId, 'presentation_event_emitted');
+    if (emittedCapture.event?.emission?.emitted !== true) {
+      throw new Error(`custom event emission failed: ${JSON.stringify(emittedCapture.event?.emission)}`);
+    }
     const deliveredFrame = await waitForFrame(frame =>
       frame.type === 'event'
       && frame.event === 'agent'
@@ -798,7 +839,8 @@ async function main() {
     console.log(JSON.stringify({
       ...report,
       event: {
-        emitted: emittedCapture.event?.emitted,
+        emitted: emittedCapture.event?.emission?.emitted,
+        emittedStream: emittedCapture.event?.emission?.stream,
         deliveredStream: deliveredFrame.payload?.stream,
         deliveredRunId: deliveredFrame.payload?.runId,
       },
@@ -827,8 +869,18 @@ async function main() {
           agentEndDurationMs: item.end.event?.durationMs,
         }])),
         resolver: lifecycle.resolver,
+        presentations: lifecycle.presentations,
+        summaries: lifecycle.summaries,
         abortResponse: lifecycle.abortResponse,
         frameCount: lifecycle.chatAndAgentFrames.length,
+        presentationChangedFrameCount: lifecycle.presentationChangedFrames.length,
+        presentationChangedRunIds: [...new Set(
+          lifecycle.presentationChangedFrames.map(frame => frame.payload?.runId).filter(Boolean),
+        )],
+        terminalToolFrameCount: lifecycle.terminalToolFrames.length,
+        terminalToolRunIds: [...new Set(
+          lifecycle.terminalToolFrames.map(frame => frame.payload?.runId).filter(Boolean),
+        )],
       },
     }, null, 2));
     return;

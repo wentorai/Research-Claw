@@ -10,6 +10,7 @@ const readFixture = (name: string): Record<string, any> => JSON.parse(fs.readFil
 const live = readFixture('presentation-hooks-live-2026.6.1.json');
 const incident = readFixture('presentation-incident-persisted-2026-07-31.json');
 const lifecycle = readFixture('presentation-lifecycle-events-live-2026.6.1.json');
+const sessionTool = readFixture('presentation-session-tool-live-2026.6.1.json');
 const negative = readFixture('presentation-negative-contracts-2026.6.1.json');
 
 const fullHookTools = [
@@ -238,7 +239,7 @@ describe('real lifecycle, resolver, and custom event contracts', () => {
     expect(userKeys).toEqual(expectedRuns.map((runId) => `${runId}:user`));
   });
 
-  it('delivers the exact versioned plugin-owned event stream to a real Dashboard socket', () => {
+  it('proves the exact versioned plugin-owned event is reachable in one real runtime', () => {
     expect(lifecycle.customEvent.emission.event.emitted).toEqual({
       emitted: true,
       stream: 'research-claw-core.presentation_changed',
@@ -253,5 +254,47 @@ describe('real lifecycle, resolver, and custom event contracts', () => {
         data: { schemaVersion: 1, recordsRevision: 1 },
       },
     });
+  });
+
+  it('pins session.tool as the cross-runtime invalidation fallback for every terminal path', () => {
+    const frames = sessionTool.terminalFrames;
+    expect(frames).toHaveLength(5);
+    expect(frames.map((frame: Record<string, any>) => frame.payload.runId)).toEqual([
+      'presentation-lifecycle-run-normal',
+      'presentation-lifecycle-run-queued-a',
+      'presentation-lifecycle-run-queued-b',
+      'presentation-lifecycle-run-timeout',
+      'presentation-lifecycle-run-cancelled',
+    ]);
+    for (const frame of frames) {
+      expect(frame).toMatchObject({
+        type: 'event',
+        event: 'session.tool',
+        payload: {
+          stream: 'tool',
+          data: {
+            phase: 'result',
+            name: 'workspace_save',
+            isError: false,
+          },
+          isHeartbeat: false,
+        },
+      });
+      expect(frame.payload.runId).toEqual(expect.any(String));
+      expect(frame.payload.sessionKey).toEqual(expect.any(String));
+      expect(frame.payload.data.toolCallId).toEqual(expect.any(String));
+    }
+  });
+
+  it('does not promote a runtime-scoped custom event into recovery truth', () => {
+    expect(sessionTool.customEventDelivery.deliveredRunIds).toEqual([
+      'presentation-lifecycle-run-normal',
+    ]);
+    expect(sessionTool.customEventDelivery.rejected).toHaveLength(4);
+    expect(sessionTool.customEventDelivery.rejected.every(
+      (entry: Record<string, any>) => entry.emission.emitted === false
+        && entry.emission.reason === 'plugin is not loaded',
+    )).toBe(true);
+    expect(sessionTool.provenance.customEventObservation).toContain('not the recovery contract');
   });
 });

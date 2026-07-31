@@ -1,7 +1,7 @@
 # Chat Evidence / Deliverable Card Contract Matrix
 
-Status: Task 0 complete on 2026-07-31. Production adapters remain blocked until
-Task 1/2 tests are written against these fixtures.
+Status: Task 0–3 implementation and real E2E complete on 2026-07-31; awaiting
+local manual acceptance before the requested final merge.
 
 Runtime under test: OpenClaw `2026.6.1`, Node `v22.22.2`, real RC Core,
 real `@wentorai/research-plugins`, real `research-superpower`, and an isolated
@@ -28,10 +28,16 @@ and hook/event payload came from the real runtime.
   message and must not be used as the user-turn join.
 - The exact versioned stream `research-claw-core.presentation_changed` returned
   `{ emitted: true }` and reached a real Control UI WebSocket as an `agent`
-  event. No `session.tool` timing fallback is required for supported 6.1.
-- OC may emit a tool terminal event before the asynchronous `after_tool_call`
-  projection completes. The custom event is emitted only after immutable
-  records commit and therefore avoids a one-shot invalidation race.
+  event in an isolated one-run probe. In a multi-Run lifecycle probe, later
+  runtime-scoped emitters were rejected with the public SDK result
+  `{ emitted: false, reason: "plugin is not loaded" }`. It is a valid fast path,
+  but not a recovery contract.
+- A subscribed Control UI received real `session.tool` `result` frames for
+  normal, queued, timeout, and cancelled Runs. OC may emit this terminal frame
+  before the asynchronous `after_tool_call` projection commits. Dashboard
+  therefore performs bounded 100/500/1500 ms presentation RPC rechecks and
+  stops when `recordsRevision` advances. Final/aborted/error chat frames trigger
+  one additional recheck. F5/reconnect always recover from SQLite-backed RPC.
 - The pre-existing execution trace persisted only the first Run in the
   multi-session isolated probe; later queued Run resolver bindings were empty.
   Task 1 must repair the shared execution-details coordinator, not build a
@@ -41,16 +47,16 @@ and hook/event payload came from the real runtime.
 
 | Tool | Full hook | Persisted path | Task 1/2 status |
 |---|---|---|---|
-| `workspace_save` | Real success | Real success + incident | Full candidate |
-| `workspace_append` | Real success | Real success | Full candidate |
-| `workspace_export` | Real xlsx success + real business error | Same | Full candidate |
-| `workspace_download` | Real success + real HTTP business error | Same | Full candidate |
-| `get_arxiv_paper` | Real positive result | Real positive result | Full candidate |
-| `search_openalex` | Real positive result | Real untruncated + capped incident | Full candidate |
-| `search_crossref` | Real positive result | Real untruncated + capped incident | Full candidate |
-| `search_arxiv` | Real positive result | Real untruncated + capped incident | Full candidate |
-| `search_dblp` | Real positive result | Real positive + incident zero-result | Full candidate |
-| `rp_search` | Real positive array details | Real untruncated + capped/prefixed incident | Full candidate |
+| `workspace_save` | Real success | Real success + incident | Full |
+| `workspace_append` | Real success | Real success | Full |
+| `workspace_export` | Real xlsx success + real business error | Same | Full |
+| `workspace_download` | Real success + real HTTP business error | Same | Full |
+| `get_arxiv_paper` | Real positive result | Real positive result | Full |
+| `search_openalex` | Real positive result | Real untruncated + capped incident | Full |
+| `search_crossref` | Real positive result | Real untruncated + capped incident | Full |
+| `search_arxiv` | Real positive result | Real untruncated + capped incident | Full |
+| `search_dblp` | Real positive result | Real positive + incident zero-result | Full |
+| `rp_search` | Real positive array details | Real untruncated + capped/prefixed incident | Full |
 | `wentor-network__search_papers` | Full-hook retry blocked by real MCP catalog rate limit | Real incident success/error | Partial: persisted fallback only |
 
 No generic tool-name pattern is allowed. Wentor full-hook events remain closed
@@ -79,6 +85,9 @@ may be supported by the strict fallback adapter.
   records, including capped details and Wentor success/error.
 - `presentation-lifecycle-events-live-2026.6.1.json`: normal/queued/timeout/
   cancel identities, projected history, resolver gap, and exact custom event.
+- `presentation-session-tool-live-2026.6.1.json`: bounded real terminal
+  `session.tool` frames for all lifecycle paths plus the observed cross-runtime
+  custom-event rejection.
 - `presentation-negative-contracts-2026.6.1.json`: real business/thrown errors
   plus explicitly labelled derived missing/synthetic/malicious mutations.
 - `scripts/verify-presentation-hook-contracts.mjs`: reproducible isolated live
@@ -93,9 +102,10 @@ cd extensions/research-claw-core
 pnpm exec vitest run src/__tests__/presentation-contracts.test.ts
 ```
 
-Result at Task 0 completion: 12/12 passed. Full Core verification passed
-1186 tests with 10 intentional skips across 50 files; the Core TypeScript build
-also passed.
+Latest contract result: 14/14 passed. The reproducible live lifecycle probe
+observed five terminal tool frames across all five Runs; the exact custom event
+probe independently delivered the expected versioned stream. Full-suite and
+build results are recorded in the acceptance handoff rather than frozen here.
 
 ### Critical-thinking gate decisions
 

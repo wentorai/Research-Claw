@@ -146,7 +146,7 @@ describe('CodeBlock edge cases', () => {
     const json = JSON.stringify({
       type: 'file_card',
       name: 'test.txt',
-      path: '/test.txt',
+      path: 'outputs/test.txt',
     });
     render(
       <CodeBlock className="language-file_card">

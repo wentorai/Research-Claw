@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "runtime": "OpenClaw 2026.6.1",
+    "node": "v22.22.2",
+    "capturedAt": "2026-08-01T00:44:24+08:00",
+    "method": "Isolated real Gateway, real RC Core, deterministic provider, and a subscribed Control UI socket. Frames below are a bounded projection of verbatim session.tool WebSocket payloads; no component mock was used.",
+    "probe": "RC_KEEP_TEST_ARTIFACTS=1 RC_CONTRACT_MODE=lifecycle node scripts/verify-presentation-hook-contracts.mjs",
+    "customEventObservation": "The exact presentation_changed stream was delivered for the first run. Later runtime-scoped emitters returned { emitted: false, reason: 'plugin is not loaded' }, so it is an optimization and not the recovery contract."
+  },
+  "terminalFrames": [
+    {
+      "type": "event",
+      "event": "session.tool",
+      "payload": {
+        "runId": "presentation-lifecycle-run-normal",
+        "stream": "tool",
+        "data": {
+          "phase": "result",
+          "name": "workspace_save",
+          "toolCallId": "contract-reused-tool-call",
+          "isError": false
+        },
+        "sessionKey": "agent:main:presentation-lifecycle-normal",
+        "seq": 4,
+        "isHeartbeat": false
+      }
+    },
+    {
+      "type": "event",
+      "event": "session.tool",
+      "payload": {
+        "runId": "presentation-lifecycle-run-queued-a",
+        "stream": "tool",
+        "data": {
+          "phase": "result",
+          "name": "workspace_save",
+          "toolCallId": "contract-queued-a",
+          "isError": false
+        },
+        "sessionKey": "agent:main:presentation-lifecycle-queued",
+        "seq": 4,
+        "isHeartbeat": false
+      }
+    },
+    {
+      "type": "event",
+      "event": "session.tool",
+      "payload": {
+        "runId": "presentation-lifecycle-run-queued-b",
+        "stream": "tool",
+        "data": {
+          "phase": "result",
+          "name": "workspace_save",
+          "toolCallId": "contract-queued-b",
+          "isError": false
+        },
+        "sessionKey": "agent:main:presentation-lifecycle-queued",
+        "seq": 4,
+        "isHeartbeat": false
+      }
+    },
+    {
+      "type": "event",
+      "event": "session.tool",
+      "payload": {
+        "runId": "presentation-lifecycle-run-timeout",
+        "stream": "tool",
+        "data": {
+          "phase": "result",
+          "name": "workspace_save",
+          "toolCallId": "contract-reused-tool-call",
+          "isError": false
+        },
+        "sessionKey": "agent:main:presentation-lifecycle-timeout",
+        "seq": 4,
+        "isHeartbeat": false
+      }
+    },
+    {
+      "type": "event",
+      "event": "session.tool",
+      "payload": {
+        "runId": "presentation-lifecycle-run-cancelled",
+        "stream": "tool",
+        "data": {
+          "phase": "result",
+          "name": "workspace_save",
+          "toolCallId": "contract-reused-tool-call",
+          "isError": false
+        },
+        "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+        "seq": 4,
+        "isHeartbeat": false
+      }
+    }
+  ],
+  "customEventDelivery": {
+    "deliveredRunIds": [
+      "presentation-lifecycle-run-normal"
+    ],
+    "rejected": [
+      {
+        "runId": "presentation-lifecycle-run-queued-a",
+        "emission": {
+          "emitted": false,
+          "reason": "plugin is not loaded"
+        }
+      },
+      {
+        "runId": "presentation-lifecycle-run-queued-b",
+        "emission": {
+          "emitted": false,
+          "reason": "plugin is not loaded"
+        }
+      },
+      {
+        "runId": "presentation-lifecycle-run-timeout",
+        "emission": {
+          "emitted": false,
+          "reason": "plugin is not loaded"
+        }
+      },
+      {
+        "runId": "presentation-lifecycle-run-cancelled",
+        "emission": {
+          "emitted": false,
+          "reason": "plugin is not loaded"
+        }
+      }
+    ]
+  }
+}
