@@ -23,8 +23,13 @@ describe('long task detection', () => {
     expect(result.reasons).toContain('action');
   });
 
-  it('promotes high-confidence long-running workspace work without confirmation', () => {
+  it('never silently promotes heuristic-only long-running workspace work', () => {
     const result = detectLongTaskIntent('帮我跑一个较长的 workspace 扫描任务');
+    expect(shouldPromoteLongTaskWithoutConfirmation(result)).toBe(false);
+  });
+
+  it('allows silent promotion only for explicit detached/background intent', () => {
+    const result = detectLongTaskIntent('请放到后台用子 Agent 扫描整个 workspace');
     expect(shouldPromoteLongTaskWithoutConfirmation(result)).toBe(true);
   });
 

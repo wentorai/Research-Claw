@@ -145,9 +145,8 @@ const historyGenerationBySession = new Map<string, number>();
  * Requests an authoritative Session reconciliation when the stream appears
  * quiet. Inactivity itself is never a terminal fact.
  *
- * Improvement over the original setTimeout approach: tracks _lastDeltaAt so it
- * can detect mid-stream connection deaths (where streamText is non-null but no
- * more deltas arrive), not just the "no first delta" case.
+ * Tracks _lastDeltaAt only to decide when another read-only Session comparison
+ * is useful. A quiet stream is not evidence of a dead run.
  *
  * Backup: the tick watchdog (client.ts) detects dead connections at the transport
  * layer and forces reconnect. This watchdog only asks the OC Session authority
@@ -689,12 +688,11 @@ interface ChatState {
    * false-positive queue-drain detection from quick heartbeat/cron finals.
    */
   _streamStartedAt: number | null;
-  /** Timestamp of last received chat delta. Used by stale-stream watchdog to detect
-   *  mid-stream deaths (connection alive but no more deltas arriving). */
+  /** Timestamp of last received chat delta. Used only to schedule an additional
+   *  authoritative Session comparison after a quiet interval. */
   _lastDeltaAt: number | null;
   /** Timestamp of the most recent WS reconnect while a run was in-flight.
-   *  When set, the stale-stream watchdog uses a shorter timeout (RECONNECT_STALE_MS)
-   *  to speed up recovery. Cleared on first delta/final/aborted/error after reconnect. */
+   *  Preserved as a transport observation; cleared on the next run event. */
   _reconnectedAt: number | null;
   /** Last user send for the active run — cleared on final or after abort restore. */
   _lastSentDraft: LastSentDraft | null;
@@ -1747,8 +1745,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
 
     // Stop the stale-streaming watchdog on TERMINAL events (final/aborted/error)
-    // matching our current run. Delta events update _lastDeltaAt instead, so the
-    // watchdog can detect mid-stream deaths (connection alive but no more deltas).
+    // matching our current run. Delta events update _lastDeltaAt only to schedule
+    // a later read-only Session comparison if the stream becomes quiet.
     if (!event.runId || !runId || event.runId === runId) {
       if (event.state !== 'delta') {
         stopStaleStreamWatchdog();
@@ -1957,8 +1955,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         if (event.runId && runId && event.runId !== runId) return;
 
         // Distinguish a USER-initiated stop (abort() tagged _userAbortedRunId) from a
-        // gateway timeout / system abort (same 'aborted' event, no tag). Only the latter
-        // surfaces an error + "continue" affordance; user stops stay silent.
+        // gateway/system abort (same 'aborted' event, no tag). Only the latter
+        // surfaces an interruption + recovery affordance; user stops stay silent.
         const wasUserAbort = get()._userAbortedRunId !== null && get()._userAbortedRunId === runId;
         const partialText = get().streamText?.trim() ? get().streamText : null;
         if (wasUserAbort) {
@@ -1977,15 +1975,20 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             };
           });
         } else {
-          const timeoutMessage = partialText
-            ? i18n.t('chat.runTimedOut')
-            : i18n.t('chat.runTimedOutNoOutput');
+          const explicitTimeout = event.stopReason === 'timeout' || event.errorKind === 'timeout';
+          const interruptionMessage = explicitTimeout
+            ? partialText
+              ? i18n.t('chat.runTimedOut')
+              : i18n.t('chat.runTimedOutNoOutput')
+            : partialText
+              ? i18n.t('chat.runInterrupted')
+              : i18n.t('chat.runInterruptedNoOutput');
           const failureInfo = {
-            ...classifyRunFailure('request timed out', undefined, {
+            ...classifyRunFailure(explicitTimeout ? 'request timed out' : 'request aborted', undefined, {
               origin: 'foreground',
               hasPartialOutput: Boolean(partialText),
             }),
-            message: timeoutMessage,
+            message: interruptionMessage,
             retryable: !partialText,
           };
           set((s) => ({
@@ -1995,20 +1998,25 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               : s.messages,
             _pendingUserMsgs: [],
             _userAbortedRunId: null,
-            lastError: timeoutMessage,
+            lastError: interruptionMessage,
             lastErrorMeta: failureInfo,
             canContinue: Boolean(partialText),
           }));
         }
-        // Top-banner notification for timeout/system aborts (user stops stay silent).
+        // Top-banner notification for gateway/system aborts (user stops stay silent).
         if (!wasUserAbort) {
+          const explicitTimeout = event.stopReason === 'timeout' || event.errorKind === 'timeout';
           useUiStore.getState().addNotification({
             type: 'error',
             title: i18n.t('chat.runIssueNotificationTitle'),
-            body: partialText
-              ? i18n.t('chat.runTimedOut')
-              : i18n.t('chat.runTimedOutNoOutput'),
-            dedupKey: `chat-run-timeout:${get().sessionKey}:${runId ?? 'unknown'}`,
+            body: explicitTimeout
+              ? partialText
+                ? i18n.t('chat.runTimedOut')
+                : i18n.t('chat.runTimedOutNoOutput')
+              : partialText
+                ? i18n.t('chat.runInterrupted')
+                : i18n.t('chat.runInterruptedNoOutput'),
+            dedupKey: `chat-run-interrupted:${get().sessionKey}:${runId ?? 'unknown'}`,
             targetSessionKey: get().sessionKey,
           });
         }

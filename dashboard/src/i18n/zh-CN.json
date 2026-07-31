@@ -102,13 +102,13 @@
     "send": "发送",
     "thinking": "思考中...",
     "compacting": "正在压缩对话历史...",
-    "compactingBanner": "会话历史较长，网关正在压缩/摘要旧消息后再调用模型。这可能需要几分钟，并非卡死。",
-    "runEndedNoOutput": "本次运行已结束但没有生成回复。会话可能过长超出模型上下文 — 可尝试 /new 开新会话，或换更大上下文的模型。",
-    "runStoppedAfterStaleStream": "本次运行长时间没有继续输出，已停止等待并重新加载历史。可能是工具或模型调用失败但未返回明确错误，请检查配置后重试。",
+    "runEndedNoOutput": "OC 报告本次运行已结束，但没有可见回复。请刷新会话记录；若仍为空，请查看已报告的失败信息或重新发送。",
     "runIssueTitle": "本次运行可能已中断",
     "runIssueNotificationTitle": "运行中断提醒",
     "runTimedOut": "本次运行因达到时间上限而停止,回复可能不完整 —— 点击「继续」可从中断处接着执行。",
     "runTimedOutNoOutput": "本次运行在生成回复前达到时间上限。请重新发送原消息后再试。",
+    "runInterrupted": "本次运行已中断，回复可能不完整 —— 可以继续等待结果，或点击「继续」接着执行。",
+    "runInterruptedNoOutput": "本次运行在生成回复前结束，但 OC 未报告超时原因。请刷新历史记录或重新发送原消息。",
     "continueRun": "继续",
     "continueInstruction": "请从中断处继续上一个任务。",
     "openSettings": "打开设置",
@@ -128,7 +128,7 @@
     "abortWithShortcut": "停止 ({{shortcut}})",
     "connectionBanner": {
       "reconnecting": "连接中断 — 正在自动重连...",
-      "disconnected": "与网关断开连接 — 未发送的消息可能丢失，请检查网关是否在运行"
+      "disconnected": "与 Gateway 断开连接 — 当前运行结果未知。请重连后核对 OC 会话状态"
     },
     "toolCallWarning": "当前模型 ({{model}}) 可能不支持工具调用。命令可能无法执行，插件功能可能不可用，建议切换模型。",
     "notConnected": "未连接网关 — 请检查网关是否正在运行",
@@ -261,13 +261,73 @@
   },
   "taskFlow": {
     "title": "任务进度",
-    "elapsed": "{{seconds}} 秒",
-    "stillWorking": "仍在处理中 — 复杂任务耗时较长是正常的。",
     "compactingDetail": "正在压缩对话历史，随后继续",
-    "stages": {
-      "understand": "理解任务",
-      "execute": "执行步骤",
-      "respond": "整理回复"
+    "runStatus": {
+      "reconnecting": {
+        "title": "正在重连 Gateway",
+        "detail": "当前连接不可用，因此不会推断任务结果。正在重连并核对 OC 会话状态。"
+      },
+      "stopping": {
+        "title": "正在停止运行",
+        "detail": "已请求停止，正在等待 OC 确认该运行不再活跃。"
+      },
+      "submitting": {
+        "title": "正在提交请求",
+        "detail": "正在等待 Gateway 确认收到这次请求。"
+      },
+      "confirming-submit": {
+        "title": "正在确认请求是否已接收",
+        "detail": "发送确认不确定。正在核对 OC 会话记录，不会自动重复发送。"
+      },
+      "compacting": {
+        "title": "正在压缩会话上下文",
+        "detail": "OC 确认运行仍活跃，当前正在压缩会话上下文。你可以继续等待或停止。"
+      },
+      "tool": {
+        "title": "正在使用 {{tool}}",
+        "detail": "OC 确认运行仍活跃。你可以继续等待或停止。",
+        "fallback": "科研工具"
+      },
+      "fallback": {
+        "title": "正在尝试可用模型线路",
+        "detail": "OC 已报告回退尝试，并确认运行仍活跃。你可以继续等待或停止。"
+      },
+      "streaming": {
+        "title": "正在接收回复",
+        "detail": "OC 确认运行仍活跃，回复内容正在到达。你可以继续等待或停止。"
+      },
+      "continuing": {
+        "title": "运行仍在继续",
+        "detail": "OC 确认运行仍活跃。你可以继续等待或停止。"
+      },
+      "processing": {
+        "title": "正在处理",
+        "detail": "OC 确认运行仍活跃，当前没有更具体的可显示活动。你可以继续等待或停止。"
+      },
+      "confirming-result": {
+        "title": "正在确认结果",
+        "detail": "OC 报告当前没有活跃运行，但持久化状态仍为 running。正在刷新会话记录，不将其显示为运行中或失败。"
+      },
+      "done": {
+        "title": "运行已完成",
+        "detail": "OC 报告本次运行已完成。"
+      },
+      "killed": {
+        "title": "运行已停止",
+        "detail": "OC 确认本次运行已停止。"
+      },
+      "timeout": {
+        "title": "运行达到时间上限",
+        "detail": "OC 已明确报告本次运行超时。"
+      },
+      "failed": {
+        "title": "运行失败",
+        "detail": "OC 已明确报告本次运行失败。"
+      },
+      "interrupted": {
+        "title": "运行已中断",
+        "detail": "OC 报告本次运行已结束，但没有提供更具体的原因。"
+      }
     }
   },
   "slashCmd": {

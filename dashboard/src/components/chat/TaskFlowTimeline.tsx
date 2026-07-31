@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import {
@@ -10,13 +10,16 @@ import {
 
 import { useTaskFlowStore } from '../../stores/task-flow';
 import { useChatStore } from '../../stores/chat';
+import { useGatewayStore } from '../../stores/gateway';
 import { selectSessionRunView, useSessionRunsStore } from '../../stores/session-runs';
 import {
-  INFERRED_STAGE_IDS,
   isTaskFlowVisible,
-  type InferredStageId,
   type TaskFlowStage,
 } from '../../utils/task-flow';
+import {
+  resolveRunStatusPresentation,
+  type RunStatusPresentation,
+} from '../../utils/run-status-presentation';
 
 function stageIcon(status: TaskFlowStage['status']) {
   switch (status) {
@@ -31,15 +34,17 @@ function stageIcon(status: TaskFlowStage['status']) {
   }
 }
 
-function resolveStageLabel(
-  stage: TaskFlowStage,
-  mode: 'inferred' | 'explicit',
-  t: (key: string) => string,
-): string {
-  if (mode === 'inferred' && INFERRED_STAGE_IDS.includes(stage.id as InferredStageId)) {
-    return t(`taskFlow.stages.${stage.id}`);
+function runStatusIcon(presentation: RunStatusPresentation) {
+  if (presentation.spins) {
+    return <LoadingOutlined spin style={{ color: '#f59e0b', fontSize: 13 }} />;
   }
-  return stage.label;
+  if (presentation.kind === 'done') {
+    return <CheckCircleOutlined style={{ color: '#22c55e', fontSize: 13 }} />;
+  }
+  if (presentation.kind === 'failed' || presentation.kind === 'timeout') {
+    return <CloseCircleOutlined style={{ color: '#ef4444', fontSize: 13 }} />;
+  }
+  return <MinusCircleOutlined style={{ color: 'var(--text-tertiary)', fontSize: 13 }} />;
 }
 
 function resolveStageDetail(stage: TaskFlowStage, t: (key: string) => string): string | null {
@@ -50,64 +55,56 @@ function resolveStageDetail(stage: TaskFlowStage, t: (key: string) => string): s
 export default function TaskFlowTimeline() {
   const { t } = useTranslation();
   const flow = useTaskFlowStore((s) => s.flow);
-  const tickMs = useTaskFlowStore((s) => s.tickMs);
-  const tick = useTaskFlowStore((s) => s.tick);
   const sessionKey = useChatStore((s) => s.sessionKey);
+  const transport = useGatewayStore((s) => s.state);
   const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, sessionKey)));
+  const hasRunContext = isTaskFlowVisible(flow)
+    || sessionRun.isBusy
+    || sessionRun.needsResultConfirmation;
+  const presentation = hasRunContext
+    ? resolveRunStatusPresentation(sessionRun, transport)
+    : null;
+  const explicitFlowVisible = isTaskFlowVisible(flow) && flow?.mode === 'explicit';
 
-  useEffect(() => {
-    if (!flow || flow.activeIndex < 0) return;
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [flow?.runId, flow?.activeIndex, tick]);
-
-  if (!isTaskFlowVisible(flow)) {
-    if (!sessionRun.isBusy) return null;
-    return (
-      <div className="task-flow-timeline" role="status" aria-live="polite">
-        <div className="task-flow-header">
-          <span className="task-flow-title">
-            <LoadingOutlined spin style={{ color: '#f59e0b', fontSize: 13, marginRight: 8 }} />
-            {t('chat.thinking')}
-          </span>
-        </div>
-        <div className="task-flow-heartbeat">{t('taskFlow.stillWorking')}</div>
-      </div>
-    );
-  }
-
-  const elapsedSec = Math.max(0, Math.floor((tickMs - flow!.startedAtMs) / 1000));
-  const activeStage = flow!.stages.find((s) => s.status === 'active' || s.status === 'error');
+  if (!presentation && !explicitFlowVisible) return null;
+  const activityLabel = presentation?.activityLabel ?? t('taskFlow.runStatus.tool.fallback');
 
   return (
     <div className="task-flow-timeline" role="status" aria-live="polite">
       <div className="task-flow-header">
-        <span className="task-flow-title">{t('taskFlow.title')}</span>
-        <span className="task-flow-elapsed">{t('taskFlow.elapsed', { seconds: elapsedSec })}</span>
+        <span className="task-flow-title">
+          {presentation && <span className="task-flow-run-icon">{runStatusIcon(presentation)}</span>}
+          {presentation
+            ? t(`taskFlow.runStatus.${presentation.kind}.title`, { tool: activityLabel })
+            : t('taskFlow.title')}
+        </span>
       </div>
-      <ol className="task-flow-steps">
-        {flow!.stages.map((stage, index) => {
-          const label = resolveStageLabel(stage, flow!.mode, t);
-          const detail = resolveStageDetail(stage, t);
-          const isActive = stage.status === 'active' || stage.status === 'error';
-          return (
-            <li
-              key={`${stage.id}-${index}`}
-              className={`task-flow-step is-${stage.status}${isActive ? ' is-current' : ''}`}
-            >
-              <span className="task-flow-step-icon">{stageIcon(stage.status)}</span>
-              <span className="task-flow-step-body">
-                <span className="task-flow-step-label">{label}</span>
-                {detail && isActive && (
-                  <span className="task-flow-step-detail">{detail}</span>
-                )}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-      {activeStage?.status === 'active' && elapsedSec >= 12 && !activeStage.detail && (
-        <div className="task-flow-heartbeat">{t('taskFlow.stillWorking')}</div>
+      {presentation && (
+        <div className="task-flow-run-detail">
+          {t(`taskFlow.runStatus.${presentation.kind}.detail`, { tool: activityLabel })}
+        </div>
+      )}
+      {explicitFlowVisible && (
+        <ol className="task-flow-steps">
+          {flow!.stages.map((stage, index) => {
+            const detail = resolveStageDetail(stage, t);
+            const isActive = stage.status === 'active' || stage.status === 'error';
+            return (
+              <li
+                key={`${stage.id}-${index}`}
+                className={`task-flow-step is-${stage.status}${isActive ? ' is-current' : ''}`}
+              >
+                <span className="task-flow-step-icon">{stageIcon(stage.status)}</span>
+                <span className="task-flow-step-body">
+                  <span className="task-flow-step-label">{stage.label}</span>
+                  {detail && isActive && (
+                    <span className="task-flow-step-detail">{detail}</span>
+                  )}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
       )}
     </div>
   );

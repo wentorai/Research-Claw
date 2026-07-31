@@ -15,4 +15,12 @@ describe('TASK_FLOW_AGENT_GUIDANCE', () => {
     expect(TASK_FLOW_AGENT_GUIDANCE).toContain('exact query `skill_search`');
     expect(TASK_FLOW_AGENT_GUIDANCE).toContain('do not read generic SKILL.md files first');
   });
+
+  it('keeps inferred long work in the foreground unless background execution was explicit or confirmed', () => {
+    expect(TASK_FLOW_AGENT_GUIDANCE).toContain('explicitly requested background');
+    expect(TASK_FLOW_AGENT_GUIDANCE).toContain('[Research-Claw] Auto Long Task');
+    expect(TASK_FLOW_AGENT_GUIDANCE).toContain('keep the run in the foreground');
+    expect(TASK_FLOW_AGENT_GUIDANCE).not.toContain('If work may exceed one agent turn, create');
+    expect(TASK_FLOW_AGENT_GUIDANCE).not.toMatch(/\bETA\b|percentage|percent complete/i);
+  });
 });

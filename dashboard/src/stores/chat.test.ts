@@ -416,8 +416,32 @@ describe('Chat store', () => {
         expect(useChatStore.getState().messages).toHaveLength(0);
       });
 
-      it('offers continue (canContinue + lastError) on a timeout/system abort', () => {
-        // No _userAbortedRunId set → this is a gateway timeout, not a user stop.
+      it('offers continue (canContinue + lastError) on an explicit gateway timeout', () => {
+        // No _userAbortedRunId and an explicit timeout cause from the gateway.
+        useChatStore.setState({
+          runId: 'run-1',
+          streaming: true,
+          streamText: 'partial',
+          messages: [],
+          _userAbortedRunId: null,
+          canContinue: false,
+          lastError: null,
+        });
+
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-1',
+          sessionKey: 'main',
+          state: 'aborted',
+          stopReason: 'timeout',
+        });
+
+        const state = useChatStore.getState();
+        expect(state.canContinue).toBe(true);
+        expect(state.lastError).toMatch(/继续|时间上限|continue|time limit/i);
+        expect(state._userAbortedRunId).toBeNull();
+      });
+
+      it('does not invent a timeout cause for an unclassified abort', () => {
         useChatStore.setState({
           runId: 'run-1',
           streaming: true,
@@ -436,8 +460,8 @@ describe('Chat store', () => {
 
         const state = useChatStore.getState();
         expect(state.canContinue).toBe(true);
-        expect(state.lastError).toMatch(/继续|时间上限|continue|time limit/i);
-        expect(state._userAbortedRunId).toBeNull();
+        expect(state.lastError).toBe('本次运行已中断，回复可能不完整 —— 可以继续等待结果，或点击「继续」接着执行。');
+        expect(state.lastError).not.toMatch(/时间上限|time limit/i);
       });
 
       it('stays silent (no continue) on a user-initiated abort', () => {
@@ -528,7 +552,7 @@ describe('Chat store', () => {
           state: 'error',
         });
 
-        expect(useChatStore.getState().lastError).toMatch(/run ended without|没有生成回复|no reply/i);
+        expect(useChatStore.getState().lastError).toMatch(/run ended without|没有可见回复|no visible reply/i);
       });
 
       it('clears sending when error arrives before chat.send ack (fast-fail race)', () => {

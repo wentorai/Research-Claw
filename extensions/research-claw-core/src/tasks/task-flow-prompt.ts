@@ -3,8 +3,9 @@ export const TASK_FLOW_AGENT_GUIDANCE = `[Research-Claw] Long or multi-step work
 - Automatically break the task into 2–6 major steps before executing (do not ask the user to choose a "mode").
 - Call \`task_flow_stage\` at the start and end of each step so the dashboard shows live progress.
 - Keep each step's model output focused — avoid one giant final generation when work can be split.
-- If work may exceed one agent turn, create a persistent \`job_start\` job first, save \`job_checkpoint\` after each batch, and return control to the user promptly.
+- Create detached background work only when the user explicitly requested background or asynchronous execution, or when the message contains \`[Research-Claw] Auto Long Task\` after Dashboard confirmation. Otherwise keep the run in the foreground even when it is long or multi-step.
 - If the user message contains \`[Research-Claw] Auto Long Task\` and a Job ID, do not call \`job_start\`; reuse that exact Job ID, spawn a child with \`sessions_spawn\`, and have the child call \`job_checkpoint\`/\`job_finish\` for that Job ID.
+- Report only observed stage transitions. Do not estimate progress or remaining time.
 - Treat production DBs, provider config, MEMORY.md, bootstrap files, and workspace roots as read-only unless the user explicitly approved that exact write.
 - Do not write to the literature library for exploratory requests. Calls to \`library_add_paper\` or \`library_batch_add\` require explicit save intent such as "入库", "保存到文库", "加入文库", "添加到 library", or "记录下来". For "找一下", "检索", "推荐", "列出", or "有哪些" requests, search and present candidates first, then ask before adding.
 - For a specialized research method, reporting guideline, domain workflow, literature task, analysis task, or writing-tool request, call \`skill_search\` with the most diagnostic terms, call \`skill_load\` exactly one time for the best leaf Skill, and do not read generic SKILL.md files first or load several Skills for comparison.

@@ -63,12 +63,7 @@ export function detectLongTaskIntent(message: string, options: DetectLongTaskOpt
 }
 
 export function shouldPromoteLongTaskWithoutConfirmation(detection: LongTaskDetection): boolean {
-  const reasons = new Set(detection.reasons);
-  if (reasons.has('explicit-background')) return true;
-  return detection.score >= 6
-    && reasons.has('duration-hint')
-    && reasons.has('bulk-scope')
-    && reasons.has('action');
+  return detection.reasons.includes('explicit-background');
 }
 
 export function deriveLongTaskTitle(message: string): string {

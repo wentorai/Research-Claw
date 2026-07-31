@@ -102,13 +102,13 @@
     "send": "Send",
     "thinking": "Thinking...",
     "compacting": "Compacting conversation history...",
-    "compactingBanner": "The session history is large — OpenClaw is summarizing older messages before calling the model. This can take several minutes; it is not frozen.",
-    "runEndedNoOutput": "The run finished without a reply. The session may be too long for the model — try /new to start fresh, or switch to a larger-context model.",
-    "runStoppedAfterStaleStream": "The run stopped after a long pause and history was reloaded. A tool or model call may have failed without returning a clear error; check the configuration and retry.",
+    "runEndedNoOutput": "OC reports that the run ended without a visible reply. Refresh session history; if it remains empty, inspect the reported failure or resend the request.",
     "runIssueTitle": "This run may have been interrupted",
     "runIssueNotificationTitle": "Run interrupted",
     "runTimedOut": "The run was stopped after reaching the time limit. The reply may be incomplete — click Continue to pick up where it left off.",
     "runTimedOutNoOutput": "The run reached its time limit before producing a reply. Resend the original message to try again.",
+    "runInterrupted": "The run was interrupted and the reply may be incomplete — you can keep waiting for reconciliation or click Continue to resume.",
+    "runInterruptedNoOutput": "The run ended before producing a reply, but OC did not report a timeout cause. Refresh the history or resend the original message.",
     "continueRun": "Continue",
     "continueInstruction": "Please continue the previous task from where it was interrupted.",
     "openSettings": "Open Settings",
@@ -128,7 +128,7 @@
     "abortWithShortcut": "Stop ({{shortcut}})",
     "connectionBanner": {
       "reconnecting": "Connection lost — reconnecting automatically...",
-      "disconnected": "Disconnected — unsent messages may be lost. Check if the gateway is running"
+      "disconnected": "Disconnected from Gateway — the current run outcome is unknown. Reconnect to check OC session state"
     },
     "toolCallWarning": "Current model ({{model}}) may not support tool calls. Commands may not execute and plugins may be unavailable. Consider switching models.",
     "notConnected": "Not connected — check if the gateway is running",
@@ -261,13 +261,73 @@
   },
   "taskFlow": {
     "title": "Task progress",
-    "elapsed": "{{seconds}}s",
-    "stillWorking": "Still working — long steps are normal for complex tasks.",
     "compactingDetail": "Compacting conversation history before continuing",
-    "stages": {
-      "understand": "Understand request",
-      "execute": "Execute steps",
-      "respond": "Compose response"
+    "runStatus": {
+      "reconnecting": {
+        "title": "Reconnecting to Gateway",
+        "detail": "The connection is unavailable, so the task outcome is not being inferred. Reconnecting and checking the OC session state."
+      },
+      "stopping": {
+        "title": "Stopping run",
+        "detail": "Stop was requested. Waiting for OC to confirm the run is no longer active."
+      },
+      "submitting": {
+        "title": "Submitting request",
+        "detail": "Waiting for the Gateway to acknowledge this request."
+      },
+      "confirming-submit": {
+        "title": "Confirming request acceptance",
+        "detail": "The acknowledgement was uncertain. Checking OC session history without sending the request again automatically."
+      },
+      "compacting": {
+        "title": "Compacting conversation",
+        "detail": "OC confirms the run is active and is compacting conversation context. You can keep waiting or Stop."
+      },
+      "tool": {
+        "title": "Using {{tool}}",
+        "detail": "OC confirms the run is active. You can keep waiting or Stop.",
+        "fallback": "a research tool"
+      },
+      "fallback": {
+        "title": "Trying an available model route",
+        "detail": "OC reported a fallback attempt and still confirms the run is active. You can keep waiting or Stop."
+      },
+      "streaming": {
+        "title": "Receiving response",
+        "detail": "OC confirms the run is active and response content is arriving. You can keep waiting or Stop."
+      },
+      "continuing": {
+        "title": "Continuing the run",
+        "detail": "OC confirms the run is active. You can keep waiting or Stop."
+      },
+      "processing": {
+        "title": "Processing",
+        "detail": "OC confirms the run is active. No more specific activity is currently available; you can keep waiting or Stop."
+      },
+      "confirming-result": {
+        "title": "Confirming result",
+        "detail": "OC reports no active run while the persisted status still says running. Refreshing session history instead of calling this running or failed."
+      },
+      "done": {
+        "title": "Run complete",
+        "detail": "OC reports that the run completed."
+      },
+      "killed": {
+        "title": "Run stopped",
+        "detail": "OC confirms that the run was stopped."
+      },
+      "timeout": {
+        "title": "Run reached its time limit",
+        "detail": "OC explicitly reported a timeout."
+      },
+      "failed": {
+        "title": "Run failed",
+        "detail": "OC explicitly reported a failure."
+      },
+      "interrupted": {
+        "title": "Run interrupted",
+        "detail": "OC reports that the run ended without a more specific cause."
+      }
     }
   },
   "slashCmd": {

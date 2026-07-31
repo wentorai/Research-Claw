@@ -207,10 +207,13 @@ approval for a specific high-risk command.
 For long, multi-step, or multi-agent work:
 
 1. Break into 2-6 major steps and call `task_flow_stage` at each step start/done.
-2. If work may exceed one agent turn, create or reuse a persistent `job_start`
-   job, then write `job_checkpoint` after each batch or subtask.
+2. Create detached background work only when the user explicitly requested
+   background/asynchronous execution, or when the message contains a
+   Dashboard-confirmed `[Research-Claw] Auto Long Task`. Otherwise keep the run
+   in the foreground, even when it is long or multi-step.
 3. If the user message contains `[Research-Claw] Auto Long Task` and a Job ID,
-   reuse that ID; do not create a competing job.
+   reuse that ID; do not create a competing job. Report only observed stage
+   transitions; do not estimate progress or remaining time.
 4. Subagents must be scoped: give them the allowed inputs, output path, and
    prohibited operations. They should report results, not alter production
    config/DB/git state directly.

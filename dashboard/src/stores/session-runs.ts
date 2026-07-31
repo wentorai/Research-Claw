@@ -42,6 +42,9 @@ export interface SessionRunView {
   activity: RunActivityObservation | null;
   localRunId: string | null;
   serverActive: boolean;
+  /** OC persisted status says running but the active-run registry says false.
+   * The run is not active; history/result reconciliation may still be pending. */
+  needsResultConfirmation: boolean;
   isBusy: boolean;
   canAbort: boolean;
   isStreaming: boolean;
@@ -170,13 +173,18 @@ export function selectSessionRunView(
   const localRunId = state.localRunIds[sessionKey] ?? null;
   const activity = state.activities[sessionKey] ?? null;
   const serverActive = Boolean(record?.truth && isSessionRunActive(record.truth));
+  const lifecycle = getSessionRunLifecycle(record);
+  const needsResultConfirmation = lifecycle === 'unknown'
+    && record?.truth?.status === 'running'
+    && record.truth.hasActiveRun === false;
   return {
     sessionKey,
     command,
-    lifecycle: getSessionRunLifecycle(record),
+    lifecycle,
     activity,
     localRunId,
     serverActive,
+    needsResultConfirmation,
     isBusy: command !== 'idle' || serverActive,
     canAbort: localRunId !== null || serverActive,
     isStreaming: activity?.kind === 'streaming',

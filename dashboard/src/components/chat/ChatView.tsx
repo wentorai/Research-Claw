@@ -215,7 +215,9 @@ export default function ChatView() {
   const scrollFrameRef = useRef<number | null>(null);
   const prevActivityActiveRef = useRef(false);
   const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, sessionKey)));
-  const activityActive = sessionRun.isBusy || pendingTools.length > 0;
+  const activityActive = sessionRun.isBusy
+    || sessionRun.needsResultConfirmation
+    || pendingTools.length > 0;
   const taskFlow = useTaskFlowStore((s) => s.flow);
   const taskFlowVisible = isTaskFlowVisible(taskFlow);
   const timelineAnchorIndex = useMemo(() => {
@@ -243,7 +245,7 @@ export default function ChatView() {
     writingJob?.startedAtMs,
     writingJob?.topic,
   ]);
-  /** Task progress already shows coarse steps + tool detail — hide redundant thinking UI. */
+  /** The run status region already shows authoritative state + activity. */
   const showThinkingPanel = activityActive && !taskFlowVisible && !showWritingTimeline;
   const activityEntries = activityLog
     .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey))
@@ -425,16 +427,6 @@ export default function ChatView() {
             ? t('chat.connectionBanner.reconnecting')
             : t('chat.connectionBanner.disconnected')}
         </div>
-      )}
-
-      {compacting && (
-        <Alert
-          type="info"
-          showIcon
-          message={t('chat.compacting')}
-          description={t('chat.compactingBanner')}
-          style={{ borderRadius: 0, margin: 0 }}
-        />
       )}
 
       {/* Tool call capability warning — model cannot generate structured tool calls */}

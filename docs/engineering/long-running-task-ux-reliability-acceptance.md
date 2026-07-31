@@ -21,7 +21,7 @@ registry.
 | 1. OC state parity and fixtures | complete | See below |
 | 2. P0 authority/watchdog | complete | See below |
 | 3. P1 recovery/races | complete | See below |
-| 4. UX/background guardrails | pending | — |
+| 4. UX/background guardrails | complete | See below |
 
 ## Task 1 — OC state parity and fixtures
 
@@ -144,3 +144,47 @@ Test-first and integration evidence:
 The configured Gateway was still unavailable during this task-level check, so
 live model/F5/restart/Stop evidence is not claimed here and remains a final
 acceptance requirement.
+
+## Task 4 — factual UX and background guardrails
+
+Implementation facts:
+
+- The inferred three-stage progress display and elapsed counter were removed
+  from the current Run region. The region now projects transport, command,
+  authoritative lifecycle and observed activity as separate inputs.
+- Active Session truth shows a factual activity (`processing`, sanitized tool
+  name, compaction, fallback or streaming) and tells the user they may wait or
+  Stop. No-delta age, completion percentage and remaining-time estimates are
+  not shown.
+- `status=running + hasActiveRun=false` is displayed as a non-spinning result
+  reconciliation state, not as running or failed. Disconnect/reconnect is
+  displayed as transport recovery and never changes the task outcome.
+- Locked OC's real `stream:lifecycle, data.phase:fallback` shape maps to fallback
+  activity. Tool `end/result/error` events return the current activity to generic
+  processing instead of leaving a completed tool shown as active. Tool labels
+  discard namespaces, raw params and filesystem paths.
+- An unclassified `chat:aborted` is now described as interrupted. Timeout text
+  is used only when OC supplies `stopReason:errorKind=timeout`.
+- Heuristic long-task detection may still offer the existing explicit Dashboard
+  confirmation, but only explicit user background intent can bypass it. Runtime
+  prompt/bootstrap guidance keeps inferred long work in the foreground; the
+  Dashboard-confirmed `[Research-Claw] Auto Long Task` marker retains the
+  existing Jobs/subagent route. No P2 migration system was added.
+
+Test-first and integration evidence:
+
+- Initial Task 4 red run covered the missing presentation helper, heuristic-only
+  silent promotion and the old auto-background prompt. A second red run pinned
+  the locked OC fallback payload and completed-tool activity transition.
+- Task 4 Dashboard integration: 12 files, 161 tests passed. One first-run failure
+  was an expected assertion-text drift after replacing the unsupported
+  "generated reply" claim with "visible reply"; the corrected suite reran clean.
+- Task 4 Dashboard TypeScript and production build passed, with only the known
+  static/dynamic import and large-chunk warnings.
+- Core plugin full suite: 48 files passed and 1 skipped; 1175 tests passed and 10
+  skipped. Core plugin TypeScript build passed.
+
+Cross-worktree note: the card-reliability worktree now also changes `App.tsx`,
+`ChatView.tsx`, execution presentation and translations, and introduces a
+`RunDetailsDock`/presentation owner. Final integration must reconcile ownership
+of the single Run region semantically rather than accepting a textual merge.

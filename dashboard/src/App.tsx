@@ -31,6 +31,7 @@ import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
 import { useSessionRunsStore } from './stores/session-runs';
 import { normalizeSessionKey } from './utils/session-key';
+import { resolveObservedRunActivity } from './utils/run-status-presentation';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -204,19 +205,12 @@ export default function App() {
         useChatStore.getState().handleAgentFailureEvent(status);
       }
       if (status.sessionKey) {
-        const toolName = status.data?.name ?? status.data?.toolName;
-        const kind = status.stream === 'compaction'
-          ? 'compacting'
-          : status.stream === 'tool'
-            ? 'tool'
-            : status.state === 'streaming'
-              ? 'streaming'
-              : 'processing';
+        const activity = resolveObservedRunActivity(status);
         useSessionRunsStore.getState().observeActivity({
           sessionKey: status.sessionKey,
           runId: status.runId,
-          kind,
-          label: toolName ?? kind,
+          kind: activity.kind,
+          label: activity.label,
           observedAt: Date.now(),
           source: status.stream === 'tool' ? 'tool-event' : 'agent-event',
         });

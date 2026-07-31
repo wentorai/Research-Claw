@@ -348,6 +348,7 @@ describe('abort recovery semantics', () => {
       runId: 'run-time-limit',
       sessionKey: 'main',
       state: 'aborted',
+      stopReason: 'timeout',
     });
     const state = useChatStore.getState();
     expect(state._lastSentDraft?.text).toBe('long analysis');
@@ -362,6 +363,7 @@ describe('abort recovery semantics', () => {
       runId: 'run-time-limit',
       sessionKey: 'main',
       state: 'aborted',
+      stopReason: 'timeout',
     });
     const state = useChatStore.getState();
     expect(state.canContinue).toBe(true);
