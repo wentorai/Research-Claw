@@ -17,6 +17,7 @@
  *   5. gateway.auth.token alignment with Dashboard DEFAULT_TOKEN
  *   6. channels.discord.botToken → token (fix stale example config key)
  *  10. agents.defaults.sandbox.mode = "off" (RC has no Docker sandbox)
+ * 10b. agents.defaults.timeoutSeconds — migrate legacy 300s cap to template value
  *  14. plugins.installs — provenance records for loaded plugins
  *  15. dangerouslyDisableDeviceAuth — remove (unnecessary on loopback)
  *  16. OC 2026.6.1 — legacy model APIs, bundledDiscovery, telegram streaming, DMS hooks
@@ -58,6 +59,27 @@ const RESEARCH_PLUGINS_PATH = path.join(os.homedir(), '.openclaw', 'extensions',
 const RC_SKILLS_PROMPT_MAX = 100;
 const RC_SKILLS_PROMPT_CHARS = 26000;
 const RC_TOOL_SEARCH_DEFAULT = false;
+
+// Canonical ceiling for one complete foreground agent turn. Read it from the
+// fresh-install template instead of duplicating the value here: commit 83a02c6
+// raised the product default to 3600s, but the old hard-coded 300s migration
+// survived and silently reverted every installed config on startup.
+//
+// IMPORTANT: this is a wall-clock deadline, not an inactivity watchdog.
+// OpenClaw does not extend it when a model is still streaming or tools are
+// making progress. Provider/idle timeouts must handle unresponsive APIs; do not
+// shorten this ceiling as a failover optimisation. The real-script regression
+// contract lives in test/ensure-config-agent-timeout.test.ts.
+const RC_AGENT_RUN_TIMEOUT_SECONDS = (() => {
+  const templatePath = path.join(__dirname, '../config/openclaw.example.json');
+  const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
+  const value = template?.agents?.defaults?.timeoutSeconds;
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`Invalid agents.defaults.timeoutSeconds in ${templatePath}`);
+  }
+  return value;
+})();
+const LEGACY_RC_AGENT_RUN_TIMEOUT_SECONDS = 300;
 
 function isLegacyResearchPluginsNodeModulesPath(candidate) {
   if (typeof candidate !== 'string') return false;
@@ -527,12 +549,25 @@ function ensureConfig(filePath) {
     changed = true;
   }
 
-  // 10b. Agent timeout — cap at 300s (5 min). The original 900s (15 min)
-  //      causes unrecoverable hangs when the model API is unresponsive.
-  //      OC default (600s) is also too long; RC uses faster failover.
-  const RC_TIMEOUT_SECONDS = 300;
-  if (!c.agents.defaults.timeoutSeconds || c.agents.defaults.timeoutSeconds > RC_TIMEOUT_SECONDS) {
-    c.agents.defaults.timeoutSeconds = RC_TIMEOUT_SECONDS;
+  // 10b. Whole-turn timeout — keep upgrades aligned with the fresh-install
+  //      template. Migrate the exact legacy 300s value because earlier RC
+  //      versions forced it on every startup. Preserve other intentional lower
+  //      operator values, while retaining the product's one-hour upper bound.
+  //
+  //      This intentionally applies to both the project config and the global
+  //      config passed by run.sh. RC's sync-global-config.cjs subsequently
+  //      overlays project agent defaults onto the global file so
+  //      `openclaw gateway --force` behaves like RC; limiting only this block to
+  //      project config would be undone later in the same startup. The isolated
+  //      global-scope contract is covered by the timeout migration test.
+  const configuredTimeoutSeconds = c.agents.defaults.timeoutSeconds;
+  if (
+    !Number.isFinite(configuredTimeoutSeconds)
+    || configuredTimeoutSeconds <= 0
+    || configuredTimeoutSeconds === LEGACY_RC_AGENT_RUN_TIMEOUT_SECONDS
+    || configuredTimeoutSeconds > RC_AGENT_RUN_TIMEOUT_SECONDS
+  ) {
+    c.agents.defaults.timeoutSeconds = RC_AGENT_RUN_TIMEOUT_SECONDS;
     changed = true;
   }
 
