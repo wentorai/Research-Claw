@@ -41,13 +41,14 @@ describe('Chat store', () => {
       tokensIn: 0,
       tokensOut: 0,
       _lastSentDraft: null,
+      _pendingSendAck: null,
       inputRestore: null,
       inputRestoreSeq: 0,
       _abortedUserSuppressCounts: {},
       _pendingUserMsgs: [],
       _localOnlyMsgs: [],
     });
-    sessionStorage.removeItem('rc-pending-user-msgs');
+    sessionStorage.clear();
     sessionStorage.removeItem('rc-local-chat-msgs');
     localStorage.removeItem('rc-local-chat-msgs-v2');
     localStorage.removeItem('rc-execution-bindings:main');
@@ -98,7 +99,7 @@ describe('Chat store', () => {
       expect(mockGatewayClient.request).not.toHaveBeenCalled();
     });
 
-    it('sets lastError on RPC failure', async () => {
+    it('keeps an uncertain transport failure for authoritative reconciliation', async () => {
       mockGatewayClient.request.mockImplementation(async (method: string) => {
         if (method === 'chat.send') throw new Error('Network error');
         return {};
@@ -107,7 +108,9 @@ describe('Chat store', () => {
       await useChatStore.getState().send('test');
 
       expect(useChatStore.getState().sending).toBe(false);
-      expect(useChatStore.getState().lastError).toBe('Network error');
+      expect(useChatStore.getState().lastError).toBeNull();
+      expect(useChatStore.getState().runId).toBeTruthy();
+      expect(useSessionRunsStore.getState().commands.main).toBe('ack_unknown');
     });
 
     it('clears previous error and streamText on new send', async () => {

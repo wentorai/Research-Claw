@@ -3,6 +3,7 @@ import { GatewayClient, type CloseInfo, type GapInfo } from '../gateway/client';
 import { useConfigStore } from './config';
 import { RC_VERSION } from '../version';
 import type { ConnectionState, HelloOk, EventFrame, SessionDefaults } from '../gateway/types';
+import { classifyChatTerminalLifecycle } from '../utils/session-run-state';
 
 /** Stable per-tab instance ID for gateway deduplication (aligned with OC clientInstanceId). */
 const _instanceId = crypto.randomUUID();
@@ -137,6 +138,9 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         void import('./sessions').then(({ useSessionsStore }) => {
           useSessionsStore.getState().loadSessions();
         });
+        void import('./session-runs').then(({ useSessionRunsStore }) => {
+          void useSessionRunsStore.getState().flushPendingAborts();
+        });
       },
       onEvent: (event: EventFrame) => {
         if (event.event === 'chat') {
@@ -145,6 +149,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
             sessionKey?: string;
             runId?: string;
             errorKind?: string;
+            stopReason?: string;
             message?: { isError?: boolean };
           } | undefined;
           if (
@@ -155,13 +160,8 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
             void import('./session-runs').then(({ selectSessionRunView, useSessionRunsStore }) => {
               const store = useSessionRunsStore.getState();
               const command = selectSessionRunView(store, payload.sessionKey!).command;
-              const status = payload.state === 'final'
-                ? (payload.message?.isError ? 'failed' : 'done')
-                : payload.state === 'error'
-                  ? (payload.errorKind === 'timeout' ? 'timeout' : 'failed')
-                  : command === 'stopping'
-                    ? 'killed'
-                    : 'interrupted';
+              const status = classifyChatTerminalLifecycle(payload, command);
+              if (!status) return;
               store.applyChatTerminal({
                 sessionKey: payload.sessionKey!,
                 runId: payload.runId,

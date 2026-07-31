@@ -20,7 +20,7 @@ registry.
 |---|---|---|
 | 1. OC state parity and fixtures | complete | See below |
 | 2. P0 authority/watchdog | complete | See below |
-| 3. P1 recovery/races | pending | — |
+| 3. P1 recovery/races | complete | See below |
 | 4. UX/background guardrails | pending | — |
 
 ## Task 1 — OC state parity and fixtures
@@ -96,3 +96,51 @@ Test-first and integration evidence:
 Deferred deliberately to Task 3: `sessionInfo/inFlightRun` hydration, ACK
 uncertainty, pending-abort recovery, full terminal/new-generation fencing, and
 duplicate/out-of-order frame suppression.
+
+## Task 3 — P1 refresh/reconnect recovery and races
+
+Implementation facts:
+
+- `chat.history` now consumes the real OC `sessionInfo` and `inFlightRun`
+  projections. It restores accumulated text, the server runId and Stop on F5;
+  an active Session without `inFlightRun` still restores generic running and a
+  session-level Stop.
+- History calls are fenced by normalized session key plus a per-key generation,
+  covering the A → B → A late-response race. Accepted push events also invalidate
+  same-epoch Session responses that were already in flight.
+- `chat.send` normalizes the OC `started/in_flight/ok` ACK contract. A structured
+  Gateway rejection is definitive and restores the draft; a timeout/socket close
+  retains the exact payload and idempotency generation as `ack_unknown`, persists
+  it across F5, performs read-only history/Session reconciliation, and never
+  automatically replays the request.
+- Matching history `idempotencyKey` or a matching `inFlightRun` resolves the
+  unknown ACK. An empty snapshot or unrelated run does not prove rejection.
+- Stop is stored once while offline, sent once per connection epoch after
+  reconnect, and remains `stopping` until an OC terminal/non-active fact clears
+  the pending command. No timer invents `killed`.
+- Gateway event delivery now drops duplicate/out-of-order sequence numbers,
+  reports real forward gaps, and resets the socket-scoped watermark on close so
+  pre-hello broadcasts from a new connection remain valid.
+- Chat terminal cause classification consumes top-level `stopReason/errorKind`;
+  timeout is only recorded when explicit, user Stop maps to killed, and an
+  otherwise unclassified abort remains interrupted.
+- Terminal/new-generation runIds and sessionIds fence late events. Current-session
+  tool projection cleanup no longer reacts to another Session's terminal.
+
+Test-first and integration evidence:
+
+- The first recovery run was deliberately red: 3 new suites, 10 failing tests
+  (missing history hydration/generation guards, ACK handling and pending aborts).
+- A separate Gateway ordering test first failed because duplicate and older frames
+  were both dispatched; it passed after cursor filtering was implemented.
+- Task 3 targeted integration: 13 files, 196 tests passed.
+- Dashboard full parity: 41 files, 654 passed and 1 skipped. The first full run
+  exposed a real cross-socket cursor regression in the pre-hello window; the
+  isolated repro and the complete parity rerun both passed after moving the
+  watermark reset to socket close.
+- Dashboard TypeScript and production build passed. Vite emitted only the known
+  import/chunk-size warnings.
+
+The configured Gateway was still unavailable during this task-level check, so
+live model/F5/restart/Stop evidence is not claimed here and remains a final
+acceptance requirement.

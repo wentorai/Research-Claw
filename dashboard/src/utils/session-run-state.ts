@@ -40,3 +40,23 @@ export function isTerminalSessionRunStatus(
   return Boolean(status && status !== 'running');
 }
 
+export type ChatTerminalLifecycle = Exclude<SessionRunLifecycle, 'idle' | 'running' | 'unknown'>;
+
+/** Map an OC chat terminal frame without inventing a cause. `aborted` is only a
+ * timeout when the gateway says so; a local Stop command is killed, otherwise
+ * the cause remains interrupted. */
+export function classifyChatTerminalLifecycle(
+  event: {
+    state?: string;
+    stopReason?: string;
+    errorKind?: string;
+    message?: { isError?: boolean };
+  },
+  command: 'idle' | 'submitting' | 'ack_unknown' | 'stopping',
+): ChatTerminalLifecycle | null {
+  if (event.state === 'final') return event.message?.isError ? 'failed' : 'done';
+  if (event.state === 'error') return event.errorKind === 'timeout' ? 'timeout' : 'failed';
+  if (event.state !== 'aborted') return null;
+  if (event.stopReason === 'timeout' || event.errorKind === 'timeout') return 'timeout';
+  return command === 'stopping' ? 'killed' : 'interrupted';
+}

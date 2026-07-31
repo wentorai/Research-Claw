@@ -80,10 +80,18 @@ interface QueryFailedAction {
   eventEpoch: number;
 }
 
+interface LocalStartAction {
+  type: 'local-start';
+  sessionKey: string;
+  runId: string;
+  observedAt: number;
+}
+
 export type SessionRunReconcileAction =
   | SnapshotAction
   | EventAction
   | ChatTerminalAction
+  | LocalStartAction
   | QueryFailedAction;
 
 function normalizedKey(key: string): string {
@@ -241,6 +249,7 @@ function shouldIgnoreMismatchedGeneration(
   if (!sessionMismatch && !runMismatch) return false;
 
   const explicitStart = patch.phase === 'start' || patch.status === 'running';
+  if (record.terminal && runMismatch && explicitStart) return false;
   const newerStart =
     typeof patch.startedAt === 'number' &&
     patch.startedAt > (record.truth?.startedAt ?? record.terminal?.occurredAt ?? 0);
@@ -295,6 +304,19 @@ export function reconcileSessionRun(
   const sessionKey = normalizedKey(action.sessionKey);
   const current = readRecord(state, sessionKey);
 
+  if (action.type === 'local-start') {
+    // Local intent is not proof that OC is running. It only creates a new run
+    // identity and invalidates old responses/fences from the previous run.
+    return writeRecord(state, {
+      ...current,
+      truth: undefined,
+      terminal: undefined,
+      runId: action.runId,
+      queryState: 'unqueried',
+      requestGeneration: current.requestGeneration + 1,
+    });
+  }
+
   if (action.type === 'snapshot') {
     if (
       action.requestGeneration !== current.requestGeneration ||
@@ -307,7 +329,9 @@ export function reconcileSessionRun(
     if (current.terminal && isSessionRunActive(truth) && !isNewGeneration(current, truth)) {
       return writeRecord(state, { ...current, queryState: 'known' });
     }
-    const terminal = terminalFromTruth(truth, action.observedAt, current.runId);
+    // sessions.list rows do not identify a chat run. Never attribute that
+    // terminal snapshot to a locally pending idempotency generation.
+    const terminal = terminalFromTruth(truth, action.observedAt);
     return writeRecord(state, {
       ...current,
       truth,
@@ -327,7 +351,13 @@ export function reconcileSessionRun(
   }
 
   if (!isCursorNewer(current, action.eventEpoch, action.seq)) return state;
-  const cursorRecord = withCursor(current, action.eventEpoch, action.seq);
+  // Any accepted push event is newer than a request that was already in
+  // flight, even when both belong to the same connection epoch. Advance the
+  // request generation so its late response cannot overwrite the event.
+  const cursorRecord = {
+    ...withCursor(current, action.eventEpoch, action.seq),
+    requestGeneration: current.requestGeneration + 1,
+  };
 
   if (action.type === 'chat-terminal') {
     if (cursorRecord.runId && action.runId && cursorRecord.runId !== action.runId) {

@@ -67,6 +67,7 @@ interface SessionRunsState {
   commands: Record<string, SessionRunCommand>;
   localRunIds: Record<string, string>;
   activities: Record<string, RunActivityObservation>;
+  pendingAborts: Record<string, { runId?: string }>;
 
   ingestSnapshot: (row: SessionRunRowLike, options: ReconcileOptions) => void;
   ingestSessionEvent: (
@@ -74,6 +75,8 @@ interface SessionRunsState {
     options: { eventEpoch: number; seq?: number; observedAt?: number },
   ) => void;
   requestReconcile: (sessionKey: string, reason: string) => Promise<void>;
+  requestAbort: (sessionKey: string) => Promise<void>;
+  flushPendingAborts: () => Promise<void>;
   applyChatTerminal: (input: ChatTerminalInput) => void;
   setCommand: (sessionKey: string, command: SessionRunCommand) => void;
   setLocalRunId: (sessionKey: string, runId: string | null) => void;
@@ -86,6 +89,8 @@ const POLL_DELAYS_MS = [15_000, 30_000, 60_000] as const;
 const reconcileInFlight = new Map<string, Promise<void>>();
 const reconcileTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pollAttempts = new Map<string, number>();
+const abortInFlight = new Map<string, Promise<void>>();
+const abortAttemptedEpoch = new Map<string, number>();
 
 function keyOf(value: string | undefined): string {
   return normalizeSessionKey(value) || value || 'main';
@@ -106,6 +111,8 @@ function clearAllPolls(): void {
   for (const timer of reconcileTimers.values()) clearTimeout(timer);
   reconcileTimers.clear();
   reconcileInFlight.clear();
+  abortInFlight.clear();
+  abortAttemptedEpoch.clear();
   pollAttempts.clear();
 }
 
@@ -129,20 +136,28 @@ function schedulePoll(sessionKey: string): void {
 function terminalOrInactiveCleanup(
   state: SessionRunsState,
   sessionKey: string,
-): Pick<SessionRunsState, 'commands' | 'localRunIds' | 'activities'> | null {
+): Pick<SessionRunsState, 'commands' | 'localRunIds' | 'activities' | 'pendingAborts'> | null {
   const record = getSessionRunRecord(state.reconciler, sessionKey);
   const lifecycle = getSessionRunLifecycle(record);
-  const terminal = ['done', 'failed', 'killed', 'timeout', 'interrupted'].includes(lifecycle);
+  const isTerminal = ['done', 'failed', 'killed', 'timeout', 'interrupted'].includes(lifecycle);
+  const localRunId = state.localRunIds[sessionKey];
+  const terminal = isTerminal && (
+    state.commands[sessionKey] !== 'ack_unknown'
+    || Boolean(record?.terminal?.runId && record.terminal.runId === localRunId)
+  );
   const authoritativelyInactive = record?.truth?.hasActiveRun === false
     && state.commands[sessionKey] !== 'ack_unknown';
   if (!terminal && !authoritativelyInactive) return null;
   const commands = { ...state.commands, [sessionKey]: 'idle' as const };
   const localRunIds = { ...state.localRunIds };
   const activities = { ...state.activities };
+  const pendingAborts = { ...state.pendingAborts };
   delete localRunIds[sessionKey];
   delete activities[sessionKey];
+  delete pendingAborts[sessionKey];
+  abortAttemptedEpoch.delete(sessionKey);
   clearPoll(sessionKey);
-  return { commands, localRunIds, activities };
+  return { commands, localRunIds, activities, pendingAborts };
 }
 
 export function selectSessionRunView(
@@ -173,6 +188,7 @@ const initialState = () => ({
   commands: {},
   localRunIds: {},
   activities: {},
+  pendingAborts: {},
 });
 
 export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
@@ -305,6 +321,46 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
     return promise;
   },
 
+  requestAbort: (rawSessionKey) => {
+    const sessionKey = keyOf(rawSessionKey);
+    const localRunId = get().localRunIds[sessionKey];
+    set((state) => ({
+      commands: { ...state.commands, [sessionKey]: 'stopping' },
+      pendingAborts: {
+        ...state.pendingAborts,
+        [sessionKey]: state.pendingAborts[sessionKey] ?? (localRunId ? { runId: localRunId } : {}),
+      },
+    }));
+
+    const existing = abortInFlight.get(sessionKey);
+    if (existing) return existing;
+    const gateway = useGatewayStore.getState();
+    const client = gateway.client;
+    if (!client?.isConnected) return Promise.resolve();
+    const eventEpoch = gateway.eventEpoch ?? 0;
+    if (abortAttemptedEpoch.get(sessionKey) === eventEpoch) return Promise.resolve();
+    abortAttemptedEpoch.set(sessionKey, eventEpoch);
+
+    const pending = get().pendingAborts[sessionKey];
+    const params = pending?.runId ? { sessionKey, runId: pending.runId } : { sessionKey };
+    const promise = client.request('chat.abort', params)
+      .catch((error) => {
+        console.warn(`[SessionRuns] abort result uncertain for ${sessionKey}:`, error);
+      })
+      .then(() => get().requestReconcile(sessionKey, 'chat.abort'))
+      .finally(() => {
+        abortInFlight.delete(sessionKey);
+      });
+    abortInFlight.set(sessionKey, promise);
+    return promise;
+  },
+
+  flushPendingAborts: async () => {
+    await Promise.all(Object.keys(get().pendingAborts).map((sessionKey) =>
+      get().requestAbort(sessionKey),
+    ));
+  },
+
   applyChatTerminal: (input) => {
     const sessionKey = keyOf(input.sessionKey);
     set((state) => {
@@ -338,20 +394,39 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
     const sessionKey = keyOf(rawSessionKey);
     set((state) => {
       const localRunIds = { ...state.localRunIds };
-      if (runId) localRunIds[sessionKey] = runId;
+      let reconciler = state.reconciler;
+      if (runId) {
+        localRunIds[sessionKey] = runId;
+        const record = getSessionRunRecord(state.reconciler, sessionKey);
+        if (!record?.truth || !isSessionRunActive(record.truth)) {
+          reconciler = reconcileSessionRun(state.reconciler, {
+            type: 'local-start',
+            sessionKey,
+            runId,
+            observedAt: Date.now(),
+          });
+        }
+      }
       else delete localRunIds[sessionKey];
-      return { localRunIds };
+      return { localRunIds, reconciler };
     });
   },
 
   observeActivity: (observation) => {
     const sessionKey = keyOf(observation.sessionKey);
-    set((state) => ({
-      activities: {
-        ...state.activities,
-        [sessionKey]: { ...observation, sessionKey },
-      },
-    }));
+    set((state) => {
+      const record = getSessionRunRecord(state.reconciler, sessionKey);
+      if (
+        record?.terminal
+        && (!observation.runId || observation.runId === record.terminal.runId)
+      ) return state;
+      return {
+        activities: {
+          ...state.activities,
+          [sessionKey]: { ...observation, sessionKey },
+        },
+      };
+    });
   },
 
   clearTransient: (rawSessionKey, runId) => {

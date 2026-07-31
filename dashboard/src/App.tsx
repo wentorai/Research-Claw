@@ -30,6 +30,7 @@ import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
 import { useSessionRunsStore } from './stores/session-runs';
+import { normalizeSessionKey } from './utils/session-key';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -161,6 +162,7 @@ export default function App() {
 
     const unsubChat = client.subscribe('chat', (payload) => {
       const event = payload as ChatStreamEvent;
+      const chatBeforeEvent = useChatStore.getState();
       if (event.sessionKey && event.state === 'delta') {
         useSessionRunsStore.getState().observeActivity({
           sessionKey: event.sessionKey,
@@ -173,7 +175,11 @@ export default function App() {
       }
       handleChatEvent(event);
       // Clear foreground tool stream when a run completes
-      if (event.state === 'final' || event.state === 'aborted' || event.state === 'error') {
+      if (
+        normalizeSessionKey(event.sessionKey) === normalizeSessionKey(chatBeforeEvent.sessionKey)
+        && (!event.runId || !chatBeforeEvent.runId || event.runId === chatBeforeEvent.runId)
+        && (event.state === 'final' || event.state === 'aborted' || event.state === 'error')
+      ) {
         useToolStreamStore.setState({ pendingTools: [] });
       }
     });

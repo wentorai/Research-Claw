@@ -109,6 +109,29 @@ describe('session run reconciler', () => {
     expect(getSessionRunRecord(state, SESSION_KEY)?.truth?.hasActiveRun).toBe(false);
   });
 
+  it('does not let a same-epoch response overwrite a newer event received in flight', () => {
+    const request = beginSessionRunRequest(createSessionRunReconcilerState(), SESSION_KEY, { eventEpoch: 1 });
+    let state = reconcileSessionRun(request.state, {
+      type: 'event',
+      sessionKey: SESSION_KEY,
+      eventEpoch: 1,
+      seq: 50,
+      observedAt: 500,
+      runId: 'run-generation-1',
+      patch: { phase: 'start', status: 'running', hasActiveRun: true, startedAt: 500 },
+    });
+    state = reconcileSessionRun(state, {
+      type: 'snapshot',
+      sessionKey: SESSION_KEY,
+      requestGeneration: request.generation,
+      eventEpoch: 1,
+      observedAt: 400,
+      row: { key: SESSION_KEY, hasActiveRun: false },
+    });
+
+    expect(getSessionRunLifecycle(getSessionRunRecord(state, SESSION_KEY))).toBe('running');
+  });
+
   it('ignores duplicate, out-of-order, and prior-epoch events', () => {
     let state = reconcileSessionRun(applyActiveSnapshot(), {
       type: 'event',

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { OC_SESSION_ACTIVE_CASES } from '../../__fixtures__/gateway-payloads/session-run-state';
-import { isSessionRunActive } from '../../utils/session-run-state';
+import { classifyChatTerminalLifecycle, isSessionRunActive } from '../../utils/session-run-state';
 
 describe('session run active parity with OpenClaw 2026.6.1', () => {
   it.each(OC_SESSION_ACTIVE_CASES)('$name', ({ row, active }) => {
@@ -14,3 +14,13 @@ describe('session run active parity with OpenClaw 2026.6.1', () => {
   });
 });
 
+describe('chat terminal classification', () => {
+  it('uses explicit timeout evidence and does not label every abort as timeout', () => {
+    expect(classifyChatTerminalLifecycle(
+      { state: 'aborted', stopReason: 'timeout' },
+      'idle',
+    )).toBe('timeout');
+    expect(classifyChatTerminalLifecycle({ state: 'aborted' }, 'stopping')).toBe('killed');
+    expect(classifyChatTerminalLifecycle({ state: 'aborted' }, 'idle')).toBe('interrupted');
+  });
+});

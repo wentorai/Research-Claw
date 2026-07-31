@@ -245,6 +245,10 @@ export class GatewayClient {
       this.pendingConnectError = undefined;
       this.ws = null;
       this.stopTickWatch();
+      // Event sequence numbers are socket-scoped. Reset on close (not only
+      // hello-ok), because the new socket can receive broadcasts after the
+      // challenge but before its connect response.
+      this.lastSeq = 0;
 
       // Reject all pending requests
       for (const [id, entry] of this.pending) {
@@ -605,6 +609,9 @@ export class GatewayClient {
 
   private handleEvent(frame: EventFrame): void {
     if (frame.seq !== undefined) {
+      // Reconnect/replay can deliver duplicate or reordered frames. They have
+      // already contributed to state and must not be dispatched a second time.
+      if (this.lastSeq > 0 && frame.seq <= this.lastSeq) return;
       if (this.lastSeq > 0 && frame.seq > this.lastSeq + 1) {
         // Object form aligned with OC GatewayBrowserClientOptions.onGap
         this.opts.onGap?.({ expected: this.lastSeq + 1, received: frame.seq });
