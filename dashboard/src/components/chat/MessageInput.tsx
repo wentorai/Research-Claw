@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { App, Button, Tooltip, message, Image } from 'antd';
+import { App, Button, Dropdown, Tooltip, message, Image } from 'antd';
 import { SendOutlined, PaperClipOutlined, ReloadOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
@@ -32,6 +32,7 @@ import {
 import {
   applyDropPolicy,
   collectDroppedEntries,
+  collectSelectedFiles,
   mapWithConcurrency,
   splitRelPath,
   UPLOAD_CONCURRENCY,
@@ -59,12 +60,16 @@ export default function MessageInput() {
   });
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [references, setReferences] = useState<ChatReference[]>([]);
+  const referencesRef = useRef(references);
+  referencesRef.current = references;
   const [caret, setCaret] = useState(0);
   const [wsFilePaths, setWsFilePaths] = useState<string[]>([]);
   const wsPathsLoadedRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const historyAnchorRef = useRef<HTMLDivElement>(null);
   const send = useChatStore((s) => s.send);
   const abort = useChatStore((s) => s.abort);
@@ -95,6 +100,7 @@ export default function MessageInput() {
 
   const isConnected = connState === 'connected';
   const hasReadyReference = references.some((r) => r.status === 'ready');
+  const hasUploadingReference = references.some((r) => r.status === 'uploading');
 
   // §13.5 (SPEC:417-419): the composer hint MUST share the vision resolver with
   // the send pipeline (chat.ts:995 resolveVisionSupport). Using the config-primary
@@ -116,7 +122,10 @@ export default function MessageInput() {
     && vision.supportsImage === false
     && !imageModelSupportsVision();
   const canSend =
-    (text.trim().length > 0 || attachments.length > 0 || hasReadyReference) && isConnected && !sending;
+    (text.trim().length > 0 || attachments.length > 0 || hasReadyReference)
+    && !hasUploadingReference
+    && isConnected
+    && !sending;
 
   // Persist draft to localStorage (session-isolated)
   useEffect(() => {
@@ -153,6 +162,13 @@ export default function MessageInput() {
     if (!inputRestore) return;
     setText(inputRestore.text);
     setAttachments(inputRestore.attachments);
+    setReferences(inputRestore.references.map((path) => ({
+      id: crypto.randomUUID(),
+      path,
+      name: basenameOf(path),
+      source: 'workspace',
+      status: 'ready',
+    })));
     clearInputRestore();
     try {
       if (inputRestore.text) {
@@ -269,6 +285,7 @@ export default function MessageInput() {
             { path },
           );
           if (result?.encoding === 'base64') {
+            if (!referencesRef.current.some((r) => r.id === id && r.path === path)) return;
             const mime = result.mime_type || 'image/png';
             setAttachments((prev) =>
               prev.some((a) => a.wsPath === path)
@@ -330,6 +347,10 @@ export default function MessageInput() {
         if (ACCEPTED_TYPES.test(file.type) && file.size <= MAX_SIZE) {
           const reader = new FileReader();
           reader.onload = () => {
+            // The upload and FileReader complete independently. If the user
+            // removed the linked chip meanwhile, do not resurrect an orphan
+            // thumbnail after that removal.
+            if (!referencesRef.current.some((r) => r.id === id && r.path === result.path)) return;
             const dataUrl = reader.result as string;
             setAttachments((prev) =>
               prev.some((a) => a.wsPath === result.path)
@@ -408,7 +429,7 @@ export default function MessageInput() {
     [t],
   );
 
-  /** Apply the shared drop policy (skip >100MB files, confirm bulk drops) and
+  /** Apply the shared drop policy (skip >1GB files, confirm bulk drops) and
    *  fan out: loose files → individual chips, folders → one folder chip each. */
   const ingestDroppedEntries = useCallback(
     async (collected: CollectedDrop) => {
@@ -449,12 +470,13 @@ export default function MessageInput() {
       });
       if (!kept || kept.length === 0) return;
 
-      // Loose files keep the existing per-file behavior (images → vision thumbnail).
+      // Loose files keep the existing per-file behavior (images → vision thumbnail),
+      // but share the same bounded fan-out as folder uploads.
       const looseFiles = kept.filter((d) => d.rootDir === null);
-      for (const d of looseFiles) {
+      await mapWithConcurrency(looseFiles, UPLOAD_CONCURRENCY, async (d) => {
         const dest = composerDropDestination(d.file.name, ACCEPTED_TYPES.test(d.file.type));
-        void ingestExternalFile(d.file, dest);
-      }
+        await ingestExternalFile(d.file, dest);
+      });
 
       // Folder files are grouped by their top-level directory → one chip each.
       const folderGroups = new Map<string, DroppedFile[]>();
@@ -465,7 +487,9 @@ export default function MessageInput() {
         else folderGroups.set(d.rootDir, [d]);
       }
       for (const [rootName, group] of folderGroups) {
-        void ingestFolder(rootName, group);
+        // Process roots sequentially so multiple selected roots cannot multiply
+        // the per-folder concurrency ceiling.
+        await ingestFolder(rootName, group);
       }
     },
     [modal, t, ingestExternalFile, ingestFolder],
@@ -599,6 +623,25 @@ export default function MessageInput() {
     },
     [addWorkspaceReference, ingestDroppedEntries],
   );
+
+  const handlePickerChange = useCallback(
+    (input: HTMLInputElement) => {
+      const collected = collectSelectedFiles(input.files ?? []);
+      // Reset even after cancellation so selecting the same file/folder again
+      // always produces a change event in browsers.
+      input.value = '';
+      void ingestDroppedEntries(collected);
+    },
+    [ingestDroppedEntries],
+  );
+
+  const openAttachmentPicker = useCallback((kind: 'files' | 'folder') => {
+    // Close the Ant Design menu before the blocking native picker opens.
+    setAttachmentMenuOpen(false);
+    requestAnimationFrame(() => {
+      (kind === 'files' ? fileInputRef.current : folderInputRef.current)?.click();
+    });
+  }, []);
 
   const handleSend = useCallback(() => {
     const msg = text.trim();
@@ -894,15 +937,16 @@ export default function MessageInput() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
           multiple
           hidden
-          onChange={(e) => {
-            if (e.target.files) {
-              for (const file of Array.from(e.target.files)) void ingestExternalFile(file, CHAT_IMAGE_DIR);
-            }
-            e.target.value = '';
-          }}
+          onChange={(e) => handlePickerChange(e.currentTarget)}
+        />
+        <input
+          ref={folderInputRef}
+          type="file"
+          hidden
+          {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+          onChange={(e) => handlePickerChange(e.currentTarget)}
         />
 
         <div className="chat-composer-toolbar">
@@ -915,15 +959,39 @@ export default function MessageInput() {
               disabled={!isConnected}
             />
           </Tooltip>
-          <Tooltip title={t('chat.attachImage')}>
-            <Button
-              type="text"
-              size="small"
-              icon={<PaperClipOutlined />}
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!isConnected || sending}
-            />
-          </Tooltip>
+          <Dropdown
+            open={attachmentMenuOpen}
+            onOpenChange={setAttachmentMenuOpen}
+            trigger={['click']}
+            placement="topRight"
+            menu={{
+              items: [
+                {
+                  key: 'files',
+                  icon: <FileOutlined />,
+                  label: t('chat.selectFiles', { defaultValue: 'Select files' }),
+                },
+                {
+                  key: 'folder',
+                  icon: <FolderOutlined />,
+                  label: t('chat.selectFolder', { defaultValue: 'Select folder' }),
+                },
+              ],
+              onClick: ({ key }) => openAttachmentPicker(key === 'folder' ? 'folder' : 'files'),
+            }}
+          >
+            <Tooltip title={t('chat.attachAttachment', { defaultValue: 'Add attachment' })}>
+              <Button
+                type="text"
+                size="small"
+                icon={<PaperClipOutlined />}
+                disabled={!isConnected || sending}
+                aria-label={t('chat.attachAttachment', { defaultValue: 'Add attachment' })}
+                aria-haspopup="menu"
+                aria-expanded={attachmentMenuOpen}
+              />
+            </Tooltip>
+          </Dropdown>
           <QuickCommands
             disabled={!isConnected || sending}
             composing={isComposing}

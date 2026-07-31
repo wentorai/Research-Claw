@@ -533,10 +533,10 @@ function buildStagedWritingContext(messages: ChatMessage[]): string {
 export interface ChatInputRestore {
   text: string;
   attachments: ChatAttachment[];
+  references: string[];
 }
 
 interface LastSentDraft extends ChatInputRestore {
-  references: string[];
   runId: string;
 }
 
@@ -611,7 +611,11 @@ function buildAbortInputRestorePatch(
     _pendingUserMsgs: state._pendingUserMsgs.filter(
       (m) => m.text !== draft.text && m.text?.trim() !== trimmed,
     ),
-    inputRestore: { text: draft.text, attachments: draft.attachments },
+    inputRestore: {
+      text: draft.text,
+      attachments: draft.attachments,
+      references: [...draft.references],
+    },
     inputRestoreSeq: state.inputRestoreSeq + 1,
     _lastSentDraft: null,
     _abortedUserSuppressCounts: bumpAbortedUserSuppress(state._abortedUserSuppressCounts, draft.text),

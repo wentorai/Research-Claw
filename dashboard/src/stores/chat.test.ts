@@ -393,7 +393,7 @@ describe('Chat store', () => {
 
         const state = useChatStore.getState();
         expect(state.messages).toHaveLength(0);
-        expect(state.inputRestore).toEqual({ text: 'Edit me', attachments: [] });
+        expect(state.inputRestore).toEqual({ text: 'Edit me', attachments: [], references: [] });
         expect(state._lastSentDraft).toBeNull();
         expect(state._abortedUserSuppressCounts).toEqual({ 'Edit me': 1 });
       });
@@ -559,10 +559,40 @@ describe('Chat store', () => {
       useChatStore.getState().abort();
 
       const state = useChatStore.getState();
-      expect(state.inputRestore).toEqual({ text: 'Stop me', attachments: [] });
+      expect(state.inputRestore).toEqual({ text: 'Stop me', attachments: [], references: [] });
       expect(state.streaming).toBe(false);
       expect(state.messages).toHaveLength(0);
       expect(mockGatewayClient.request).toHaveBeenCalledWith('chat.abort', { runId: 'run-1', sessionKey: 'main' });
+    });
+
+    it('restores ready workspace references when stop is clicked', () => {
+      const userMsg = {
+        role: 'user' as const,
+        text: 'Review the documents',
+        references: ['sources/chat/paper.pdf', 'sources/chat/data.csv'],
+        timestamp: Date.now(),
+      };
+      useChatStore.setState({
+        runId: 'run-with-references',
+        sessionKey: 'main',
+        streaming: true,
+        messages: [userMsg],
+        _lastSentDraft: {
+          text: 'Review the documents',
+          attachments: [],
+          references: ['sources/chat/paper.pdf', 'sources/chat/data.csv'],
+          runId: 'run-with-references',
+        },
+      });
+      mockGatewayClient.request.mockResolvedValueOnce({});
+
+      useChatStore.getState().abort();
+
+      expect(useChatStore.getState().inputRestore).toEqual({
+        text: 'Review the documents',
+        attachments: [],
+        references: ['sources/chat/paper.pdf', 'sources/chat/data.csv'],
+      });
     });
 
     it('sends chat.abort RPC with runId and sessionKey', () => {

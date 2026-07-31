@@ -151,6 +151,39 @@ export async function collectDroppedEntries(dt: DataTransfer): Promise<Collected
   return { files: out, hadDirectory };
 }
 
+/**
+ * Normalize files returned by native file/folder pickers into the same shape as
+ * a drag-and-drop collection. Folder inputs expose only `File` objects; their
+ * browser-provided `webkitRelativePath` is the sole directory signal available.
+ * Invalid or incomplete relative paths are treated as loose files rather than
+ * fabricating a directory hierarchy.
+ */
+export function collectSelectedFiles(files: FileList | File[]): CollectedDrop {
+  let hadDirectory = false;
+  const normalized = Array.from(files).map((file): DroppedFile => {
+    const relativePath = file.webkitRelativePath;
+    const segments = relativePath?.split('/') ?? [];
+    const validRelativePath = Boolean(
+      relativePath
+      && !relativePath.startsWith('/')
+      && !relativePath.includes('\\')
+      && !relativePath.includes('\0')
+      && segments.length >= 2
+      && segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+      && segments[segments.length - 1] === file.name,
+    );
+
+    if (!validRelativePath) {
+      return { file, relPath: file.name, rootDir: null };
+    }
+
+    hadDirectory = true;
+    return { file, relPath: relativePath, rootDir: segments[0] };
+  });
+
+  return { files: normalized, hadDirectory };
+}
+
 export interface DropPolicyOptions {
   /** Per-file size cap in bytes; larger files are skipped with one combined warning. */
   maxFileSize: number;

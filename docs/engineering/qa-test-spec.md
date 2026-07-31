@@ -101,7 +101,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 21
 | F-06-02 | Markdown 渲染 | GFM、LaTeX、代码高亮（Shiki） |
 | F-06-03 | 流式输出 | delta 累积 + 光标动画 |
 | F-06-04 | 思考过程展示 | thinking 区块默认折叠，点击展开 |
-| F-06-05 | 图片附件 | 拖拽/选择，5MB 限制，多格式 |
+| F-06-05 | 聊天附件 | 回形针选择任意多文件/文件夹并复用拖拽摄取；支持图片 ≤5MB 时同时进入内联视觉上下文，较大图片保留为工作区引用 |
 | F-06-06 | 视觉模型路由 | 不支持 vision 时提示切换 |
 | F-06-07 | 发送 / 停止 | Enter 发送；Stop 按钮 + 全局快捷键（Esc、macOS ⌃C/⌘./无选区 ⌘C、Win/Linux Ctrl+C） |
 | F-06-08 | 中止后恢复输入 | 停止时还原 draft |
@@ -473,8 +473,8 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 21
 | TC-C-03 | P0 | 长任务运行中点 Stop | run 中止，输入内容恢复 |
 | TC-C-04 | P1 | 对含唯一目标、数值单位条件、方法参数、精确引用、负结果、未决问题和证据等级的 fixture 执行 `/compact` | 请求收到 RC 科研指令；摘要逐项保留 fixture 语义，不外推为普遍无损保证 |
 | TC-C-05 | P1 | `/model` 无参 | 显示当前模型 |
-| TC-C-06 | P1 | 上传 <5MB PNG | 附件预览，发送成功 |
-| TC-C-07 | P1 | 上传 >5MB 图片 | 拒绝并提示 |
+| TC-C-06 | P1 | 选择 <5MB PNG | 上传至 `sources/chat/images/`，显示缩略图 + 引用标签，发送成功 |
+| TC-C-07 | P1 | 选择 >5MB 且 ≤1GB 图片 | 上传至 `sources/chat/images/`，仅显示工作区引用标签，不拒绝整个文件、不进入内联视觉附件 |
 | TC-C-08 | P1 | 无 vision 模型发图 | 提示启用视觉模型 |
 | TC-C-09 | P1 | ↑ 键 | 上一条历史输入 |
 | TC-C-10 | P2 | 闲置超 policy 后发消息 | stale session 确认框 |
@@ -487,6 +487,9 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 21
 | TC-C-17 | P1 | 清空浏览器执行绑定后刷新 | `rc.execution.resolve` 从服务端回复哈希恢复 runId |
 | TC-C-18 | P1 | 打开 schema 21 前已有的带工具回复 | 按同会话工具活动时间窗恢复执行详情 |
 | TC-C-19 | P0 | Agent 真实读取 workspace Skill 的 `SKILL.md` | OpenClaw `skill.used` 被持久化，刷新后 Skill 数与明细一致 |
+| TC-C-20 | P0 | 回形针 → 选择文件，一次混选 PNG/PDF/CSV/BIN | 全部复用拖拽摄取管线；仅受支持且 ≤5MB 的图片生成缩略图，其他文件只生成引用标签 |
+| TC-C-21 | P0 | 回形针 → 选择文件夹（含嵌套目录） | 保留内部相对结构，一个顶层文件夹只显示一个 folder chip；空目录受 Web File API 限制无法表示 |
+| TC-C-22 | P1 | 发送含普通文档引用后点 Stop | 文本、图片附件与文件引用标签全部恢复，可再次编辑/发送 |
 
 ### 模块 D：结构化卡片
 

@@ -46,12 +46,12 @@ describe('file-reference helpers', () => {
 
   describe('safeUploadName', () => {
     it('sanitizes unsafe characters', () => {
-      expect(safeUploadName('my file (1).pdf')).toBe('my_file__1_.pdf');
-      // Leading underscores (from stripped CJK) are trimmed.
-      expect(safeUploadName('数据.csv')).toBe('.csv');
+      expect(safeUploadName('nested/name\\part.pdf')).toBe('nested_name_part.pdf');
+      expect(safeUploadName('my file (1).pdf')).toBe('my file (1).pdf');
+      expect(safeUploadName('数据.csv')).toBe('数据.csv');
     });
     it('never returns empty', () => {
-      expect(safeUploadName('***')).toBe('file');
+      expect(safeUploadName('\0\n')).toBe('file');
     });
   });
 

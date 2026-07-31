@@ -49,7 +49,11 @@ export function basenameOf(path: string): string {
 
 /** Sanitize a filename for workspace upload (mirrors gateway's filename rules). */
 export function safeUploadName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+/, '') || 'file';
+  return name
+    .replace(/\0/g, '')
+    .replace(/[\\/]/g, '_')
+    .replace(/[\x00-\x1f]/g, '')
+    .trim() || 'file';
 }
 
 /** Timestamp-prefixed name that makes composer ingests collision-free up

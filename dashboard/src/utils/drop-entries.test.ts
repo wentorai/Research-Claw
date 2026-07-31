@@ -2,10 +2,22 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   applyDropPolicy,
   collectDroppedEntries,
+  collectSelectedFiles,
   mapWithConcurrency,
   splitRelPath,
   type CollectedDrop,
 } from './drop-entries';
+
+function selectedFile(name: string, options: { relativePath?: string; size?: number } = {}): File {
+  const file = new File(['x'], name);
+  if (options.relativePath !== undefined) {
+    Object.defineProperty(file, 'webkitRelativePath', { value: options.relativePath });
+  }
+  if (options.size !== undefined) {
+    Object.defineProperty(file, 'size', { value: options.size });
+  }
+  return file;
+}
 
 // --- Minimal FileSystemEntry mocks (webkitGetAsEntry tree) ---
 
@@ -84,6 +96,65 @@ describe('collectDroppedEntries', () => {
     expect(result.files).toHaveLength(1);
     expect(result.files[0].relPath).toBe('x.csv');
     expect(result.files[0].rootDir).toBeNull();
+  });
+});
+
+describe('collectSelectedFiles', () => {
+  it('normalizes arbitrary multiple loose files without inventing a root', () => {
+    const files = [selectedFile('paper.pdf'), selectedFile('data.csv'), selectedFile('unknown.bin')];
+
+    const result = collectSelectedFiles(files);
+
+    expect(result.hadDirectory).toBe(false);
+    expect(result.files.map(({ relPath, rootDir }) => ({ relPath, rootDir }))).toEqual([
+      { relPath: 'paper.pdf', rootDir: null },
+      { relPath: 'data.csv', rootDir: null },
+      { relPath: 'unknown.bin', rootDir: null },
+    ]);
+  });
+
+  it('uses a valid webkitRelativePath to preserve nested structure and Unicode names', () => {
+    const files = [
+      selectedFile('a.pdf', { relativePath: 'study/sub/a.pdf' }),
+      selectedFile('图1.png', { relativePath: '研究资料/子目录/图1.png' }),
+    ];
+
+    const result = collectSelectedFiles(files);
+
+    expect(result.hadDirectory).toBe(true);
+    expect(result.files.map(({ relPath, rootDir }) => ({ relPath, rootDir }))).toEqual([
+      { relPath: 'study/sub/a.pdf', rootDir: 'study' },
+      { relPath: '研究资料/子目录/图1.png', rootDir: '研究资料' },
+    ]);
+  });
+
+  it('supports multiple top-level roots in one normalized batch', () => {
+    const result = collectSelectedFiles([
+      selectedFile('a.txt', { relativePath: 'root-a/a.txt' }),
+      selectedFile('b.txt', { relativePath: 'root-b/nested/b.txt' }),
+    ]);
+
+    expect(result.files.map((item) => item.rootDir)).toEqual(['root-a', 'root-b']);
+  });
+
+  it('returns an empty collection for an empty FileList-like selection', () => {
+    expect(collectSelectedFiles([])).toEqual({ files: [], hadDirectory: false });
+  });
+
+  it.each([
+    '/absolute/a.txt',
+    '../escape/a.txt',
+    'root/../escape.txt',
+    'root//a.txt',
+    'root\\a.txt',
+    'single-name.txt',
+  ])('honestly degrades malformed relative path %s to a loose file', (relativePath) => {
+    const file = selectedFile('fallback.txt', { relativePath });
+
+    expect(collectSelectedFiles([file])).toEqual({
+      files: [{ file, relPath: 'fallback.txt', rootDir: null }],
+      hadDirectory: false,
+    });
   });
 });
 
@@ -202,6 +273,55 @@ describe('applyDropPolicy', () => {
     expect(cb.confirmBulk).toHaveBeenCalledTimes(1);
     expect(cb.confirmBulk).toHaveBeenCalledWith(201, 0);
     expect(kept).toHaveLength(201);
+  });
+
+  it('does not confirm at exactly 200 files, but does at 201', async () => {
+    const atBoundary = noopCallbacks();
+    await applyDropPolicy(drop(Array.from({ length: 200 }, () => 1)), { maxFileSize: 10, ...atBoundary });
+    expect(atBoundary.confirmBulk).not.toHaveBeenCalled();
+
+    const aboveBoundary = noopCallbacks();
+    await applyDropPolicy(drop(Array.from({ length: 201 }, () => 1)), { maxFileSize: 10, ...aboveBoundary });
+    expect(aboveBoundary.confirmBulk).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not confirm at exactly 200MB, but confirms above 200MB and honors cancellation', async () => {
+    const makeSizedDrop = (sizes: number[]): CollectedDrop => ({
+      files: sizes.map((size, index) => ({
+        file: selectedFile(`large-${index}.bin`, { size }),
+        relPath: `large-${index}.bin`,
+        rootDir: null,
+      })),
+      hadDirectory: false,
+    });
+    const maxFileSize = 1024 * 1024 * 1024;
+    const atBoundary = noopCallbacks();
+    await applyDropPolicy(makeSizedDrop([200 * 1024 * 1024]), { maxFileSize, ...atBoundary });
+    expect(atBoundary.confirmBulk).not.toHaveBeenCalled();
+
+    const aboveBoundary = { warnOversize: vi.fn(), confirmBulk: vi.fn(async () => false) };
+    const result = await applyDropPolicy(
+      makeSizedDrop([200 * 1024 * 1024 + 1]),
+      { maxFileSize, ...aboveBoundary },
+    );
+    expect(aboveBoundary.confirmBulk).toHaveBeenCalledTimes(1);
+    expect(result).toBeNull();
+  });
+
+  it('warns once and uploads nothing when every file exceeds the 1GB front gate', async () => {
+    const files: CollectedDrop = {
+      files: [
+        selectedFile('huge-a.bin', { size: 1024 * 1024 * 1024 + 1 }),
+        selectedFile('huge-b.bin', { size: 2 * 1024 * 1024 * 1024 }),
+      ].map((file) => ({ file, relPath: file.name, rootDir: null })),
+      hadDirectory: false,
+    };
+    const callbacks = noopCallbacks();
+
+    expect(await applyDropPolicy(files, { maxFileSize: 1024 * 1024 * 1024, ...callbacks })).toEqual([]);
+    expect(callbacks.warnOversize).toHaveBeenCalledTimes(1);
+    expect(callbacks.warnOversize).toHaveBeenCalledWith(2, 1024);
+    expect(callbacks.confirmBulk).not.toHaveBeenCalled();
   });
 
   it('returns null when the bulk confirm is declined', async () => {
