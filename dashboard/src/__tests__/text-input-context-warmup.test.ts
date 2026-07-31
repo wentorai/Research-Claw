@@ -21,7 +21,14 @@ describe('early text input context warmup', () => {
       'utf8',
     );
     const registrations: Array<[string, EventListener, boolean]> = [];
-    const fakeWindow = {
+    const fakeDocument = {
+      addEventListener: vi.fn(),
+    };
+    const fakeWindow: {
+      location: { search: string };
+      addEventListener: ReturnType<typeof vi.fn>;
+      __rcImeProbe?: unknown;
+    } = {
       location: { search: '' },
       addEventListener: vi.fn((type: string, listener: EventListener, capture: boolean) => {
         registrations.push([type, listener, capture]);
@@ -30,7 +37,7 @@ describe('early text input context warmup', () => {
 
     new Function('window', 'document', 'HTMLTextAreaElement', 'URLSearchParams', source)(
       fakeWindow,
-      document,
+      fakeDocument,
       HTMLTextAreaElement,
       URLSearchParams,
     );
@@ -39,6 +46,9 @@ describe('early text input context warmup', () => {
       ['pointerdown', true],
       ['focus', true],
     ]);
+    expect(registrations[0][1]).toBe(registrations[1][1]);
+    expect(fakeDocument.addEventListener).not.toHaveBeenCalled();
+    expect(fakeWindow.__rcImeProbe).toBeUndefined();
 
     const textarea = document.createElement('textarea');
     const value = vi.fn(() => 'draft');
@@ -50,11 +60,55 @@ describe('early text input context warmup', () => {
       selectionEnd: { configurable: true, get: selectionEnd },
     });
 
-    registrations[0][1]({ target: textarea } as unknown as Event);
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    registrations[0][1]({
+      target: textarea,
+      preventDefault,
+      stopPropagation,
+    } as unknown as Event);
+    registrations[1][1]({
+      target: textarea,
+      preventDefault,
+      stopPropagation,
+    } as unknown as Event);
 
-    expect(value).toHaveBeenCalledOnce();
-    expect(selectionStart).toHaveBeenCalledOnce();
-    expect(selectionEnd).toHaveBeenCalledOnce();
+    expect(value).toHaveBeenCalledTimes(2);
+    expect(selectionStart).toHaveBeenCalledTimes(2);
+    expect(selectionEnd).toHaveBeenCalledTimes(2);
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it('ignores non-textarea targets without observing their value or selection', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'public/text-input-context-warmup.js'),
+      'utf8',
+    );
+    const registrations: Array<[string, EventListener, boolean]> = [];
+    const fakeWindow = {
+      location: { search: '' },
+      addEventListener: vi.fn((type: string, listener: EventListener, capture: boolean) => {
+        registrations.push([type, listener, capture]);
+      }),
+    };
+    const value = vi.fn(() => 'untouched');
+    const target = {};
+    Object.defineProperties(target, {
+      value: { get: value },
+      selectionStart: { get: vi.fn() },
+      selectionEnd: { get: vi.fn() },
+    });
+
+    new Function('window', 'document', 'HTMLTextAreaElement', 'URLSearchParams', source)(
+      fakeWindow,
+      { addEventListener: vi.fn() },
+      HTMLTextAreaElement,
+      URLSearchParams,
+    );
+    registrations[0][1]({ target } as unknown as Event);
+
+    expect(value).not.toHaveBeenCalled();
   });
 
   it('installs a content-free full IME matrix only in explicit probe mode', () => {
@@ -127,5 +181,19 @@ describe('early text input context warmup', () => {
       },
     ]);
     expect(JSON.stringify(fakeWindow.__rcImeProbe?.records)).not.toContain('secret');
+    expect(fakeWindow.__rcImeProbe?.records[0]).not.toHaveProperty('key');
+    expect(fakeWindow.__rcImeProbe?.records[0]).not.toHaveProperty('data');
+    expect(fakeWindow.__rcImeProbe?.records[0]).not.toHaveProperty('value');
+
+    for (let i = 0; i < 200; i += 1) {
+      registrations[0][1]({
+        target: textarea,
+        type: 'keydown',
+        keyCode: 229,
+        isComposing: true,
+      } as unknown as Event);
+    }
+
+    expect(fakeWindow.__rcImeProbe?.records).toHaveLength(200);
   });
 });
