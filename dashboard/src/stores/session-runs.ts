@@ -89,6 +89,7 @@ interface SessionRunsState {
 }
 
 const POLL_DELAYS_MS = [15_000, 30_000, 60_000] as const;
+const RESULT_CONFIRMATION_POLL_DELAYS_MS = [1_000, 2_000, 5_000, 15_000, 30_000, 60_000] as const;
 const reconcileInFlight = new Map<string, Promise<void>>();
 const reconcileTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pollAttempts = new Map<string, number>();
@@ -122,12 +123,15 @@ function clearAllPolls(): void {
 function schedulePoll(sessionKey: string): void {
   if (reconcileTimers.has(sessionKey) || reconcileInFlight.has(sessionKey)) return;
   const view = selectSessionRunView(useSessionRunsStore.getState(), sessionKey);
-  if (!view.serverActive && view.command === 'idle') {
+  if (!view.serverActive && view.command === 'idle' && !view.needsResultConfirmation) {
     clearPoll(sessionKey);
     return;
   }
   const attempt = pollAttempts.get(sessionKey) ?? 0;
-  const delay = POLL_DELAYS_MS[Math.min(attempt, POLL_DELAYS_MS.length - 1)];
+  const delays = view.needsResultConfirmation
+    ? RESULT_CONFIRMATION_POLL_DELAYS_MS
+    : POLL_DELAYS_MS;
+  const delay = delays[Math.min(attempt, delays.length - 1)];
   const timer = setTimeout(() => {
     reconcileTimers.delete(sessionKey);
     pollAttempts.set(sessionKey, attempt + 1);
@@ -159,7 +163,12 @@ function terminalOrInactiveCleanup(
   delete activities[sessionKey];
   delete pendingAborts[sessionKey];
   abortAttemptedEpoch.delete(sessionKey);
-  clearPoll(sessionKey);
+  const needsResultConfirmation = record?.truth?.status === 'running'
+    && record.truth.hasActiveRun === false;
+  // OC clears the active-run registry before it necessarily persists the
+  // terminal session status. Keep the read-only poll alive through that short
+  // settling window; a terminal snapshot will clear it.
+  if (!needsResultConfirmation) clearPoll(sessionKey);
   return { commands, localRunIds, activities, pendingAborts };
 }
 
@@ -220,7 +229,7 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
       return { reconciler, ...(terminalOrInactiveCleanup(nextState, sessionKey) ?? {}) };
     });
     const view = selectSessionRunView(get(), sessionKey);
-    if (view.serverActive || view.command !== 'idle') schedulePoll(sessionKey);
+    if (view.serverActive || view.command !== 'idle' || view.needsResultConfirmation) schedulePoll(sessionKey);
     else clearPoll(sessionKey);
   },
 
@@ -257,7 +266,7 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
       return { reconciler, ...(terminalOrInactiveCleanup(nextState, sessionKey) ?? {}) };
     });
     const view = selectSessionRunView(get(), sessionKey);
-    if (view.serverActive || view.command !== 'idle') schedulePoll(sessionKey);
+    if (view.serverActive || view.command !== 'idle' || view.needsResultConfirmation) schedulePoll(sessionKey);
     else clearPoll(sessionKey);
   },
 
@@ -322,7 +331,7 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
     })().finally(() => {
       reconcileInFlight.delete(sessionKey);
       const view = selectSessionRunView(get(), sessionKey);
-      if (view.serverActive || view.command !== 'idle') schedulePoll(sessionKey);
+      if (view.serverActive || view.command !== 'idle' || view.needsResultConfirmation) schedulePoll(sessionKey);
       else clearPoll(sessionKey);
     });
     reconcileInFlight.set(sessionKey, promise);
@@ -392,7 +401,7 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
     set((state) => ({ commands: { ...state.commands, [sessionKey]: command } }));
     if (command === 'idle') {
       const view = selectSessionRunView(get(), sessionKey);
-      if (!view.serverActive) clearPoll(sessionKey);
+      if (!view.serverActive && !view.needsResultConfirmation) clearPoll(sessionKey);
     } else {
       schedulePoll(sessionKey);
     }

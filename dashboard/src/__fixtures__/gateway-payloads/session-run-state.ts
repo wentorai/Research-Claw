@@ -79,6 +79,37 @@ export const SESSION_LIST_GATEWAY_RESTART_RESPONSE = {
   ],
 } as const;
 
+/**
+ * Captured ordering from the 2026-08-01 RC/OC 2026.6.1 manual acceptance run.
+ * `chat.abort` returns after the active-run registry is cleared, but before the
+ * session store has necessarily persisted its terminal `killed` status. A
+ * subsequent sessions.list observes the terminal row. These are two complete
+ * snapshots from one run generation, not partial lifecycle events.
+ */
+export const SESSION_LIST_ABORT_SETTLING_RESPONSE = {
+  ...SESSION_LIST_ACTIVE_RESPONSE,
+  sessions: [
+    {
+      ...SESSION_LIST_ACTIVE_RESPONSE.sessions[0],
+      status: 'running',
+      hasActiveRun: false,
+    },
+  ],
+} as const;
+
+export const SESSION_LIST_ABORT_TERMINAL_RESPONSE = {
+  ...SESSION_LIST_ACTIVE_RESPONSE,
+  sessions: [
+    {
+      ...SESSION_LIST_ACTIVE_RESPONSE.sessions[0],
+      status: 'killed',
+      hasActiveRun: false,
+      endedAt: 1_754_000_020_000,
+      runtimeMs: 20_000,
+    },
+  ],
+} as const;
+
 export const SESSION_LIST_TERMINAL_CONFLICT_RESPONSE = {
   ...SESSION_LIST_ACTIVE_RESPONSE,
   sessions: [
@@ -117,3 +148,10 @@ export const CHAT_ABORTED_TIMEOUT_EVENT = {
   errorKind: 'timeout',
 } as const;
 
+/** Agent lifecycle event observed after an F5 where local chat.runId is gone. */
+export const AGENT_LIFECYCLE_RECOVERED_FOREGROUND = {
+  runId: 'run-generation-1',
+  sessionKey: 'agent:main:project-longrun',
+  stream: 'lifecycle',
+  data: { phase: 'start' },
+} as const;

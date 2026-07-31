@@ -115,17 +115,31 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
       }
     }
 
-    // Background = different runId from the user's active chat, or no active chat.
-    const isBackground = !!evt.runId && (!chatRunId || evt.runId !== chatRunId);
+    const mappedSessionKey = evt.runId ? get().runSessionMap[evt.runId] : undefined;
+    const explicitEventSessionKey = normalizeSessionKey(evt.sessionKey ?? mappedSessionKey);
+    const matchesActiveSession = Boolean(
+      explicitEventSessionKey && explicitEventSessionKey === normalizedActiveSessionKey,
+    );
+    const matchesLocalForegroundRun = Boolean(
+      evt.runId && chatRunId && evt.runId === chatRunId,
+    );
+    // F5 legitimately loses chat.runId. An authoritative event that still
+    // names the selected session remains foreground; calling it "background"
+    // would falsely claim the execution mode changed. A different run remains
+    // background only when a local foreground run is concurrently known.
+    const isBackground = Boolean(
+      evt.runId
+      && !matchesLocalForegroundRun
+      && !(!chatRunId && matchesActiveSession),
+    );
 
     // Resolve event session: explicit sessionKey -> remembered run mapping ->
     // current foreground run's active session. For background events, never
     // fall back to active session to avoid cross-session pollution.
-    const mappedSessionKey = evt.runId ? get().runSessionMap[evt.runId] : undefined;
     const eventSessionKey = normalizeSessionKey(
       evt.sessionKey
       ?? mappedSessionKey
-      ?? (!isBackground && evt.runId && chatRunId && evt.runId === chatRunId ? activeSessionKey : undefined),
+      ?? (matchesLocalForegroundRun ? activeSessionKey : undefined),
     );
 
     // Session isolation: if we can resolve session and it is not active, drop it.

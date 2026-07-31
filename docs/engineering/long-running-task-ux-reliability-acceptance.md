@@ -78,7 +78,9 @@ Implementation facts:
   reconciliation and keeps the Run identity until a terminal fact arrives.
 - connect, session switch, visibility regain and sequence gaps trigger read-only
   reconciliation. Active/locally-busy sessions use one in-flight bounded poll
-  with 15s → 30s → 60s backoff.
+  with 15s → 30s → 60s backoff. The narrower post-abort result-confirmation
+  race starts at 1s, then backs off through 2s, 5s, 15s, 30s and 60s until OC
+  publishes a terminal Session fact.
 
 Test-first and integration evidence:
 
@@ -188,3 +190,66 @@ Cross-worktree note: the card-reliability worktree now also changes `App.tsx`,
 `ChatView.tsx`, execution presentation and translations, and introduces a
 `RunDetailsDock`/presentation owner. Final integration must reconcile ownership
 of the single Run region semantically rather than accepting a textual merge.
+
+## Final integration and live acceptance
+
+Acceptance-driven fixes:
+
+- A real `chat.abort` showed that OC may clear its active-run registry before
+  the Session store persists `killed`. The first post-abort Session snapshot was
+  therefore the real intermediate state `status=running + hasActiveRun=false`.
+  A captured fixture now covers that sequence. Result confirmation keeps polling
+  read-only with bounded backoff until the later terminal snapshot arrives; it
+  never synthesizes abort success or failure.
+- F5 while a foreground run was active showed that the missing local runId could
+  cause that same Session's lifecycle event to be labelled as background work.
+  A captured lifecycle fixture now proves that the selected Session remains
+  foreground after refresh. A different Session is only projected as concurrent
+  background work while a known local foreground run exists.
+- Both cases were first pinned by failing parity tests. The final targeted run
+  passed 2 files and 8 tests.
+
+Live RC/OC evidence (Dashboard served from this worktree):
+
+- A real DeepSeek model run completed with the exact visible result
+  `RC_REAL_MODEL_OK`; OC recorded 53,657 input tokens and 33 output tokens for
+  that Session. An earlier OpenAI OAuth attempt reached the provider but ended
+  in its 120-second idle timeout, so it is not counted as the successful run.
+- A second real long run was refreshed mid-execution. The restored page showed
+  OC-confirmed active state, kept Stop available without relying on a local
+  runId, did not label the selected run as background, and settled automatically
+  after Stop without another refresh.
+- A/B/A rapid Session switching kept terminal and active states isolated. The
+  active Session regained its Stop control when selected; late responses did
+  not bleed into the other Session.
+- The Gateway was stopped while a real tool-backed run was active. While offline,
+  the Dashboard showed transport reconnection/unknown wording and did not mark
+  the task failed. After restart, locked OC 6.1 reported
+  `status=running + hasActiveRun=false`; the Dashboard showed non-spinning result
+  confirmation with no Stop instead of claiming that the lost process was still
+  active or had timed out.
+- A server-active run remained factual and stoppable during a long interval with
+  no chat delta. Exact 207-second and greater-than-360-second cases, plus ACK
+  uncertainty, duplicate/out-of-order frames, sequence gaps, terminal fencing,
+  missing fields and late responses are also pinned by deterministic parity and
+  integration tests.
+
+Final automated evidence:
+
+- Dashboard full suite at bounded concurrency: 166 files passed; 2,378 tests
+  passed and 1 skipped. One earlier default-concurrency `PlaudCard` singleton
+  failure passed 31/31 in isolation and did not recur in the bounded full run.
+- Root RC full suite after building extensions: 115 files passed and 4 skipped;
+  1,636 tests passed, 12 skipped and 22 todo. The pre-build run's seven failures
+  were all missing generated `extensions/openclaw-weixin/dist/index.js`; the
+  three affected files passed 29/29 after build before the full rerun passed.
+- Core plugin full suite: 48 files passed and 1 skipped; 1,175 tests passed and
+  10 skipped. Core plugin build passed.
+- Dashboard production build, full repository build, `verify:e2e` and
+  `verify:logging` passed. Vite emitted only the known import/chunk-size warnings.
+
+Remaining truth boundary: locked OC 6.1 does not preserve an in-memory active
+run across a full Gateway process restart. RC can recover live state after F5,
+socket reconnect and navigation while OC still owns the run, but it cannot
+resurrect a process that OC itself lost. In that conflict it deliberately shows
+result confirmation/unknown, never a fabricated failure, progress value or ETA.

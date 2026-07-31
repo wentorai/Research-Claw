@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DELTA_SECOND } from '../../__fixtures__/gateway-payloads/chat-events';
+import { AGENT_LIFECYCLE_RECOVERED_FOREGROUND } from '../../__fixtures__/gateway-payloads/session-run-state';
 import { useChatStore, _testWatchdog } from '../../stores/chat';
 import { useSessionRunsStore } from '../../stores/session-runs';
 import { useToolStreamStore } from '../../stores/tool-stream';
@@ -135,5 +136,15 @@ describe('stale stream compatibility observations', () => {
 
     expect(useChatStore.getState().streamText).toBe('Hello, I can help');
     expect(useChatStore.getState()._reconnectedAt).toBeNull();
+  });
+
+  it('does not relabel the active session run as background after F5 loses local runId', () => {
+    useToolStreamStore.getState().handleAgentEvent(
+      AGENT_LIFECYCLE_RECOVERED_FOREGROUND,
+      null,
+      'project-longrun',
+    );
+
+    expect(useToolStreamStore.getState().bgActivity).toBeNull();
   });
 });

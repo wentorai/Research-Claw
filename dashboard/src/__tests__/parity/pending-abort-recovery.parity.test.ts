@@ -1,7 +1,11 @@
 /** P1 offline/pending Stop contract. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useSessionRunsStore } from '../../stores/session-runs';
+import {
+  SESSION_LIST_ABORT_SETTLING_RESPONSE,
+  SESSION_LIST_ABORT_TERMINAL_RESPONSE,
+} from '../../__fixtures__/gateway-payloads/session-run-state';
+import { selectSessionRunView, useSessionRunsStore } from '../../stores/session-runs';
 
 const gateway = { isConnected: false, request: vi.fn() };
 
@@ -22,11 +26,17 @@ type AbortRecoveryStore = ReturnType<typeof useSessionRunsStore.getState> & {
 describe('pending abort recovery', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.useFakeTimers();
     gateway.isConnected = false;
     useSessionRunsStore.getState().resetForTests();
     useSessionRunsStore.getState().ingestSnapshot({
       key: 'main', status: 'running', hasActiveRun: true,
     }, { eventEpoch: 1, observedAt: 10 });
+  });
+
+  afterEach(() => {
+    useSessionRunsStore.getState().resetForTests();
+    vi.useRealTimers();
   });
 
   it('records one pending Stop while offline without inventing killed', async () => {
@@ -56,5 +66,35 @@ describe('pending abort recovery', () => {
     expect(gateway.request.mock.calls.filter(([method]) => method === 'chat.abort')).toEqual([
       ['chat.abort', { sessionKey: 'main' }],
     ]);
+  });
+
+  it('keeps reconciling when abort clears hasActiveRun before OC persists killed', async () => {
+    gateway.isConnected = true;
+    useSessionRunsStore.getState().resetForTests();
+    useSessionRunsStore.getState().ingestSnapshot(
+      SESSION_LIST_ABORT_SETTLING_RESPONSE.sessions[0],
+      { eventEpoch: 2, observedAt: 20 },
+    );
+    gateway.request.mockResolvedValueOnce(SESSION_LIST_ABORT_TERMINAL_RESPONSE);
+
+    expect(selectSessionRunView(useSessionRunsStore.getState(), 'project-longrun')).toMatchObject({
+      lifecycle: 'unknown',
+      serverActive: false,
+      needsResultConfirmation: true,
+      canAbort: false,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(gateway.request).toHaveBeenCalledWith('sessions.list', {
+      includeDerivedTitles: true,
+      limit: 1000,
+    });
+    expect(selectSessionRunView(useSessionRunsStore.getState(), 'project-longrun')).toMatchObject({
+      lifecycle: 'killed',
+      needsResultConfirmation: false,
+      isBusy: false,
+      canAbort: false,
+    });
   });
 });
