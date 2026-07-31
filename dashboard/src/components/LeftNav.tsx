@@ -99,6 +99,13 @@ export default function LeftNav() {
 
   const [renameTarget, setRenameTarget] = useState<{ key: string; current: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [sessionSearch, setSessionSearch] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const closeSessionDropdown = useCallback(() => {
+    setDropdownOpen(false);
+    setSessionSearch('');
+  }, []);
 
   useEffect(() => {
     loadSessions();
@@ -114,6 +121,7 @@ export default function LeftNav() {
   };
 
   const handleRename = (key: string, currentLabel: string) => {
+    closeSessionDropdown();
     setRenameTarget({ key, current: currentLabel });
     setRenameValue(currentLabel);
   };
@@ -129,6 +137,7 @@ export default function LeftNav() {
 
   const handleDelete = (key: string) => {
     if (isMainSession(key)) return;
+    closeSessionDropdown();
     modal.confirm({
       title: t('project.deleteConfirm'),
       okText: t('common.ok', 'OK'),
@@ -142,6 +151,7 @@ export default function LeftNav() {
   };
 
   const handleClearSession = useCallback((key: string, name: string) => {
+    closeSessionDropdown();
     modal.confirm({
       title: t('project.clearConfirmTitle', { name }),
       content: t('project.clearConfirmContent'),
@@ -153,9 +163,10 @@ export default function LeftNav() {
         await clearSession(key);
       },
     });
-  }, [modal, t, clearSession]);
+  }, [closeSessionDropdown, modal, t, clearSession]);
 
   const handleDeleteCronSession = useCallback((key: string) => {
+    closeSessionDropdown();
     modal.confirm({
       title: t('cron.deleteSessionConfirm'),
       okText: t('common.ok', 'OK'),
@@ -169,12 +180,10 @@ export default function LeftNav() {
         await loadSessions();
       },
     });
-  }, [modal, sessions, t, deleteSession, loadSessions]);
+  }, [closeSessionDropdown, modal, sessions, t, deleteSession, loadSessions]);
 
   // ── Session switcher dropdown content ───────────────────────────────────────
 
-  const [sessionSearch, setSessionSearch] = useState('');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
   const cronFolded = useUiStore((s) => s.cronSessionsFolded);
   const setCronSessionsFolded = useUiStore((s) => s.setCronSessionsFolded);
   const toggleCronFold = useCallback(() => {
@@ -183,9 +192,12 @@ export default function LeftNav() {
 
   // Reset search when dropdown closes
   const handleDropdownOpenChange = useCallback((open: boolean) => {
-    setDropdownOpen(open);
-    if (!open) setSessionSearch('');
-  }, []);
+    if (open) {
+      setDropdownOpen(true);
+    } else {
+      closeSessionDropdown();
+    }
+  }, [closeSessionDropdown]);
 
   // Layer 3 (#33): separate user sessions from cron sessions, dedup cron by name
   const { userSessions: filteredSessions, cronSessions: filteredCronSessions } = useMemo(() => {
@@ -266,7 +278,7 @@ export default function LeftNav() {
           return (
             <div
               key={session.key}
-              onClick={() => { switchSession(session.key); setDropdownOpen(false); }}
+              onClick={() => { switchSession(session.key); closeSessionDropdown(); }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -366,7 +378,7 @@ export default function LeftNav() {
               return (
                 <div
                   key={session.key}
-                  onClick={() => { switchSession(session.key); setDropdownOpen(false); }}
+                  onClick={() => { switchSession(session.key); closeSessionDropdown(); }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -400,7 +412,7 @@ export default function LeftNav() {
       {/* Fixed footer: New Session */}
       <div style={{ borderTop: '1px solid var(--border)', padding: '4px 0' }}>
         <div
-          onClick={async () => { await createSession(); setDropdownOpen(false); }}
+          onClick={async () => { closeSessionDropdown(); await createSession(); }}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -420,7 +432,7 @@ export default function LeftNav() {
       </div>
     </div>
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, t, handleDeleteCronSession, handleClearSession]);
+  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, t, handleDeleteCronSession, handleClearSession, closeSessionDropdown]);
 
   const activeSessionLabel = useMemo(() => {
     const session = sessions.find((s) => s.key === activeSessionKey);
