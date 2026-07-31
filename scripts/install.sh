@@ -586,16 +586,29 @@ activate_private_pnpm() {
     return 1
   fi
   case ":$PATH:" in
-    *":$bin_dir:"*) ;;
+    ":$bin_dir:"*) ;;
     *) export PATH="$bin_dir:$PATH" ;;
   esac
+  hash -r 2>/dev/null || true
   return 0
 }
 
+pnpm_version() {
+  # pnpm 10 defaults manage-package-manager-versions=true. During a first-hop
+  # upgrade, an old checkout can therefore make the freshly installed pnpm 10
+  # report (and execute as) pnpm 9 from that checkout's packageManager field.
+  # Probe the candidate itself so verification is independent of the cwd.
+  npm_config_manage_package_manager_versions=false "$1" --version 2>/dev/null
+}
+
 pnpm_cmd_works() {
-  local detected_version
-  command -v pnpm &>/dev/null || return 1
-  detected_version="$(pnpm --version 2>/dev/null)" || return 1
+  local candidate="${1:-pnpm}" detected_version
+  if [[ "$candidate" == */* ]]; then
+    [ -x "$candidate" ] || return 1
+  else
+    command -v "$candidate" &>/dev/null || return 1
+  fi
+  detected_version="$(pnpm_version "$candidate")" || return 1
   [ "$detected_version" = "$PNPM_VERSION" ]
 }
 
@@ -607,34 +620,34 @@ install_private_pnpm() {
 }
 
 ensure_pnpm() {
-  local detected_version=""
+  local detected_version="" private_pnpm="$RC_PNPM_PREFIX/bin/pnpm"
   if pnpm_cmd_works; then
     PNPM_BIN="$(command -v pnpm)"
-    ok "pnpm $(pnpm --version)"
+    ok "pnpm $(pnpm_version "$PNPM_BIN")"
     return 0
   fi
 
   activate_private_pnpm || true
-  if pnpm_cmd_works; then
-    PNPM_BIN="$(command -v pnpm)"
-    ok "pnpm $(pnpm --version)"
+  if pnpm_cmd_works "$private_pnpm"; then
+    PNPM_BIN="$private_pnpm"
+    ok "pnpm $(pnpm_version "$PNPM_BIN")"
     return 0
   fi
 
   if command -v pnpm &>/dev/null; then
-    detected_version="$(pnpm --version 2>/dev/null || true)"
+    detected_version="$(pnpm_version pnpm || true)"
   fi
   if [ -n "$detected_version" ]; then
     warn "pnpm $detected_version does not match required $PNPM_VERSION. Installing an isolated compatible copy."
   else
     warn "pnpm is unavailable or its Corepack shim is broken. Installing an isolated compatible copy."
   fi
-  if ! install_private_pnpm || ! pnpm_cmd_works; then
+  if ! install_private_pnpm || ! pnpm_cmd_works "$private_pnpm"; then
     die "pnpm installation failed. Install manually: npm install --prefix $RC_PNPM_PREFIX -g pnpm@$PNPM_VERSION"
   fi
 
-  PNPM_BIN="$(command -v pnpm)"
-  ok "pnpm $(pnpm --version)"
+  PNPM_BIN="$private_pnpm"
+  ok "pnpm $(pnpm_version "$PNPM_BIN")"
 }
 
 # --- Disable Corepack strict mode ---
@@ -842,7 +855,9 @@ ensure_ppt_master
 add_git_config "url.https://github.com/.insteadOf" "git@github.com:"
 
 # --- [5/8 cont.] pnpm ---
-ensure_pnpm
+if ! $UPDATE_FAILED; then
+  ensure_pnpm
+fi
 
 # --- Detect gateway Node (early — needed for ABI rebuild, plugin install, gateway launch) ---
 # OpenClaw re-execs under conda "openclaw" env's Node at runtime, regardless of which
@@ -1189,6 +1204,8 @@ if ! $UPDATE_FAILED; then
       ok "Dashboard rebuilt"
     fi
   fi
+else
+  ok "Existing dependencies and build kept"
 fi
 
 step 7 "Native modules check"
@@ -1288,6 +1305,8 @@ else
   if ! test_sqlite3; then
     warn "Native module (better-sqlite3) may be corrupted. Gateway may fail to start."
     warn "Fix: cd $INSTALL_DIR && pnpm install && pnpm build"
+  else
+    ok "Existing native modules OK"
   fi
 fi
 
@@ -1396,6 +1415,8 @@ if ! node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
     --check --quiet --target "$PLUGIN_DIR" 2>/dev/null; then
   warn "Research features are temporarily unavailable; the core assistant can still start."
   warn "Run this installer again to restore research features."
+elif $UPDATE_FAILED; then
+  ok "Existing research plugins kept"
 fi
 
 # --- Persist OPENCLAW_CONFIG_PATH in shell profile ---
