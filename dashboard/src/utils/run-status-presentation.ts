@@ -5,6 +5,7 @@ export type RunStatusPresentationKind =
   | 'reconnecting'
   | 'stopping'
   | 'submitting'
+  | 'accepted'
   | 'confirming-submit'
   | 'compacting'
   | 'tool'
@@ -13,6 +14,7 @@ export type RunStatusPresentationKind =
   | 'continuing'
   | 'processing'
   | 'confirming-result'
+  | 'result-unconfirmed'
   | 'done'
   | 'killed'
   | 'timeout'
@@ -28,7 +30,12 @@ export interface RunStatusPresentation {
 
 type RunPresentationInput = Pick<
   SessionRunView,
-  'command' | 'lifecycle' | 'serverActive' | 'needsResultConfirmation' | 'activity'
+  | 'command'
+  | 'lifecycle'
+  | 'serverActive'
+  | 'needsResultConfirmation'
+  | 'resultUnconfirmed'
+  | 'activity'
 >;
 
 interface ObservedAgentEvent {
@@ -40,8 +47,20 @@ interface ObservedAgentEvent {
 /** Map real OC agent event fields without keeping a completed tool as current. */
 export function resolveObservedRunActivity(
   event: ObservedAgentEvent,
-): { kind: RunActivityKind; label: string } {
+): { kind: RunActivityKind; label: string } | null {
   const phase = event.data?.phase;
+  // OC emits lower-specificity item/command_output frames immediately after
+  // the corresponding tool frame. They are partial observations of the same
+  // activity and must not erase an already-known current tool name.
+  if (
+    event.stream
+    && event.stream !== 'tool'
+    && event.stream !== 'compaction'
+    && event.stream !== 'lifecycle'
+    && !event.state
+  ) {
+    return null;
+  }
   const toolStillActive = event.stream === 'tool'
     && phase !== 'end'
     && phase !== 'result'
@@ -107,6 +126,15 @@ export function resolveRunStatusPresentation(
   if (run.command === 'submitting') {
     return { kind: 'submitting', isTerminal: false, spins: true };
   }
+  if (run.needsResultConfirmation) {
+    return { kind: 'confirming-result', isTerminal: false, spins: false };
+  }
+  if (run.resultUnconfirmed) {
+    return { kind: 'result-unconfirmed', isTerminal: false, spins: false };
+  }
+  if (run.command === 'accepted') {
+    return { kind: 'accepted', isTerminal: false, spins: true };
+  }
 
   if (run.serverActive) {
     switch (run.activity?.kind) {
@@ -128,10 +156,6 @@ export function resolveRunStatusPresentation(
       default:
         return { kind: 'processing', isTerminal: false, spins: true };
     }
-  }
-
-  if (run.needsResultConfirmation) {
-    return { kind: 'confirming-result', isTerminal: false, spins: false };
   }
 
   return null;

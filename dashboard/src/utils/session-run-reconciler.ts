@@ -24,6 +24,9 @@ export interface SessionRunRecord {
   lastEventEpoch: number;
   lastEventSeq?: number;
   runId?: string;
+  /** Local time at which this idempotency generation was created.
+   * It is only a generation fence; it is not OC lifecycle truth. */
+  localStartedAt?: number;
   terminal?: SessionRunTerminalFence;
 }
 
@@ -215,11 +218,48 @@ function terminalFromTruth(
   if (!isTerminalSessionRunStatus(truth.status)) return undefined;
   return {
     status: truth.status,
-    occurredAt,
+    occurredAt: typeof truth.endedAt === 'number' ? truth.endedAt : occurredAt,
     ...(truth.sessionId ? { sessionId: truth.sessionId } : {}),
     ...(runId ? { runId } : {}),
     ...(typeof truth.startedAt === 'number' ? { startedAt: truth.startedAt } : {}),
   };
+}
+
+function terminalPredatesLocalGeneration(
+  record: SessionRunRecord,
+  truth: SessionRunTruth,
+): boolean {
+  if (!record.runId || typeof record.localStartedAt !== 'number') return false;
+  if (!isTerminalSessionRunStatus(truth.status)) return false;
+  if (typeof truth.endedAt === 'number') return truth.endedAt < record.localStartedAt;
+  return typeof truth.startedAt === 'number' && truth.startedAt < record.localStartedAt;
+}
+
+function projectRegistryTruthPastStaleTerminal(
+  record: SessionRunRecord,
+  truth: SessionRunTruth,
+): SessionRunTruth {
+  return {
+    sessionKey: record.sessionKey,
+    observedAt: truth.observedAt,
+    ...(truth.sessionId ? { sessionId: truth.sessionId } : {}),
+    ...(typeof truth.hasActiveRun === 'boolean'
+      ? { hasActiveRun: truth.hasActiveRun }
+      : {}),
+  };
+}
+
+function isSameTerminalGeneration(
+  terminal: SessionRunTerminalFence,
+  truth: SessionRunTruth,
+  runId?: string,
+): boolean {
+  if (terminal.runId && runId && terminal.runId !== runId) return false;
+  if (terminal.sessionId && truth.sessionId && terminal.sessionId !== truth.sessionId) return false;
+  return !(
+    typeof truth.startedAt === 'number'
+    && truth.startedAt > terminal.occurredAt
+  );
 }
 
 function isNewGeneration(
@@ -312,6 +352,7 @@ export function reconcileSessionRun(
       truth: undefined,
       terminal: undefined,
       runId: action.runId,
+      localStartedAt: action.observedAt,
       queryState: 'unqueried',
       requestGeneration: current.requestGeneration + 1,
     });
@@ -326,17 +367,40 @@ export function reconcileSessionRun(
       return state;
     }
     const truth = toTruth(sessionKey, action.row, action.observedAt);
+    // sessions.list rows do not carry a chat runId. Immediately after a new
+    // chat.send ACK, OC can already report hasActiveRun=true while the
+    // persisted lifecycle fields still describe the preceding run. Keep the
+    // live registry fact, but never attach that old terminal to the new local
+    // idempotency generation.
+    if (terminalPredatesLocalGeneration(current, truth)) {
+      return writeRecord(state, {
+        ...current,
+        truth: projectRegistryTruthPastStaleTerminal(current, truth),
+        queryState: 'known',
+        terminal: undefined,
+      });
+    }
     if (current.terminal && isSessionRunActive(truth) && !isNewGeneration(current, truth)) {
       return writeRecord(state, { ...current, queryState: 'known' });
     }
     // sessions.list rows do not identify a chat run. Never attribute that
     // terminal snapshot to a locally pending idempotency generation.
     const terminal = terminalFromTruth(truth, action.observedAt);
+    if (
+      current.terminal
+      && terminal
+      && isSameTerminalGeneration(current.terminal, truth)
+      && current.terminal.status !== 'interrupted'
+    ) {
+      return writeRecord(state, { ...current, queryState: 'known' });
+    }
     return writeRecord(state, {
       ...current,
       truth,
       queryState: 'known',
-      ...(terminal ? { terminal } : { terminal: undefined }),
+      ...(terminal
+        ? { terminal }
+        : { terminal: undefined, localStartedAt: current.localStartedAt }),
     });
   }
 
@@ -361,6 +425,15 @@ export function reconcileSessionRun(
 
   if (action.type === 'chat-terminal') {
     if (cursorRecord.runId && action.runId && cursorRecord.runId !== action.runId) {
+      return writeRecord(state, cursorRecord);
+    }
+    if (
+      cursorRecord.terminal
+      && cursorRecord.terminal.status !== 'interrupted'
+      && (!cursorRecord.terminal.runId
+        || !action.runId
+        || cursorRecord.terminal.runId === action.runId)
+    ) {
       return writeRecord(state, cursorRecord);
     }
     const truth = mergeTruth(
@@ -418,6 +491,14 @@ export function reconcileSessionRun(
   }
 
   const terminal = terminalFromTruth(truth, action.observedAt, action.runId);
+  if (
+    cursorRecord.terminal
+    && terminal
+    && isSameTerminalGeneration(cursorRecord.terminal, truth, action.runId)
+    && cursorRecord.terminal.status !== 'interrupted'
+  ) {
+    return writeRecord(state, cursorRecord);
+  }
   return writeRecord(state, {
     ...cursorRecord,
     truth,

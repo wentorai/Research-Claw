@@ -4,12 +4,16 @@ import {
   resolveObservedRunActivity,
   resolveRunStatusPresentation,
 } from './run-status-presentation';
+import { ACCEPTANCE_FOREGROUND_ITEM_START_AFTER_TOOL } from '../__fixtures__/gateway-payloads/long-run-incidents';
+import en from '../i18n/en.json';
+import zh from '../i18n/zh-CN.json';
 
 const base = {
   command: 'idle' as const,
   lifecycle: 'unknown' as const,
   serverActive: false,
   needsResultConfirmation: false,
+  resultUnconfirmed: false,
   activity: null,
 };
 
@@ -26,6 +30,12 @@ describe('truthful run status presentation', () => {
       stream: 'tool',
       data: { phase: 'end', name: 'search' },
     })).toEqual({ kind: 'processing', label: 'processing' });
+  });
+
+  it('does not let a lower-specificity item frame erase current tool activity', () => {
+    expect(resolveObservedRunActivity(
+      ACCEPTANCE_FOREGROUND_ITEM_START_AFTER_TOOL,
+    )).toBeNull();
   });
 
   it('separates transport recovery from task failure', () => {
@@ -98,5 +108,35 @@ describe('truthful run status presentation', () => {
       isTerminal: false,
       spins: false,
     });
+  });
+
+  it('keeps an accepted ACK visible until OC lifecycle takes over', () => {
+    expect(resolveRunStatusPresentation({
+      ...base,
+      command: 'accepted',
+    }, 'connected')).toMatchObject({
+      kind: 'accepted',
+      isTerminal: false,
+      spins: true,
+    });
+  });
+
+  it('settles an unresolved non-active result without an infinite spinner', () => {
+    expect(resolveRunStatusPresentation({
+      ...base,
+      resultUnconfirmed: true,
+    }, 'connected')).toMatchObject({
+      kind: 'result-unconfirmed',
+      isTerminal: false,
+      spins: false,
+    });
+  });
+
+  it('does not label every actionable error as an interruption or invent a time limit', () => {
+    expect(zh.chat.runIssueTitle).not.toContain('中断');
+    expect(en.chat.runIssueTitle.toLowerCase()).not.toContain('interrupted');
+    expect(zh.chat.runTimedOut).toContain('OC 明确报告');
+    expect(zh.chat.runTimedOut).not.toContain('时间上限');
+    expect(zh.taskFlow.runStatus.timeout.title).not.toContain('时间上限');
   });
 });

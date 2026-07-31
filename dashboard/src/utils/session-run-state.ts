@@ -52,11 +52,15 @@ export function classifyChatTerminalLifecycle(
     errorKind?: string;
     message?: { isError?: boolean };
   },
-  command: 'idle' | 'submitting' | 'ack_unknown' | 'stopping',
+  command: 'idle' | 'submitting' | 'accepted' | 'ack_unknown' | 'stopping',
 ): ChatTerminalLifecycle | null {
   if (event.state === 'final') return event.message?.isError ? 'failed' : 'done';
   if (event.state === 'error') return event.errorKind === 'timeout' ? 'timeout' : 'failed';
   if (event.state !== 'aborted') return null;
   if (event.stopReason === 'timeout' || event.errorKind === 'timeout') return 'timeout';
-  return command === 'stopping' ? 'killed' : 'interrupted';
+  // OC chat.abort emits stopReason:"rpc" on the live frame. OC 2026.6.1 does
+  // not retain that field in chat.history/sessionInfo after F5, so the
+  // Dashboard separately preserves the successful chat.abort command receipt.
+  if (event.stopReason === 'rpc' || command === 'stopping') return 'killed';
+  return 'interrupted';
 }

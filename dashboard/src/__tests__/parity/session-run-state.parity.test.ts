@@ -20,6 +20,10 @@ describe('chat terminal classification', () => {
       { state: 'aborted', stopReason: 'timeout' },
       'idle',
     )).toBe('timeout');
+    expect(classifyChatTerminalLifecycle(
+      { state: 'aborted', stopReason: 'rpc' },
+      'idle',
+    )).toBe('killed');
     expect(classifyChatTerminalLifecycle({ state: 'aborted' }, 'stopping')).toBe('killed');
     expect(classifyChatTerminalLifecycle({ state: 'aborted' }, 'idle')).toBe('interrupted');
   });
