@@ -28,6 +28,7 @@ import {
 } from '../utils/staged-writing-detect';
 import { isStagedWritingJobForSession } from '../utils/staged-writing-run';
 import { useStagedWritingStore } from './staged-writing';
+import { useSessionRunsStore } from './session-runs';
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 const EXECUTION_BINDINGS_PREFIX = 'rc-execution-bindings:';
@@ -137,35 +138,21 @@ const GAP_DEBOUNCE_MS = 500;
 /**
  * Stale-streaming watchdog.
  * Periodically checks if no chat delta has arrived within STALE_STREAM_TIMEOUT_MS.
- * Recovers via loadHistory() when the stream appears dead.
+ * Requests an authoritative Session reconciliation when the stream appears
+ * quiet. Inactivity itself is never a terminal fact.
  *
  * Improvement over the original setTimeout approach: tracks _lastDeltaAt so it
  * can detect mid-stream connection deaths (where streamText is non-null but no
  * more deltas arrive), not just the "no first delta" case.
  *
- * Tool-aware recovery (Fix 1 — Plan B):
- * Instead of unconditionally skipping recovery when tools are pending, the
- * watchdog now checks each tool's `lastEventAt`. If ALL pending tools have
- * received no events for > STALE_TOOL_MS (120s), they are considered hung and
- * forcibly evicted, allowing recovery to proceed. This prevents a single hung
- * tool (e.g. SSH timeout) from blocking recovery indefinitely.
- *
- * Reconnect-aware timeout (Fix 3):
- * After a WS reconnect (_reconnectedAt is set), the watchdog uses a shorter
- * timeout (RECONNECT_STALE_MS = 15s) to speed up recovery when the run
- * completed during the disconnect window and no more deltas will arrive.
- *
  * Backup: the tick watchdog (client.ts) detects dead connections at the transport
- * layer and forces reconnect → loadHistory(), so this watchdog mainly covers the
- * "alive connection but stale model response" scenario.
+ * layer and forces reconnect. This watchdog only asks the OC Session authority
+ * whether the run is still active; it cannot clear chat/tool state or report a
+ * failure.
  */
 let _staleStreamWatchdog: ReturnType<typeof setInterval> | null = null;
 const STALE_STREAM_TIMEOUT_MS = 360_000;
 const STALE_WATCHDOG_CHECK_MS = 15_000;
-/** Shorter stale timeout used after WS reconnect (Fix 3). */
-const RECONNECT_STALE_MS = 15_000;
-/** Max age (ms) for a pending tool with no events before watchdog treats it as hung. */
-const WATCHDOG_TOOL_STALE_MS = 120_000;
 
 type AgentFailureData = {
   phase?: string;
@@ -257,51 +244,16 @@ function startStaleStreamWatchdog(get: () => ChatState) {
       stopStaleStreamWatchdog();
       return;
     }
-    // Context compaction can run for several minutes with no chat deltas.
-    if (s.compacting) return;
     const lastActivity = s._lastDeltaAt ?? s._streamStartedAt;
     if (!lastActivity) return;
 
-    // Fix 3: use shorter timeout after reconnect
-    const effectiveTimeout = s._reconnectedAt ? RECONNECT_STALE_MS : STALE_STREAM_TIMEOUT_MS;
     const gap = Date.now() - lastActivity;
-    if (gap > effectiveTimeout) {
-      // Fix 1 (Plan B): check tool staleness via lastEventAt
-      const pendingTools = useToolStreamStore.getState().pendingTools;
-      if (pendingTools.length > 0) {
-        const now = Date.now();
-        const allStale = pendingTools.every(t => now - t.lastEventAt >= WATCHDOG_TOOL_STALE_MS);
-        if (!allStale) return; // some tools still active — keep waiting
-        // All tools are hung — force-evict and proceed with recovery
-        useToolStreamStore.setState({ pendingTools: [] });
-      }
-
+    if (gap > STALE_STREAM_TIMEOUT_MS) {
       stopStaleStreamWatchdog();
-      const staleRunId = s.runId;
-      console.log(`[Chat] Stale streaming detected (${Math.round(gap / 1000)}s since last activity, reconnect=${!!s._reconnectedAt}) — recovering via loadHistory`);
-      useTaskFlowStore.getState().endRun(staleRunId, 'error');
-      useChatStore.setState(clearActiveRunState());
-      void useChatStore.getState().loadHistory().then(() => {
-        if (detectRunEndedWithoutReply(useChatStore.getState().messages)) {
-          useChatStore.setState({ lastError: i18n.t('chat.runEndedNoOutput'), lastErrorMeta: classifyRunFailure('') });
-        } else {
-          const message = i18n.t('chat.runStoppedAfterStaleStream');
-          useChatStore.setState({
-            lastError: message,
-            lastErrorMeta: {
-              ...classifyRunFailure(message),
-              message,
-            },
-          });
-          useUiStore.getState().addNotification({
-            type: 'error',
-            title: i18n.t('chat.runIssueNotificationTitle'),
-            body: message,
-            dedupKey: `chat-stale-stream:${s.sessionKey}:${staleRunId ?? 'unknown'}`,
-            targetSessionKey: s.sessionKey,
-          });
-        }
-      });
+      console.info(
+        `[Chat] No chat delta for ${Math.round(gap / 1000)}s — reconciling OC Session state`,
+      );
+      void useSessionRunsStore.getState().requestReconcile(s.sessionKey, 'stale-watchdog');
     }
   }, STALE_WATCHDOG_CHECK_MS);
 }
@@ -992,6 +944,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // can match immediately, with no timing gap between RPC send and response.
     // Source: openclaw/ui/src/ui/controllers/chat.ts:192-196
     const localRunId = crypto.randomUUID();
+    const sendSessionKey = get().sessionKey;
 
     // Non-image references render as chips in the user bubble (images already
     // show as thumbnails). Persisted on the optimistic message; reconstructed
@@ -1033,6 +986,16 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       },
       inputRestore: null,
     }));
+    useSessionRunsStore.getState().setLocalRunId(sendSessionKey, localRunId);
+    useSessionRunsStore.getState().setCommand(sendSessionKey, 'submitting');
+    useSessionRunsStore.getState().observeActivity({
+      sessionKey: sendSessionKey,
+      runId: localRunId,
+      kind: 'submitting',
+      label: 'submitting',
+      observedAt: Date.now(),
+      source: 'local-ack',
+    });
     useTaskFlowStore.getState().startRun(localRunId, get().sessionKey, {
       userTimestamp: userMessage.timestamp,
       userText: displayText,
@@ -1151,6 +1114,16 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         ...(finalAttachments?.length ? { attachments: finalAttachments } : {}),
       });
       set({ sending: false, streaming: true, _streamStartedAt: Date.now(), _lastDeltaAt: null });
+      useSessionRunsStore.getState().setCommand(sendSessionKey, 'idle');
+      useSessionRunsStore.getState().observeActivity({
+        sessionKey: sendSessionKey,
+        runId: localRunId,
+        kind: 'processing',
+        label: 'processing',
+        observedAt: Date.now(),
+        source: 'local-ack',
+      });
+      void useSessionRunsStore.getState().requestReconcile(sendSessionKey, 'chat.send-ack');
 
       // Start stale-streaming watchdog. Checks every 15s if no delta has arrived
       // within 360s (covers both "no first delta" and "mid-stream death" scenarios).
@@ -1172,6 +1145,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         ),
       });
       useTaskFlowStore.getState().endRun(localRunId, 'error');
+      useSessionRunsStore.getState().clearTransient(sendSessionKey, localRunId);
     }
   },
 
@@ -1179,6 +1153,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     stopStaleStreamWatchdog();
     const client = useGatewayStore.getState().client;
     const { runId, sessionKey } = get();
+    const sessionRun = useSessionRunsStore.getState();
+    sessionRun.setCommand(sessionKey, 'stopping');
 
     // Restore input immediately on stop — do not wait for gateway 'aborted' event
     // (it may be delayed, missing, or carry a mismatched runId).
@@ -1189,9 +1165,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     //   runId ? { sessionKey, runId } : { sessionKey }
     if (client && client.isConnected) {
       const params = runId ? { runId, sessionKey } : { sessionKey };
-      client.request('chat.abort', params).catch((err) => {
-        console.warn('[Chat] Abort failed:', err);
-      });
+      void client.request('chat.abort', params)
+        .catch((err) => {
+          console.warn('[Chat] Abort result uncertain:', err);
+        })
+        .finally(() => {
+          void useSessionRunsStore.getState().requestReconcile(sessionKey, 'chat.abort');
+        });
     }
 
     // If no runId, this is an orphan streaming state (e.g. after session switch
@@ -1207,6 +1187,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         _lastDeltaAt: null,
         ...(optimisticRestore ?? {}),
       }));
+      void sessionRun.requestReconcile(sessionKey, 'chat.abort-session');
       return;
     }
 
@@ -1221,34 +1202,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       ...(optimisticRestore ?? {}),
     }));
 
-    // Safety: if server doesn't send 'aborted' event within 3s, force-clear runId.
+    // A local timer cannot prove that abort succeeded. If the terminal event is
+    // delayed or lost, ask the Session authority and keep Stop state until it answers.
     const abortedRunId = runId;
-    useTaskFlowStore.getState().endRun(abortedRunId, 'clear');
     setTimeout(() => {
       if (get().runId === abortedRunId) {
-        console.warn('[Chat] Abort timeout — force-clearing streaming state');
-        const partialText = get().streamText;
-        if (partialText) {
-          set((s) => ({
-            messages: [
-              ...s.messages,
-              { role: 'assistant' as const, text: partialText, timestamp: Date.now() },
-            ],
-            streamText: null,
-            runId: null,
-            _streamStartedAt: null,
-            _lastDeltaAt: null,
-            _pendingUserMsgs: [],
-          }));
-        } else {
-          set({
-            streamText: null,
-            runId: null,
-            _streamStartedAt: null,
-            _lastDeltaAt: null,
-            _pendingUserMsgs: [],
-          });
-        }
+        console.info('[Chat] Abort still pending — reconciling OC Session state');
+        void useSessionRunsStore.getState().requestReconcile(sessionKey, 'abort-pending');
       }
     }, 3000);
   },

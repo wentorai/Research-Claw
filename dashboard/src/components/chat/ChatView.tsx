@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Typography, Spin, Alert, Button, Space } from 'antd';
 import {
   MessageOutlined,
@@ -31,6 +32,7 @@ import { isStagedWritingJobForSession } from '../../utils/staged-writing-run';
 import { isTaskFlowVisible } from '../../utils/task-flow';
 import { detectStagedWritingIntent } from '../../utils/staged-writing-detect';
 import { useExecutionTraceStore } from '../../stores/execution-trace';
+import { selectSessionRunView, useSessionRunsStore } from '../../stores/session-runs';
 
 const { Text } = Typography;
 
@@ -212,7 +214,8 @@ export default function ChatView() {
   // Matches OC pattern: openclaw/ui/src/ui/app-scroll.ts:19-21
   const scrollFrameRef = useRef<number | null>(null);
   const prevActivityActiveRef = useRef(false);
-  const activityActive = sending || streaming || compacting || pendingTools.length > 0;
+  const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, sessionKey)));
+  const activityActive = sessionRun.isBusy || pendingTools.length > 0;
   const taskFlow = useTaskFlowStore((s) => s.flow);
   const taskFlowVisible = isTaskFlowVisible(taskFlow);
   const timelineAnchorIndex = useMemo(() => {

@@ -1,6 +1,9 @@
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 import { useConfigStore } from '../stores/config';
-import { useUiStore } from '../stores/ui';
+import { useGatewayStore } from '../stores/gateway';
+import { useSessionsStore } from '../stores/sessions';
+import { selectSessionRunView, useSessionRunsStore } from '../stores/session-runs';
 import NotificationDropdown from './NotificationDropdown';
 import type { AgentStatus } from '../stores/ui';
 
@@ -66,7 +69,22 @@ export default function TopBar() {
   const setTheme = useConfigStore((s) => s.setTheme);
   const locale = useConfigStore((s) => s.locale);
   const setLocale = useConfigStore((s) => s.setLocale);
-  const agentStatus = useUiStore((s) => s.agentStatus);
+  const transport = useGatewayStore((s) => s.state);
+  const activeSessionKey = useSessionsStore((s) => s.activeSessionKey);
+  const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, activeSessionKey)));
+  const agentStatus: AgentStatus = transport !== 'connected'
+    ? 'disconnected'
+    : sessionRun.lifecycle === 'failed' || sessionRun.lifecycle === 'timeout'
+      ? 'error'
+      : sessionRun.activity?.kind === 'compacting'
+        ? 'compacting'
+        : sessionRun.activity?.kind === 'tool'
+          ? 'tool_running'
+          : sessionRun.activity?.kind === 'streaming'
+            ? 'streaming'
+            : sessionRun.isBusy
+              ? 'thinking'
+              : 'idle';
 
   const isDark = theme === 'dark';
 

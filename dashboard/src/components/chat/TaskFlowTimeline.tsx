@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import {
   CheckCircleOutlined,
@@ -8,6 +9,8 @@ import {
 } from '@ant-design/icons';
 
 import { useTaskFlowStore } from '../../stores/task-flow';
+import { useChatStore } from '../../stores/chat';
+import { selectSessionRunView, useSessionRunsStore } from '../../stores/session-runs';
 import {
   INFERRED_STAGE_IDS,
   isTaskFlowVisible,
@@ -49,6 +52,8 @@ export default function TaskFlowTimeline() {
   const flow = useTaskFlowStore((s) => s.flow);
   const tickMs = useTaskFlowStore((s) => s.tickMs);
   const tick = useTaskFlowStore((s) => s.tick);
+  const sessionKey = useChatStore((s) => s.sessionKey);
+  const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, sessionKey)));
 
   useEffect(() => {
     if (!flow || flow.activeIndex < 0) return;
@@ -56,7 +61,20 @@ export default function TaskFlowTimeline() {
     return () => window.clearInterval(id);
   }, [flow?.runId, flow?.activeIndex, tick]);
 
-  if (!isTaskFlowVisible(flow)) return null;
+  if (!isTaskFlowVisible(flow)) {
+    if (!sessionRun.isBusy) return null;
+    return (
+      <div className="task-flow-timeline" role="status" aria-live="polite">
+        <div className="task-flow-header">
+          <span className="task-flow-title">
+            <LoadingOutlined spin style={{ color: '#f59e0b', fontSize: 13, marginRight: 8 }} />
+            {t('chat.thinking')}
+          </span>
+        </div>
+        <div className="task-flow-heartbeat">{t('taskFlow.stillWorking')}</div>
+      </div>
+    );
+  }
 
   const elapsedSec = Math.max(0, Math.floor((tickMs - flow!.startedAtMs) / 1000));
   const activeStage = flow!.stages.find((s) => s.status === 'active' || s.status === 'error');

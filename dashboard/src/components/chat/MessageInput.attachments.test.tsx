@@ -8,6 +8,7 @@ import { useChatStore } from '../../stores/chat';
 import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
 import { useUiStore } from '../../stores/ui';
+import { useSessionRunsStore } from '../../stores/session-runs';
 
 const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
@@ -123,12 +124,32 @@ describe('MessageInput attachment picker', () => {
       _localOnlyMsgs: [],
     });
     useUiStore.setState({ chatInputPrefill: null, chatAttachmentPrefill: null });
+    useSessionRunsStore.getState().resetForTests();
   });
 
   afterEach(() => {
     cleanup();
+    useSessionRunsStore.getState().resetForTests();
     vi.unstubAllGlobals();
     document.querySelectorAll('.ant-dropdown').forEach((node) => node.remove());
+  });
+
+  it('keeps Stop available from server-active truth after the local runId is lost', async () => {
+    useSessionRunsStore.getState().ingestSnapshot({
+      key: 'agent:main:main',
+      sessionId: 'session-1',
+      status: 'running',
+      hasActiveRun: true,
+      startedAt: Date.now() - 10_000,
+    }, { eventEpoch: 1, observedAt: Date.now() });
+
+    renderComposer();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Stop/i }));
+      await Promise.resolve();
+    });
+
+    expect(gatewayRequest).toHaveBeenCalledWith('chat.abort', { sessionKey: 'main' });
   });
 
   it('exposes an accessible Add attachment button and a keyboard-capable two-action menu', async () => {

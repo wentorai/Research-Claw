@@ -41,7 +41,6 @@ export interface SessionRunRowLike {
   endedAt?: number;
   runtimeMs?: number;
   phase?: string;
-  [key: string]: unknown;
 }
 
 interface SnapshotAction {
@@ -397,4 +396,3 @@ export function reconcileSessionRun(
     ...(terminal ? { terminal } : { terminal: undefined }),
   });
 }
-

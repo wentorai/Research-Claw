@@ -357,8 +357,8 @@ describe('Chat send parity with OpenClaw native UI', () => {
       // chat.ts:241: state.chatSending = false (finally block)
       // Our impl transitions to streaming=true after successful response
       let sendingDuringRpc: boolean | undefined;
-      mockGatewayClient.request.mockImplementation(() => {
-        sendingDuringRpc = useChatStore.getState().sending;
+      mockGatewayClient.request.mockImplementation((method: string) => {
+        if (method === 'chat.send') sendingDuringRpc = useChatStore.getState().sending;
         return Promise.resolve({ runId: 'r1' });
       });
 

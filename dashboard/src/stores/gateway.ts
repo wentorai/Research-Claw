@@ -82,30 +82,8 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // event on this connection can be sequenced against the previous one.
         bumpEventEpoch();
         get().setServerInfo(hello);
-        // Fix 2 — Reconnection-safe streaming state reset.
-        // Old behavior: unconditionally clear streaming/runId on every reconnect.
-        // Problem: if the user sent a message that the gateway queued (collect mode),
-        // the WS reconnection destroys the pending run state. Combined with
-        // loadHistory() not finding the queued message in the transcript, the
-        // optimistic user message vanishes.
-        //
-        // New behavior: if we have a pending runId (user sent a message and is
-        // waiting for a response), keep the runId and streaming state alive.
-        // The stale-stream timer (360s) will recover if the run is truly dead.
-        // Only clear streamText (partial stream data was lost during reconnect).
-        void import('./chat').then(({ useChatStore }) => {
-          const { runId } = useChatStore.getState();
-          if (runId) {
-            // Pending user-initiated run — preserve state, clear partial stream.
-            // Fix 3: set _reconnectedAt so the stale-stream watchdog uses a shorter
-            // timeout (15s vs 360s) for faster recovery if the run completed during
-            // the disconnect window and no more deltas will arrive.
-            useChatStore.setState({ streamText: null, _reconnectedAt: Date.now() });
-          } else {
-            // No pending run — reset orphaned state (original behavior)
-            useChatStore.setState({ streaming: false, streamText: null, runId: null, _reconnectedAt: null });
-          }
-        });
+        // Transport recovery is not a run terminal. Keep any local projection
+        // intact until sessions.list/chat.history supplies authoritative state.
         // Reset retry counter for fresh evaluation on (re)connection
         useConfigStore.setState({ _configRetryCount: 0 });
         // Auto-fetch config on every (re)connection
@@ -161,10 +139,51 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         });
       },
       onEvent: (event: EventFrame) => {
+        if (event.event === 'chat') {
+          const payload = event.payload as {
+            state?: string;
+            sessionKey?: string;
+            runId?: string;
+            errorKind?: string;
+            message?: { isError?: boolean };
+          } | undefined;
+          if (
+            payload?.sessionKey
+            && (payload.state === 'final' || payload.state === 'aborted' || payload.state === 'error')
+          ) {
+            const eventEpoch = get().eventEpoch;
+            void import('./session-runs').then(({ selectSessionRunView, useSessionRunsStore }) => {
+              const store = useSessionRunsStore.getState();
+              const command = selectSessionRunView(store, payload.sessionKey!).command;
+              const status = payload.state === 'final'
+                ? (payload.message?.isError ? 'failed' : 'done')
+                : payload.state === 'error'
+                  ? (payload.errorKind === 'timeout' ? 'timeout' : 'failed')
+                  : command === 'stopping'
+                    ? 'killed'
+                    : 'interrupted';
+              store.applyChatTerminal({
+                sessionKey: payload.sessionKey!,
+                runId: payload.runId,
+                status,
+                eventEpoch,
+                seq: event.seq,
+                observedAt: Date.now(),
+              });
+            });
+          }
+        }
         // Handle session change events (aligned with OC UI sessions.subscribe)
         if (event.event === 'sessions.changed') {
+          const eventEpoch = get().eventEpoch;
+          void import('./session-runs').then(({ useSessionRunsStore }) => {
+            useSessionRunsStore.getState().ingestSessionEvent(event.payload, {
+              eventEpoch,
+              seq: event.seq,
+            });
+          });
           void import('./sessions').then(({ useSessionsStore }) => {
-            useSessionsStore.getState().loadSessions();
+            void useSessionsStore.getState().loadSessions();
           });
         }
         // Handle shutdown event (gateway restart notification)
@@ -183,6 +202,15 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // Safe: onGap fires only after connect, when both stores are initialized.
         void import('./chat').then(({ useChatStore }) => {
           useChatStore.getState().onGapDetected();
+        });
+        void Promise.all([import('./session-runs'), import('./sessions')]).then(([
+          { useSessionRunsStore },
+          { useSessionsStore },
+        ]) => {
+          void useSessionRunsStore.getState().requestReconcile(
+            useSessionsStore.getState().activeSessionKey,
+            'seq-gap',
+          );
         });
       },
       onConnectError: (code: string, message: string) => {

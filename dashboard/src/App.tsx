@@ -29,6 +29,7 @@ import SupervisorReviewListener from './components/SupervisorReviewListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
+import { useSessionRunsStore } from './stores/session-runs';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -99,7 +100,6 @@ export default function App() {
   const connectError = useGatewayStore((s) => s.connectError);
   const handleChatEvent = useChatStore((s) => s.handleChatEvent);
   const loadHistory = useChatStore((s) => s.loadHistory);
-  const setAgentStatus = useUiStore((s) => s.setAgentStatus);
   const leftNavCollapsed = useUiStore((s) => s.leftNavCollapsed);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
   const rightPanelWidth = useUiStore((s) => s.rightPanelWidth);
@@ -160,9 +160,19 @@ export default function App() {
     if (!client) return;
 
     const unsubChat = client.subscribe('chat', (payload) => {
-      handleChatEvent(payload as ChatStreamEvent);
-      // Clear foreground tool stream when a run completes
       const event = payload as ChatStreamEvent;
+      if (event.sessionKey && event.state === 'delta') {
+        useSessionRunsStore.getState().observeActivity({
+          sessionKey: event.sessionKey,
+          runId: event.runId,
+          kind: 'streaming',
+          label: 'streaming',
+          observedAt: Date.now(),
+          source: 'chat-event',
+        });
+      }
+      handleChatEvent(event);
+      // Clear foreground tool stream when a run completes
       if (event.state === 'final' || event.state === 'aborted' || event.state === 'error') {
         useToolStreamStore.setState({ pendingTools: [] });
       }
@@ -170,29 +180,40 @@ export default function App() {
 
     const handleAgentPayload = (payload: unknown) => {
       const status = payload as {
+        runId?: string;
+        sessionKey?: string;
         state?: string;
         stream?: string;
-        data?: { phase?: string };
+        data?: { phase?: string; name?: string; toolName?: string };
       };
 
       if (status.stream === 'compaction' && status.data?.phase) {
         useChatStore.getState().handleCompactionAgentEvent(status);
-        if (status.data.phase === 'start') {
-          setAgentStatus('compacting');
-        } else if (status.data.phase === 'end' && useChatStore.getState().streaming) {
-          setAgentStatus('thinking');
-        }
       } else if (
         status.stream === 'lifecycle'
         && status.data?.phase === 'error'
       ) {
         useChatStore.getState().handleAgentFailureEvent(status);
-        setAgentStatus('error');
       } else if (status.stream === 'error') {
         useChatStore.getState().handleAgentFailureEvent(status);
-        setAgentStatus('error');
-      } else if (status.state) {
-        setAgentStatus(status.state as 'idle' | 'thinking' | 'compacting' | 'tool_running' | 'streaming' | 'error');
+      }
+      if (status.sessionKey) {
+        const toolName = status.data?.name ?? status.data?.toolName;
+        const kind = status.stream === 'compaction'
+          ? 'compacting'
+          : status.stream === 'tool'
+            ? 'tool'
+            : status.state === 'streaming'
+              ? 'streaming'
+              : 'processing';
+        useSessionRunsStore.getState().observeActivity({
+          sessionKey: status.sessionKey,
+          runId: status.runId,
+          kind,
+          label: toolName ?? kind,
+          observedAt: Date.now(),
+          source: status.stream === 'tool' ? 'tool-event' : 'agent-event',
+        });
       }
       // Feed tool stream store for P1-2 (inline tool display) and P1-3 (bg activity)
       const chatRunId = useChatStore.getState().runId;
@@ -210,7 +231,7 @@ export default function App() {
       unsubAgent();
       unsubSessionTool();
     };
-  }, [client, handleChatEvent, setAgentStatus]);
+  }, [client, handleChatEvent]);
 
   // On connection: restore persisted session, load history + session list + check notifications
   useEffect(() => {
@@ -228,14 +249,11 @@ export default function App() {
       void Promise.all([historyPromise, sessionsPromise, onboardingPromise]).then(() => {
         useOnboardingStore.getState().markProbesReady();
       });
-      setAgentStatus('idle');
       // Initial notification check
       useUiStore.getState().checkNotifications();
       void useStagedWritingStore.getState().restoreJob();
-    } else if (connState === 'disconnected' || connState === 'reconnecting') {
-      setAgentStatus('disconnected');
     }
-  }, [connState, loadHistory, setAgentStatus]);
+  }, [connState, loadHistory]);
 
   // Load session usage once boot completes (after config.get finishes).
   // Deferred from connection effect to avoid competing with the critical config.get RPC.
@@ -280,6 +298,10 @@ export default function App() {
           lastVisibilitySyncAt = now;
           setTimeout(() => {
             useChatStore.getState().loadHistory();
+            void useSessionRunsStore.getState().requestReconcile(
+              useSessionsStore.getState().activeSessionKey,
+              'visibility',
+            );
           }, 300);
         }
       }

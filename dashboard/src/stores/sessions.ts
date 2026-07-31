@@ -32,6 +32,13 @@ export interface Session {
    * Present when the session has an active model override; null/undefined otherwise.
    */
   model?: string | null;
+  /** OpenClaw Session lifecycle projection. These fields come from the
+   * sessions.list authority and must not be inferred from chat deltas. */
+  status?: 'running' | 'done' | 'failed' | 'killed' | 'timeout';
+  hasActiveRun?: boolean;
+  startedAt?: number;
+  endedAt?: number;
+  runtimeMs?: number;
 }
 
 /** Fields supported by OC sessions.patch RPC (aligned with OC controllers/sessions.ts). */
@@ -106,6 +113,7 @@ import {
 import { isSessionRowStale } from '../utils/session-freshness';
 import { isAutoNameCandidate, extractFirstExchange, type HistoryMessage } from '../utils/auto-name';
 import { useConfigStore } from './config';
+import { useSessionRunsStore } from './session-runs';
 
 /**
  * Sessions already auto-named (or naming in-flight) this dashboard lifetime.
@@ -114,6 +122,8 @@ import { useConfigStore } from './config';
  * a session is named at most once (user rename then wins forever).
  */
 const autoNameGuard = new Set<string>();
+let sessionsLoadGeneration = 0;
+let sessionsLoadInFlight: Promise<void> | null = null;
 
 /** Test-only: reset the auto-name guard between test cases. */
 export function _resetAutoNameGuard(): void {
@@ -144,32 +154,47 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
   activeSessionStale: false,
   staleSendAcknowledgedKey: null,
 
-  loadSessions: async () => {
-    const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
-    set({ loading: true });
-    try {
-      const result = await client.request<{ sessions: Session[] }>('sessions.list', {
-        includeDerivedTitles: true,
-        limit: 1000,
-      });
-      // Drop synthetic sessions: heartbeat (isolatedSession runs in "<base>:heartbeat")
-      // and subagent runs ("agent:main:subagent:<uuid>").
-      const serverSessions = (result.sessions ?? []).filter(
-        (s) => !isHeartbeatSessionKey(s.key) && !isSubagentSessionKey(s.key),
-      );
-      // Ensure the main session is always present in the list
-      const sessions = serverSessions.some((s) => isMain(s.key))
-        ? serverSessions
-        : [{ key: MAIN_SESSION_KEY }, ...serverSessions];
-      set({
-        sessions,
-        loading: false,
-        activeSessionStale: computeActiveSessionStale(sessions, get().activeSessionKey),
-      });
-    } catch {
-      set({ loading: false });
-    }
+  loadSessions: () => {
+    if (sessionsLoadInFlight) return sessionsLoadInFlight;
+    const request = (async () => {
+      const client = useGatewayStore.getState().client;
+      if (!client?.isConnected) return;
+      const generation = ++sessionsLoadGeneration;
+      const eventEpoch = useGatewayStore.getState().eventEpoch;
+      set({ loading: true });
+      try {
+        const result = await client.request<{ sessions: Session[] }>('sessions.list', {
+          includeDerivedTitles: true,
+          limit: 1000,
+        });
+        // Drop synthetic sessions: heartbeat (isolatedSession runs in "<base>:heartbeat")
+        // and subagent runs ("agent:main:subagent:<uuid>").
+        const serverSessions = (result.sessions ?? []).filter(
+          (s) => !isHeartbeatSessionKey(s.key) && !isSubagentSessionKey(s.key),
+        );
+        if (generation !== sessionsLoadGeneration) return;
+        const observedAt = Date.now();
+        for (const session of serverSessions) {
+          useSessionRunsStore.getState().ingestSnapshot(session, { eventEpoch, observedAt });
+        }
+        // Ensure the main session is always present in the list
+        const sessions = serverSessions.some((s) => isMain(s.key))
+          ? serverSessions
+          : [{ key: MAIN_SESSION_KEY }, ...serverSessions];
+        set({
+          sessions,
+          loading: false,
+          activeSessionStale: computeActiveSessionStale(sessions, get().activeSessionKey),
+        });
+      } catch {
+        if (generation === sessionsLoadGeneration) set({ loading: false });
+      }
+    })();
+    sessionsLoadInFlight = request;
+    void request.finally(() => {
+      if (sessionsLoadInFlight === request) sessionsLoadInFlight = null;
+    });
+    return request;
   },
 
   refreshActiveSessionStale: () => {
@@ -195,6 +220,7 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     useChatStore.getState().setSessionKey(safeKey);
     useChatStore.getState().loadHistory();
     useChatStore.getState().loadSessionUsage();
+    void useSessionRunsStore.getState().requestReconcile(safeKey, 'session-switch');
   },
 
   createSession: async () => {

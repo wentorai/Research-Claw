@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useChatStore } from './chat';
 import { useStagedWritingStore } from './staged-writing';
 import { buildInitialStageStates, STAGED_WRITING_STAGES } from '../utils/staged-writing-stages';
+import { useSessionRunsStore } from './session-runs';
 
 // Mock the gateway store
 const mockGatewayClient = {
@@ -54,6 +55,7 @@ describe('Chat store', () => {
       job: null,
       restored: false,
     });
+    useSessionRunsStore.getState().resetForTests();
   });
 
   describe('send', () => {
@@ -617,7 +619,7 @@ describe('Chat store', () => {
       expect(useChatStore.getState().streamText).toBeNull();
     });
 
-    it('skips RPC when disconnected but still schedules timeout', () => {
+    it('skips RPC when disconnected and does not let a timer invent abort success', () => {
       vi.useFakeTimers();
       useChatStore.setState({ runId: 'run-1', streaming: true, streamText: 'partial' });
       mockGatewayClient.isConnected = false;
@@ -628,11 +630,10 @@ describe('Chat store', () => {
       // Stops streaming immediately; partial text kept until timeout
       expect(useChatStore.getState().streaming).toBe(false);
 
-      // After 3s timeout, runId cleared and partial saved as assistant message
+      // After 3s, the local run remains until an authoritative terminal arrives.
       vi.advanceTimersByTime(3000);
-      expect(useChatStore.getState().runId).toBeNull();
-      expect(useChatStore.getState().messages).toHaveLength(1);
-      expect(useChatStore.getState().messages[0].text).toBe('partial');
+      expect(useChatStore.getState().runId).toBe('run-1');
+      expect(useChatStore.getState().messages).toHaveLength(0);
       vi.useRealTimers();
     });
 
