@@ -1,5 +1,10 @@
 import { useTranslation } from 'react-i18next';
-import { useToolStreamStore, type PendingTool } from '../../stores/tool-stream';
+import { useShallow } from 'zustand/react/shallow';
+import {
+  selectPendingTools,
+  useToolStreamStore,
+  type PendingTool,
+} from '../../stores/tool-stream';
 import { LoadingOutlined, CheckCircleOutlined, ToolOutlined } from '@ant-design/icons';
 
 function ToolItem({ tool }: { tool: PendingTool }) {
@@ -36,8 +41,10 @@ function ToolItem({ tool }: { tool: PendingTool }) {
   );
 }
 
-export default function ToolActivityStream() {
-  const pendingTools = useToolStreamStore((s) => s.pendingTools);
+export default function ToolActivityStream({ sessionKey }: { sessionKey: string }) {
+  const pendingTools = useToolStreamStore(
+    useShallow((state) => selectPendingTools(state, sessionKey)),
+  );
 
   if (pendingTools.length === 0) return null;
 

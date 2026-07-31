@@ -181,7 +181,9 @@ export default function App() {
         && (!event.runId || !chatBeforeEvent.runId || event.runId === chatBeforeEvent.runId)
         && (event.state === 'final' || event.state === 'aborted' || event.state === 'error')
       ) {
-        useToolStreamStore.setState({ pendingTools: [] });
+        useToolStreamStore.getState().clearSession(
+          event.sessionKey ?? chatBeforeEvent.sessionKey,
+        );
       }
     });
 
@@ -206,14 +208,16 @@ export default function App() {
       }
       if (status.sessionKey) {
         const activity = resolveObservedRunActivity(status);
-        useSessionRunsStore.getState().observeActivity({
-          sessionKey: status.sessionKey,
-          runId: status.runId,
-          kind: activity.kind,
-          label: activity.label,
-          observedAt: Date.now(),
-          source: status.stream === 'tool' ? 'tool-event' : 'agent-event',
-        });
+        if (activity) {
+          useSessionRunsStore.getState().observeActivity({
+            sessionKey: status.sessionKey,
+            runId: status.runId,
+            kind: activity.kind,
+            label: activity.label,
+            observedAt: Date.now(),
+            source: status.stream === 'tool' ? 'tool-event' : 'agent-event',
+          });
+        }
       }
       // Feed tool stream store for P1-2 (inline tool display) and P1-3 (bg activity)
       const chatRunId = useChatStore.getState().runId;

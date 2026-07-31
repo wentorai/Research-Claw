@@ -217,7 +217,7 @@ export default function MessageInput() {
   const handleRefresh = useCallback(async () => {
     const beforeCount = useChatStore.getState().messages.length;
     try {
-      useToolStreamStore.getState().clearAll();
+      useToolStreamStore.getState().clearSession(sessionKey);
       await loadHistory();
       const afterCount = useChatStore.getState().messages.length;
       const diff = afterCount - beforeCount;

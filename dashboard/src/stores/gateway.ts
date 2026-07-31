@@ -4,6 +4,7 @@ import { useConfigStore } from './config';
 import { RC_VERSION } from '../version';
 import type { ConnectionState, HelloOk, EventFrame, SessionDefaults } from '../gateway/types';
 import { classifyChatTerminalLifecycle } from '../utils/session-run-state';
+import { recordRunTrace } from '../utils/run-trace';
 
 /** Stable per-tab instance ID for gateway deduplication (aligned with OC clientInstanceId). */
 const _instanceId = crypto.randomUUID();
@@ -75,6 +76,12 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // to handlers registered on the previous connection. Leaving 'connected'
         // is the last moment guaranteed to precede every frame of the next one.
         if (state !== 'connected') bumpEventEpoch();
+        recordRunTrace({
+          source: 'gateway',
+          action: 'transport-state',
+          eventEpoch: get().eventEpoch,
+          decision: state,
+        });
         set({ state, ...(state === 'connected' ? { connectError: null } : {}) });
       },
       onHello: (hello: HelloOk) => {
@@ -82,6 +89,12 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // per-connection sequence numbering and the client zeroes lastSeq, so no
         // event on this connection can be sequenced against the previous one.
         bumpEventEpoch();
+        recordRunTrace({
+          source: 'gateway',
+          action: 'hello',
+          eventEpoch: get().eventEpoch + 1,
+          decision: hello.server?.connId ? 'runtime-identified' : 'runtime-id-missing',
+        });
         get().setServerInfo(hello);
         // Transport recovery is not a run terminal. Keep any local projection
         // intact until sessions.list/chat.history supplies authoritative state.
@@ -157,6 +170,17 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
             && (payload.state === 'final' || payload.state === 'aborted' || payload.state === 'error')
           ) {
             const eventEpoch = get().eventEpoch;
+            recordRunTrace({
+              source: 'gateway',
+              action: 'chat-terminal',
+              sessionKey: payload.sessionKey,
+              runId: payload.runId,
+              eventEpoch,
+              seq: event.seq,
+              status: payload.state,
+              reason: payload.stopReason ?? payload.errorKind,
+              fieldsPresent: Object.keys(payload),
+            });
             void import('./session-runs').then(({ selectSessionRunView, useSessionRunsStore }) => {
               const store = useSessionRunsStore.getState();
               const command = selectSessionRunView(store, payload.sessionKey!).command;
@@ -176,6 +200,31 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // Handle session change events (aligned with OC UI sessions.subscribe)
         if (event.event === 'sessions.changed') {
           const eventEpoch = get().eventEpoch;
+          const payload = event.payload && typeof event.payload === 'object'
+            ? event.payload as Record<string, unknown>
+            : {};
+          const nested = payload.session && typeof payload.session === 'object'
+            ? payload.session as Record<string, unknown>
+            : {};
+          const source = Object.keys(nested).length > 0 ? nested : payload;
+          recordRunTrace({
+            source: 'gateway',
+            action: 'sessions.changed',
+            sessionKey: typeof source.sessionKey === 'string'
+              ? source.sessionKey
+              : typeof source.key === 'string'
+                ? source.key
+                : undefined,
+            sessionId: typeof source.sessionId === 'string' ? source.sessionId : undefined,
+            runId: typeof payload.runId === 'string' ? payload.runId : undefined,
+            eventEpoch,
+            seq: event.seq,
+            status: typeof source.status === 'string' ? source.status : undefined,
+            hasActiveRun: typeof source.hasActiveRun === 'boolean' ? source.hasActiveRun : undefined,
+            startedAt: typeof source.startedAt === 'number' ? source.startedAt : undefined,
+            endedAt: typeof source.endedAt === 'number' ? source.endedAt : undefined,
+            fieldsPresent: Object.keys(source),
+          });
           void import('./session-runs').then(({ useSessionRunsStore }) => {
             useSessionRunsStore.getState().ingestSessionEvent(event.payload, {
               eventEpoch,
@@ -194,6 +243,12 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       },
       onGap: ({ expected, received }: GapInfo) => {
         console.warn(`[Gateway] Event sequence gap: expected ${expected}, got ${received} — scheduling history sync`);
+        recordRunTrace({
+          source: 'gateway',
+          action: 'seq-gap',
+          eventEpoch: get().eventEpoch,
+          reason: `expected:${expected};received:${received}`,
+        });
         // First, and synchronously: the frame that revealed this gap has not
         // reached the event subscribers yet, and it may itself be the cron
         // completion whose place in a failure episode we can no longer establish.

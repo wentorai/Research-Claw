@@ -14,7 +14,7 @@ import {
 } from '../utils/task-flow';
 
 interface TaskFlowState {
-  flow: TaskFlowSnapshot | null;
+  flows: Record<string, TaskFlowSnapshot>;
   tickMs: number;
 
   startRun: (
@@ -30,46 +30,81 @@ interface TaskFlowState {
     data?: Record<string, unknown>;
   }, activeSessionKey: string, chatRunId: string | null) => void;
   handleStreamText: (runId: string | null | undefined, hasText: boolean) => void;
-  handleCompaction: (active: boolean) => void;
+  handleCompaction: (active: boolean, sessionKey?: string) => void;
   tick: () => void;
-  clear: () => void;
+  clear: (sessionKey?: string) => void;
+}
+
+export function selectTaskFlow(
+  state: Pick<TaskFlowState, 'flows'>,
+  sessionKey: string,
+): TaskFlowSnapshot | null {
+  return state.flows[normalizeSessionKey(sessionKey)] ?? null;
+}
+
+function findFlowEntry(
+  flows: Record<string, TaskFlowSnapshot>,
+  runId: string | null | undefined,
+): [string, TaskFlowSnapshot] | null {
+  if (!runId) return null;
+  return Object.entries(flows).find(([, flow]) => flow.runId === runId) ?? null;
 }
 
 export const useTaskFlowStore = create<TaskFlowState>()((set, get) => ({
-  flow: null,
+  flows: {},
   tickMs: Date.now(),
 
   startRun: (runId, sessionKey, anchor) => {
-    set({
-      flow: createInferredTaskFlow(runId, normalizeSessionKey(sessionKey), Date.now(), anchor),
+    const key = normalizeSessionKey(sessionKey);
+    set((state) => ({
+      flows: {
+        ...state.flows,
+        [key]: createInferredTaskFlow(runId, key, Date.now(), anchor),
+      },
       tickMs: Date.now(),
-    });
+    }));
   },
 
   endRun: (runId, outcome) => {
-    const flow = get().flow;
-    if (!flow) return;
-    if (runId && flow.runId !== runId) return;
+    const entry = findFlowEntry(get().flows, runId);
+    if (!entry) return;
+    const [sessionKey, flow] = entry;
     if (outcome === 'clear') {
-      set({ flow: null });
+      set((state) => {
+        const flows = { ...state.flows };
+        delete flows[sessionKey];
+        return { flows };
+      });
       return;
     }
-    set({ flow: finishTaskFlow(flow, outcome) });
+    set((state) => ({
+      flows: {
+        ...state.flows,
+        [sessionKey]: finishTaskFlow(flow, outcome),
+      },
+    }));
     window.setTimeout(() => {
-      if (get().flow?.runId === flow.runId) {
-        set({ flow: null });
+      if (get().flows[sessionKey]?.runId === flow.runId) {
+        set((state) => {
+          const flows = { ...state.flows };
+          delete flows[sessionKey];
+          return { flows };
+        });
       }
     }, outcome === 'error' ? 12_000 : 4_000);
   },
 
   handleToolEvent: (payload, activeSessionKey, chatRunId) => {
     if (!payload.runId || payload.stream !== 'tool' || !payload.data?.phase) return;
-    const flow = get().flow;
+    const eventSession = normalizeSessionKey(payload.sessionKey ?? activeSessionKey);
+    const flow = get().flows[eventSession];
     if (!flow || flow.runId !== payload.runId) return;
 
-    const eventSession = normalizeSessionKey(payload.sessionKey ?? flow.sessionKey);
-    if (eventSession !== normalizeSessionKey(activeSessionKey)) return;
-    if (chatRunId && payload.runId !== chatRunId) return;
+    if (
+      eventSession === normalizeSessionKey(activeSessionKey)
+      && chatRunId
+      && payload.runId !== chatRunId
+    ) return;
 
     const phase = payload.data.phase;
     const toolName = String(payload.data.name ?? payload.data.toolName ?? 'unknown');
@@ -77,7 +112,13 @@ export const useTaskFlowStore = create<TaskFlowState>()((set, get) => ({
     if (toolName === TASK_FLOW_STAGE_TOOL && (phase === 'start' || phase === 'running')) {
       const report = parseTaskFlowStageFromToolData(payload.data);
       if (report) {
-        set({ flow: applyExplicitStageReport(flow, report), tickMs: Date.now() });
+        set((state) => ({
+          flows: {
+            ...state.flows,
+            [eventSession]: applyExplicitStageReport(flow, report),
+          },
+          tickMs: Date.now(),
+        }));
       }
       return;
     }
@@ -87,29 +128,58 @@ export const useTaskFlowStore = create<TaskFlowState>()((set, get) => ({
       if (next.activeIndex === 1) {
         next = updateInferredExecuteDetail(next, toolName);
       }
-      set({ flow: next, tickMs: Date.now() });
+      set((state) => ({
+        flows: { ...state.flows, [eventSession]: next },
+        tickMs: Date.now(),
+      }));
     }
   },
 
   handleStreamText: (runId, hasText) => {
     if (!hasText) return;
-    const flow = get().flow;
-    if (!flow || (runId && flow.runId !== runId)) return;
-    set({ flow: advanceInferredOnStreamText(flow), tickMs: Date.now() });
+    const entry = findFlowEntry(get().flows, runId);
+    if (!entry) return;
+    const [sessionKey, flow] = entry;
+    set((state) => ({
+      flows: {
+        ...state.flows,
+        [sessionKey]: advanceInferredOnStreamText(flow),
+      },
+      tickMs: Date.now(),
+    }));
   },
 
-  handleCompaction: (active) => {
-    const flow = get().flow;
+  handleCompaction: (active, rawSessionKey) => {
+    if (!rawSessionKey) return;
+    const sessionKey = normalizeSessionKey(rawSessionKey);
+    const flow = get().flows[sessionKey];
     if (!flow) return;
     const stages = flow.stages.map((s, i) =>
       i === flow.activeIndex && s.status === 'active'
         ? { ...s, detail: active ? '__compacting__' : s.detail === '__compacting__' ? null : s.detail }
         : s,
     );
-    set({ flow: { ...flow, stages, lastUpdateMs: Date.now() }, tickMs: Date.now() });
+    set((state) => ({
+      flows: {
+        ...state.flows,
+        [sessionKey]: { ...flow, stages, lastUpdateMs: Date.now() },
+      },
+      tickMs: Date.now(),
+    }));
   },
 
   tick: () => set({ tickMs: Date.now() }),
 
-  clear: () => set({ flow: null }),
+  clear: (rawSessionKey) => {
+    if (!rawSessionKey) {
+      set({ flows: {} });
+      return;
+    }
+    const sessionKey = normalizeSessionKey(rawSessionKey);
+    set((state) => {
+      const flows = { ...state.flows };
+      delete flows[sessionKey];
+      return { flows };
+    });
+  },
 }));

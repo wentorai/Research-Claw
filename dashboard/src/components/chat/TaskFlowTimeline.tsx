@@ -8,7 +8,7 @@ import {
   MinusCircleOutlined,
 } from '@ant-design/icons';
 
-import { useTaskFlowStore } from '../../stores/task-flow';
+import { selectTaskFlow, useTaskFlowStore } from '../../stores/task-flow';
 import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
 import { selectSessionRunView, useSessionRunsStore } from '../../stores/session-runs';
@@ -54,13 +54,14 @@ function resolveStageDetail(stage: TaskFlowStage, t: (key: string) => string): s
 
 export default function TaskFlowTimeline() {
   const { t } = useTranslation();
-  const flow = useTaskFlowStore((s) => s.flow);
   const sessionKey = useChatStore((s) => s.sessionKey);
+  const flow = useTaskFlowStore((s) => selectTaskFlow(s, sessionKey));
   const transport = useGatewayStore((s) => s.state);
   const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, sessionKey)));
   const hasRunContext = isTaskFlowVisible(flow)
     || sessionRun.isBusy
-    || sessionRun.needsResultConfirmation;
+    || sessionRun.needsResultConfirmation
+    || sessionRun.resultUnconfirmed;
   const presentation = hasRunContext
     ? resolveRunStatusPresentation(sessionRun, transport)
     : null;

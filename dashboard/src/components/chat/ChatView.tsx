@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
-import { useToolStreamStore } from '../../stores/tool-stream';
+import { selectPendingTools, useToolStreamStore } from '../../stores/tool-stream';
 import { useGatewayStore } from '../../stores/gateway';
 import { useConfigStore } from '../../stores/config';
 import { useSessionsStore } from '../../stores/sessions';
@@ -26,7 +26,7 @@ import ToolActivityStream from './ToolActivityStream';
 import TaskFlowTimeline from './TaskFlowTimeline';
 import StagedWritingTimeline from './StagedWritingTimeline';
 import AgentActivityBar from './AgentActivityBar';
-import { useTaskFlowStore } from '../../stores/task-flow';
+import { selectTaskFlow, useTaskFlowStore } from '../../stores/task-flow';
 import { useStagedWritingStore } from '../../stores/staged-writing';
 import { isStagedWritingJobForSession } from '../../utils/staged-writing-run';
 import { isTaskFlowVisible } from '../../utils/task-flow';
@@ -174,7 +174,9 @@ export default function ChatView() {
   const createSession = useSessionsStore((s) => s.createSession);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
-  const pendingTools = useToolStreamStore((s) => s.pendingTools);
+  const pendingTools = useToolStreamStore(
+    useShallow((state) => selectPendingTools(state, sessionKey)),
+  );
   const activityLog = useToolStreamStore((s) => s.activityLog);
   const clearActivityLog = useToolStreamStore((s) => s.clearActivityLog);
   const connState = useGatewayStore((s) => s.state);
@@ -217,8 +219,9 @@ export default function ChatView() {
   const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, sessionKey)));
   const activityActive = sessionRun.isBusy
     || sessionRun.needsResultConfirmation
+    || sessionRun.resultUnconfirmed
     || pendingTools.length > 0;
-  const taskFlow = useTaskFlowStore((s) => s.flow);
+  const taskFlow = useTaskFlowStore((s) => selectTaskFlow(s, sessionKey));
   const taskFlowVisible = isTaskFlowVisible(taskFlow);
   const timelineAnchorIndex = useMemo(() => {
     if (showWritingTimeline) {
@@ -571,7 +574,7 @@ export default function ChatView() {
                   </Text>
                 </div>
               )}
-              <ToolActivityStream />
+              <ToolActivityStream sessionKey={sessionKey} />
               {activityEntries.length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   {activityEntries.map((e) => {
