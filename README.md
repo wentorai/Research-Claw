@@ -374,15 +374,18 @@ docker compose up -d --build
 ### 常用命令
 
 ```bash
-pnpm serve          # 启动（配置保存后自动重启）
-pnpm start          # 单次启动（不自动重启）
-pnpm dev            # 开发模式（Dashboard dev: localhost:5175）
+pnpm serve           # 自动选择：安装用户安静启动，源码工作区开发启动
+pnpm serve:user      # 显式用户模式：终端 error，文件 info
+pnpm serve:developer # 显式开发模式：终端与文件均为 debug
+pnpm support         # 一次性排障：debug 启动；退出时生成脱敏诊断包
+pnpm start           # 单次启动（不自动重启）
+pnpm dev             # 开发模式（Gateway debug + Dashboard HMR）
 pnpm test           # 运行单元测试
 pnpm health         # 检查运行状态
 pnpm backup         # 备份数据库
 ```
 
-> `pnpm serve` 是推荐的日常启动方式。修改 API Key / 模型等配置后，网关会自动重启，无需手动操作。
+> `pnpm serve` 是推荐的日常启动方式。安装器会写入本机安装标记，因此安装用户与源码开发者即使运行同一命令，也会稳定得到各自的日志体验。`pnpm support` 只影响本次进程，不修改 active config；按 `Ctrl+C` 退出后自动恢复日常等级并生成脱敏诊断包。
 
 ### 斜杠命令
 
@@ -394,7 +397,7 @@ pnpm backup         # 备份数据库
 | `/model [name]` | 查看或切换当前模型 |
 | `/think [level]` | 设置思考级别（off / low / medium / high） |
 | `/fast [on\|off]` | 切换快速模式 |
-| `/verbose [on\|off\|full]` | 切换详细模式 |
+| `/verbose [on\|off\|full]` | 切换 Agent 回复详情；不改变 Gateway、启动器或 Dashboard 通知等级 |
 | `/usage` | 查看当前会话 Token 用量 |
 | `/help` | 显示所有可用命令 |
 | `/stop` | 停止当前运行 |
@@ -716,7 +719,10 @@ wsl --unregister Ubuntu
 
 ```bash
 # macOS / Linux 原生安装
-tail -50 ~/.openclaw/openclaw.log
+tail -50 ~/.research-claw/logs/openclaw.log
+
+# 一次性 debug 启动；Ctrl+C 退出后生成脱敏诊断包且不改配置
+cd ~/research-claw && pnpm support
 
 # Docker（macOS / Linux / Windows）
 docker logs --tail 50 research-claw

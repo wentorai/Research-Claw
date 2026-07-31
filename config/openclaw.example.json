@@ -6,8 +6,16 @@
   },
   "logging": {
     "level": "info",
-    "consoleLevel": "warn",
-    "file": "~/.research-claw/logs/openclaw.log"
+    "consoleLevel": "error",
+    "file": "~/.research-claw/logs/openclaw.log",
+    "redactSensitive": "tools",
+    "redactPatterns": [
+      "\\b(?:Cookie|Set-Cookie)\\s*:\\s*([^\\r\\n]+)",
+      "https?://hooks\\.[^/\\s]+/(?:services/)?([^\\s\"'<>]+)",
+      "https?://[^\\s\"'<>]+/(?:api/)?webhooks?/([^\\s\"'<>]+)",
+      "https?://open\\.feishu\\.cn/open-apis/bot/v2/hook/([^\\s\"'<>]+)",
+      "[a-z][a-z0-9+.-]*://[^@\\s/:]+:([^@\\s]+)@"
+    ]
   },
   "discovery": {
     "mdns": {

@@ -372,15 +372,18 @@ Or configure a proxy in Docker Desktop → Settings → Resources → Proxies, t
 ### Commands
 
 ```bash
-pnpm serve          # Start (auto-restart on config change)
-pnpm start          # Single run (no auto-restart)
-pnpm dev            # Dev mode (Dashboard: localhost:5175)
+pnpm serve           # Auto-select: quiet installed-user or debug source profile
+pnpm serve:user      # Explicit user profile: console error, file info
+pnpm serve:developer # Explicit developer profile: console and file debug
+pnpm support         # One-shot debug; creates a redacted diagnostic bundle on exit
+pnpm start           # Single run (no auto-restart)
+pnpm dev             # Developer profile (Gateway debug + Dashboard HMR)
 pnpm test           # Run unit tests
 pnpm health         # Health check
 pnpm backup         # Backup database
 ```
 
-> `pnpm serve` is the recommended way to run. When you change API key / model in the browser, the gateway restarts automatically — no manual intervention needed.
+> `pnpm serve` is the recommended daily entry point. The installer writes a local managed-install marker, so an installed user and a source developer get the correct profile even when both use the same command. `pnpm support` affects only that process; `Ctrl+C` restores the normal level automatically and creates a redacted diagnostic bundle.
 
 ### Slash Commands
 
@@ -392,7 +395,7 @@ Type `/` in the chat input to trigger the autocomplete menu. Navigate with ↑�
 | `/model [name]` | View or switch the current model |
 | `/think [level]` | Set thinking level (off / low / medium / high) |
 | `/fast [on\|off]` | Toggle fast mode |
-| `/verbose [on\|off\|full]` | Toggle verbose mode |
+| `/verbose [on\|off\|full]` | Toggle Agent response detail; does not change Gateway, launcher, or Dashboard notification levels |
 | `/usage` | Show current session token usage |
 | `/help` | List all available commands |
 | `/stop` | Stop the current run |
@@ -714,7 +717,10 @@ Found a bug? File it on [GitHub Issues](https://github.com/wentorai/Research-Cla
 
 ```bash
 # macOS / Linux native install
-tail -50 ~/.openclaw/openclaw.log
+tail -50 ~/.research-claw/logs/openclaw.log
+
+# One-shot debug; Ctrl+C creates a redacted bundle without changing config
+cd ~/research-claw && pnpm support
 
 # Docker (macOS / Linux / Windows)
 docker logs --tail 50 research-claw

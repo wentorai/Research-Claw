@@ -21,7 +21,7 @@ overrides:
 
 patchedDependencies:
   openclaw@2026.6.1:
-    hash: 76788347f1a5bd812b8e0b5470ee4d7959424197d99181c6f21d997fe5b3b053
+    hash: 5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821
     path: patches/openclaw@2026.6.1.patch
 
 importers:
@@ -30,7 +30,7 @@ importers:
     dependencies:
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=76788347f1a5bd812b8e0b5470ee4d7959424197d99181c6f21d997fe5b3b053)
+        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
     devDependencies:
       concurrently:
         specifier: ^9.1.0
@@ -150,7 +150,7 @@ importers:
         version: 22.19.15
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=76788347f1a5bd812b8e0b5470ee4d7959424197d99181c6f21d997fe5b3b053)
+        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -172,7 +172,7 @@ importers:
     devDependencies:
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=76788347f1a5bd812b8e0b5470ee4d7959424197d99181c6f21d997fe5b3b053)
+        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
@@ -194,7 +194,7 @@ importers:
         version: 22.19.15
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=76788347f1a5bd812b8e0b5470ee4d7959424197d99181c6f21d997fe5b3b053)
+        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -215,7 +215,7 @@ importers:
         version: 22.19.15
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=76788347f1a5bd812b8e0b5470ee4d7959424197d99181c6f21d997fe5b3b053)
+        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -6055,7 +6055,7 @@ snapshots:
       ws: 8.21.0
       zod: 4.4.3
 
-  openclaw@2026.6.1(patch_hash=76788347f1a5bd812b8e0b5470ee4d7959424197d99181c6f21d997fe5b3b053):
+  openclaw@2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821):
     dependencies:
       '@agentclientprotocol/sdk': 0.22.1(zod@4.4.3)
       '@anthropic-ai/sdk': 0.100.1(zod@4.4.3)

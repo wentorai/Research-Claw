@@ -790,14 +790,27 @@ function ensureConfig(filePath) {
   // N. Logging — quiet terminal, full persistent file log (project config only).
   // Rationale: gateway INFO chatter on the terminal only confuses users who
   // can't act on P1/P2 noise; the full detail belongs in a file we can ask
-  // them to send. consoleLevel=warn quiets stdout; level=info keeps the file
+  // them to send. consoleLevel=error keeps native-user stdout actionable;
+  // level=info keeps the file
   // complete; file=<persistent path> survives reboots (unlike /tmp).
-  // 3-state: inject when absent, fill missing keys, NEVER override user values.
+  // 3-state for level/file keys: inject when absent, fill missing keys, NEVER
+  // override user values. Redaction is a separate security boundary: RC always
+  // keeps tools-mode enabled and appends patterns for credential shapes that
+  // OpenClaw 2026.6.1 does not cover by default.
   if (!isGlobal) {
+    const RC_REDACT_PATTERNS = [
+      String.raw`\b(?:Cookie|Set-Cookie)\s*:\s*([^\r\n]+)`,
+      String.raw`https?://hooks\.[^/\s]+/(?:services/)?([^\s"'<>]+)`,
+      String.raw`https?://[^\s"'<>]+/(?:api/)?webhooks?/([^\s"'<>]+)`,
+      String.raw`https?://open\.feishu\.cn/open-apis/bot/v2/hook/([^\s"'<>]+)`,
+      String.raw`[a-z][a-z0-9+.-]*://[^@\s/:]+:([^@\s]+)@`,
+    ];
     const LOG_DEFAULTS = {
       level: 'info',
-      consoleLevel: 'warn',
+      consoleLevel: 'error',
       file: '~/.research-claw/logs/openclaw.log',
+      redactSensitive: 'tools',
+      redactPatterns: RC_REDACT_PATTERNS,
     };
     if (!c.logging || typeof c.logging !== 'object' || Array.isArray(c.logging)) {
       c.logging = { ...LOG_DEFAULTS };
@@ -805,6 +818,18 @@ function ensureConfig(filePath) {
     } else {
       for (const [k, v] of Object.entries(LOG_DEFAULTS)) {
         if (c.logging[k] === undefined) { c.logging[k] = v; changed = true; }
+      }
+      if (c.logging.redactSensitive !== 'tools') {
+        c.logging.redactSensitive = 'tools';
+        changed = true;
+      }
+      const existingPatterns = Array.isArray(c.logging.redactPatterns)
+        ? c.logging.redactPatterns.filter(value => typeof value === 'string')
+        : [];
+      const mergedPatterns = [...new Set([...existingPatterns, ...RC_REDACT_PATTERNS])];
+      if (JSON.stringify(mergedPatterns) !== JSON.stringify(c.logging.redactPatterns)) {
+        c.logging.redactPatterns = mergedPatterns;
+        changed = true;
       }
     }
   }

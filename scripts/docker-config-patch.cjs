@@ -32,7 +32,8 @@ function patchDockerConfig(config, env = process.env) {
   let changed = false;
 
   if (ensureObject(config, 'logging')) changed = true;
-  if (config.logging.consoleLevel !== 'info') {
+  const consoleLevel = config.logging.consoleLevel;
+  if (!['info', 'debug', 'trace'].includes(consoleLevel)) {
     config.logging.consoleLevel = 'info';
     changed = true;
   }

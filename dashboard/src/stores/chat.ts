@@ -644,6 +644,10 @@ interface ChatState {
    *  tell a user-initiated abort (silent) apart from a timeout/system abort (offer
    *  continue). Consumed and reset to null when the matching 'aborted' arrives. */
   _userAbortedRunId: string | null;
+  /** Agent lifecycle errors can be followed by a delayed chat:error for the
+   *  same run. Remember the lifecycle-terminal run so the duplicate frame
+   *  cannot overwrite a partial-output "continue" recovery with "resend". */
+  _lastAgentFailureRunId: string | null;
   /**
    * Optimistic user messages added to messages[] before the gateway persists them
    * to the session transcript. When the gateway queues messages behind an active
@@ -722,6 +726,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   tokensOut: 0,
   _pendingGapReload: false,
   _userAbortedRunId: null,
+  _lastAgentFailureRunId: null,
   _pendingUserMsgs: _restoredPendingMsgs,
   _localOnlyMsgs: _restoredLocalMsgs,
   _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
@@ -1012,6 +1017,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       lastErrorMeta: null,
       canContinue: false,
       _userAbortedRunId: null,
+      _lastAgentFailureRunId: null,
       streamText: null,
       runId: localRunId,
       _pendingUserMsgs: [...s._pendingUserMsgs, userMessage],
@@ -1471,17 +1477,34 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
     if (!failureText) return;
 
+    // The real gateway can emit one or more assistant deltas and then terminate
+    // with an agent lifecycle error without a separate chat:error frame. Preserve
+    // that visible partial output before clearActiveRunState() clears streamText,
+    // and classify the recovery action with the same partial-output context used
+    // by chat:error / system-abort handling.
+    const partialText = get().streamText?.trim() ? get().streamText : null;
+    const rawFailure = String(evt.data?.reason ?? evt.data?.error ?? '');
+    const failureInfo = classifyRunFailure(
+      rawFailure,
+      undefined,
+      { origin: 'foreground', hasPartialOutput: Boolean(partialText) },
+    );
     stopStaleStreamWatchdog();
     useTaskFlowStore.getState().endRun(runId, 'error');
-    set({
+    set((state) => ({
       ...clearActiveRunState(),
+      messages: partialText
+        ? [...state.messages, { role: 'assistant', text: partialText, timestamp: Date.now() }]
+        : state.messages,
       sending: false,
       lastError: failureText,
       lastErrorMeta: {
-        ...classifyRunFailure(String(evt.data?.reason ?? evt.data?.error ?? '')),
+        ...failureInfo,
         message: failureText,
       },
-    });
+      canContinue: failureInfo.category === 'foreground-continue',
+      _lastAgentFailureRunId: evt.runId ?? runId,
+    }));
     void get().loadHistory();
   },
 
@@ -1784,6 +1807,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // Fix 1 — runId guard: skip error events from OTHER runs.
         // Same triple-AND pattern as delta/aborted.
         if (event.runId && runId && event.runId !== runId) return;
+        // A lifecycle error is emitted immediately, while the corresponding
+        // chat:error can arrive after provider/fallback teardown. The lifecycle
+        // handler already persisted partial output and chose the recovery
+        // action; processing the delayed duplicate would erase that context.
+        if (
+          event.runId
+          && get()._lastAgentFailureRunId === event.runId
+        ) return;
 
         // Classify with the gateway's own errorKind first; free-text sniffing
         // covers auth/network cases that upstream maps to "unknown".
@@ -1833,6 +1864,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       tokensIn: 0,
       tokensOut: 0,
       _pendingGapReload: false,
+      _lastAgentFailureRunId: null,
       _pendingUserMsgs: [],
       _localOnlyMsgs: loadLocalMsgs(key),
       _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,

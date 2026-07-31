@@ -963,9 +963,11 @@ WRAPPER
   ok "openclaw CLI → $LOCAL_BIN/openclaw"
 fi
 
+RC_CONFIG_CREATED=0
 if [ ! -f config/openclaw.json ]; then
   if [ -f config/openclaw.example.json ]; then
     cp config/openclaw.example.json config/openclaw.json
+    RC_CONFIG_CREATED=1
     ok "Config created from template"
   fi
 fi
@@ -1093,6 +1095,16 @@ node -e "
 " 2>/dev/null || true
 
 if [ -f config/openclaw.json ]; then
+  # A durable, gitignored marker distinguishes this managed native install from
+  # a source worktree even though both later use `pnpm serve`. The helper owns
+  # the one-time legacy warn→error migration and stops managing logging as soon
+  # as the operator makes an explicit choice.
+  if ! node scripts/log-profile.cjs mark-native \
+      --root "$INSTALL_DIR" \
+      --config "$INSTALL_DIR/config/openclaw.json" \
+      --fresh "$RC_CONFIG_CREATED" >/dev/null; then
+    die "Could not record the native-install log profile. Existing config was kept."
+  fi
   node scripts/migrate-rc-data-dir.cjs 2>/dev/null || true
   # Clean stale references + ensure OC 2026.6.1+ required fields.
   # Shared logic in ensure-config.cjs — also called by run.sh and docker-entrypoint.sh.

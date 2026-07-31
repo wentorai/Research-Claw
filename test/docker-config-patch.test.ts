@@ -11,11 +11,14 @@ const {
   ) => boolean;
 };
 
-function configWithLevel(level?: unknown): Record<string, any> {
+function configWithLevel(
+  level?: unknown,
+  consoleLevel: unknown = 'warn',
+): Record<string, any> {
   return {
     logging: {
       ...(level !== undefined ? { level } : {}),
-      consoleLevel: 'warn',
+      consoleLevel,
       file: '/tmp/openclaw.log',
       redactSensitive: 'tools',
     },
@@ -57,6 +60,24 @@ describe('Docker config patch — logging level policy', () => {
       const config = configWithLevel(level);
       patchDockerConfig(config);
       expect(config.logging.level).toBe(level);
+    },
+  );
+
+  it.each(['debug', 'trace'])(
+    'preserves an explicit %s console-log level',
+    (level) => {
+      const config = configWithLevel('info', level);
+      patchDockerConfig(config);
+      expect(config.logging.consoleLevel).toBe(level);
+    },
+  );
+
+  it.each(['silent', 'fatal', 'error', 'warn'])(
+    'raises an explicit %s console-log level to info',
+    (level) => {
+      const config = configWithLevel('debug', level);
+      patchDockerConfig(config);
+      expect(config.logging.consoleLevel).toBe('info');
     },
   );
 

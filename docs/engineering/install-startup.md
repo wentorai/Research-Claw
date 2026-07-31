@@ -1,7 +1,7 @@
 ---
 doc: engineering/install-startup.md
 audience: 开发者 — 渠道 B(仓库按需阅读,不注入运行时)
-status: 现行 · 2026-07-29
+status: 现行 · 2026-07-31
 source-of-truth: 安装流程以根 docs/sop/INSTALL_SOP.md(v2.5)为准;本文只补 RC 特有设计取舍
 baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 ---
@@ -15,7 +15,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 RC 把 OpenClaw 当 **npm 依赖**消费,**不是 fork**。全部定制走 config overlay + Plugin SDK + 极小 pnpm patch(~20 行/7 文件)。这决定了安装的几条特性:
 
 - **目标平台**:macOS(darwin arm64/x64)、Linux(x64/arm64)、WSL2,以及通过 Docker Desktop 运行的 Windows(x64/arm64)。原生 Windows 不直接运行 POSIX 安装器,使用 `scripts/install-docker.ps1`。
-- **运行时**:Node.js ≥ 22.12,pnpm ≥ 9.15;gateway 跑在 conda `openclaw` 环境(Node 22),**不是系统 Node**。
+- **运行时**:`package.json` 要求 Node.js ≥ 22.16。安装器优先复用 conda `openclaw` 环境中的 Node(若真实存在),其次检查已安装 `openclaw` CLI 相邻的 Node,否则使用当前 PATH 中的 Node 22；`run.sh` 当前只在 conda `openclaw` 环境真实存在时选择它,否则使用当前 Node。安装器用最终选中的 Gateway Node 安装/校验 `better-sqlite3`,不要把“必须 conda”或“必须 fnm”当成不变事实。
 - **脚本幂等**:POSIX 脚本使用严格错误处理,PowerShell 脚本使用 `$ErrorActionPreference = "Stop"`;安装、更新和重新启动均通过同一份 `scripts/ensure-config.cjs` 做版本迁移,重复运行不覆盖用户的有效配置。
 
 ## 2. pnpm patch 生命周期(核心 why)
@@ -35,11 +35,23 @@ Node 版本检查对 `major.minor` 拆分后做**整数比较**,而非字符串�
 - `scripts/run.sh`(本地)与 `scripts/docker-entrypoint.sh`(容器)就是这个重启循环:`Gateway exited (code N) — restarting in 3s`。
 - 为什么这样设计:config 热改后需要干净重载,用"退出 + 外层循环拉起"比进程内热重载更简单可靠;也解释了为何改 config 会看到 gateway 短暂重启。
 
+### 4.1 日志 profile
+
+`pnpm serve` 统一进入 `scripts/run.sh`,但不再靠命令名、TTY、路径名或 `.git` 猜测用户身份:
+
+- 安装器写入 gitignored 的 `.research-claw-install.json`;有效或损坏的安装标记都按 `user` 安静启动,避免元数据损坏意外开启 debug。该文件不能放入项目 `.research-claw/` 数据目录,否则会被旧数据迁移脚本移动到 HOME。
+- 无标记的源码 worktree 默认 `developer`;`pnpm dev` 与 `pnpm serve:developer` 也显式选择该 profile。
+- `RC_LOG_PROFILE=user|developer|support` 是最高优先级的一次性覆盖。`pnpm support` 等价于本次进程选择 `support`,退出时生成脱敏诊断包,不改 active config。
+- `OPENCLAW_LOG_LEVEL` 是 OpenClaw 专家级一次性覆盖,会同时覆盖文件和终端等级；不能用它声称实现两者分离。用户模式的分离来自 config 中 `logging.level=info`、`logging.consoleLevel=error`。
+- `run.sh` 自己的 Dashboard 地址、端口冲突、配置失败、插件退化和崩溃恢复提示不受 Gateway 阈值控制。
+
+完整矩阵、优先级和安全边界见 [`logging-profiles.md`](./logging-profiles.md)。
+
 ## 5. 配置文件
 
 - `config/openclaw.json`(active)+ `config/openclaw.example.json`(带注释的参考模板)。
 - example config **必须能过 OC schema 校验**——非法 key 会让所有新用户启动即崩(集成细节见 [plugin-integration.md](./plugin-integration.md) §2)。
-- `scripts/ensure-config.cjs` 是跨阶段迁移的唯一入口:清理历史占位渠道和无效 Supervisor 测试模型,默认关闭需要向外部服务发送内容的语义记忆检索,同时保留用户明确配置过的真实渠道、模型和其他用户自定义值。全局 OpenClaw 配置只执行其既有的兼容迁移,不会注入 RC 插件或语义记忆默认值。
+- `scripts/ensure-config.cjs` 是跨阶段迁移的唯一入口:清理历史占位渠道和无效 Supervisor 测试模型,默认关闭需要向外部服务发送内容的语义记忆检索,同时保留用户明确配置过的真实渠道、模型、日志等级和其他用户自定义值。全局 OpenClaw 配置只执行其既有的兼容迁移,不会注入 RC 插件或语义记忆默认值。
 
 ## 6. 版本可见性与升级保护
 

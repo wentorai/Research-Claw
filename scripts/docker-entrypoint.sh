@@ -17,7 +17,7 @@ PORT=${PORT:-28789}
 # `docker logs` (that's the container's diagnostic channel — never filtered).
 # Only the entrypoint's OWN step detail is gated: dbg() lines show only with
 # RC_VERBOSE=1. Keeps a clean first screen without hiding gateway diagnostics.
-dbg() { [ -n "$RC_VERBOSE" ] && echo "$@" || true; }
+dbg() { [ -n "${RC_VERBOSE:-}" ] && echo "$@" || true; }
 
 # --- One-time migration: v0.5.3 fixed volume mount from /root → /app ---
 # Earlier versions mounted rc-data at /root/.research-claw but the plugin
@@ -321,8 +321,7 @@ printf "  ${D}https://wentor.ai${N}\n\n"
 node /app/scripts/version-info.cjs --root /app 2>/dev/null | sed 's/^/  /' || true
 printf "\n"
 
-echo "[research-claw] Dashboard: http://127.0.0.1:$PORT/?token=$OPENCLAW_GATEWAY_TOKEN"
-dbg "[research-claw] Gateway token: $OPENCLAW_GATEWAY_TOKEN (override via -e OPENCLAW_GATEWAY_TOKEN=…)"
+echo "[research-claw] Dashboard: http://127.0.0.1:$PORT/"
 
 # Ensure `openclaw` CLI and conda Python are available to agent's system.run commands.
 export PATH="/opt/miniforge3/bin:/app/node_modules/.bin:$PATH"

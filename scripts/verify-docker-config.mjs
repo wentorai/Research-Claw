@@ -82,7 +82,7 @@ function volumeMount(source, target, readOnly = false) {
   return `type=bind,src=${source},dst=${target}${readOnly ? ',readonly' : ''}`;
 }
 
-function dockerRunArgs(name) {
+function dockerRunArgs(name, extraEnv = {}) {
   const args = [
     'run',
     '-d',
@@ -139,11 +139,14 @@ function dockerRunArgs(name) {
     image,
     '/entrypoint.sh',
   ];
+  for (const [key, value] of Object.entries(extraEnv)) {
+    args.splice(args.indexOf('--mount'), 0, '-e', `${key}=${value}`);
+  }
   return args;
 }
 
-async function startContainer(name) {
-  await docker(dockerRunArgs(name));
+async function startContainer(name, extraEnv) {
+  await docker(dockerRunArgs(name, extraEnv));
   containers.add(name);
 }
 
@@ -202,14 +205,14 @@ async function waitForContainerExit(name, timeoutMs = 30_000) {
   throw new Error(`container ${name} did not stop after a fatal config error`);
 }
 
-async function seedDebugConfig() {
+async function seedConfig({ level, consoleLevel }) {
   const template = JSON.parse(
     await readFile(path.join(projectRoot, 'config', 'openclaw.example.json'), 'utf8'),
   );
   template.logging = {
     ...template.logging,
-    level: 'debug',
-    consoleLevel: 'error',
+    level,
+    consoleLevel,
     file: '/user/custom/openclaw.log',
   };
   template.channels = {};
@@ -238,7 +241,7 @@ async function seedDebugConfig() {
   );
 }
 
-async function assertHealthyContainer(name) {
+async function assertHealthyContainer(name, expected) {
   const health = await waitForHealth(name);
   await docker([
     'exec',
@@ -276,8 +279,14 @@ async function assertHealthyContainer(name) {
   const config = JSON.parse(
     await readFile(path.join(tempRoot, 'config', 'openclaw.json'), 'utf8'),
   );
-  assert(config.logging.level === 'debug', 'Docker overwrote explicit debug file logging');
-  assert(config.logging.consoleLevel === 'info', 'Docker console logging is not info');
+  assert(
+    config.logging.level === expected.level,
+    `Docker file logging is ${config.logging.level}, expected ${expected.level}`,
+  );
+  assert(
+    config.logging.consoleLevel === expected.consoleLevel,
+    `Docker console logging is ${config.logging.consoleLevel}, expected ${expected.consoleLevel}`,
+  );
   assert(
     config.logging.file === '/app/.research-claw/logs/openclaw.log',
     'Docker file log is not on the persistent data volume',
@@ -316,7 +325,7 @@ async function assertHealthyContainer(name) {
     entrypointLines.length <= 15,
     `entrypoint emitted ${entrypointLines.length} regular lines before gateway output`,
   );
-  assert(!logs.includes(`Gateway token: ${gatewayToken}`), 'verbose token line leaked by default');
+  assert(!logs.includes(gatewayToken), 'gateway token leaked into docker logs');
 
   return {
     health: health.trim(),
@@ -370,14 +379,27 @@ async function main() {
     ['config', 'data', 'workspace', 'state'].map(name =>
       mkdir(path.join(tempRoot, name), { recursive: true })),
   );
-  await seedDebugConfig();
+  await seedConfig({ level: 'info', consoleLevel: 'error' });
 
-  const healthyName = `${containerPrefix}-healthy`;
+  const defaultName = `${containerPrefix}-default`;
+  const debugName = `${containerPrefix}-debug`;
   const badName = `${containerPrefix}-bad`;
   try {
-    await startContainer(healthyName);
-    const healthy = await assertHealthyContainer(healthyName);
-    await stopContainer(healthyName);
+    await startContainer(defaultName);
+    const defaultProfile = await assertHealthyContainer(defaultName, {
+      level: 'info',
+      consoleLevel: 'info',
+    });
+    await stopContainer(defaultName);
+    await assertPortFree(hostPort);
+
+    await seedConfig({ level: 'trace', consoleLevel: 'trace' });
+    await startContainer(debugName, { OPENCLAW_LOG_LEVEL: 'trace' });
+    const debugProfile = await assertHealthyContainer(debugName, {
+      level: 'trace',
+      consoleLevel: 'trace',
+    });
+    await stopContainer(debugName);
     await assertPortFree(hostPort);
 
     const badConfigEvidence = await assertBadConfigVisible(badName);
@@ -388,7 +410,8 @@ async function main() {
       ok: true,
       image,
       hostPort,
-      healthy,
+      defaultProfile,
+      debugProfile,
       badConfigEvidence,
     }, null, 2));
   } finally {

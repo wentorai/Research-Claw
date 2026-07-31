@@ -390,6 +390,74 @@ describe('agent failure isolation', () => {
     });
     expect(useChatStore.getState().lastError).toBeNull();
   });
+
+  it('preserves streamed output and offers continue when lifecycle error follows a delta', () => {
+    useChatStore.setState({
+      sessionKey: 'main',
+      messages: [{ role: 'user', text: 'long analysis', timestamp: 1 }],
+      streamText: 'Partial result already shown',
+      lastError: null,
+      lastErrorMeta: null,
+      canContinue: false,
+      runId: 'run-partial-lifecycle-error',
+      sending: false,
+      streaming: true,
+    });
+
+    useChatStore.getState().handleAgentFailureEvent({
+      runId: 'run-partial-lifecycle-error',
+      sessionKey: 'agent:main:main',
+      stream: 'lifecycle',
+      data: {
+        phase: 'error',
+        error: 'LLM request timed out.',
+      },
+    });
+
+    const state = useChatStore.getState();
+    expect(state.messages.at(-1)?.text).toBe('Partial result already shown');
+    expect(state.lastErrorMeta?.category).toBe('foreground-continue');
+    expect(state.canContinue).toBe(true);
+  });
+
+  it('does not let delayed chat:error overwrite lifecycle partial-output recovery', () => {
+    useChatStore.setState({
+      sessionKey: 'main',
+      messages: [{ role: 'user', text: 'long analysis', timestamp: 1 }],
+      streamText: 'Partial result already shown',
+      lastError: null,
+      lastErrorMeta: null,
+      canContinue: false,
+      runId: 'run-dual-terminal',
+      sending: false,
+      streaming: true,
+      _lastAgentFailureRunId: null,
+    });
+
+    useChatStore.getState().handleAgentFailureEvent({
+      runId: 'run-dual-terminal',
+      sessionKey: 'agent:main:main',
+      stream: 'lifecycle',
+      data: {
+        phase: 'error',
+        error: 'LLM request timed out.',
+      },
+    });
+    useChatStore.getState().handleChatEvent({
+      runId: 'run-dual-terminal',
+      sessionKey: 'agent:main:main',
+      state: 'error',
+      errorMessage: 'LLM request timed out.',
+      errorKind: 'timeout',
+    });
+
+    const state = useChatStore.getState();
+    expect(state.messages.filter(
+      message => message.text === 'Partial result already shown',
+    )).toHaveLength(1);
+    expect(state.lastErrorMeta?.category).toBe('foreground-continue');
+    expect(state.canContinue).toBe(true);
+  });
 });
 
 describe('history reload after a provider/system abort', () => {

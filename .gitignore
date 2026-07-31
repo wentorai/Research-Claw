@@ -39,6 +39,7 @@ config/plugin-skills/
 *.db-wal
 *.db-shm
 .research-claw/
+.research-claw-install.json
 
 # OS
 .DS_Store

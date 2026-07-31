@@ -10,6 +10,30 @@ cd "$(dirname "$0")/.."
 
 PORT="${PORT:-28789}"
 
+# --- Resolve native user / developer / one-shot support log semantics ---
+# A managed installer writes a gitignored marker. Source worktrees have no
+# marker and therefore default to developer debug. RC_LOG_PROFILE is the
+# explicit, stable override; OPENCLAW_LOG_LEVEL remains an expert override and
+# is never downgraded by RC_VERBOSE.
+if ! _RC_PROFILE_SHELL=$(node ./scripts/log-profile.cjs resolve \
+    --root "$(pwd)" \
+    ${RC_LOG_MARKER_PATH:+--marker "$RC_LOG_MARKER_PATH"} \
+    --shell); then
+  echo "[run] ERROR: Could not resolve RC_LOG_PROFILE. Use user, developer, or support." >&2
+  exit 64
+fi
+eval "$_RC_PROFILE_SHELL"
+unset _RC_PROFILE_SHELL
+if [ "${RC_LOG_PROFILE_CHECK:-}" = "1" ]; then
+  node ./scripts/log-profile.cjs resolve \
+    --root "$(pwd)" \
+    ${RC_LOG_MARKER_PATH:+--marker "$RC_LOG_MARKER_PATH"}
+  exit $?
+fi
+if [ -n "$RC_PROFILE_GATEWAY_LOG_LEVEL" ] && [ -z "${OPENCLAW_LOG_LEVEL:-}" ]; then
+  export OPENCLAW_LOG_LEVEL="$RC_PROFILE_GATEWAY_LOG_LEVEL"
+fi
+
 # --- Single-owner lock: a second launcher reuses the live instance ---
 source "./scripts/run-lock.sh"
 if acquire_run_lock; then
@@ -42,11 +66,12 @@ node "$(dirname "$0")/version-info.cjs" --root "$(pwd)" 2>/dev/null \
 printf "\n"
 
 # --- Output discipline (P1/P2 noise off by default; full detail lands in files) ---
-# Default terminal shows only what a user can act on. The gateway's own INFO
-# chatter is quieted via logging.consoleLevel=warn (set by ensure-config); its
+# Managed-user terminal shows only what a user can act on. The gateway's own
+# chatter is quieted via logging.consoleLevel=error (set by ensure-config); its
 # full log lives in ~/.research-claw/logs/openclaw.log. run.sh's own step log
 # lands in run-latest.log (previous run kept as run-prev.log).
-# RC_VERBOSE=1 restores full terminal detail (gateway INFO + run.sh debug lines).
+# Source worktrees default to developer/debug. RC_VERBOSE=1 remains a compatible
+# user-mode info shortcut but never overwrites OPENCLAW_LOG_LEVEL=debug/trace.
 RC_LOG_DIR="$HOME/.research-claw/logs"
 mkdir -p "$RC_LOG_DIR" 2>/dev/null || true
 RC_RUN_LOG="$RC_LOG_DIR/run-latest.log"
@@ -54,11 +79,9 @@ RC_RUN_LOG="$RC_LOG_DIR/run-latest.log"
 : > "$RC_RUN_LOG" 2>/dev/null || true
 rclog() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >>"$RC_RUN_LOG" 2>/dev/null || true; }
 say()   { printf "  %s\n" "$*"; rclog "$*"; }                                   # always shown
-dbg()   { rclog "$*"; [ -n "$RC_VERBOSE" ] && printf "  ${D}%s${N}\n" "$*" || true; }  # verbose only
-if [ -n "$RC_VERBOSE" ]; then
-  export OPENCLAW_LOG_LEVEL=info   # raise gateway console+file to info for this run
-  rclog "RC_VERBOSE=1 — gateway console raised to info"
-fi
+dbg()   { rclog "$*"; [ -n "$RC_LAUNCHER_VERBOSE" ] && printf "  ${D}%s${N}\n" "$*" || true; }  # verbose only
+rclog "Log profile: $RC_RESOLVED_LOG_PROFILE ($RC_PROFILE_SOURCE)"
+dbg "Log profile: $RC_RESOLVED_LOG_PROFILE"
 
 # --- Ensure project config exists ---
 # RC project config contains plugin paths, tool whitelist, dashboard root, port 28789.
@@ -270,9 +293,13 @@ trap 'STOP=true' INT TERM
 
 # Print access + log info ONCE up front. The gateway's own "ready / dashboard
 # URL" lines are INFO level and hidden by consoleLevel=warn, so surface them here.
-printf "\n  ${B}Dashboard:${N} http://127.0.0.1:$PORT/?token=%s\n" "$OPENCLAW_GATEWAY_TOKEN"
-say "Logs: terminal quiet by default · full gateway log ~/.research-claw/logs/openclaw.log · startup log $RC_RUN_LOG"
-[ -z "$RC_VERBOSE" ] && printf "  ${D}(set RC_VERBOSE=1 for full terminal output)${N}\n"
+printf "\n  ${B}Dashboard:${N} http://127.0.0.1:$PORT/\n"
+say "Logs: profile=$RC_RESOLVED_LOG_PROFILE · gateway file ~/.research-claw/logs/openclaw.log · startup $RC_RUN_LOG"
+if [ "$RC_RESOLVED_LOG_PROFILE" = "user" ] && [ -z "$RC_LAUNCHER_VERBOSE" ]; then
+  printf "  ${D}One-time debug: pnpm support${N}\n"
+elif [ "$RC_RESOLVED_LOG_PROFILE" = "support" ]; then
+  say "Support debug is temporary. Stop with Ctrl+C to create a redacted diagnostic bundle."
+fi
 printf "\n"
 
 while true; do
@@ -315,6 +342,11 @@ while true; do
 
   if $STOP; then
     RC_NODE="$GW_NODE" bash "$(dirname "$0")/farewell.sh" || true
+    if [ "$RC_RESOLVED_LOG_PROFILE" = "support" ]; then
+      say "Creating redacted diagnostic bundle..."
+      RC_NODE="$GW_NODE" bash "$(dirname "$0")/diag.sh" || \
+        say "✗ Diagnostic bundle failed. Run: bash scripts/diag.sh"
+    fi
     exit 0
   fi
 

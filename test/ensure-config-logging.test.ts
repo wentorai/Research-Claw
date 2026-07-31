@@ -5,10 +5,19 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const ENSURE_CONFIG = path.resolve(__dirname, '../scripts/ensure-config.cjs');
+const RC_REDACT_PATTERNS = [
+  String.raw`\b(?:Cookie|Set-Cookie)\s*:\s*([^\r\n]+)`,
+  String.raw`https?://hooks\.[^/\s]+/(?:services/)?([^\s"'<>]+)`,
+  String.raw`https?://[^\s"'<>]+/(?:api/)?webhooks?/([^\s"'<>]+)`,
+  String.raw`https?://open\.feishu\.cn/open-apis/bot/v2/hook/([^\s"'<>]+)`,
+  String.raw`[a-z][a-z0-9+.-]*://[^@\s/:]+:([^@\s]+)@`,
+];
 const DEFAULTS = {
   level: 'info',
-  consoleLevel: 'warn',
+  consoleLevel: 'error',
   file: '~/.research-claw/logs/openclaw.log',
+  redactSensitive: 'tools',
+  redactPatterns: RC_REDACT_PATTERNS,
 };
 
 describe('ensure-config.cjs — logging three-state migration', () => {
@@ -44,14 +53,16 @@ describe('ensure-config.cjs — logging three-state migration', () => {
         level: 'debug',
         file: '/custom/openclaw.jsonl',
         redactSensitive: 'off',
+        redactPatterns: ['operator-pattern'],
       },
     });
     expect(migrated.logging).toEqual({
-      level: 'debug',
-      consoleLevel: 'warn',
-      file: '/custom/openclaw.jsonl',
-      redactSensitive: 'off',
-    });
+        level: 'debug',
+        consoleLevel: 'error',
+        file: '/custom/openclaw.jsonl',
+        redactSensitive: 'tools',
+        redactPatterns: ['operator-pattern', ...RC_REDACT_PATTERNS],
+      });
   });
 
   it.each([[], 'invalid'])('replaces a non-object logging value (%j)', (logging) => {
@@ -67,5 +78,23 @@ describe('ensure-config.cjs — logging three-state migration', () => {
       { HOME: isolatedHome },
     );
     expect(migrated.logging).toEqual({ level: 'trace' });
+  });
+
+  it('repairs disabled redaction without changing explicit log levels or paths', () => {
+    const migrated = migrate({
+      logging: {
+        level: 'trace',
+        consoleLevel: 'debug',
+        file: '/operator/log.jsonl',
+        redactSensitive: 'off',
+      },
+    });
+    expect(migrated.logging).toMatchObject({
+      level: 'trace',
+      consoleLevel: 'debug',
+      file: '/operator/log.jsonl',
+      redactSensitive: 'tools',
+    });
+    expect(migrated.logging.redactPatterns).toEqual(RC_REDACT_PATTERNS);
   });
 });
