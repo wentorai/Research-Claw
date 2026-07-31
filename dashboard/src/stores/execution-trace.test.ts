@@ -49,6 +49,16 @@ describe('execution trace store', () => {
             activation: 'read',
             skill_source: '/plugins/wentor-network/SKILL.md',
           }],
+          skillEvents: [{
+            id: 'se1',
+            skill_key: 'rp:wentor-network',
+            skill_name: 'wentor-network',
+            skill_source: 'research-plugins',
+            lifecycle: 'candidate',
+            activation: null,
+            tool_call_id: 'call-search',
+            observed_at: 10,
+          }],
         };
       }
       return {
@@ -72,6 +82,7 @@ describe('execution trace store', () => {
       runId: 'runA',
       tools: [{ tool_name: 'read' }],
       skills: [{ skill_name: 'wentor-network' }],
+      skillEvents: [{ skill_name: 'wentor-network', lifecycle: 'candidate' }],
       reviews: [{ reviewId: 'r1' }],
     });
   });

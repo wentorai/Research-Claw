@@ -14,6 +14,15 @@ export default function ExecutionDetailsBadge({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(false);
   if (!summary || (summary.toolCount === 0 && summary.skillCount === 0)) return null;
 
+  const skillEvents = detail?.skillEvents ?? [];
+  const candidates = skillEvents.filter((event) => event.lifecycle === 'candidate');
+  const terminalEventFor = (skill: NonNullable<typeof detail>['skills'][number]) => (
+    [...skillEvents].reverse().find((event) => (
+      (event.skill_key === skill.skill_key || event.skill_name === skill.skill_name)
+      && (event.lifecycle === 'loaded' || event.lifecycle === 'executed')
+    ))
+  );
+
   const content = detail ? (
     <div style={{ width: 360, maxWidth: 'calc(100vw - 24px)' }}>
       <Text strong>{t('executionDetails.tools')}</Text>
@@ -31,20 +40,40 @@ export default function ExecutionDetailsBadge({ runId }: { runId: string }) {
       <Text strong>{t('executionDetails.skills')}</Text>
       <div style={{ margin: '6px 0 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {detail.skills.length > 0
-          ? detail.skills.map((skill) => (
-            <div key={skill.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Tag color="blue" style={{ marginInlineEnd: 0 }}>{skill.skill_name}</Tag>
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                {t(`executionDetails.activation.${skill.activation}`)}
-                {' · '}
-                {t(`executionDetails.skillSource.${skill.skill_source}`, {
-                  defaultValue: skill.skill_source,
-                })}
-              </Text>
-            </div>
-          ))
+          ? detail.skills.map((skill) => {
+            const terminal = terminalEventFor(skill);
+            return (
+              <div key={skill.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Tag color="blue" style={{ marginInlineEnd: 0 }}>{skill.skill_name}</Tag>
+                {terminal && (
+                  <Tag color={terminal.lifecycle === 'executed' ? 'green' : 'cyan'} style={{ marginInlineEnd: 0 }}>
+                    {t(`executionDetails.lifecycle.${terminal.lifecycle}`)}
+                  </Tag>
+                )}
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {t(`executionDetails.activation.${skill.activation}`)}
+                  {' · '}
+                  {t(`executionDetails.skillSource.${skill.skill_source}`, {
+                    defaultValue: skill.skill_source,
+                  })}
+                </Text>
+              </div>
+            );
+          })
           : <Text type="secondary">{t('executionDetails.noneDetected')}</Text>}
       </div>
+      {candidates.length > 0 && (
+        <>
+          <Text strong>{t('executionDetails.candidates')}</Text>
+          <div style={{ margin: '6px 0 12px', display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {candidates.map((candidate) => (
+              <Tag key={candidate.id} style={{ marginInlineEnd: 0 }}>
+                {candidate.skill_name}
+              </Tag>
+            ))}
+          </div>
+        </>
+      )}
       <Text strong>{t('executionDetails.review')}</Text>
       <div style={{ marginTop: 6 }}>
         {(detail.reviews?.length ?? 0) > 0

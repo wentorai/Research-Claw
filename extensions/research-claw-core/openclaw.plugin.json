@@ -58,6 +58,7 @@
       "ppt_init",
       "ppt_export",
       "skill_search",
+      "skill_load",
       "job_start",
       "job_checkpoint",
       "job_status",

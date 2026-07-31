@@ -69,4 +69,23 @@ describe('OpenClaw release lock', () => {
       ).toBe('2026.6.1');
     }
   });
+
+  it('preserves the camera permission required by the local dashboard patch', () => {
+    const expected =
+      'Permissions-Policy", "camera=(self), microphone=(self), geolocation=()"';
+    const runtime = fs.readFileSync(
+      path.join(
+        ROOT,
+        'node_modules/openclaw/dist/http-common-DuE8kH2j.js',
+      ),
+      'utf8',
+    );
+    const patch = fs.readFileSync(
+      path.join(ROOT, 'patches/openclaw@2026.6.1.patch'),
+      'utf8',
+    );
+
+    expect(runtime).toContain(expected);
+    expect(patch).toContain(expected);
+  });
 });

@@ -37,11 +37,21 @@ export interface SkillStatusEntry {
   always: boolean;
   disabled: boolean;
   blockedByAllowlist: boolean;
+  blockedByAgentFilter: boolean;
   eligible: boolean;
+  modelVisible: boolean;
+  userInvocable: boolean;
+  commandVisible: boolean;
   requirements: SkillRequirements;
   missing: SkillRequirements;
   configChecks: { path: string; satisfied: boolean }[];
   install: { id: string; kind: string; label: string; bins: string[] }[];
+  clawhub?: Record<string, unknown>;
+  skillCard?: {
+    present: boolean;
+    path?: string;
+    sizeBytes?: number;
+  };
 }
 
 // ── Channel types ───────────────────────────────────────────────────────────
@@ -79,19 +89,88 @@ export interface PluginEntry {
   enabled: boolean;
   path: string;
   config: Record<string, unknown>;
+  allowed?: boolean;
+  configured: boolean;
+  installed: boolean;
+  installSource?: string;
 }
 
 // ── Skill grouping ──────────────────────────────────────────────────────────
 
-export type SkillGroup = 'local' | 'research-plugins' | 'managed' | 'bundled';
+export type SkillGroup =
+  | 'local'
+  | 'research-plugins'
+  | 'workspace'
+  | 'extra'
+  | 'managed'
+  | 'bundled'
+  | 'other';
 
-export const GROUP_ORDER: SkillGroup[] = ['local', 'research-plugins', 'managed', 'bundled'];
+export const GROUP_ORDER: SkillGroup[] = [
+  'local',
+  'research-plugins',
+  'workspace',
+  'extra',
+  'managed',
+  'bundled',
+  'other',
+];
 
+function normalizeSkillPath(value: string): string {
+  return value.replaceAll('\\', '/').replace(/\/+/g, '/').toLowerCase();
+}
+
+/**
+ * OpenClaw 2026.6.1 uses structured loader origins (`openclaw-extra`,
+ * `openclaw-workspace`, …). `openclaw-extra` intentionally covers both RC
+ * repo skills and plugin-contributed skills, so path provenance is the stable
+ * discriminator until the gateway exposes a first-class plugin id.
+ */
 export function classifySkill(entry: SkillStatusEntry): SkillGroup {
-  if (entry.source.includes('research-claw/skills') || entry.source.includes('research-claw\\skills')) return 'local';
-  if (entry.source.includes('research-plugins')) return 'research-plugins';
-  if (entry.bundled) return 'bundled';
-  return 'managed';
+  const source = entry.source.trim().toLowerCase();
+  const provenancePath = normalizeSkillPath(`${entry.baseDir}\n${entry.filePath}`);
+
+  if (entry.bundled || source === 'openclaw-bundled') return 'bundled';
+  if (
+    provenancePath.includes('/extensions/research-plugins/') ||
+    provenancePath.includes('/node_modules/@wentorai/research-plugins/')
+  ) {
+    return 'research-plugins';
+  }
+  if (source === 'openclaw-workspace') return 'workspace';
+  if (provenancePath.includes('/research-claw/workspace/skills/')) return 'workspace';
+  if (provenancePath.includes('/research-claw/skills/')) return 'local';
+  if (source === 'openclaw-extra') return 'extra';
+  if (
+    source === 'openclaw-managed' ||
+    source === 'agents-skills-personal' ||
+    source === 'agents-skills-project'
+  ) {
+    return 'managed';
+  }
+  return 'other';
+}
+
+export type SkillRuntimeState =
+  | 'disabled'
+  | 'allowlist-blocked'
+  | 'agent-blocked'
+  | 'requirements-missing'
+  | 'model-and-command'
+  | 'model-visible'
+  | 'command-only'
+  | 'enabled-hidden';
+
+/** Human-facing runtime state; never equates configured enabled with usable. */
+export function getSkillRuntimeState(entry: SkillStatusEntry): SkillRuntimeState {
+  if (entry.disabled) return 'disabled';
+  if (entry.blockedByAllowlist) return 'allowlist-blocked';
+  if (entry.blockedByAgentFilter) return 'agent-blocked';
+  if (!entry.eligible) return 'requirements-missing';
+  if (entry.modelVisible && entry.commandVisible) return 'model-and-command';
+  if (entry.modelVisible) return 'model-visible';
+  if (entry.commandVisible) return 'command-only';
+  return 'enabled-hidden';
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────
@@ -128,6 +207,9 @@ interface ExtensionsState {
   pluginsLoaded: boolean;
   loadPlugins: () => Promise<void>;
   togglePlugin: (name: string, enabled: boolean) => Promise<void>;
+
+  // Gateway reconnect invalidates every server-derived snapshot.
+  invalidate: () => void;
 }
 
 // Prevent double-toggle race
@@ -185,13 +267,16 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
   toggleSkill: async (skillKey: string, enabled: boolean) => {
     if (_inflightSkillOps.has(skillKey)) return;
     const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
+    if (!client?.isConnected) {
+      throw new Error('Gateway is disconnected');
+    }
 
     _inflightSkillOps.add(skillKey);
-    // Optimistic update
+    // Only the persisted configuration bit is safe to update optimistically.
+    // Eligibility and visibility remain authoritative gateway state.
     set((s) => ({
       skills: s.skills.map((sk) =>
-        sk.skillKey === skillKey ? { ...sk, disabled: !enabled, eligible: enabled } : sk,
+        sk.skillKey === skillKey ? { ...sk, disabled: !enabled } : sk,
       ),
     }));
 
@@ -202,6 +287,7 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
     } catch (err) {
       console.error('[ExtensionsStore] toggleSkill failed:', err);
       await get().loadSkills(); // Rollback optimistic
+      throw err;
     } finally {
       _inflightSkillOps.delete(skillKey);
     }
@@ -489,26 +575,51 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
       const configObj = (result.config ?? result.resolved ?? {}) as Record<string, unknown>;
 
       const pluginsSection = configObj.plugins as {
+        enabled?: boolean;
+        allow?: string[];
         load?: { paths?: string[] };
         entries?: Record<string, { enabled?: boolean; config?: Record<string, unknown> }>;
+        installs?: Record<string, {
+          source?: string;
+          sourcePath?: string;
+          installPath?: string;
+          spec?: string;
+        }>;
       } | undefined;
 
       const entries: PluginEntry[] = [];
       const paths = pluginsSection?.load?.paths ?? [];
       const pluginEntries = pluginsSection?.entries ?? {};
+      const pluginInstalls = pluginsSection?.installs ?? {};
+      const allow = pluginsSection?.allow;
+      const pluginNames = new Set<string>([
+        ...Object.keys(pluginEntries),
+        ...Object.keys(pluginInstalls),
+        ...(allow ?? []),
+      ]);
 
-      for (const [name, entry] of Object.entries(pluginEntries)) {
-        let matchingPath = paths.find((p) => p.includes(name)) ?? '';
-        // Fallback: globally installed plugins aren't in load.paths.
-        // Mark as "global install" so UI doesn't show "—".
-        if (!matchingPath) {
-          matchingPath = `~/.openclaw/extensions/${name}`;
-        }
+      for (const pluginPath of paths) {
+        const normalized = pluginPath.replaceAll('\\', '/').replace(/\/+$/, '');
+        const basename = normalized.split('/').pop();
+        if (basename) pluginNames.add(basename);
+      }
+
+      for (const name of [...pluginNames].sort((a, b) => a.localeCompare(b, 'en'))) {
+        const entry = pluginEntries[name];
+        const install = pluginInstalls[name];
+        const matchingPath = paths.find((candidate) => {
+          const normalized = candidate.replaceAll('\\', '/').replace(/\/+$/, '');
+          return normalized.split('/').pop() === name;
+        }) ?? install?.installPath ?? install?.sourcePath ?? '';
         entries.push({
           name,
-          enabled: entry.enabled !== false,
+          enabled: pluginsSection?.enabled !== false && entry?.enabled !== false,
           path: matchingPath,
-          config: entry.config ?? {},
+          config: entry?.config ?? {},
+          allowed: allow ? allow.includes(name) : undefined,
+          configured: Boolean(entry),
+          installed: Boolean(install),
+          installSource: install?.source,
         });
       }
 
@@ -546,7 +657,16 @@ export const useExtensionsStore = create<ExtensionsState>()((set, get) => ({
     } catch (err) {
       console.error('[ExtensionsStore] togglePlugin failed:', err);
       await get().loadPlugins(); // Rollback optimistic
+      throw err;
     }
+  },
+
+  invalidate: () => {
+    set({
+      skillsLoaded: false,
+      channelsLoaded: false,
+      pluginsLoaded: false,
+    });
   },
 
 }));
