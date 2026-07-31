@@ -8,10 +8,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DELTA_SECOND } from '../../__fixtures__/gateway-payloads/chat-events';
+import {
+  ACCEPTANCE_SESSION_A_TOOL_START,
+  ACCEPTANCE_SESSION_B_KEY,
+} from '../../__fixtures__/gateway-payloads/long-run-incidents';
 import { AGENT_LIFECYCLE_RECOVERED_FOREGROUND } from '../../__fixtures__/gateway-payloads/session-run-state';
 import { useChatStore, _testWatchdog } from '../../stores/chat';
 import { useSessionRunsStore } from '../../stores/session-runs';
-import { useToolStreamStore } from '../../stores/tool-stream';
+import { selectPendingTools, useToolStreamStore } from '../../stores/tool-stream';
+import {
+  _setRunTraceEnabledForTests,
+  clearRunTrace,
+  getRunTraceSnapshot,
+} from '../../utils/run-trace';
 
 const request = vi.fn().mockResolvedValue({ sessions: [] });
 
@@ -46,11 +55,15 @@ describe('stale stream compatibility observations', () => {
       _reconnectedAt: null,
     });
     useToolStreamStore.setState({ pendingTools: [], bgActivity: null });
+    clearRunTrace();
+    _setRunTraceEnabledForTests(false);
   });
 
   afterEach(() => {
     _testWatchdog.stop();
     useSessionRunsStore.getState().resetForTests();
+    clearRunTrace();
+    _setRunTraceEnabledForTests(null);
     vi.useRealTimers();
   });
 
@@ -109,6 +122,40 @@ describe('stale stream compatibility observations', () => {
     expect(useToolStreamStore.getState().pendingTools).toHaveLength(1);
   });
 
+  it.each([207_000, 361_000])(
+    'keeps a no-delta run alive after %dms when OC still reports server active',
+    async (quietForMs) => {
+      request.mockResolvedValue({
+        sessions: [{ key: 'main', status: 'running', hasActiveRun: true }],
+      });
+      const quietSince = Date.now() - quietForMs;
+      useChatStore.setState({
+        streaming: true,
+        runId: 'run-no-delta',
+        _streamStartedAt: quietSince,
+        _lastDeltaAt: quietSince,
+        lastError: null,
+      });
+      useSessionRunsStore.getState().setLocalRunId('main', 'run-no-delta');
+      useSessionRunsStore.getState().setCommand('main', 'idle');
+
+      _testWatchdog.start();
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      // 207 seconds is deliberately below the 360-second watchdog threshold:
+      // no query is required yet. Past 360 seconds the watchdog must reconcile,
+      // but the quiet interval itself still cannot terminate the run.
+      expect(request.mock.calls.filter(([method]) => method === 'sessions.list')).toHaveLength(
+        quietForMs > 360_000 ? 1 : 0,
+      );
+      expect(useChatStore.getState()).toMatchObject({
+        streaming: true,
+        runId: 'run-no-delta',
+        lastError: null,
+      });
+    },
+  );
+
   it('reconnect age cannot activate a short fake-terminal timeout', () => {
     useChatStore.setState({
       streaming: true,
@@ -146,5 +193,64 @@ describe('stale stream compatibility observations', () => {
     );
 
     expect(useToolStreamStore.getState().bgActivity).toBeNull();
+  });
+
+  it('does not render session A foreground tools in a newly selected session B', () => {
+    useToolStreamStore.getState().handleAgentEvent(
+      ACCEPTANCE_SESSION_A_TOOL_START,
+      ACCEPTANCE_SESSION_A_TOOL_START.runId,
+      ACCEPTANCE_SESSION_A_TOOL_START.sessionKey,
+    );
+
+    expect(selectPendingTools(
+      useToolStreamStore.getState(),
+      ACCEPTANCE_SESSION_A_TOOL_START.sessionKey,
+    )).toHaveLength(1);
+    expect(selectPendingTools(
+      useToolStreamStore.getState(),
+      ACCEPTANCE_SESSION_B_KEY,
+    )).toEqual([]);
+  });
+
+  it('clearing session B cannot erase session A foreground tools', () => {
+    useToolStreamStore.getState().handleAgentEvent(
+      ACCEPTANCE_SESSION_A_TOOL_START,
+      ACCEPTANCE_SESSION_A_TOOL_START.runId,
+      ACCEPTANCE_SESSION_A_TOOL_START.sessionKey,
+    );
+
+    useToolStreamStore.getState().clearSession(ACCEPTANCE_SESSION_B_KEY);
+
+    expect(selectPendingTools(
+      useToolStreamStore.getState(),
+      ACCEPTANCE_SESSION_A_TOOL_START.sessionKey,
+    )).toHaveLength(1);
+  });
+
+  it('records metadata-only tool routing decisions in the opt-in acceptance probe', () => {
+    _setRunTraceEnabledForTests(true);
+    useToolStreamStore.getState().handleAgentEvent(
+      {
+        ...ACCEPTANCE_SESSION_A_TOOL_START,
+        data: {
+          ...ACCEPTANCE_SESSION_A_TOOL_START.data,
+          args: { command: 'TOP SECRET COMMAND' },
+        },
+      },
+      ACCEPTANCE_SESSION_A_TOOL_START.runId,
+      ACCEPTANCE_SESSION_A_TOOL_START.sessionKey,
+    );
+
+    expect(getRunTraceSnapshot()).toContainEqual(expect.objectContaining({
+      source: 'tool-stream',
+      action: 'agent-event',
+      sessionKey: 'project-58f153dd',
+      runId: ACCEPTANCE_SESSION_A_TOOL_START.runId,
+      status: 'tool',
+      decision: 'foreground',
+      reason: 'start',
+      fieldsPresent: expect.arrayContaining(['data.phase', 'data.toolCallId', 'data.args']),
+    }));
+    expect(JSON.stringify(getRunTraceSnapshot())).not.toContain('TOP SECRET');
   });
 });

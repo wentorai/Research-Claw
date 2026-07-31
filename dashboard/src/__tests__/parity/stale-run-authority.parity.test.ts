@@ -5,19 +5,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SESSION_LIST_ACTIVE_RESPONSE } from '../../__fixtures__/gateway-payloads/session-run-state';
+import { ACCEPTANCE_GATEWAY_RESTART_STALE_RUNNING } from '../../__fixtures__/gateway-payloads/long-run-incidents';
 import { useChatStore, _testWatchdog } from '../../stores/chat';
 import { useSessionRunsStore } from '../../stores/session-runs';
-import { useTaskFlowStore } from '../../stores/task-flow';
+import { selectTaskFlow, useTaskFlowStore } from '../../stores/task-flow';
 import { useToolStreamStore } from '../../stores/tool-stream';
 
 const request = vi.fn();
+const gatewayRuntime = vi.hoisted(() => ({ eventEpoch: 1 }));
 
 vi.mock('../../stores/gateway', () => ({
   useGatewayStore: {
     getState: () => ({
       client: { isConnected: true, request },
       state: 'connected',
-      eventEpoch: 1,
+      eventEpoch: gatewayRuntime.eventEpoch,
     }),
     setState: vi.fn(),
     subscribe: vi.fn(),
@@ -51,6 +53,7 @@ describe('stale watchdog delegates to Session reconciliation', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-31T12:00:00.000Z'));
     vi.resetAllMocks();
+    gatewayRuntime.eventEpoch = 1;
     request.mockResolvedValue({ sessions: SESSION_LIST_ACTIVE_RESPONSE.sessions });
     useSessionRunsStore.getState().resetForTests();
     useToolStreamStore.setState({ pendingTools: [], bgActivity: null });
@@ -89,7 +92,9 @@ describe('stale watchdog delegates to Session reconciliation', () => {
       runId: 'run-generation-1',
       lastError: null,
     });
-    expect(useTaskFlowStore.getState().flow?.activeIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      selectTaskFlow(useTaskFlowStore.getState(), 'project-longrun')?.activeIndex,
+    ).toBeGreaterThanOrEqual(0);
   });
 
   it('does not evict a tool merely because it has been quiet for 120 seconds', async () => {
@@ -121,5 +126,62 @@ describe('stale watchdog delegates to Session reconciliation', () => {
     // A reconnect/session poll is allowed; it is an authority query, not a fake terminal.
     expect(useChatStore.getState().runId).toBe('run-generation-1');
     expect(useChatStore.getState().streaming).toBe(true);
+  });
+
+  it('starts a new-epoch confirmation poll when an old-epoch request never settles', async () => {
+    request.mockReset();
+    request.mockImplementationOnce(() => new Promise(() => {}));
+
+    void useSessionRunsStore.getState().requestReconcile(
+      'project-29560714',
+      'active-poll',
+    );
+    await vi.runAllTicks();
+    expect(request).toHaveBeenCalledTimes(1);
+
+    gatewayRuntime.eventEpoch = 2;
+    request.mockResolvedValue({
+      sessions: [ACCEPTANCE_GATEWAY_RESTART_STALE_RUNNING],
+    });
+    useSessionRunsStore.getState().ingestSnapshot(
+      ACCEPTANCE_GATEWAY_RESTART_STALE_RUNNING,
+      { eventEpoch: 2, observedAt: Date.now() },
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenLastCalledWith(
+      'sessions.list',
+      expect.objectContaining({ limit: 1000 }),
+    );
+  });
+
+  it('replaces a slow active-run timer with the bounded result-confirmation cadence', async () => {
+    request.mockReset();
+    request.mockResolvedValue({
+      sessions: [ACCEPTANCE_GATEWAY_RESTART_STALE_RUNNING],
+    });
+    useSessionRunsStore.getState().ingestSnapshot(
+      {
+        ...ACCEPTANCE_GATEWAY_RESTART_STALE_RUNNING,
+        hasActiveRun: true,
+      },
+      { eventEpoch: 1, observedAt: Date.now() },
+    );
+
+    gatewayRuntime.eventEpoch = 2;
+    useSessionRunsStore.getState().ingestSnapshot(
+      ACCEPTANCE_GATEWAY_RESTART_STALE_RUNNING,
+      { eventEpoch: 2, observedAt: Date.now() },
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenLastCalledWith(
+      'sessions.list',
+      expect.objectContaining({ limit: 1000 }),
+    );
   });
 });

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { normalizeSessionKey } from '../utils/session-key';
+import { normalizeSessionKey, toGatewaySessionKey } from '../utils/session-key';
 import {
   beginSessionRunRequest,
   createSessionRunReconcilerState,
@@ -11,9 +11,19 @@ import {
   type SessionRunRowLike,
 } from '../utils/session-run-reconciler';
 import { isSessionRunActive, type SessionRunLifecycle } from '../utils/session-run-state';
+import { recordRunTrace } from '../utils/run-trace';
+import {
+  projectStoredConfirmedStopCommand,
+  rememberConfirmedStopCommand,
+} from '../utils/confirmed-stop-command';
 import { useGatewayStore } from './gateway';
 
-export type SessionRunCommand = 'idle' | 'submitting' | 'ack_unknown' | 'stopping';
+export type SessionRunCommand =
+  | 'idle'
+  | 'submitting'
+  | 'accepted'
+  | 'ack_unknown'
+  | 'stopping';
 
 export type RunActivityKind =
   | 'submitting'
@@ -45,6 +55,9 @@ export interface SessionRunView {
   /** OC persisted status says running but the active-run registry says false.
    * The run is not active; history/result reconciliation may still be pending. */
   needsResultConfirmation: boolean;
+  /** OC says the run is no longer active but never supplied a terminal result
+   * within the bounded confirmation window. */
+  resultUnconfirmed: boolean;
   isBusy: boolean;
   canAbort: boolean;
   isStreaming: boolean;
@@ -71,6 +84,7 @@ interface SessionRunsState {
   localRunIds: Record<string, string>;
   activities: Record<string, RunActivityObservation>;
   pendingAborts: Record<string, { runId?: string }>;
+  resultConfirmationExhausted: Record<string, boolean>;
 
   ingestSnapshot: (row: SessionRunRowLike, options: ReconcileOptions) => void;
   ingestSessionEvent: (
@@ -89,12 +103,21 @@ interface SessionRunsState {
 }
 
 const POLL_DELAYS_MS = [15_000, 30_000, 60_000] as const;
-const RESULT_CONFIRMATION_POLL_DELAYS_MS = [1_000, 2_000, 5_000, 15_000, 30_000, 60_000] as const;
-const reconcileInFlight = new Map<string, Promise<void>>();
+const RESULT_CONFIRMATION_POLL_DELAYS_MS = [1_000, 2_000] as const;
+const reconcileInFlight = new Map<string, {
+  eventEpoch: number;
+  promise: Promise<void>;
+}>();
 const reconcileTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pollAttempts = new Map<string, number>();
 const abortInFlight = new Map<string, Promise<void>>();
 const abortAttemptedEpoch = new Map<string, number>();
+
+interface ChatAbortResponse {
+  ok?: boolean;
+  aborted?: boolean;
+  runIds?: unknown[];
+}
 
 function keyOf(value: string | undefined): string {
   return normalizeSessionKey(value) || value || 'main';
@@ -121,7 +144,12 @@ function clearAllPolls(): void {
 }
 
 function schedulePoll(sessionKey: string): void {
-  if (reconcileTimers.has(sessionKey) || reconcileInFlight.has(sessionKey)) return;
+  const currentEpoch = useGatewayStore.getState().eventEpoch ?? 0;
+  const inFlight = reconcileInFlight.get(sessionKey);
+  if (
+    reconcileTimers.has(sessionKey)
+    || (inFlight && inFlight.eventEpoch === currentEpoch)
+  ) return;
   const view = selectSessionRunView(useSessionRunsStore.getState(), sessionKey);
   if (!view.serverActive && view.command === 'idle' && !view.needsResultConfirmation) {
     clearPoll(sessionKey);
@@ -143,7 +171,10 @@ function schedulePoll(sessionKey: string): void {
 function terminalOrInactiveCleanup(
   state: SessionRunsState,
   sessionKey: string,
-): Pick<SessionRunsState, 'commands' | 'localRunIds' | 'activities' | 'pendingAborts'> | null {
+): Pick<
+  SessionRunsState,
+  'commands' | 'localRunIds' | 'activities' | 'pendingAborts' | 'resultConfirmationExhausted'
+> | null {
   const record = getSessionRunRecord(state.reconciler, sessionKey);
   const lifecycle = getSessionRunLifecycle(record);
   const isTerminal = ['done', 'failed', 'killed', 'timeout', 'interrupted'].includes(lifecycle);
@@ -153,15 +184,21 @@ function terminalOrInactiveCleanup(
     || Boolean(record?.terminal?.runId && record.terminal.runId === localRunId)
   );
   const authoritativelyInactive = record?.truth?.hasActiveRun === false
-    && state.commands[sessionKey] !== 'ack_unknown';
+    && state.commands[sessionKey] !== 'ack_unknown'
+    && (
+      state.commands[sessionKey] !== 'accepted'
+      || state.resultConfirmationExhausted[sessionKey] === true
+    );
   if (!terminal && !authoritativelyInactive) return null;
   const commands = { ...state.commands, [sessionKey]: 'idle' as const };
   const localRunIds = { ...state.localRunIds };
   const activities = { ...state.activities };
   const pendingAborts = { ...state.pendingAborts };
+  const resultConfirmationExhausted = { ...state.resultConfirmationExhausted };
   delete localRunIds[sessionKey];
   delete activities[sessionKey];
   delete pendingAborts[sessionKey];
+  if (terminal) delete resultConfirmationExhausted[sessionKey];
   abortAttemptedEpoch.delete(sessionKey);
   const needsResultConfirmation = record?.truth?.status === 'running'
     && record.truth.hasActiveRun === false;
@@ -169,11 +206,45 @@ function terminalOrInactiveCleanup(
   // terminal session status. Keep the read-only poll alive through that short
   // settling window; a terminal snapshot will clear it.
   if (!needsResultConfirmation) clearPoll(sessionKey);
-  return { commands, localRunIds, activities, pendingAborts };
+  return {
+    commands,
+    localRunIds,
+    activities,
+    pendingAborts,
+    resultConfirmationExhausted,
+  };
+}
+
+function settleCommandAgainstAuthority(
+  state: SessionRunsState,
+  sessionKey: string,
+): Partial<SessionRunsState> | null {
+  const cleanup = terminalOrInactiveCleanup(state, sessionKey);
+  if (cleanup) return cleanup;
+
+  const record = getSessionRunRecord(state.reconciler, sessionKey);
+  const serverActive = Boolean(record?.truth && isSessionRunActive(record.truth));
+  const accepted = state.commands[sessionKey] === 'accepted';
+  const exhausted = state.resultConfirmationExhausted[sessionKey] === true;
+  if (!serverActive || (!accepted && !exhausted)) return null;
+
+  const commands = accepted
+    ? { ...state.commands, [sessionKey]: 'idle' as const }
+    : state.commands;
+  const resultConfirmationExhausted = { ...state.resultConfirmationExhausted };
+  delete resultConfirmationExhausted[sessionKey];
+  return { commands, resultConfirmationExhausted };
 }
 
 export function selectSessionRunView(
-  state: Pick<SessionRunsState, 'reconciler' | 'commands' | 'localRunIds' | 'activities'>,
+  state: Pick<
+    SessionRunsState,
+    'reconciler'
+    | 'commands'
+    | 'localRunIds'
+    | 'activities'
+    | 'resultConfirmationExhausted'
+  >,
   rawSessionKey: string,
 ): SessionRunView {
   const sessionKey = keyOf(rawSessionKey);
@@ -183,9 +254,13 @@ export function selectSessionRunView(
   const activity = state.activities[sessionKey] ?? null;
   const serverActive = Boolean(record?.truth && isSessionRunActive(record.truth));
   const lifecycle = getSessionRunLifecycle(record);
-  const needsResultConfirmation = lifecycle === 'unknown'
-    && record?.truth?.status === 'running'
-    && record.truth.hasActiveRun === false;
+  const confirmationConflict = record?.truth?.hasActiveRun === false
+    && (
+      record.truth.status === 'running'
+      || command === 'accepted'
+    );
+  const resultUnconfirmed = state.resultConfirmationExhausted[sessionKey] === true;
+  const needsResultConfirmation = confirmationConflict && !resultUnconfirmed;
   return {
     sessionKey,
     command,
@@ -194,6 +269,7 @@ export function selectSessionRunView(
     localRunId,
     serverActive,
     needsResultConfirmation,
+    resultUnconfirmed,
     isBusy: command !== 'idle' || serverActive,
     canAbort: localRunId !== null || serverActive,
     isStreaming: activity?.kind === 'streaming',
@@ -206,13 +282,32 @@ const initialState = () => ({
   localRunIds: {},
   activities: {},
   pendingAborts: {},
+  resultConfirmationExhausted: {},
 });
 
 export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
   ...initialState(),
 
   ingestSnapshot: (row, options) => {
-    const sessionKey = keyOf(row.key ?? row.sessionKey);
+    const stopProjection = projectStoredConfirmedStopCommand(row, options.observedAt);
+    const effectiveRow = stopProjection.row;
+    const sessionKey = keyOf(effectiveRow.key ?? effectiveRow.sessionKey);
+    const previousView = selectSessionRunView(get(), sessionKey);
+    if (stopProjection.fact) {
+      recordRunTrace({
+        source: 'session-store',
+        action: 'confirmed-stop-projected',
+        sessionKey,
+        sessionId: effectiveRow.sessionId,
+        runId: stopProjection.fact.runId,
+        status: row.status,
+        decision: 'killed',
+        reason: 'chat.abort-confirmed',
+        startedAt: effectiveRow.startedAt,
+        endedAt: effectiveRow.endedAt,
+        observedAt: options.observedAt,
+      });
+    }
     set((state) => {
       const request = beginSessionRunRequest(state.reconciler, sessionKey, {
         eventEpoch: options.eventEpoch,
@@ -223,12 +318,17 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
         requestGeneration: request.generation,
         eventEpoch: options.eventEpoch,
         observedAt: options.observedAt,
-        row,
+        row: effectiveRow,
       });
       const nextState = { ...state, reconciler };
-      return { reconciler, ...(terminalOrInactiveCleanup(nextState, sessionKey) ?? {}) };
+      return { reconciler, ...(settleCommandAgainstAuthority(nextState, sessionKey) ?? {}) };
     });
     const view = selectSessionRunView(get(), sessionKey);
+    if (view.needsResultConfirmation && !previousView.needsResultConfirmation) {
+      // A slow active-run fallback timer must not postpone the short, bounded
+      // confirmation cadence after F5/reconnect reveals running + inactive.
+      clearPoll(sessionKey);
+    }
     if (view.serverActive || view.command !== 'idle' || view.needsResultConfirmation) schedulePoll(sessionKey);
     else clearPoll(sessionKey);
   },
@@ -244,7 +344,8 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
       '';
     if (!rawKey) return;
     const sessionKey = keyOf(rawKey);
-    const patch: SessionRunRowLike = {
+    const previousView = selectSessionRunView(get(), sessionKey);
+    const rawPatch: SessionRunRowLike = {
       ...source,
       ...(typeof payload.phase === 'string' ? { phase: payload.phase } : {}),
     };
@@ -252,6 +353,26 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
       (typeof payload.clientRunId === 'string' && payload.clientRunId) ||
       (typeof payload.runId === 'string' && payload.runId) ||
       undefined;
+    const stopProjection = projectStoredConfirmedStopCommand({
+      ...rawPatch,
+      ...(runId ? { runId } : {}),
+    }, options.observedAt ?? Date.now());
+    const patch: SessionRunRowLike = stopProjection.row;
+    if (stopProjection.fact) {
+      recordRunTrace({
+        source: 'session-store',
+        action: 'confirmed-stop-projected',
+        sessionKey,
+        sessionId: patch.sessionId,
+        runId: stopProjection.fact.runId,
+        status: rawPatch.status,
+        decision: 'killed',
+        reason: 'chat.abort-confirmed',
+        startedAt: patch.startedAt,
+        endedAt: patch.endedAt,
+        observedAt: options.observedAt ?? Date.now(),
+      });
+    }
     set((state) => {
       const reconciler = reconcileSessionRun(state.reconciler, {
         type: 'event',
@@ -263,29 +384,41 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
         patch,
       });
       const nextState = { ...state, reconciler };
-      return { reconciler, ...(terminalOrInactiveCleanup(nextState, sessionKey) ?? {}) };
+      return { reconciler, ...(settleCommandAgainstAuthority(nextState, sessionKey) ?? {}) };
     });
     const view = selectSessionRunView(get(), sessionKey);
+    if (view.needsResultConfirmation && !previousView.needsResultConfirmation) {
+      clearPoll(sessionKey);
+    }
     if (view.serverActive || view.command !== 'idle' || view.needsResultConfirmation) schedulePoll(sessionKey);
     else clearPoll(sessionKey);
   },
 
   requestReconcile: (rawSessionKey, reason) => {
     const sessionKey = keyOf(rawSessionKey);
-    const existing = reconcileInFlight.get(sessionKey);
-    if (existing) return existing;
-
     const gateway = useGatewayStore.getState();
     const client = gateway.client;
     const eventEpoch = gateway.eventEpoch ?? 0;
+    const existing = reconcileInFlight.get(sessionKey);
+    if (existing?.eventEpoch === eventEpoch) return existing.promise;
     let generation = 0;
     set((state) => {
       const request = beginSessionRunRequest(state.reconciler, sessionKey, { eventEpoch });
       generation = request.generation;
       return { reconciler: request.state };
     });
+    recordRunTrace({
+      source: 'session-store',
+      action: 'reconcile-request',
+      sessionKey,
+      requestGeneration: generation,
+      eventEpoch,
+      reason,
+      observedAt: Date.now(),
+    });
 
-    const promise = (async () => {
+    let promise: Promise<void>;
+    promise = (async () => {
       if (!client?.isConnected) {
         set((state) => ({
           reconciler: reconcileSessionRun(state.reconciler, {
@@ -302,9 +435,40 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
           includeDerivedTitles: true,
           limit: 1000,
         });
-        const row = result?.sessions?.find((candidate) =>
+        const rawRow = result?.sessions?.find((candidate) =>
           keyOf(candidate.key ?? candidate.sessionKey) === sessionKey,
         ) ?? { key: sessionKey };
+        const stopProjection = projectStoredConfirmedStopCommand(rawRow);
+        const row = stopProjection.row;
+        recordRunTrace({
+          source: 'session-store',
+          action: 'reconcile-response',
+          sessionKey,
+          sessionId: row.sessionId,
+          requestGeneration: generation,
+          eventEpoch,
+          status: row.status,
+          hasActiveRun: row.hasActiveRun,
+          startedAt: row.startedAt,
+          endedAt: row.endedAt,
+          fieldsPresent: Object.keys(row),
+          observedAt: Date.now(),
+        });
+        if (stopProjection.fact) {
+          recordRunTrace({
+            source: 'session-store',
+            action: 'confirmed-stop-projected',
+            sessionKey,
+            sessionId: row.sessionId,
+            runId: stopProjection.fact.runId,
+            status: rawRow.status,
+            decision: 'killed',
+            reason: 'chat.abort-confirmed',
+            startedAt: row.startedAt,
+            endedAt: row.endedAt,
+            observedAt: Date.now(),
+          });
+        }
         set((state) => {
           const reconciler = reconcileSessionRun(state.reconciler, {
             type: 'snapshot',
@@ -314,8 +478,45 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
             observedAt: Date.now(),
             row,
           });
-          const nextState = { ...state, reconciler };
-          return { reconciler, ...(terminalOrInactiveCleanup(nextState, sessionKey) ?? {}) };
+          let nextState = { ...state, reconciler };
+          let nextView = selectSessionRunView(nextState, sessionKey);
+          const attempts = pollAttempts.get(sessionKey) ?? 0;
+          if (
+            reason === 'active-poll'
+            && nextView.needsResultConfirmation
+            && attempts >= RESULT_CONFIRMATION_POLL_DELAYS_MS.length
+          ) {
+            nextState = {
+              ...nextState,
+              resultConfirmationExhausted: {
+                ...nextState.resultConfirmationExhausted,
+                [sessionKey]: true,
+              },
+            };
+            nextView = selectSessionRunView(nextState, sessionKey);
+          }
+          recordRunTrace({
+            source: 'session-store',
+            action: 'reconcile-applied',
+            sessionKey,
+            runId: nextView.localRunId ?? undefined,
+            requestGeneration: generation,
+            eventEpoch,
+            lifecycle: nextView.lifecycle,
+            command: nextView.command,
+            hasActiveRun: nextView.serverActive,
+            decision: nextView.needsResultConfirmation
+              ? 'confirm-result'
+              : nextView.resultUnconfirmed
+                ? 'result-unconfirmed'
+                : 'settled',
+            observedAt: Date.now(),
+          });
+          return {
+            reconciler,
+            resultConfirmationExhausted: nextState.resultConfirmationExhausted,
+            ...(settleCommandAgainstAuthority(nextState, sessionKey) ?? {}),
+          };
         });
       } catch (error) {
         console.warn(`[SessionRuns] reconcile failed (${reason}) for ${sessionKey}:`, error);
@@ -329,18 +530,22 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
         }));
       }
     })().finally(() => {
+      // A request from a dead transport epoch may settle after a reconnect.
+      // It must neither delete nor suppress the newer epoch's reconciliation.
+      if (reconcileInFlight.get(sessionKey)?.promise !== promise) return;
       reconcileInFlight.delete(sessionKey);
       const view = selectSessionRunView(get(), sessionKey);
       if (view.serverActive || view.command !== 'idle' || view.needsResultConfirmation) schedulePoll(sessionKey);
       else clearPoll(sessionKey);
     });
-    reconcileInFlight.set(sessionKey, promise);
+    reconcileInFlight.set(sessionKey, { eventEpoch, promise });
     return promise;
   },
 
   requestAbort: (rawSessionKey) => {
     const sessionKey = keyOf(rawSessionKey);
     const localRunId = get().localRunIds[sessionKey];
+    const requestedAt = Date.now();
     set((state) => ({
       commands: { ...state.commands, [sessionKey]: 'stopping' },
       pendingAborts: {
@@ -360,11 +565,104 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
 
     const pending = get().pendingAborts[sessionKey];
     const params = pending?.runId ? { sessionKey, runId: pending.runId } : { sessionKey };
-    const promise = client.request('chat.abort', params)
-      .catch((error) => {
+    const promise = (async () => {
+      try {
+        let result = await client.request<ChatAbortResponse>('chat.abort', params);
+        const shouldRetryBySession = (
+          result?.aborted === false
+          && Boolean(pending?.runId)
+          && selectSessionRunView(get(), sessionKey).serverActive
+        );
+        if (shouldRetryBySession) {
+          recordRunTrace({
+            source: 'session-store',
+            action: 'abort-response',
+            sessionKey,
+            runId: pending?.runId,
+            eventEpoch,
+            decision: 'retry-session-scope',
+            observedAt: Date.now(),
+            fieldsPresent: result && typeof result === 'object' ? Object.keys(result) : [],
+          });
+          result = await client.request<ChatAbortResponse>('chat.abort', { sessionKey });
+        }
+        const gatewaySessionKey = toGatewaySessionKey(sessionKey);
+        const shouldRetryCanonicalSession = (
+          result?.aborted === false
+          && selectSessionRunView(get(), sessionKey).serverActive
+          && gatewaySessionKey !== sessionKey
+        );
+        if (shouldRetryCanonicalSession) {
+          recordRunTrace({
+            source: 'session-store',
+            action: 'abort-response',
+            sessionKey,
+            eventEpoch,
+            decision: 'retry-gateway-session-scope',
+            observedAt: Date.now(),
+            fieldsPresent: result && typeof result === 'object' ? Object.keys(result) : [],
+          });
+          result = await client.request<ChatAbortResponse>('chat.abort', {
+            sessionKey: gatewaySessionKey,
+          });
+        }
+
+        const confirmedAt = Date.now();
+        const confirmedRunIds = result?.aborted === true && Array.isArray(result.runIds)
+          ? result.runIds.filter((value): value is string => (
+              typeof value === 'string' && Boolean(value.trim())
+            ))
+          : [];
+        const sessionId = getSessionRunRecord(get().reconciler, sessionKey)?.truth?.sessionId;
+        for (const runId of confirmedRunIds) {
+          rememberConfirmedStopCommand({
+            sessionKey,
+            ...(sessionId ? { sessionId } : {}),
+            runId,
+            requestedAt,
+            confirmedAt,
+          });
+        }
+        const terminalRunId = (
+          pending?.runId && confirmedRunIds.includes(pending.runId)
+            ? pending.runId
+            : confirmedRunIds[0]
+        );
+        if (terminalRunId) {
+          get().applyChatTerminal({
+            sessionKey,
+            runId: terminalRunId,
+            ...(sessionId ? { sessionId } : {}),
+            status: 'killed',
+            eventEpoch,
+            observedAt: confirmedAt,
+          });
+        }
+        recordRunTrace({
+          source: 'session-store',
+          action: 'abort-response',
+          sessionKey,
+          sessionId,
+          runId: terminalRunId ?? pending?.runId,
+          eventEpoch,
+          decision: terminalRunId ? 'confirmed' : 'not-active',
+          observedAt: confirmedAt,
+          fieldsPresent: result && typeof result === 'object' ? Object.keys(result) : [],
+        });
+      } catch (error) {
         console.warn(`[SessionRuns] abort result uncertain for ${sessionKey}:`, error);
-      })
-      .then(() => get().requestReconcile(sessionKey, 'chat.abort'))
+        recordRunTrace({
+          source: 'session-store',
+          action: 'abort-response',
+          sessionKey,
+          runId: pending?.runId,
+          eventEpoch,
+          decision: 'uncertain',
+          observedAt: Date.now(),
+        });
+      }
+      await get().requestReconcile(sessionKey, 'chat.abort');
+    })()
       .finally(() => {
         abortInFlight.delete(sessionKey);
       });
@@ -392,7 +690,7 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
         observedAt: input.observedAt,
       });
       const nextState = { ...state, reconciler };
-      return { reconciler, ...(terminalOrInactiveCleanup(nextState, sessionKey) ?? {}) };
+      return { reconciler, ...(settleCommandAgainstAuthority(nextState, sessionKey) ?? {}) };
     });
   },
 
@@ -411,8 +709,11 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
     const sessionKey = keyOf(rawSessionKey);
     set((state) => {
       const localRunIds = { ...state.localRunIds };
+      const currentRunId = state.localRunIds[sessionKey];
+      const resultConfirmationExhausted = { ...state.resultConfirmationExhausted };
       let reconciler = state.reconciler;
       if (runId) {
+        delete resultConfirmationExhausted[sessionKey];
         localRunIds[sessionKey] = runId;
         const record = getSessionRunRecord(state.reconciler, sessionKey);
         if (!record?.truth || !isSessionRunActive(record.truth)) {
@@ -425,7 +726,14 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
         }
       }
       else delete localRunIds[sessionKey];
-      return { localRunIds, reconciler };
+      recordRunTrace({
+        source: 'session-store',
+        action: runId ? 'local-run-set' : 'local-run-cleared',
+        sessionKey,
+        runId: runId ?? currentRunId,
+        observedAt: Date.now(),
+      });
+      return { localRunIds, reconciler, resultConfirmationExhausted };
     });
   },
 
@@ -454,9 +762,19 @@ export const useSessionRunsStore = create<SessionRunsState>()((set, get) => ({
       const commands = { ...state.commands, [sessionKey]: 'idle' as const };
       const localRunIds = { ...state.localRunIds };
       const activities = { ...state.activities };
+      const pendingAborts = { ...state.pendingAborts };
+      const resultConfirmationExhausted = { ...state.resultConfirmationExhausted };
       delete localRunIds[sessionKey];
       delete activities[sessionKey];
-      return { commands, localRunIds, activities };
+      delete pendingAborts[sessionKey];
+      delete resultConfirmationExhausted[sessionKey];
+      return {
+        commands,
+        localRunIds,
+        activities,
+        pendingAborts,
+        resultConfirmationExhausted,
+      };
     });
     clearPoll(sessionKey);
   },

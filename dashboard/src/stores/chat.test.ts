@@ -4,10 +4,12 @@
  * abort, clearMessages, and token tracking.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Modal } from 'antd';
+import { fireEvent, render } from '@testing-library/react';
 import { useChatStore } from './chat';
 import { useStagedWritingStore } from './staged-writing';
 import { buildInitialStageStates, STAGED_WRITING_STAGES } from '../utils/staged-writing-stages';
-import { useSessionRunsStore } from './session-runs';
+import { selectSessionRunView, useSessionRunsStore } from './session-runs';
 
 // Mock the gateway store
 const mockGatewayClient = {
@@ -78,6 +80,15 @@ describe('Chat store', () => {
       expect(useChatStore.getState().runId).toBeTruthy();
       expect(typeof useChatStore.getState().runId).toBe('string');
       expect(useChatStore.getState().streaming).toBe(true);
+      // A successful transport ACK is a command fact, not yet a Session
+      // lifecycle fact. It must keep the turn busy/abortable while the first
+      // authoritative sessions.list row is still stale or incomplete.
+      expect(useSessionRunsStore.getState().commands.main).toBe('accepted');
+      expect(selectSessionRunView(useSessionRunsStore.getState(), 'main')).toMatchObject({
+        command: 'accepted',
+        isBusy: true,
+        canAbort: true,
+      });
     });
 
     it('sets lastError when not connected', async () => {
@@ -120,6 +131,126 @@ describe('Chat store', () => {
       await useChatStore.getState().send('new message');
 
       expect(useChatStore.getState().lastError).toBeNull();
+    });
+
+    it('does not send when the heuristic background decision is dismissed', async () => {
+      const confirm = vi.spyOn(Modal, 'confirm').mockImplementation((config) => {
+        (config.onCancel as (() => void) | undefined)?.();
+        return { destroy: vi.fn(), update: vi.fn() } as never;
+      });
+      mockGatewayClient.request.mockResolvedValue({});
+
+      try {
+        await useChatStore.getState().send('帮我跑一个较长的 workspace 扫描任务');
+      } finally {
+        confirm.mockRestore();
+      }
+
+      expect(mockGatewayClient.request.mock.calls.some(([method]) => method === 'chat.send')).toBe(false);
+      expect(mockGatewayClient.request.mock.calls.some(([method]) => method === 'rc.longTask.submit')).toBe(false);
+      expect(useChatStore.getState().messages).toEqual([]);
+    });
+
+    it('offers a visible cancel-without-sending action', async () => {
+      let config: Parameters<typeof Modal.confirm>[0] | undefined;
+      const confirm = vi.spyOn(Modal, 'confirm').mockImplementation((next) => {
+        config = next;
+        return { destroy: vi.fn(), update: vi.fn() } as never;
+      });
+      mockGatewayClient.request.mockResolvedValue({});
+
+      try {
+        const sending = useChatStore.getState().send('帮我跑一个较长的 workspace 扫描任务');
+        expect(config).toBeDefined();
+        const footer = typeof config!.footer === 'function'
+          ? config!.footer(null, {} as never)
+          : config!.footer;
+        const view = render(footer as never);
+        fireEvent.click(view.getByRole('button', { name: '取消发送' }));
+        await sending;
+        view.unmount();
+      } finally {
+        confirm.mockRestore();
+      }
+
+      expect(mockGatewayClient.request).not.toHaveBeenCalled();
+      expect(useChatStore.getState().messages).toEqual([]);
+      expect(useChatStore.getState().inputRestore).toEqual({
+        text: '帮我跑一个较长的 workspace 扫描任务',
+        attachments: [],
+        references: [],
+      });
+    });
+
+    it('sends the unchanged request in the foreground when explicitly chosen', async () => {
+      let config: Parameters<typeof Modal.confirm>[0] | undefined;
+      const confirm = vi.spyOn(Modal, 'confirm').mockImplementation((next) => {
+        config = next;
+        return { destroy: vi.fn(), update: vi.fn() } as never;
+      });
+      mockGatewayClient.request.mockResolvedValue({});
+
+      try {
+        const sending = useChatStore.getState().send('帮我跑一个较长的 workspace 扫描任务');
+        const footer = typeof config!.footer === 'function'
+          ? config!.footer(null, {} as never)
+          : config!.footer;
+        const view = render(footer as never);
+        fireEvent.click(view.getByRole('button', { name: '前台执行' }));
+        await sending;
+        view.unmount();
+      } finally {
+        confirm.mockRestore();
+      }
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'chat.send',
+        expect.objectContaining({
+          message: '帮我跑一个较长的 workspace 扫描任务',
+        }),
+      );
+      expect(mockGatewayClient.request.mock.calls.some(([method]) =>
+        method === 'rc.longTask.submit')).toBe(false);
+    });
+
+    it('dispatches detached work only when the background action is chosen', async () => {
+      let config: Parameters<typeof Modal.confirm>[0] | undefined;
+      const confirm = vi.spyOn(Modal, 'confirm').mockImplementation((next) => {
+        config = next;
+        return { destroy: vi.fn(), update: vi.fn() } as never;
+      });
+      mockGatewayClient.request.mockImplementation(async (method: string) => {
+        if (method === 'rc.longTask.submit') {
+          return { job: { id: 'longtask:test', title: '较长的 workspace 扫描任务' } };
+        }
+        return {};
+      });
+
+      try {
+        const sending = useChatStore.getState().send('帮我跑一个较长的 workspace 扫描任务');
+        const footer = typeof config!.footer === 'function'
+          ? config!.footer(null, {} as never)
+          : config!.footer;
+        const view = render(footer as never);
+        fireEvent.click(view.getByRole('button', { name: '后台执行' }));
+        await sending;
+        view.unmount();
+      } finally {
+        confirm.mockRestore();
+      }
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'rc.longTask.submit',
+        expect.objectContaining({
+          message: '帮我跑一个较长的 workspace 扫描任务',
+        }),
+      );
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'chat.send',
+        expect.objectContaining({
+          message: expect.stringContaining('[Research-Claw] Auto Long Task'),
+        }),
+      );
     });
 
     // --- Regression: text / references combinations (D) ---
@@ -361,6 +492,56 @@ describe('Chat store', () => {
     });
 
     describe('aborted', () => {
+      it('ignores a late aborted event after the same run already completed', () => {
+        useChatStore.setState({
+          runId: 'run-done',
+          streaming: true,
+          streamText: null,
+          messages: [],
+          lastError: null,
+        });
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-done',
+          sessionKey: 'main',
+          state: 'final',
+          message: { role: 'assistant', text: 'DONE' },
+        });
+        expect(useChatStore.getState()).toMatchObject({
+          runId: null,
+          streaming: false,
+          lastError: null,
+        });
+
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-done',
+          sessionKey: 'main',
+          state: 'aborted',
+        });
+
+        expect(useChatStore.getState().lastError).toBeNull();
+        expect(useChatStore.getState().messages.map((message) => message.text)).toEqual(['DONE']);
+      });
+
+      it('uses OC stopReason=rpc after F5 instead of reporting an interruption', () => {
+        useChatStore.setState({
+          runId: null,
+          streaming: false,
+          messages: [],
+          _userAbortedRunId: null,
+          lastError: null,
+        });
+
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-stopped-before-refresh',
+          sessionKey: 'main',
+          state: 'aborted',
+          stopReason: 'rpc',
+        });
+
+        expect(useChatStore.getState().lastError).toBeNull();
+        expect(useChatStore.getState().canContinue).toBe(false);
+      });
+
       it('saves partial text as message when available', () => {
         useChatStore.setState({ runId: 'run-1', streaming: true, streamText: 'Partial answer', messages: [] });
 

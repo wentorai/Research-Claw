@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { Modal } from 'antd';
+import { createElement } from 'react';
+import { Button, Modal } from 'antd';
 import type { ChatMessage, ChatStreamEvent, ChatAttachment } from '../gateway/types';
 import { GatewayRequestError } from '../gateway/client';
 import { useGatewayStore } from './gateway';
@@ -31,6 +32,7 @@ import { isStagedWritingJobForSession } from '../utils/staged-writing-run';
 import { useStagedWritingStore } from './staged-writing';
 import { selectSessionRunView, useSessionRunsStore } from './session-runs';
 import type { SessionRunRowLike } from '../utils/session-run-reconciler';
+import { recordRunTrace } from '../utils/run-trace';
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 const EXECUTION_BINDINGS_PREFIX = 'rc-execution-bindings:';
@@ -193,15 +195,52 @@ function formatStructuredRunFailureForUser(data: AgentFailureData): string {
  * answering inline). Resolves false on cancel/dismiss, so the default is the
  * non-surprising "answer in this turn".
  */
-function confirmHeuristicLongTask(title: string): Promise<boolean> {
+type LongTaskDecision = 'background' | 'foreground' | 'cancel';
+
+function confirmHeuristicLongTask(title: string): Promise<LongTaskDecision> {
   return new Promise((resolve) => {
-    Modal.confirm({
+    let settled = false;
+    let instance: ReturnType<typeof Modal.confirm> | undefined;
+    const finish = (decision: LongTaskDecision) => {
+      if (settled) return;
+      settled = true;
+      resolve(decision);
+      instance?.destroy();
+    };
+    instance = Modal.confirm({
       title: i18n.t('chat.longTask.confirmTitle'),
       content: i18n.t('chat.longTask.confirmBody', { title }),
-      okText: i18n.t('chat.longTask.confirmOk'),
-      cancelText: i18n.t('chat.longTask.confirmCancel'),
-      onOk: () => resolve(true),
-      onCancel: () => resolve(false),
+      closable: true,
+      footer: () => createElement(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 8,
+          },
+        },
+        createElement(
+          Button,
+          { key: 'cancel', onClick: () => finish('cancel') },
+          i18n.t('chat.longTask.confirmDismiss'),
+        ),
+        createElement(
+          Button,
+          { key: 'foreground', onClick: () => finish('foreground') },
+          i18n.t('chat.longTask.confirmForeground'),
+        ),
+        createElement(
+          Button,
+          {
+            key: 'background',
+            type: 'primary',
+            onClick: () => finish('background'),
+          },
+          i18n.t('chat.longTask.confirmOk'),
+        ),
+      ),
+      onCancel: () => finish('cancel'),
     });
   });
 }
@@ -980,11 +1019,29 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // Explicit "后台/长任务/子会话" requests are promoted silently — the user
       // asked for it. Heuristic-only matches are the false-positive-prone case,
       // so confirm before changing behaviour from "answer now" to "spawn a
-      // background subagent". Declining falls through to a normal inline turn.
+      // background subagent". The modal has three explicit outcomes: detached,
+      // foreground, or cancel-without-sending.
       const promoteSilently = shouldPromoteLongTaskWithoutConfirmation(longTask);
-      const promote = longTask.shouldAutoTrack
-        && (promoteSilently || await confirmHeuristicLongTask(longTask.title));
-      if (promote) {
+      const decision: LongTaskDecision = !longTask.shouldAutoTrack
+        ? 'foreground'
+        : promoteSilently
+          ? 'background'
+          : await confirmHeuristicLongTask(longTask.title);
+      if (decision === 'cancel') {
+        // MessageInput clears optimistically before this async decision
+        // resolves. Restore the exact unsent draft so "cancel" is genuinely
+        // non-destructive as well as RPC-free.
+        set((state) => ({
+          inputRestore: {
+            text: displayText,
+            attachments: cloneAttachments(attachments),
+            references: [...fileRefPaths],
+          },
+          inputRestoreSeq: state.inputRestoreSeq + 1,
+        }));
+        return;
+      }
+      if (decision === 'background') {
         try {
           const submitted = await client.request<{ job: { id: string; title: string } }>('rc.longTask.submit', {
             message: trimmed,
@@ -1063,6 +1120,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }));
     useSessionRunsStore.getState().setLocalRunId(sendSessionKey, localRunId);
     useSessionRunsStore.getState().setCommand(sendSessionKey, 'submitting');
+    recordRunTrace({
+      source: 'chat',
+      action: 'local-send',
+      sessionKey: sendSessionKey,
+      runId: localRunId,
+      command: 'submitting',
+      observedAt: Date.now(),
+    });
     useSessionRunsStore.getState().observeActivity({
       sessionKey: sendSessionKey,
       runId: localRunId,
@@ -1208,6 +1273,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       const ackStatus = ackRecord.status === 'in_flight' || ackRecord.status === 'ok'
         ? ackRecord.status
         : 'started';
+      recordRunTrace({
+        source: 'chat',
+        action: 'send-ack',
+        sessionKey: sendSessionKey,
+        runId: ackRunId,
+        status: ackStatus,
+        fieldsPresent: Object.keys(ackRecord),
+        observedAt: Date.now(),
+      });
       clearPersistedPendingSendAck(sendSessionKey);
       if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
         set({ _pendingSendAck: null });
@@ -1235,7 +1309,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         }
         const runs = useSessionRunsStore.getState();
         runs.setLocalRunId(sendSessionKey, ackRunId);
-        runs.setCommand(sendSessionKey, 'idle');
+        runs.setCommand(sendSessionKey, 'accepted');
         runs.observeActivity({
           sessionKey: sendSessionKey,
           runId: ackRunId,
@@ -1307,6 +1381,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           observedAt: Date.now(),
           source: 'local-ack',
         });
+        recordRunTrace({
+          source: 'chat',
+          action: 'send-ack-unknown',
+          sessionKey: sendSessionKey,
+          runId: localRunId,
+          command: 'ack_unknown',
+          reason: err instanceof Error ? err.name : 'non-error-throw',
+          observedAt: Date.now(),
+        });
         void runs.requestReconcile(sendSessionKey, 'chat.send-ack-unknown');
         if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
           void get().loadHistory();
@@ -1372,6 +1455,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     const normalizedRequestedKey = normalizeSessionKey(requestedKey);
     const historyGeneration = (historyGenerationBySession.get(normalizedRequestedKey) ?? 0) + 1;
     historyGenerationBySession.set(normalizedRequestedKey, historyGeneration);
+    recordRunTrace({
+      source: 'history',
+      action: 'request',
+      sessionKey: requestedKey,
+      requestGeneration: historyGeneration,
+      observedAt: Date.now(),
+    });
     const isCurrentRequest = () => (
       normalizeSessionKey(get().sessionKey) === normalizedRequestedKey
       && historyGenerationBySession.get(normalizedRequestedKey) === historyGeneration
@@ -1385,11 +1475,33 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         sessionKey: requestedKey,
         limit: 500,
       });
+      const responseEventEpoch = useGatewayStore.getState().eventEpoch ?? 0;
+      const responseIsCurrent = isCurrentRequest();
+      const responseInFlightRunId = result.inFlightRun?.runId?.trim();
+      recordRunTrace({
+        source: 'history',
+        action: 'response',
+        sessionKey: requestedKey,
+        sessionId: result.sessionInfo?.sessionId,
+        runId: responseInFlightRunId,
+        requestGeneration: historyGeneration,
+        eventEpoch: responseEventEpoch,
+        status: result.sessionInfo?.status,
+        hasActiveRun: result.sessionInfo?.hasActiveRun,
+        startedAt: result.sessionInfo?.startedAt,
+        endedAt: result.sessionInfo?.endedAt,
+        decision: responseIsCurrent ? 'accepted' : 'stale',
+        fieldsPresent: [
+          ...(result.sessionInfo ? Object.keys(result.sessionInfo) : []),
+          ...(result.inFlightRun ? ['inFlightRun'] : []),
+        ],
+        observedAt: Date.now(),
+      });
       // Guard both session identity and request generation. A → B → A can make
       // a key-only guard accept the first A response after the second A wins.
-      if (!isCurrentRequest()) return;
+      if (!responseIsCurrent) return;
 
-      const eventEpoch = useGatewayStore.getState().eventEpoch ?? 0;
+      const eventEpoch = responseEventEpoch;
       const pendingAck = get()._pendingSendAck;
       const rawMessages = result.messages ?? [];
       const acceptedIndex = pendingAck
@@ -1401,7 +1513,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       const acceptedByHistory = acceptedIndex >= 0;
       const completedByHistory = acceptedByHistory
         && rawMessages.slice(acceptedIndex + 1).some((message) => message.role === 'assistant');
-      const inFlightRunId = result.inFlightRun?.runId?.trim();
+      const inFlightRunId = responseInFlightRunId;
       const acceptedByInFlight = Boolean(
         pendingAck && inFlightRunId && inFlightRunId === pendingAck.runId,
       );
@@ -1643,12 +1755,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
     if (evt.data.phase === 'start') {
       set({ compacting: true });
-      useTaskFlowStore.getState().handleCompaction(true);
+      useTaskFlowStore.getState().handleCompaction(true, get().sessionKey);
       return;
     }
     if (evt.data.phase === 'end') {
       set({ compacting: false });
-      useTaskFlowStore.getState().handleCompaction(false);
+      useTaskFlowStore.getState().handleCompaction(false, get().sessionKey);
     }
   },
 
@@ -1728,11 +1840,25 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
 
     const { runId } = get();
+    recordRunTrace({
+      source: 'chat',
+      action: `event:${event.state}`,
+      sessionKey: event.sessionKey,
+      runId: event.runId,
+      status: event.state,
+      reason: event.stopReason ?? event.errorKind,
+      decision: runId && event.runId && event.runId !== runId ? 'run-mismatch' : 'candidate',
+      fieldsPresent: Object.keys(event),
+      observedAt: Date.now(),
+    });
     const pendingAck = get()._pendingSendAck;
     if (pendingAck && event.runId === pendingAck.runId) {
       clearPersistedPendingSendAck(pendingAck.sessionKey);
       set({ _pendingSendAck: null });
-      useSessionRunsStore.getState().setCommand(pendingAck.sessionKey, 'idle');
+      useSessionRunsStore.getState().setCommand(
+        pendingAck.sessionKey,
+        event.state === 'delta' ? 'accepted' : 'idle',
+      );
     }
 
     // Accumulate token usage from any event that carries it
@@ -1953,11 +2079,25 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // while queryB is streaming). Without this, queryA's abort destroys queryB's state.
         // Uses the same triple-AND pattern as the delta handler (line 575).
         if (event.runId && runId && event.runId !== runId) return;
+        // Without a current local identity, this frame cannot safely be
+        // attributed to the visible turn. The central Session reducer still
+        // consumes it and the read-only reconciliation will recover the
+        // authoritative terminal. Do not manufacture a chat error banner from
+        // a late, old-run, or field-incomplete aborted event.
+        if (!runId) {
+          void useSessionRunsStore.getState().requestReconcile(
+            get().sessionKey,
+            'unattributed-chat-aborted',
+          );
+          return;
+        }
 
         // Distinguish a USER-initiated stop (abort() tagged _userAbortedRunId) from a
         // gateway/system abort (same 'aborted' event, no tag). Only the latter
         // surfaces an interruption + recovery affordance; user stops stay silent.
-        const wasUserAbort = get()._userAbortedRunId !== null && get()._userAbortedRunId === runId;
+        const wasUserAbort =
+          (get()._userAbortedRunId !== null && get()._userAbortedRunId === runId)
+          || event.stopReason === 'rpc';
         const partialText = get().streamText?.trim() ? get().streamText : null;
         if (wasUserAbort) {
           // Match restore to client runId (idempotencyKey), not gateway event.runId.
@@ -2076,7 +2216,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // Matches OC resetChatStateForSessionSwitch: clears chatStream, chatStreamStartedAt,
     // chatRunId, chatMessage, resets tool stream + scroll.
     stopStaleStreamWatchdog();
-    useTaskFlowStore.getState().clear();
+    useTaskFlowStore.getState().clear(get().sessionKey);
     const pendingAck = loadPendingSendAck(key);
     if (pendingAck) {
       const runs = useSessionRunsStore.getState();
