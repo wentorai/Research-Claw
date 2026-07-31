@@ -64,6 +64,7 @@ export default function FileCard(props: FileCardType) {
   const client = useGatewayStore((s) => s.client);
 
   const fileInfo = getFileTypeInfo(props.name, tokens);
+  const unavailable = props.availability !== undefined && props.availability !== 'present';
   const [dockerModal, setDockerModal] = useState<Omit<DockerFileModalProps, 'open' | 'onClose'> | null>(null);
 
   const handleOpenFile = useCallback(() => {
@@ -135,6 +136,11 @@ export default function FileCard(props: FileCardType) {
               {props.git_status === 'committed' && t('card.file.gitCommitted')}
             </Tag>
           )}
+          {props.availability && props.availability !== 'present' && (
+            <Tag color={props.availability === 'blocked' ? 'error' : 'warning'} style={{ fontSize: 10, marginTop: 2 }}>
+              {t(`card.file.availability.${props.availability}`)}
+            </Tag>
+          )}
         </div>
       </div>
 
@@ -185,6 +191,7 @@ export default function FileCard(props: FileCardType) {
           size="small"
           icon={<ExportOutlined />}
           onClick={handleOpenFile}
+          disabled={unavailable}
           style={{
             borderColor: tokens.accent.blue,
             color: tokens.accent.blue,
@@ -196,6 +203,7 @@ export default function FileCard(props: FileCardType) {
           size="small"
           icon={<FolderViewOutlined />}
           onClick={handleOpenFolder}
+          disabled={unavailable}
           style={{
             borderColor: tokens.accent.blue,
             color: tokens.accent.blue,

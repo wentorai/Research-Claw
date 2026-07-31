@@ -117,6 +117,8 @@ export interface FileCard {
   created_at?: string; // ISO 8601
   modified_at?: string; // ISO 8601
   git_status?: 'new' | 'modified' | 'committed';
+  /** Live enrichment; not part of the immutable tool observation revision. */
+  availability?: 'present' | 'deleted' | 'missing' | 'blocked' | 'unknown';
 }
 
 // ---------------------------------------------------------------------------

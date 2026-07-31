@@ -1,9 +1,9 @@
 ---
 doc: engineering/modules/workspace.md
 audience: 开发者 — 渠道 B(仓库按需阅读,不注入运行时)
-status: 现行 · 2026-06-09 核验仍与代码一致
+status: 现行 · 2026-07-31 增补确定性文件事实投影
 source-of-truth: 代码优先(src/workspace/);本文保留设计意图,易变数字以代码为准
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 23
 ---
 
 # Workspace & Git 跟踪模块
@@ -483,7 +483,10 @@ type WorkspaceExportResult = Static<typeof WorkspaceExportResult>;
 2. Resolve output path (default: `outputs/exports/{basename}.{format}`).
 3. Run conversion via `child_process.execFile` (60s timeout).
 4. Auto-commit the generated binary file.
-5. Return a `file_card` JSON for the LLM to include in its response.
+5. Return bounded `details.presentation` metadata; RC Core observes the success
+   under the canonical Run and Dashboard renders the FileCard independently of
+   the model. The textual result reports an ordinary relative path for CLI and
+   legacy channel readability.
 
 **Context (Issue #38):** LLM agents generate text only. Writing text with a
 `.docx` extension produces a corrupt file (not a valid OOXML ZIP). This tool

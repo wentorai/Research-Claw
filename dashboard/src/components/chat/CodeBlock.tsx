@@ -23,6 +23,7 @@ import MonitorDigest from './cards/MonitorDigest';
 import CardPlaceholder from './cards/CardPlaceholder';
 import { useConfigStore } from '@/stores/config';
 import { getThemeTokens } from '@/styles/theme';
+import { parseRuntimeFileCard, parseRuntimePaperCard } from '@/utils/card-runtime';
 
 const { Text } = Typography;
 
@@ -170,71 +171,6 @@ function renderCard(cardType: string, data: unknown): React.ReactElement {
   }
 }
 
-function parseHumanSize(value: string): number | undefined {
-  const match = value.trim().match(/^([\d.]+)\s*(b|kb|mb|gb)?$/i);
-  if (!match) return undefined;
-  const amount = Number(match[1]);
-  if (!Number.isFinite(amount)) return undefined;
-  const unit = (match[2] ?? 'b').toLowerCase();
-  const factor = unit === 'gb'
-    ? 1024 ** 3
-    : unit === 'mb'
-      ? 1024 ** 2
-      : unit === 'kb'
-        ? 1024
-        : 1;
-  return Math.round(amount * factor);
-}
-
-function inferNameFromPath(path: string): string {
-  const normalized = path.trim().replace(/\\/g, '/');
-  const last = normalized.split('/').filter(Boolean).pop();
-  return last || normalized || 'file';
-}
-
-function normalizeLegacyFileCard(fields: Record<string, string>): FileCardType | null {
-  const path = fields.path || fields.file || fields.file_path || fields.output_file || fields.output;
-  if (!path) return null;
-  const name = fields.name || fields.filename || fields.file_name || inferNameFromPath(path);
-  const sizeValue = fields.size_bytes || fields.size;
-  const sizeBytes = sizeValue
-    ? fields.size_bytes
-      ? Number(sizeValue)
-      : parseHumanSize(sizeValue)
-    : undefined;
-  const gitStatus = fields.git_status;
-
-  return {
-    type: 'file_card',
-    name,
-    path,
-    ...(Number.isFinite(sizeBytes) ? { size_bytes: sizeBytes } : {}),
-    ...(fields.mime_type || fields.mime ? { mime_type: fields.mime_type || fields.mime } : {}),
-    ...(gitStatus === 'new' || gitStatus === 'modified' || gitStatus === 'committed'
-      ? { git_status: gitStatus }
-      : {}),
-  };
-}
-
-function parseLegacyKeyValueCard(cardType: string, codeString: string): unknown | null {
-  if (cardType !== 'file_card') return null;
-
-  const fields: Record<string, string> = {};
-  for (const rawLine of codeString.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const match = line.match(/^([A-Za-z_][\w.-]*)\s*:\s*(.+)$/);
-    if (!match) continue;
-    const key = match[1].trim().toLowerCase().replace(/-/g, '_');
-    let value = match[2].trim();
-    value = value.replace(/^['"]|['"]$/g, '');
-    fields[key] = value;
-  }
-
-  if (fields.type && fields.type !== 'file_card') return null;
-  return normalizeLegacyFileCard(fields);
-}
-
 // ---------------------------------------------------------------------------
 // CodeBlock — the react-markdown `components.code` interceptor
 // ---------------------------------------------------------------------------
@@ -250,6 +186,30 @@ export default function CodeBlock({ className, children }: CodeBlockProps) {
 
   // 1) Check if the language tag is a known card type
   if (language && CARD_TYPES.has(language)) {
+    if (language === 'file_card' || language === 'paper_card') {
+      // Preserve the established fallback for valid non-object JSON while
+      // keeping malformed/streaming card objects behind the placeholder.
+      try {
+        const parsed = JSON.parse(codeString);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return <SyntaxHighlightedBlock language={language} code={codeString} />;
+        }
+      } catch {
+        // Legacy file cards may use the historical key/value syntax, so the
+        // strict runtime parser below remains the source of truth.
+      }
+      const data = language === 'file_card'
+        ? parseRuntimeFileCard(codeString)
+        : parseRuntimePaperCard(codeString);
+      if (data) {
+        return (
+          <ErrorBoundary fallback={<SyntaxHighlightedBlock language="json" code={codeString} />}>
+            {renderCard(language, data)}
+          </ErrorBoundary>
+        );
+      }
+      return <CardPlaceholder cardType={language} />;
+    }
     try {
       const data = JSON.parse(codeString);
       // Guard: only render cards for plain objects, not arrays or primitives
@@ -263,16 +223,6 @@ export default function CodeBlock({ className, children }: CodeBlockProps) {
         );
       }
     } catch {
-      const legacyData = parseLegacyKeyValueCard(language, codeString);
-      if (legacyData && typeof legacyData === 'object' && !Array.isArray(legacyData)) {
-        return (
-          <ErrorBoundary
-            fallback={<SyntaxHighlightedBlock language="json" code={codeString} />}
-          >
-            {renderCard(language, legacyData)}
-          </ErrorBoundary>
-        );
-      }
       // JSON incomplete during streaming — show skeleton instead of raw JSON
       return <CardPlaceholder cardType={language} />;
     }

@@ -1,15 +1,16 @@
 ---
 doc: engineering/modules/cards.md
 audience: 开发者 — 渠道 B(仓库按需阅读,不注入运行时)
-status: 现行 · 2026-06-09 依代码(protocol.ts + dashboard 渲染层)重写校核
-source-of-truth: 代码优先。卡片契约权威 = `extensions/research-claw-core/src/cards/protocol.ts`;dashboard 镜像 = `dashboard/src/types/cards.ts`;渲染链路 = `dashboard/src/components/chat/CodeBlock.tsx`
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
+status: 现行 · 2026-07-31 增补工具事实投影与 legacy 去重
+source-of-truth: 代码优先。legacy 卡片 = `src/cards/protocol.ts` + `dashboard/src/components/chat/CodeBlock.tsx`;工具事实投影 = `src/presentation/` + `dashboard/src/stores/execution-trace.ts`
+baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 23
 ---
 
 # 消息卡片协议(Message Card Protocol)
 
-> 模块:Dashboard 聊天渲染。Agent 在回复正文里发出 markdown 原生的 fenced JSON 卡片,
-> dashboard 把已知类型解析为结构化 UI,其余一切优雅降级为带语法高亮的代码块。
+> 模块:Dashboard 聊天渲染。当前有两条语义不同的来源：Agent 主动发出的
+> markdown fenced cards，以及 RC 从受信工具生命周期确定性投影的文件事实与
+> 原始文献候选。两者共享 canonical Run owner，但不能混淆语义。
 
 > ⚠️ 本文**不写卡片数量定值之外的字段穷举**(字段会随版本增删)。卡片**唯一契约是 TypeScript interface**(`protocol.ts`),没有独立 JSON Schema 文件,也没有 Ajv 校验——下文凡涉及具体字段,以 `protocol.ts` 为准。
 
@@ -17,15 +18,19 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
 
 ## 1. 设计哲学
 
-卡片协议在 agent 输出与 Dashboard UI 之间架桥,**不引入私有传输层**。四条原则:
+卡片展示在 Agent 文本与受信工具事实之间划清边界。原则如下:
 
-**Markdown 原生输出。** Agent 写标准 Markdown,结构化数据放进 fenced code block——正是人类读者预期它出现的位置。无自定义 XML 标签、无隐藏元数据、无二进制封帧。
+**Markdown 兼容通道。** Agent 主动表达精选论文、任务、进度、审批或监控时，继续写 fenced card；旧消息和旧客户端不失效。
+
+**工具事实确定投影。** 受支持 Workspace 工具成功产生的文件，以及受支持文献工具返回的原始候选，由 Core hook 白名单化后 immutable append 到 SQLite。低延迟事件只负责 invalidation，F5/重连以 session-scoped RPC 为恢复事实源，完全不依赖模型复制 JSON。
 
 **语言标签即卡片类型。** fenced block 的语言标识符同时充当卡片类型判别符。Dashboard 的 Markdown 渲染器把每个代码块的语言标签拿去与已知类型集 `CARD_TYPES` 比对:命中则富渲染成卡片,否则原样走默认语法高亮代码块。
 
 **纯终端可读降级。** 当输出在终端、VS Code 预览或任何不认识 RC 卡片类型的 Markdown 渲染器里查看时,用户看到的是一个带语言标签(如 `paper_card`)的 JSON 代码块——上下文仍在,信息不丢。
 
-**优雅降级。** 三种失败模式——未知类型、JSON 非法、流式未闭合——都被妥善处理,绝不崩溃、绝不吞内容、绝不留空占位。详见 §6。
+**语义隔离。** 文件投影是成功工具事实；Candidate 分组只是 `retrieved/检索结果·尚未筛选`，不表示 highlighted、cited、saved 或 verified，更不是 Reliable Sources。
+
+**安全降级。** 旧 Gateway 缺少新 RPC、RPC 单方失败或事件丢失时，聊天正文与 legacy fences 继续工作；`toolResult` 仍不作为聊天正文直接显示。
 
 ### 为什么不用自定义协议?
 
@@ -48,11 +53,11 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 14
 
 | 类型 | 必填字段 | 用途 | 典型来源 |
 |---|---|---|---|
-| `paper_card` | `title`, `authors` | 单篇学术论文 | 文献检索、监控、手动 |
+| `paper_card` | `title`, `authors` | Agent 主动呈现的单篇真实论文 | 精选、监控、手动 |
 | `task_card` | `title`, `task_type`, `status`, `priority` | 研究任务(human/agent/mixed) | 任务系统、heartbeat |
 | `progress_card` | `period`, `papers_read`, `papers_added`, `tasks_completed`, `tasks_created` | 时段活动汇总 | heartbeat cron、手动 |
 | `approval_card` | `action`, `context`, `risk_level` | 人在环审批请求 | HiL / exec-approvals |
-| `file_card` | `name`, `path` | 工作区文件 | 文件操作 |
+| `file_card` | `name`, `path` | 工作区文件（legacy 或自动投影） | 受支持文件操作、旧消息 |
 | `monitor_digest` | `monitor_name`, `source_type`, `target`, `total_found`, `findings` | 监控扫描摘要(N-监控:arxiv/github/rss/webpage/openalex/…) | 监控系统、定时扫描 |
 
 > **可选字段、枚举值、子接口(如 `monitor_digest.findings: MonitorFinding[]`)一律去 `protocol.ts` 看,不在本文复制——会漂移。** `code_block` **不是**卡片类型:带已知编程语言标签的普通 fenced block 走语法高亮(§4)。
@@ -90,9 +95,9 @@ Agent 发出一个 fenced code block,语言标签 = 卡片类型,正文 = **单�
 
 ---
 
-## 4. 解析与渲染链路(真实实现)
+## 4. Legacy fence 解析与渲染链路
 
-卡片渲染**没有独立解析器、没有 Ajv、没有 JSON Schema 文件**。它是 `react-markdown` 的 `components.code` 覆盖项——即 `dashboard/src/components/chat/CodeBlock.tsx`。流程:
+四类非本期卡片仍沿用轻量 JSON 路径。`paper_card` / `file_card` 在进入组件前额外经过 `dashboard/src/utils/card-runtime.ts` 的运行时字段、相对路径、URL、DOI 与 arXiv ID 校验；没有新增通用六类 parser。Markdown 派发入口仍是 `CodeBlock.tsx`：
 
 ```
 Agent 消息(Markdown)
@@ -111,7 +116,7 @@ Agent 消息(Markdown)
 关键事实(均在 `CodeBlock.tsx` 可核):
 
 - **类型判定**:`language && CARD_TYPES.has(language)`(`CARD_TYPES` 是 `types/cards.ts` 导出的 `Set`)。
-- **"校验"仅两步**:`JSON.parse` + `data && typeof data === 'object' && !Array.isArray(data)`。没有 schema 校验——TS interface 是唯一契约,运行时不强制。
+- **运行时校验**:`paper_card` / `file_card` 使用严格 validator；其余四类仍是 `JSON.parse` + plain-object guard。
 - **派发**:`renderCard()` 是一个**硬编码 switch**(6 个 case + default),组件**静态 import**(非 lazy、无 `CARD_COMPONENTS` map、无插件注册)。
 - **组件崩溃**:外层 `<ErrorBoundary>`(`@/components/ErrorBoundary`)兜底,fallback 到 `SyntaxHighlightedBlock(json)`。
 - **流式未闭合**:`JSON.parse` 抛错时**不**显示生 JSON,而是 `<CardPlaceholder>` 骨架(`CARD_LABELS` 按类型给中性 label),等闭合后重渲染。
@@ -147,6 +152,40 @@ Agent 消息(Markdown)
 
 ---
 
+### 4.1 工具事实投影链路
+
+```text
+OC before_tool_call / after_tool_call / tool_result_persist
+  → PresentationCoordinator（sessionKey + runId + toolCallId）
+  → 每个真实 toolName 的严格 adapter（只取有界展示字段）
+  → rc_execution_presentation_records（immutable append）
+  → presentation_changed 快路径 / session.tool 有界重查（均只做 invalidation）
+  → rc.execution.presentations（每批最多 100 Run，刷新事实源）
+  → RunDetailsDock（工具/Skills badge + FileCard + Candidate 分组）
+```
+
+- persisted fallback 可能已截断，且没有 runId/params；只允许通过同 session 的 `(toolCallId → unique Run)` TTL/DB 唯一关联，missing/synthetic/歧义全部 fail closed。
+- 同路径文件在当前 Run 只展示最新成功事实；文件 availability 是实时 enrichment，不改 `recordsRevision`。
+- 论文跨源仅共享 DOI、arXiv 或 provider strong alias 时合并；title+year 永不作为合并键。Library saved 状态也是实时 enrichment。
+- legacy `file_card` 与同 Run 同 path 的服务器事实只显示一次，并保留周边说明；Agent deliberate `paper_card` 按 strong alias 从 raw Candidate 分组中去重，保留主动精选语义。
+- 自定义 `research-claw-core.presentation_changed` 在真实单 runtime 可达，但 OC
+  6.1 的 runtime 卸载后可能返回 `plugin is not loaded`。因此 Dashboard 同时订阅
+  真实 `session.tool` 终态帧，按 100/500/1500 ms 有界重查；事件丢失或重连后
+  仍只以 SQLite-backed RPC 为事实源，绝不从 WebSocket payload 直接造卡。
+
+### 4.2 数量、容量与保留边界
+
+- 文献 adapter 最多检查一次返回的 200 行、每次工具记录 20 个候选、每个 Run
+  合并后最多 100 个唯一候选；作者最多 10 位、摘要预览最多 500 字符。
+- 单条 presentation record 最大 256 KiB；单 Run 最大 1000 条或 4 MiB；全库
+  最大 100,000 条或 128 MiB。越界 fail closed，不截取成看似完整的成功事实。
+- 启动清理只读有界 OC `sessions.json` registry，不读 transcript；默认 7 天
+  grace、每次最多扫描 2000 Run、删除 100 Run。registry 不可确认时跳过删除，
+  OC 仍登记的 session 永不作为 orphan 删除。Dashboard session 删除/reset 则
+  通过 RPC 立即清理对应 presentation records。
+
+---
+
 ## 5. 第二通道:卡片通知
 
 除主渲染外,`dashboard/src/stores/chat.ts` 的 `extractCardNotifications()` 用一条正则旁路扫 assistant 消息:
@@ -170,7 +209,7 @@ Agent 消息(Markdown)
 | 已知类型、合法 JSON 但顶层非对象 | 数组/原始值 → object guard 失败 | 落到 §4 末路:走语法高亮代码块 |
 | 已知类型、对象合法但组件渲染崩溃 | 外层 `ErrorBoundary` 捕获 | fallback 到 `SyntaxHighlightedBlock(json)` |
 
-> 注意:实现里没有"Parse Error / Validation Error / Render Error" 三色 badge,也没有 schema 校验失败这一档——因为根本没有 schema 校验。失败一律降级到代码块或骨架。
+> 注意:这里描述的是 legacy Markdown 降级。服务器投影 adapter 拒绝非法或业务错误 payload 时不会制造成功卡，只在脱敏执行诊断中保留 drop reason。
 
 ### 硬不变量
 
@@ -182,7 +221,9 @@ Agent 消息(Markdown)
 
 Agent **何时发哪种卡片、字段长什么样**,权威在 `AGENTS.md §9 Output Cards`(内联给出 6 个卡片的 schema 摘要)+ `Output Cards` skill。本工程文档不复制那份指引、也不写 token 预算定值——以 L1 提示词为准。要点:
 
-- 数据类工具调用后发对应卡片;`paper_card` 用于任何论文引用;`task_card` 用于任务增改列;`progress_card` 用于活动汇总;`approval_card` 用于 HiL 审批;`monitor_digest` 用于监控摘要;`file_card` 用于引用自己创建/修改的工作区文件。
+- Workspace 文件事实和受支持的原始检索结果由 UI 自动呈现；Agent 在普通文本中说明路径和判断，不机械复制工具 JSON。
+- `paper_card` 只用于 Agent 主动精选/建议关注的真实论文，不代表已引用、已入库或已验证；原始候选保持独立 Candidate 语义。
+- `task_card`/`progress_card`/`approval_card`/`monitor_digest` 沿用既有责任。
 - 卡片务必配自然语言上下文,不确定时优先纯文本。
 
 ---

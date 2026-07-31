@@ -6,18 +6,23 @@ export function registerExecutionTraceRpc(
   service: ExecutionTraceService,
 ): void {
   registerMethod('rc.execution.summary', async (params) => {
+    if (typeof params.sessionKey !== 'string' || !params.sessionKey) {
+      throw new Error('sessionKey is required');
+    }
     if (!Array.isArray(params.runIds) || params.runIds.length > 100 || params.runIds.some((id) => typeof id !== 'string' || !id)) {
       throw new Error('runIds must be an array of 1-100 non-empty strings');
     }
-    return { summaries: service.summary(params.runIds) };
+    return { summaries: service.summaryForSession(params.sessionKey, params.runIds) };
   });
   registerMethod('rc.execution.detail', async (params) => {
+    if (typeof params.sessionKey !== 'string' || !params.sessionKey) {
+      throw new Error('sessionKey is required');
+    }
     if (typeof params.runId !== 'string' || !params.runId) throw new Error('runId is required');
+    const detail = service.detailForSession(params.sessionKey, params.runId);
     return {
       runId: params.runId,
-      tools: service.detail(params.runId),
-      skills: service.skillDetail(params.runId),
-      skillEvents: service.skillLifecycleDetail(params.runId),
+      ...detail,
     };
   });
   registerMethod('rc.execution.resolve', async (params) => {

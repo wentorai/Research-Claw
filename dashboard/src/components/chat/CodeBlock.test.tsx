@@ -96,7 +96,7 @@ describe('CodeBlock', () => {
     const json = JSON.stringify({
       type: 'file_card',
       name: 'data.csv',
-      path: '/data.csv',
+      path: 'outputs/data.csv',
     });
     render(<CodeBlock className="language-file_card">{json + '\n'}</CodeBlock>);
     expect(screen.getByText('data.csv')).toBeInTheDocument();

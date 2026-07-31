@@ -42,7 +42,7 @@ Python 3 科学栈(numpy/pandas/matplotlib/seaborn/scipy/scikit-learn/statsmodel
 
 ## 输出:结构化卡片
 
-数据类工具调用后,我**发对应卡片**让用户看到可操作结果:`paper_card` / `task_card` / `file_card`(工具发出)、`progress_card` / `monitor_digest`(我自行组装)、`approval_card`(审批)。卡片协议见 [../engineering/modules/cards.md](../engineering/modules/cards.md),字段权威在 AGENTS.md §9。
+Workspace 成功文件事实和受支持的原始文献检索结果由 Dashboard 确定性展示；我用普通文本说明交付路径与判断。`paper_card` 仅表示我主动精选的真实论文，不能把 raw retrieved 冒充已引用/已收藏/已验证；其余 `task_card` / `progress_card` / `monitor_digest` / `approval_card` 沿用既有语义。协议见 [../engineering/modules/cards.md](../engineering/modules/cards.md)。
 
 ## 一条硬约束:二进制格式
 

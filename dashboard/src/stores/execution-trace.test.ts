@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGatewayStore } from './gateway';
-import { useExecutionTraceStore } from './execution-trace';
+import {
+  executionKey,
+  resetPresentationRetryCoordinatorForTests,
+  useExecutionTraceStore,
+} from './execution-trace';
 
-describe('execution trace store', () => {
+describe('shared execution-details coordinator', () => {
   const request = vi.fn();
 
   beforeEach(() => {
@@ -11,24 +15,98 @@ describe('execution trace store', () => {
       client: { isConnected: true, request } as never,
       state: 'connected',
     });
-    useExecutionTraceStore.setState({ summaries: {}, details: {} });
+    useExecutionTraceStore.setState({
+      activeSessionKey: null,
+      generation: 0,
+      summaries: {},
+      details: {},
+      presentations: {},
+      availability: {},
+    });
   });
 
-  it('deduplicates run IDs and loads summary counts in one RPC', async () => {
-    request.mockResolvedValueOnce({
-      summaries: {
-        runA: { toolCount: 2, errorCount: 1, skillCount: 1 },
-      },
+  afterEach(() => {
+    resetPresentationRetryCoordinatorForTests();
+    vi.useRealTimers();
+  });
+
+  it('loads summary and presentation under one session-scoped Run identity', async () => {
+    request.mockImplementation(async (method: string) => method === 'rc.execution.summary'
+      ? { summaries: { runA: { toolCount: 2, errorCount: 1, skillCount: 1 } } }
+      : { presentations: { runA: { runId: 'runA', recordsRevision: 1, files: [], paperBatches: [] } } });
+
+    await useExecutionTraceStore.getState().loadRuns('session-a', ['runA', 'runA', '']);
+
+    expect(request).toHaveBeenCalledWith('rc.execution.summary', {
+      sessionKey: 'agent:main:session-a', runIds: ['runA'],
+    });
+    expect(request).toHaveBeenCalledWith('rc.execution.presentations', {
+      sessionKey: 'agent:main:session-a', runIds: ['runA'],
+    });
+    const key = executionKey('session-a', 'runA');
+    expect(useExecutionTraceStore.getState().summaries[key]?.toolCount).toBe(2);
+    expect(useExecutionTraceStore.getState().presentations[key]?.recordsRevision).toBe(1);
+  });
+
+  it('batches all 101 visible Runs instead of slicing away the last one', async () => {
+    request.mockImplementation(async (method: string, params: { runIds: string[] }) => (
+      method === 'rc.execution.summary'
+        ? { summaries: Object.fromEntries(params.runIds.map((runId) => [runId, { toolCount: 1, errorCount: 0, skillCount: 0 }])) }
+        : { presentations: Object.fromEntries(params.runIds.map((runId) => [runId, { runId, recordsRevision: 1, files: [], paperBatches: [] }])) }
+    ));
+    const runIds = Array.from({ length: 101 }, (_, index) => `run-${index + 1}`);
+    await useExecutionTraceStore.getState().loadRuns('session-a', runIds);
+    const summaryCalls = request.mock.calls.filter(([method]) => method === 'rc.execution.summary');
+    expect(summaryCalls.map((call) => call[1].runIds.length)).toEqual([100, 1]);
+    expect(useExecutionTraceStore.getState().summaries[executionKey('session-a', 'run-101')]).toBeTruthy();
+  });
+
+  it('preserves one side when summary or cards fail independently', async () => {
+    request.mockImplementation(async (method: string) => {
+      if (method === 'rc.execution.summary') throw new Error('summary unavailable');
+      return { presentations: { runA: { runId: 'runA', recordsRevision: 2, files: [], paperBatches: [] } } };
+    });
+    await useExecutionTraceStore.getState().loadRuns('session-a', ['runA']);
+    expect(useExecutionTraceStore.getState().summaries[executionKey('session-a', 'runA')]).toBeUndefined();
+    expect(useExecutionTraceStore.getState().presentations[executionKey('session-a', 'runA')]?.recordsRevision).toBe(2);
+  });
+
+  it('falls back to legacy execution RPC shapes when presentation RPC is unavailable', async () => {
+    request.mockImplementation(async (method: string, params: Record<string, unknown>) => {
+      if (method === 'rc.execution.presentations') throw new Error('method not found');
+      if (method === 'rc.execution.summary' && params.sessionKey) throw new Error('legacy params');
+      if (method === 'rc.execution.summary') {
+        return { summaries: { runA: { toolCount: 3, errorCount: 0, skillCount: 2 } } };
+      }
+      if (method === 'rc.execution.detail' && params.sessionKey) throw new Error('legacy params');
+      if (method === 'rc.execution.detail') {
+        return { runId: 'runA', tools: [], skills: [], skillEvents: [] };
+      }
+      return { reviews: [] };
     });
 
-    await useExecutionTraceStore.getState().loadSummaries(['runA', 'runA', '']);
+    await useExecutionTraceStore.getState().loadRuns('session-a', ['runA']);
+    expect(useExecutionTraceStore.getState().summaries[executionKey('session-a', 'runA')]?.toolCount).toBe(3);
+    expect(useExecutionTraceStore.getState().presentations[executionKey('session-a', 'runA')]).toBeUndefined();
+    await useExecutionTraceStore.getState().loadDetail('session-a', 'runA');
+    expect(useExecutionTraceStore.getState().details[executionKey('session-a', 'runA')]).toMatchObject({ runId: 'runA' });
+  });
 
-    expect(request).toHaveBeenCalledWith('rc.execution.summary', { runIds: ['runA'] });
-    expect(useExecutionTraceStore.getState().summaries.runA).toEqual({
-      toolCount: 2,
-      errorCount: 1,
-      skillCount: 1,
+  it('drops a late session-A response after a rapid switch to session B', async () => {
+    const resolveA: Array<{ method: string; resolve: (value: unknown) => void }> = [];
+    request.mockImplementation((method: string, params: { sessionKey: string }) => {
+      if (params.sessionKey === 'agent:main:session-a') return new Promise((resolve) => { resolveA.push({ method, resolve }); });
+      return Promise.resolve(method === 'rc.execution.summary' ? { summaries: {} } : { presentations: {} });
     });
+    const lateA = useExecutionTraceStore.getState().loadRuns('session-a', ['run-a']);
+    await useExecutionTraceStore.getState().loadRuns('session-b', ['run-b']);
+    for (const pending of resolveA) {
+      pending.resolve(pending.method === 'rc.execution.summary'
+        ? { summaries: { 'run-a': { toolCount: 9, errorCount: 0, skillCount: 0 } } }
+        : { presentations: { 'run-a': { runId: 'run-a', recordsRevision: 9, files: [], paperBatches: [] } } });
+    }
+    await lateA;
+    expect(useExecutionTraceStore.getState().summaries[executionKey('session-a', 'run-a')]).toBeUndefined();
   });
 
   it('merges exact-run tools, Skills, and trusted reviews into one detail', async () => {
@@ -36,54 +114,64 @@ describe('execution trace store', () => {
       if (method === 'rc.execution.detail') {
         return {
           runId: 'runA',
-          tools: [{
-            id: 't1',
-            tool_name: 'read',
-            status: 'completed',
-            duration_ms: 18,
-            error: null,
-          }],
-          skills: [{
-            id: 's1',
-            skill_name: 'wentor-network',
-            activation: 'read',
-            skill_source: '/plugins/wentor-network/SKILL.md',
-          }],
-          skillEvents: [{
-            id: 'se1',
-            skill_key: 'rp:wentor-network',
-            skill_name: 'wentor-network',
-            skill_source: 'research-plugins',
-            lifecycle: 'candidate',
-            activation: null,
-            tool_call_id: 'call-search',
-            observed_at: 10,
-          }],
+          tools: [{ id: 't1', tool_name: 'read', status: 'completed', duration_ms: 18, error: null }],
+          skills: [{ id: 's1', skill_name: 'wentor-network', activation: 'read', skill_source: 'research-plugins' }],
+          skillEvents: [],
         };
       }
-      return {
-        reviews: [{
-          reviewId: 'r1',
-          state: 'completed',
-          verdict: 'pass',
-          findings: [],
-        }],
-      };
+      return { reviews: [{ reviewId: 'r1', state: 'completed', verdict: 'pass', findings: [] }] };
     });
 
-    await useExecutionTraceStore.getState().loadDetail('runA');
+    await useExecutionTraceStore.getState().loadDetail('session-a', 'runA');
 
-    expect(request).toHaveBeenCalledWith('rc.execution.detail', { runId: 'runA' });
-    expect(request).toHaveBeenCalledWith('rc.supervisor.reviews.list', {
-      runId: 'runA',
-      limit: 20,
+    expect(request).toHaveBeenCalledWith('rc.execution.detail', {
+      sessionKey: 'agent:main:session-a', runId: 'runA',
     });
-    expect(useExecutionTraceStore.getState().details.runA).toMatchObject({
-      runId: 'runA',
-      tools: [{ tool_name: 'read' }],
-      skills: [{ skill_name: 'wentor-network' }],
-      skillEvents: [{ skill_name: 'wentor-network', lifecycle: 'candidate' }],
-      reviews: [{ reviewId: 'r1' }],
+    expect(useExecutionTraceStore.getState().details[executionKey('session-a', 'runA')]).toMatchObject({
+      tools: [{ tool_name: 'read' }], skills: [{ skill_name: 'wentor-network' }], reviews: [{ reviewId: 'r1' }],
     });
+  });
+
+  it('rechecks a terminal session.tool event until the delayed after-hook record appears', async () => {
+    vi.useFakeTimers();
+    let presentationCalls = 0;
+    request.mockImplementation(async (method: string) => {
+      if (method !== 'rc.execution.presentations') return { summaries: {} };
+      presentationCalls += 1;
+      return presentationCalls === 1
+        ? { presentations: {} }
+        : { presentations: { runA: { runId: 'runA', recordsRevision: 1, files: [], paperBatches: [] } } };
+    });
+    useExecutionTraceStore.setState({ activeSessionKey: 'session-a', generation: 1 });
+
+    const coordinator = useExecutionTraceStore.getState();
+    coordinator.schedulePresentationRefresh('session-a', 'runA', 'toolA');
+    coordinator.schedulePresentationRefresh('session-a', 'runA', 'toolA');
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(presentationCalls).toBe(1);
+    expect(useExecutionTraceStore.getState().presentations[executionKey('session-a', 'runA')]).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(presentationCalls).toBe(2);
+    expect(useExecutionTraceStore.getState().presentations[executionKey('session-a', 'runA')]?.recordsRevision).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(presentationCalls).toBe(2);
+  });
+
+  it('bounds terminal rechecks and cancels them after a session switch', async () => {
+    vi.useFakeTimers();
+    request.mockResolvedValue({ presentations: {} });
+    useExecutionTraceStore.setState({ activeSessionKey: 'session-a', generation: 1 });
+
+    useExecutionTraceStore.getState().schedulePresentationRefresh('session-a', 'runA', 'toolA');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    useExecutionTraceStore.getState().activateSession('session-b');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(useExecutionTraceStore.getState().presentations[executionKey('session-a', 'runA')]).toBeUndefined();
   });
 });

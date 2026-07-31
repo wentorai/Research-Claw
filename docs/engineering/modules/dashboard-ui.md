@@ -1,9 +1,9 @@
 ---
 doc: engineering/modules/dashboard-ui.md
 audience: 开发者 / 前端 — 渠道 B(仓库按需阅读,不注入运行时)
-status: 现行 · 2026-06-09 依代码重建(原 03e dashboard 实现设计)
+status: 现行 · 2026-07-31 增补统一 Run execution/presentation coordinator
 source-of-truth: 代码优先(research-claw/dashboard/src/);本文保留技术取舍 why,组件/store 清单以代码为准
-baseline: OpenClaw 2026.6.1 · WS RPC v3 · DB SCHEMA_VERSION 14
+baseline: OpenClaw 2026.6.1 · WS RPC v3 · DB SCHEMA_VERSION 23
 ---
 
 # Dashboard 实现(前端工程)
@@ -49,7 +49,26 @@ Web Platform 用 UmiJS Max 跑多页 + 路由 + SSR 提示 + proxy。Dashboard �
 
 连接"活着"分三层判断,任一层失效给用户不同提示:WS 物理连接 → 握手完成(hello-ok)→ 业务心跳。详见 [../architecture.md](../architecture.md) §7。为什么要分层:物理连上 ≠ 能用,握手没过就发业务请求会被拒;分层才能给"连接中/已就绪/已断"的准确状态。
 
-## 5. 易变事实的权威源
+## 5. 聊天 Run 的执行详情与交付展示
+
+`dashboard/src/stores/execution-trace.ts` 是唯一 coordinator：同一
+`(canonical sessionKey, runId)` 下并行加载工具/Skills summary 与
+presentation，二者允许单方失败而不互相清空。101 个以上可见 Run 按 100
+分批全部恢复；session generation 丢弃快速 A/B 切换后的迟到响应。
+
+有 final assistant 时 Run dock 原子迁移到 final；无 final 时由 OC history
+保留的 `<runId>:user` idempotency key 停靠在对应用户回合。断连本身不推断
+为失败，生命周期状态只服从 OC 已确认事实。`research-claw-core.presentation_changed`
+是提交后的精确 Run 快路径；真实 OC 6.1 runtime 重建后可能拒绝旧 emitter，
+所以受支持工具的 `session.tool` terminal frame 会触发 100/500/1500 ms 有界
+重查，覆盖“terminal 先到、after hook 后落库”。重复 result/end 以
+`(sessionKey, runId, toolCallId)` 去重，切会话取消旧 generation，F5/重连仍从
+同一 coordinator 的 RPC 恢复，不读取 WebSocket `toolResult` 造卡。
+
+旧 Gateway 缺少 presentation/availability RPC 时，仅增强 UI 安全降级；聊天、
+legacy fences 和已有工具/Skills 执行详情继续可用。
+
+## 6. 易变事实的权威源
 
 | 想知道 | 去哪数 |
 |--------|--------|

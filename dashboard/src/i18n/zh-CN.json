@@ -259,6 +259,42 @@
       "error": "出错"
     }
   },
+  "presentation": {
+    "filesTitle": "交付文件",
+    "noFinalFileFact": "工具已成功生成文件；本轮没有最终回复。此卡片来自工具事实。",
+    "rawRetrieved": "原始检索结果",
+    "candidateSummary": "去重后 {{count}} 条 · {{sources}} 个来源",
+    "unavailableSummary": "结果暂无法展示",
+    "showCandidates": "查看候选",
+    "hideCandidates": "收起候选",
+    "unscreened": "尚未筛选",
+    "candidateDisclaimer": "这些是工具返回的候选结果，尚未由 Agent 筛选、阅读、引用或验证，也不代表 Reliable Sources。",
+    "queries": "查询：{{queries}}",
+    "queryUnavailable": "查询参数不可恢复",
+    "someQueriesUnavailable": "部分 fallback 查询参数不可恢复",
+    "partialSources": "仅从持久化 fallback 恢复部分结果的来源：{{sources}}",
+    "unavailableSources": "以下已适配来源的本轮结果暂无法展示：{{sources}}",
+    "returnPositions": "API 返回位置：{{positions}}",
+    "sourceResultsUnavailable": "本轮已调用受支持的文献工具，但结果暂无法展示；不将其冒充为 0 条命中。",
+    "noResultsReturned": "已适配来源本轮真实返回 0 条结果。",
+    "resultsUnavailable": "工具返回了结果，但没有候选通过安全展示校验；结果暂无法展示。",
+    "metadataConflict": "跨来源元数据存在差异：{{fields}}",
+    "openResult": "打开结果",
+    "addToLibrary": "加入文献库",
+    "saved": "已收藏",
+    "addFailed": "加入文献库失败",
+    "noStrongIdentity": "缺少 DOI、arXiv ID 或来源 ID，不能直接收藏",
+    "showMore": "再显示 {{count}} 条",
+    "showLess": "收起",
+    "counts": {
+      "matchedTotal": "命中总数",
+      "returned": "工具返回",
+      "eligible": "通过校验",
+      "stored": "本地保留",
+      "unique": "去重后",
+      "shown": "当前显示"
+    }
+  },
   "taskFlow": {
     "title": "任务进度",
     "elapsed": "{{seconds}} 秒",
@@ -1373,7 +1409,13 @@
       "type": "类型",
       "gitNew": "新文件",
       "gitModified": "已修改",
-      "gitCommitted": "已提交"
+      "gitCommitted": "已提交",
+      "availability": {
+        "deleted": "文件已删除",
+        "missing": "文件不存在",
+        "blocked": "路径已阻止",
+        "unknown": "状态未知"
+      }
     },
     "monitor": {
       "title": "监控结果",
