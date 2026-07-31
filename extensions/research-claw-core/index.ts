@@ -6,9 +6,9 @@
  *
  * Registration totals:
  *   - 57 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 2 Skill Registry + 4 job + 3 periph)
- *   - 138 WS RPC methods + 3 HTTP routes = 141 interface methods
+ *   - 140 WS RPC methods + 3 HTTP routes = 143 interface methods
  *     (including rc.execution.summary/detail/resolve; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
- *   - 15 typed hook handlers (8 hook names; agent_end ×3, after_tool_call ×5)
+ *   - 16 typed hook handlers (9 hook names; agent_end ×3, after_tool_call ×5)
  *     + 1 legacy agent:bootstrap hook
  *   - 1 service (research-claw-db lifecycle)
  *   - 1 session monitoring service (automatic memory extraction)
@@ -101,8 +101,11 @@ import { resolveWithinRoot } from './src/workspace/path-guard.js';
 import { PromptPresetService } from './src/prompt-presets/service.js';
 import { registerPromptPresetRpc } from './src/prompt-presets/rpc.js';
 import { ExecutionTraceService } from './src/execution-trace/service.js';
-import { registerExecutionTraceRpc } from './src/execution-trace/rpc.js';
 import { subscribeExecutionSkillDiagnostics } from './src/execution-trace/skill-diagnostic.js';
+import { PresentationService } from './src/presentation/service.js';
+import { PresentationCoordinator } from './src/presentation/coordinator.js';
+import { registerPresentationRpc } from './src/presentation/rpc.js';
+import { loadOpenClawSessionRegistry } from './src/presentation/retention.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -167,6 +170,14 @@ interface PluginApi {
     start: (ctx: { stateDir: string; logger: PluginLogger }) => void | Promise<void>;
     stop?: (ctx: { stateDir: string; logger: PluginLogger }) => void | Promise<void>;
   }) => void;
+  emitAgentEvent?: (event: {
+    runId: string;
+    sessionKey: string;
+    stream: string;
+    data: Record<string, unknown>;
+  }) =>
+    | { emitted: true; stream: string }
+    | { emitted: false; reason: string };
   on: (hookName: string, handler: (...args: unknown[]) => unknown, opts?: { priority?: number }) => void;
   registerHook?: (
     events: string | string[],
@@ -193,7 +204,7 @@ interface PluginDefinition {
 // initialized once and reused — creating duplicates wastes file handles
 // and causes git lock races.
 let _initialized = false;
-let _hooksRegistered = false;
+const _hookApis = new WeakSet<object>();
 let _dbManager: DatabaseManager | null = null;
 let _litService: InstanceType<typeof LiteratureService> | null = null;
 let _taskService: InstanceType<typeof TaskService> | null = null;
@@ -211,6 +222,8 @@ let _jobService: JobService | null = null;
 let _periphService: PeriphService | null = null;
 let _promptPresetService: PromptPresetService | null = null;
 let _executionTraceService: ExecutionTraceService | null = null;
+let _presentationService: PresentationService | null = null;
+let _lastPresentationSweepAt = 0;
 let _executionSkillDiagnosticUnsubscribe: (() => void) | null = null;
 
 // ── Plaud MCP manager ──────────────────────────────────────────────────────
@@ -1142,6 +1155,7 @@ const plugin: PluginDefinition = {
       _jobService = new JobService(_dbManager.db);
       _promptPresetService = new PromptPresetService(_dbManager.db);
       _executionTraceService = new ExecutionTraceService(_dbManager.db);
+      _presentationService = new PresentationService(_dbManager.db);
       // OpenClaw already resolves the exact per-run Skill snapshot and emits a
       // trusted `skill.used` event when a read/command really activates one.
       // Consuming that host-owned signal avoids false negatives for workspace,
@@ -1244,6 +1258,7 @@ const plugin: PluginDefinition = {
     const wsConfig = _wsConfig!;
     const promptPresetService = _promptPresetService!;
     const executionTraceService = _executionTraceService!;
+    const presentationService = _presentationService!;
 
     // Single coalescing entry point for the OpenClaw subagent sync. Reads the
     // live JobService from module state (robust across restart cycles) and skips
@@ -1275,7 +1290,7 @@ const plugin: PluginDefinition = {
     // handler registered above.
     api.registerService({
       id: 'research-claw-db',
-      start() {
+      start(ctx) {
         if (_dbManager?.isOpen()) {
           const result = _dbManager.db.pragma('integrity_check') as Array<{ integrity_check: string }>;
           if (result[0]?.integrity_check !== 'ok') {
@@ -1288,6 +1303,34 @@ const plugin: PluginDefinition = {
           const pruned = jobService.pruneOld(30);
           if (pruned > 0) {
             api.logger.info(`[Jobs] Pruned ${pruned} terminal job(s) older than 30 days`);
+          }
+          const now = Date.now();
+          if (now - _lastPresentationSweepAt >= 60 * 60_000) {
+            const registry = loadOpenClawSessionRegistry(ctx.stateDir);
+            if (!registry.ok) {
+              api.logger.warn('[Presentation] Session registry unavailable; orphan sweep skipped (fail closed)');
+            } else {
+              const telemetry = presentationService.sweepOrphans(registry.sessionKeys, { now });
+              const summary = [
+                `activeSessions=${telemetry.activeSessions}`,
+                `scannedRuns=${telemetry.scannedRuns}`,
+                `eligibleOrphans=${telemetry.eligibleOrphanRuns}`,
+                `deletedRuns=${telemetry.deletedRuns}`,
+                `deletedRows=${telemetry.deletedRecords}`,
+                `deletedBytes=${telemetry.deletedBytes}`,
+                `totalRows=${telemetry.totalRecordsBefore}`,
+                `totalBytes=${telemetry.totalBytesBefore}`,
+                `registryFiles=${registry.filesRead}`,
+                `registryBytes=${registry.bytesRead}`,
+                `registryErrors=${registry.errors}`,
+              ].join(' ');
+              if (telemetry.capacityExceeded) {
+                api.logger.warn(`[Presentation] retention capacity exceeded; visible Session facts retained: ${summary}`);
+              } else {
+                api.logger.info(`[Presentation] bounded orphan sweep: ${summary}`);
+              }
+            }
+            _lastPresentationSweepAt = now;
           }
         }
         // Self-driving sync: refresh OpenClaw subagent jobs + sweep stalled ones
@@ -1446,7 +1489,7 @@ const plugin: PluginDefinition = {
     }); // 1 method
     registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!, _rtspPreviewManager!); // 14 methods
     registerPromptPresetRpc(registerMethod, promptPresetService); // 6 methods
-    registerExecutionTraceRpc(registerMethod, executionTraceService); // 3 methods
+    registerPresentationRpc(registerMethod, presentationService, executionTraceService); // 5 methods
 
     if (MEMORY_MODULE_ENABLED && _memoryService && _sessionService) {
     const memoryService = _memoryService;
@@ -2017,9 +2060,33 @@ const plugin: PluginDefinition = {
     });
 
     // ── 7. Register hooks ─────────────────────────────────────────────
-    // Hooks MUST only be registered once — duplicate registration causes
-    // handlers to fire multiple times per event.
-    if (!_hooksRegistered) {
+    // Register once per concrete OC PluginApi/runtime. A process-global boolean
+    // silently strands hooks on the discovery runtime after OC rebuilds the
+    // agent runtime; the real multi-Run contract probe caught that failure.
+    if (!_hookApis.has(api)) {
+    _hookApis.add(api);
+    const presentationCoordinator = new PresentationCoordinator(
+      presentationService,
+      executionTraceService,
+      {
+        onChanged: (event) => {
+          const emission = api.emitAgentEvent?.({
+            runId: event.runId,
+            sessionKey: event.sessionKey,
+            stream: 'research-claw-core.presentation_changed',
+            data: { ...event },
+          });
+          if (emission?.emitted !== true) {
+            const reason = emission && 'reason' in emission
+              ? ` (${emission.reason})`
+              : '';
+            api.logger.warn(
+              `[Presentation] custom event was not emitted for session=${event.sessionKey} run=${event.runId}${reason}; RPC/F5 recovery remains authoritative`,
+            );
+          }
+        },
+      },
+    );
     // Hook 0: Close OpenClaw's Python scanning gap for every external Skill
     // install source. The ClawHub path is routed here by the small pnpm patch;
     // local directory, Git, upload, and dependency-installer paths already call
@@ -2455,13 +2522,8 @@ const plugin: PluginDefinition = {
         const evt = event as { toolName?: string; runId?: string; toolCallId?: string } | undefined;
         const ctx = context as { sessionKey?: string; runId?: string; toolCallId?: string } | undefined;
         const runId = evt?.runId ?? ctx?.runId;
-        if (!evt?.toolName || !runId || !_executionTraceService) return;
-        _executionTraceService.recordBefore({
-          sessionKey: ctx?.sessionKey ?? 'unknown',
-          runId,
-          toolCallId: evt.toolCallId ?? ctx?.toolCallId,
-          toolName: evt.toolName,
-        });
+        if (!evt?.toolName || !runId) return;
+        presentationCoordinator.beforeTool(evt, ctx ?? {});
       } catch (err) {
         api.logger.warn(`[ExecutionTrace] before_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -2478,16 +2540,9 @@ const plugin: PluginDefinition = {
         } | undefined;
         const ctx = context as { sessionKey?: string; runId?: string; toolCallId?: string } | undefined;
         const runId = evt?.runId ?? ctx?.runId;
-        if (!evt?.toolName || !runId || !_executionTraceService) return;
-        _executionTraceService.recordAfter({
-          sessionKey: ctx?.sessionKey ?? 'unknown',
-          runId,
-          toolCallId: evt.toolCallId ?? ctx?.toolCallId,
-          toolName: evt.toolName,
-          durationMs: evt.durationMs,
-          error: evt.error,
-        });
-        recordSkillLifecycleFromToolResult(_executionTraceService, {
+        if (!evt?.toolName || !runId) return;
+        presentationCoordinator.afterTool(event as never, ctx ?? {});
+        recordSkillLifecycleFromToolResult(executionTraceService, {
           toolName: evt.toolName,
           result: (event as { result?: unknown }).result,
           sessionKey: ctx?.sessionKey ?? 'unknown',
@@ -2500,6 +2555,16 @@ const plugin: PluginDefinition = {
       }
     });
 
+    api.on('tool_result_persist', (event: unknown, context: unknown) => {
+      try {
+        presentationCoordinator.persistedToolResult(event as never, context as never);
+      } catch (err) {
+        api.logger.warn(
+          `[Presentation] persisted fallback capture failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+
     // Persist only a hash of the delivered reply body. This is the durable
     // history→runId join used by the Dashboard after refresh; no reply content
     // is duplicated into the execution database.
@@ -2508,7 +2573,7 @@ const plugin: PluginDefinition = {
         const evt = event as { runId?: string; messages?: unknown[] } | undefined;
         const ctx = context as { sessionKey?: string; runId?: string } | undefined;
         const runId = evt?.runId ?? ctx?.runId;
-        if (!runId || !ctx?.sessionKey || !_executionTraceService || !Array.isArray(evt?.messages)) return;
+        if (!runId || !ctx?.sessionKey || !Array.isArray(evt?.messages)) return;
         const finalAssistant = [...evt.messages].reverse().find((message) => (
           isRecord(message)
           && message.role === 'assistant'
@@ -2518,7 +2583,7 @@ const plugin: PluginDefinition = {
         const timestamp = typeof finalAssistant.timestamp === 'number'
           ? finalAssistant.timestamp
           : Date.now();
-        _executionTraceService.recordReply({
+        executionTraceService.recordReply({
           sessionKey: ctx.sessionKey,
           runId,
           text: extractExecutionReplyText(finalAssistant),
@@ -3128,8 +3193,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (56 tools, 138 WS RPC + 3 HTTP = 141 interfaces, 15 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
-    _hooksRegistered = true;
+    api.logger.info('Research-Claw Core registered (56 tools, 140 WS RPC + 3 HTTP = 143 interfaces, 16 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
     }
   },
 };

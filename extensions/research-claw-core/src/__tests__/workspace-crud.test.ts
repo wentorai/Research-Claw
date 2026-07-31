@@ -592,7 +592,12 @@ describe('Workspace tool-level functional tests', () => {
       });
       const text = getToolText(result);
       expect(text).toContain('Appended');
-      expect(text).toContain('file_card');
+      expect(text).not.toContain('file_card');
+      expect((result as any).details.presentation).toMatchObject({
+        schemaVersion: 1,
+        kind: 'file',
+        path: 'outputs/log.md',
+      });
 
       const readResult = await svc.read('outputs/log.md');
       expect(readResult.content).toBe('First entry');

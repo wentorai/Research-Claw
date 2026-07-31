@@ -29,6 +29,8 @@ import SupervisorReviewListener from './components/SupervisorReviewListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
+import { useExecutionTraceStore } from './stores/execution-trace';
+import { normalizeSessionKey } from './utils/session-key';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -41,6 +43,20 @@ const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ??
 /** Default token for local deployment (matches OPENCLAW_GATEWAY_TOKEN default in run.sh) */
 const DEFAULT_TOKEN = 'research-claw';
 const TOKEN_STORAGE_KEY = 'rc-gateway-token';
+
+const PRESENTATION_TOOL_ALLOWLIST = new Set([
+  'workspace_save',
+  'workspace_export',
+  'workspace_append',
+  'workspace_download',
+  'get_arxiv_paper',
+  'wentor-network__search_papers',
+  'search_openalex',
+  'search_crossref',
+  'search_arxiv',
+  'search_dblp',
+  'rp_search',
+]);
 
 /** Read gateway token: URL param > localStorage (remote users) > hardcoded default */
 function getGatewayToken(): string {
@@ -165,17 +181,68 @@ export default function App() {
       const event = payload as ChatStreamEvent;
       if (event.state === 'final' || event.state === 'aborted' || event.state === 'error') {
         useToolStreamStore.setState({ pendingTools: [] });
+        const activeSessionKey = useChatStore.getState().sessionKey;
+        if (
+          typeof event.runId === 'string'
+          && (!event.sessionKey
+            || normalizeSessionKey(event.sessionKey) === normalizeSessionKey(activeSessionKey))
+        ) {
+          void useExecutionTraceStore.getState().refreshPresentations(activeSessionKey, [event.runId]);
+        }
       }
     });
 
-    const handleAgentPayload = (payload: unknown) => {
+    const handleAgentPayload = (payload: unknown, source: 'agent' | 'session.tool' = 'agent') => {
       const status = payload as {
         state?: string;
         stream?: string;
-        data?: { phase?: string };
+        data?: {
+          phase?: string;
+          schemaVersion?: number;
+          sessionKey?: string;
+          runId?: string;
+          recordsRevision?: number;
+          name?: string;
+          toolName?: string;
+          toolCallId?: string;
+        };
+        runId?: string;
+        sessionKey?: string;
       };
 
-      if (status.stream === 'compaction' && status.data?.phase) {
+      if (status.stream === 'research-claw-core.presentation_changed') {
+        const data = status.data;
+        if (
+          data?.schemaVersion === 1
+          && typeof data.sessionKey === 'string'
+          && typeof data.runId === 'string'
+          && Number.isInteger(data.recordsRevision)
+          && normalizeSessionKey(useChatStore.getState().sessionKey) === normalizeSessionKey(data.sessionKey)
+        ) {
+          const store = useExecutionTraceStore.getState();
+          const activeSessionKey = useChatStore.getState().sessionKey;
+          const current = store.presentations[`${activeSessionKey}\0${data.runId}`];
+          if (!current || current.recordsRevision < (data.recordsRevision ?? 0)) {
+            void store.refreshPresentations(activeSessionKey, [data.runId]);
+          }
+        }
+      } else if (
+        status.stream === 'tool'
+        && (status.data?.phase === 'result' || status.data?.phase === 'end')
+        && typeof status.runId === 'string'
+        && typeof status.sessionKey === 'string'
+        && typeof status.data.toolCallId === 'string'
+        && PRESENTATION_TOOL_ALLOWLIST.has(status.data.name ?? status.data.toolName ?? '')
+      ) {
+        const activeSessionKey = useChatStore.getState().sessionKey;
+        if (normalizeSessionKey(status.sessionKey) === normalizeSessionKey(activeSessionKey)) {
+          useExecutionTraceStore.getState().schedulePresentationRefresh(
+            activeSessionKey,
+            status.runId,
+            status.data.toolCallId,
+          );
+        }
+      } else if (status.stream === 'compaction' && status.data?.phase) {
         useChatStore.getState().handleCompactionAgentEvent(status);
         if (status.data.phase === 'start') {
           setAgentStatus('compacting');
@@ -194,16 +261,23 @@ export default function App() {
       } else if (status.state) {
         setAgentStatus(status.state as 'idle' | 'thinking' | 'compacting' | 'tool_running' | 'streaming' | 'error');
       }
-      // Feed tool stream store for P1-2 (inline tool display) and P1-3 (bg activity)
-      const chatRunId = useChatStore.getState().runId;
-      const activeSessionKey = useChatStore.getState().sessionKey;
-      useToolStreamStore.getState().handleAgentEvent(payload, chatRunId, activeSessionKey);
+      // session.tool result frames include the sanitized tool result. They are
+      // invalidations only: never copy that payload into activity/execution
+      // state or render it as chat content. The ordinary agent stream remains
+      // the sole input for existing inline/background tool activity.
+      if (source === 'agent') {
+        const chatRunId = useChatStore.getState().runId;
+        const activeSessionKey = useChatStore.getState().sessionKey;
+        useToolStreamStore.getState().handleAgentEvent(payload, chatRunId, activeSessionKey);
+      }
     };
 
-    const unsubAgent = client.subscribe('agent', handleAgentPayload);
+    const unsubAgent = client.subscribe('agent', (payload) => handleAgentPayload(payload, 'agent'));
     // session.tool mirrors tool events to late-joining operator UIs (reconnect scenario).
     // Source: openclaw/src/gateway/server-chat.ts:747-751
-    const unsubSessionTool = client.subscribe('session.tool', handleAgentPayload);
+    const unsubSessionTool = client.subscribe('session.tool', (payload) => (
+      handleAgentPayload(payload, 'session.tool')
+    ));
 
     return () => {
       unsubChat();

@@ -850,8 +850,28 @@ describe('Sessions store RPC parity (sessions.*)', () => {
         'sessions.delete',
         { key: 'agent:main:project-a1b2c3d4', deleteTranscript: true },
       );
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'rc.execution.cleanupSession',
+        { sessionKey: 'agent:main:project-a1b2c3d4' },
+      );
       expect(useSessionsStore.getState().sessions).toHaveLength(2);
       expect(useSessionsStore.getState().sessions.find((s) => s.key === 'agent:main:project-a1b2c3d4')).toBeUndefined();
+    });
+
+    it('does not delete execution facts when OC session deletion is unconfirmed', async () => {
+      mockGatewayClient.request.mockRejectedValueOnce(new Error('gateway unavailable'));
+      useSessionsStore.setState({
+        sessions: SESSIONS_LIST_RESPONSE.sessions,
+        activeSessionKey: 'agent:main:main',
+      });
+
+      await useSessionsStore.getState().deleteSession('agent:main:project-a1b2c3d4');
+
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(1);
+      expect(mockGatewayClient.request).not.toHaveBeenCalledWith(
+        'rc.execution.cleanupSession',
+        expect.anything(),
+      );
     });
 
     it('switches to main session when deleting the active session', async () => {

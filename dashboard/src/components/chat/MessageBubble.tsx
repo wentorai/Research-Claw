@@ -25,7 +25,6 @@ import {
   markdownComponents,
   normalizeMath,
 } from '../../lib/markdown';
-import ExecutionDetailsBadge from './ExecutionDetailsBadge';
 
 interface ImageBlock {
   url: string;
@@ -499,11 +498,6 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
               verticalAlign: 'text-bottom',
             }}
           />
-        )}
-        {!isUser && !isStreaming && message.executionRunId && (
-          <div style={{ marginTop: 10 }}>
-            <ExecutionDetailsBadge runId={message.executionRunId} />
-          </div>
         )}
       </div>
       </div>

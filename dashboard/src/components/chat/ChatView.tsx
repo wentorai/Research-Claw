@@ -30,7 +30,10 @@ import { useStagedWritingStore } from '../../stores/staged-writing';
 import { isStagedWritingJobForSession } from '../../utils/staged-writing-run';
 import { isTaskFlowVisible } from '../../utils/task-flow';
 import { detectStagedWritingIntent } from '../../utils/staged-writing-detect';
-import { useExecutionTraceStore } from '../../stores/execution-trace';
+import { executionKey, useExecutionTraceStore } from '../../stores/execution-trace';
+import { resolveRunPresentationOwners } from '../../utils/run-presentation-owner';
+import RunDetailsDock from './RunDetailsDock';
+import { collectPaperFenceAliases, suppressProjectedFileFences } from '../../utils/card-runtime';
 
 const { Text } = Typography;
 
@@ -185,14 +188,33 @@ export default function ChatView() {
   const showWritingTimeline = isStagedWritingJobForSession(writingJob, sessionKey);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<ChatMessage[]>(messages);
-  const loadExecutionSummaries = useExecutionTraceStore((state) => state.loadSummaries);
+  const loadExecutionRuns = useExecutionTraceStore((state) => state.loadRuns);
+  const activateExecutionSession = useExecutionTraceStore((state) => state.activateSession);
+  const executionPresentations = useExecutionTraceStore((state) => state.presentations);
+  const runOwners = useMemo(() => resolveRunPresentationOwners(messages), [messages]);
+  const runOwnerByIndex = useMemo(
+    () => new Map(runOwners.map((owner) => [owner.index, owner])),
+    [runOwners],
+  );
+  const renderedMessages = useMemo(() => messages.map((message, index) => {
+    const owner = runOwnerByIndex.get(index);
+    const presentation = owner
+      ? executionPresentations[executionKey(sessionKey, owner.runId)]
+      : undefined;
+    return {
+      message: presentation
+        ? suppressProjectedFileFences(message, new Set(presentation.files.map((file) => file.path)))
+        : message,
+      selectedPaperAliases: owner ? collectPaperFenceAliases(message) : new Set<string>(),
+    };
+  }), [executionPresentations, messages, runOwnerByIndex, sessionKey]);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
   useEffect(() => {
-    const runIds = messages.flatMap((message) => message.executionRunId ? [message.executionRunId] : []);
-    void loadExecutionSummaries(runIds);
-  }, [messages, loadExecutionSummaries]);
+    activateExecutionSession(sessionKey);
+    void loadExecutionRuns(sessionKey, runOwners.map((owner) => owner.runId));
+  }, [activateExecutionSession, loadExecutionRuns, runOwners, sessionKey]);
 
   // Sticky "last user input" context (only one copy to avoid sticky chaos).
   const [isNearBottom, setIsNearBottom] = useState(true);
@@ -517,7 +539,7 @@ export default function ChatView() {
             </div>
           )}
 
-          {messages.map((msg, idx) => (
+          {renderedMessages.map(({ message: msg, selectedPaperAliases }, idx) => (
             <React.Fragment key={idx}>
               {msg.localKind === 'welcome' ? (
                 // Synthetic first-run welcome — rich hero card instead of the
@@ -533,6 +555,14 @@ export default function ChatView() {
                 </div>
               ) : (
                 <MessageBubble message={msg} />
+              )}
+              {runOwnerByIndex.has(idx) && (
+                <RunDetailsDock
+                  sessionKey={sessionKey}
+                  runId={runOwnerByIndex.get(idx)!.runId}
+                  noFinal={runOwnerByIndex.get(idx)!.noFinal}
+                  selectedPaperAliases={selectedPaperAliases}
+                />
               )}
               {timelineAnchorIndex === idx && (
                 showWritingTimeline ? <StagedWritingTimeline /> : <TaskFlowTimeline />

@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — SQLite Schema DDL
  *
- * 32 tables + FTS5 virtual table + triggers + indexes.
+ * 34 tables + FTS5 virtual table + triggers + indexes.
  * All table names prefixed with `rc_` to avoid collision with OpenClaw internals.
  *
  * Tables:
@@ -37,12 +37,14 @@
  *  30. rc_execution_skills  — Per-run verified Skill activation trace
  *  31. rc_execution_replies — Privacy-safe reply hash → run binding
  *  32. rc_execution_skill_events — Candidate/selected/loaded/executed lifecycle trace
+ *  33. rc_execution_presentation_runs — Per-session/run presentation revision
+ *  34. rc_execution_presentation_records — Immutable bounded card facts
  *
  * FTS5: rc_papers_fts (title, authors, abstract, notes, keywords)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -470,6 +472,35 @@ CREATE TABLE IF NOT EXISTS rc_execution_skill_events (
   UNIQUE(run_id, skill_key, lifecycle)
 );`;
 
+export const CREATE_RC_EXECUTION_PRESENTATION_RUNS_SQL = `
+CREATE TABLE IF NOT EXISTS rc_execution_presentation_runs (
+  session_key      TEXT NOT NULL,
+  run_id           TEXT NOT NULL,
+  records_revision INTEGER NOT NULL DEFAULT 0 CHECK(records_revision >= 0),
+  updated_at       INTEGER NOT NULL,
+  PRIMARY KEY(session_key, run_id)
+);`;
+
+export const CREATE_RC_EXECUTION_PRESENTATION_RECORDS_SQL = `
+CREATE TABLE IF NOT EXISTS rc_execution_presentation_records (
+  id            TEXT PRIMARY KEY,
+  session_key   TEXT NOT NULL,
+  run_id        TEXT NOT NULL,
+  tool_call_id  TEXT NOT NULL,
+  tool_name     TEXT NOT NULL,
+  source        TEXT NOT NULL CHECK(source IN ('full', 'persisted')),
+  completeness  TEXT NOT NULL CHECK(completeness IN ('partial', 'complete')),
+  record_kind   TEXT NOT NULL CHECK(record_kind IN ('file', 'paper_batch')),
+  payload_json  TEXT NOT NULL,
+  payload_hash  TEXT NOT NULL,
+  revision      INTEGER NOT NULL CHECK(revision > 0),
+  observed_at   INTEGER NOT NULL,
+  FOREIGN KEY(session_key, run_id)
+    REFERENCES rc_execution_presentation_runs(session_key, run_id)
+    ON DELETE CASCADE,
+  UNIQUE(session_key, run_id, tool_call_id, source, payload_hash)
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -505,6 +536,8 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   CREATE_RC_EXECUTION_SKILLS_SQL,
   CREATE_RC_EXECUTION_REPLIES_SQL,
   CREATE_RC_EXECUTION_SKILL_EVENTS_SQL,
+  CREATE_RC_EXECUTION_PRESENTATION_RUNS_SQL,
+  CREATE_RC_EXECUTION_PRESENTATION_RECORDS_SQL,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -611,6 +644,10 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
     ON rc_execution_replies(session_key, reply_timestamp);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_execution_skill_events_run
     ON rc_execution_skill_events(run_id, lifecycle, observed_at);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_execution_presentation_records_run
+    ON rc_execution_presentation_records(session_key, run_id, revision);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_execution_presentation_records_tool
+    ON rc_execution_presentation_records(session_key, tool_call_id, observed_at);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────

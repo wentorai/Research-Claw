@@ -3,7 +3,7 @@ import { App as AntdApp } from 'antd';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ExecutionDetailsBadge from './ExecutionDetailsBadge';
-import { useExecutionTraceStore } from '../../stores/execution-trace';
+import { executionKey, useExecutionTraceStore } from '../../stores/execution-trace';
 
 describe('ExecutionDetailsBadge', () => {
   const loadDetail = vi.fn();
@@ -12,7 +12,7 @@ describe('ExecutionDetailsBadge', () => {
     loadDetail.mockReset();
     useExecutionTraceStore.setState({
       summaries: {
-        runA: { toolCount: 2, errorCount: 0, skillCount: 1 },
+        [executionKey('session-a', 'runA')]: { toolCount: 2, errorCount: 0, skillCount: 1 },
       },
       details: {},
       loadDetail,
@@ -23,7 +23,7 @@ describe('ExecutionDetailsBadge', () => {
     loadDetail.mockResolvedValue(undefined);
     render(
       <AntdApp>
-        <ExecutionDetailsBadge runId="runA" />
+        <ExecutionDetailsBadge sessionKey="session-a" runId="runA" />
       </AntdApp>,
     );
 
@@ -34,13 +34,13 @@ describe('ExecutionDetailsBadge', () => {
     expect(button).toHaveTextContent('S 1');
 
     fireEvent.click(button);
-    await waitFor(() => expect(loadDetail).toHaveBeenCalledWith('runA'));
+    await waitFor(() => expect(loadDetail).toHaveBeenCalledWith('session-a', 'runA'));
   });
 
   it('renders the persisted tool, Skill, and review detail', async () => {
     useExecutionTraceStore.setState({
       details: {
-        runA: {
+        [executionKey('session-a', 'runA')]: {
           runId: 'runA',
           tools: [{
             id: 't1',
@@ -85,7 +85,7 @@ describe('ExecutionDetailsBadge', () => {
     });
     render(
       <AntdApp>
-        <ExecutionDetailsBadge runId="runA" />
+        <ExecutionDetailsBadge sessionKey="session-a" runId="runA" />
       </AntdApp>,
     );
 

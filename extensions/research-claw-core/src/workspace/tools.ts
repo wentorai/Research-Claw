@@ -270,25 +270,28 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
 
         const result = await service.save(filePath, content, commitMessage);
 
-        // Build file_card JSON block so the LLM includes it in its response
         const fileExt = path.extname(filePath).slice(1).toLowerCase();
         const mimeType = EXT_MIME[fileExt] ?? 'application/octet-stream';
-        const gitStatus = result.committed ? 'committed' : 'new';
-        const cardJson = JSON.stringify({
-          type: 'file_card',
-          name: path.basename(filePath),
-          path: result.path,
-          size_bytes: result.size,
-          mime_type: mimeType,
-          git_status: gitStatus,
-        });
 
         const overwriteNote = !result.is_new
           ? `\n⚠️ Overwrote existing file. Previous version is in git history.`
           : '';
         return ok(
-          `Saved ${result.path} (${result.size} bytes, committed: ${result.committed})${overwriteNote}\n\nInclude this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
-          { path: result.path, size: result.size, committed: result.committed, commit_hash: result.commit_hash },
+          `Saved ${result.path} (${result.size} bytes, committed: ${result.committed})${overwriteNote}`,
+          {
+            path: result.path,
+            size: result.size,
+            committed: result.committed,
+            commit_hash: result.commit_hash,
+            presentation: {
+              schemaVersion: 1,
+              kind: 'file',
+              path: result.path,
+              sizeBytes: result.size,
+              mimeType,
+              committed: result.committed,
+            },
+          },
         );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
@@ -696,20 +699,10 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
           // Git failure is non-fatal
         }
 
-        // Build file_card
         const mimeType = EXT_MIME[format] ?? 'application/octet-stream';
-        const cardJson = JSON.stringify({
-          type: 'file_card',
-          name: path.basename(outputRelative),
-          path: outputRelative,
-          size_bytes: result.size,
-          mime_type: mimeType,
-          git_status: committed ? 'committed' : 'new',
-        });
 
         return ok(
-          `Exported ${source} → ${outputRelative} (${result.size} bytes, format: ${format})\n\n` +
-          `Include this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
+          `Exported ${source} → ${outputRelative} (${result.size} bytes, format: ${format})`,
           {
             source,
             output: outputRelative,
@@ -717,6 +710,14 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
             format,
             committed,
             commit_hash: commitHash,
+            presentation: {
+              schemaVersion: 1,
+              kind: 'file',
+              path: outputRelative,
+              sizeBytes: result.size,
+              mimeType,
+              committed,
+            },
           },
         );
       } catch (err) {
@@ -846,22 +847,24 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
 
         const result = await service.save(filePath, finalContent, commitMessage ?? `Append: ${path.basename(filePath)}`);
 
-        // Build file_card
         const fileExt = path.extname(filePath).slice(1).toLowerCase();
         const mimeType = EXT_MIME[fileExt] ?? 'application/octet-stream';
-        const gitStatus = result.committed ? 'committed' : 'new';
-        const cardJson = JSON.stringify({
-          type: 'file_card',
-          name: path.basename(filePath),
-          path: result.path,
-          size_bytes: result.size,
-          mime_type: mimeType,
-          git_status: gitStatus,
-        });
 
         return ok(
-          `Appended to ${result.path} (${result.size} bytes, committed: ${result.committed})\n\nInclude this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
-          { path: result.path, size: result.size, committed: result.committed },
+          `Appended to ${result.path} (${result.size} bytes, committed: ${result.committed})`,
+          {
+            path: result.path,
+            size: result.size,
+            committed: result.committed,
+            presentation: {
+              schemaVersion: 1,
+              kind: 'file',
+              path: result.path,
+              sizeBytes: result.size,
+              mimeType,
+              committed: result.committed,
+            },
+          },
         );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
@@ -1005,22 +1008,25 @@ export function createWorkspaceTools(service: WorkspaceService): ToolDefinition[
         const message = commitMessage ?? `Download: ${path.basename(filePath)}`;
         const result = await service.save(filePath, buffer, message);
 
-        // Build file_card
         const fileExt = path.extname(filePath).slice(1).toLowerCase();
         const mimeType = EXT_MIME[fileExt] ?? (response.headers.get('content-type') ?? 'application/octet-stream');
-        const gitStatus = result.committed ? 'committed' : 'new';
-        const cardJson = JSON.stringify({
-          type: 'file_card',
-          name: path.basename(filePath),
-          path: result.path,
-          size_bytes: result.size,
-          mime_type: mimeType,
-          git_status: gitStatus,
-        });
 
         return ok(
-          `Downloaded ${url} → ${result.path} (${result.size} bytes, committed: ${result.committed})\n\nInclude this card in your response:\n\`\`\`file_card\n${cardJson}\n\`\`\``,
-          { path: result.path, size: result.size, committed: result.committed, source_url: url },
+          `Downloaded ${url} → ${result.path} (${result.size} bytes, committed: ${result.committed})`,
+          {
+            path: result.path,
+            size: result.size,
+            committed: result.committed,
+            source_url: url,
+            presentation: {
+              schemaVersion: 1,
+              kind: 'file',
+              path: result.path,
+              sizeBytes: result.size,
+              mimeType,
+              committed: result.committed,
+            },
+          },
         );
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
