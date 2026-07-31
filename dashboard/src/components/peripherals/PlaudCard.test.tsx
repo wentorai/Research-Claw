@@ -788,13 +788,9 @@ describe('PlaudCard — disconnect (P1-U3)', () => {
     await renderPlaudCardAfterInitialStatus();
     expect(screen.getByTestId('plaud-disconnect-btn')).toBeTruthy();
 
-    await act(async () => { fireEvent.click(screen.getByTestId('plaud-disconnect-btn')); });
-    // Popconfirm — confirm the danger action.
-    await act(async () => {
-      const okBtn = document.querySelector('.ant-popconfirm-buttons .ant-btn-dangerous')
-        ?? document.querySelector('.ant-popconfirm-buttons .ant-btn-primary');
-      fireEvent.click(okBtn as Element);
-    });
+    fireEvent.click(screen.getByTestId('plaud-disconnect-btn'));
+    // Popconfirm renders through a portal; wait for it to mount before confirming.
+    fireEvent.click(await screen.findByRole('button', { name: 'OK' }));
 
     await waitFor(() => {
       const patchCall = mockRequest.mock.calls.find(([m]) => m === 'config.patch');
