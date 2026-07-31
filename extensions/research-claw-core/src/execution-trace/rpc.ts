@@ -17,6 +17,7 @@ export function registerExecutionTraceRpc(
       runId: params.runId,
       tools: service.detail(params.runId),
       skills: service.skillDetail(params.runId),
+      skillEvents: service.skillLifecycleDetail(params.runId),
     };
   });
   registerMethod('rc.execution.resolve', async (params) => {

@@ -18,9 +18,20 @@ export interface ExecutionDetail {
   }>;
   skills: Array<{
     id: string;
+    skill_key?: string;
     skill_name: string;
     activation: 'read' | 'command';
     skill_source: string;
+  }>;
+  skillEvents?: Array<{
+    id: string;
+    skill_key: string;
+    skill_name: string;
+    skill_source: string;
+    lifecycle: 'candidate' | 'selected' | 'loaded' | 'executed';
+    activation: 'read' | 'command' | null;
+    tool_call_id: string | null;
+    observed_at: number;
   }>;
   reviews?: Array<{
     reviewId: string;

@@ -21,7 +21,7 @@ overrides:
 
 patchedDependencies:
   openclaw@2026.6.1:
-    hash: 5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821
+    hash: f9f2a288add783b42a8234acc89b6c4d577c1f2f49cf078e6b4565c44a918b30
     path: patches/openclaw@2026.6.1.patch
 
 importers:
@@ -30,7 +30,7 @@ importers:
     dependencies:
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
+        version: 2026.6.1(patch_hash=f9f2a288add783b42a8234acc89b6c4d577c1f2f49cf078e6b4565c44a918b30)
     devDependencies:
       concurrently:
         specifier: ^9.1.0
@@ -68,6 +68,9 @@ importers:
       i18next:
         specifier: ^24.0.0
         version: 24.2.3(typescript@5.9.3)
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
       katex:
         specifier: ^0.16
         version: 0.16.47
@@ -98,6 +101,9 @@ importers:
       shiki:
         specifier: ^1.24.0
         version: 1.29.2
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
       zustand:
         specifier: ^5.0.0
         version: 5.0.11(@types/react@18.3.28)(react@18.3.1)
@@ -150,7 +156,7 @@ importers:
         version: 22.19.15
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
+        version: 2026.6.1(patch_hash=f9f2a288add783b42a8234acc89b6c4d577c1f2f49cf078e6b4565c44a918b30)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -172,7 +178,7 @@ importers:
     devDependencies:
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
+        version: 2026.6.1(patch_hash=f9f2a288add783b42a8234acc89b6c4d577c1f2f49cf078e6b4565c44a918b30)
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
@@ -185,6 +191,9 @@ importers:
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.11.1
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.0
@@ -194,7 +203,7 @@ importers:
         version: 22.19.15
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
+        version: 2026.6.1(patch_hash=f9f2a288add783b42a8234acc89b6c4d577c1f2f49cf078e6b4565c44a918b30)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -215,7 +224,7 @@ importers:
         version: 22.19.15
       openclaw:
         specifier: 2026.6.1
-        version: 2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821)
+        version: 2026.6.1(patch_hash=f9f2a288add783b42a8234acc89b6c4d577c1f2f49cf078e6b4565c44a918b30)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -6055,7 +6064,7 @@ snapshots:
       ws: 8.21.0
       zod: 4.4.3
 
-  openclaw@2026.6.1(patch_hash=5e4090af41cbc8772ee777f37e6a8d63af646fc3d8e3b2f555bd857447eb5821):
+  openclaw@2026.6.1(patch_hash=f9f2a288add783b42a8234acc89b6c4d577c1f2f49cf078e6b4565c44a918b30):
     dependencies:
       '@agentclientprotocol/sdk': 0.22.1(zod@4.4.3)
       '@anthropic-ai/sdk': 0.100.1(zod@4.4.3)

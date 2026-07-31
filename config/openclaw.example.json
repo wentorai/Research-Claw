@@ -87,9 +87,15 @@
   "skills": {
     "load": {
       "extraDirs": [
-        "./skills",
-        "./workspace/skills"
+        "./skills"
       ]
+    },
+    "limits": {
+      "maxSkillsInPrompt": 100,
+      "maxSkillsPromptChars": 26000
+    },
+    "install": {
+      "allowUploadedArchives": true
     },
     "workshop": {
       "autonomous": {
@@ -162,6 +168,7 @@
     }
   },
   "tools": {
-    "profile": "full"
+    "profile": "full",
+    "toolSearch": false
   }
 }

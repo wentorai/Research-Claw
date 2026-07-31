@@ -5,10 +5,10 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 56 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 1 skill_search + 4 job + 3 periph)
+ *   - 57 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 2 Skill Registry + 4 job + 3 periph)
  *   - 138 WS RPC methods + 3 HTTP routes = 141 interface methods
  *     (including rc.execution.summary/detail/resolve; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
- *   - 14 typed hook handlers (7 hook names; agent_end ×3, after_tool_call ×5)
+ *   - 15 typed hook handlers (8 hook names; agent_end ×3, after_tool_call ×5)
  *     + 1 legacy agent:bootstrap hook
  *   - 1 service (research-claw-db lifecycle)
  *   - 1 session monitoring service (automatic memory extraction)
@@ -60,7 +60,10 @@ import {
   selectModelVisibleEligibleSkills,
   type RuntimeProbeConfigLike,
 } from './src/self-check/runtime-probe.js';
-import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
+import { SkillRegistry } from './src/skills/registry.js';
+import { OpenClawCliStatusProvider } from './src/skills/openclaw-status.js';
+import { createSkillTools, recordSkillLifecycleFromToolResult } from './src/skills/tools.js';
+import { runSkillBeforeInstall } from './src/skills/install-security.js';
 import { checkUpdates, applyUpdate, findGitRoot, isUpdateRunning } from './src/app-updates.js';
 import {
   oauthInitiate,
@@ -1090,6 +1093,7 @@ const RESEARCH_CLAW_AGENT_TOOLS = [
   'ppt_init',
   'ppt_export',
   'skill_search',
+  'skill_load',
   'job_start',
   'job_checkpoint',
   'job_status',
@@ -1338,13 +1342,16 @@ const plugin: PluginDefinition = {
       api.registerTool(tool);
     }
 
-    // ── 4b. Skill Search tool ─────────────────────────────────────────
-    // On-demand skill loading: searches research-plugins catalog and
-    // returns SKILL.md content so the agent can load methodology guidance
-    // beyond what fits in the initial prompt (~150 of 438 skills).
+    // ── 4b. Unified Skill Registry tools ──────────────────────────────
+    // Progressive disclosure: search returns bounded metadata candidates;
+    // skill_load reads exactly one stable-id selection. OpenClaw-native
+    // status remains authoritative for workspace/managed/bundled/router
+    // eligibility, while RP catalog contributes leaves beyond the one-level
+    // prompt loader.
     {
       const rpCandidates = [
         path.join(api.resolvePath('..'), 'research-plugins'),
+        path.join(api.resolvePath('..'), '..', 'research-plugins'),
         path.join(api.resolvePath('.'), 'node_modules', '@wentorai', 'research-plugins'),
       ];
       const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
@@ -1363,101 +1370,19 @@ const plugin: PluginDefinition = {
       }
 
       if (!rpRoot) {
-        api.logger.warn('[SkillSearch] research-plugins catalog.json not found — skill search disabled');
-        _unregisteredDeclaredTools.set(
-          'skill_search',
-          'research-plugins catalog.json not found, so skill search has nothing to search',
+        api.logger.warn(
+          '[SkillRegistry] research-plugins catalog.json not found — '
+          + 'OpenClaw workspace/managed/bundled Skills remain available',
         );
       } else {
-        const indexedCount = initSkillIndex(rpRoot);
-        api.logger.info(`[SkillSearch] Indexed ${indexedCount} skills from ${rpRoot}`);
+        api.logger.info(`[SkillRegistry] Research-Plugins catalog source: ${rpRoot}`);
       }
 
-      // Only register the tool when catalog is available — avoids exposing
-      // a tool that always returns "no skills" which confuses the model.
-      if (rpRoot) api.registerTool({
-        name: 'skill_search',
-        description:
-          'Search and load research methodology skills on demand. Use when you need ' +
-          'domain-specific guidance (e.g., "LaTeX thesis", "citation network", "CNKI search strategy") ' +
-          'that is not in your current prompt. Returns skill content that you should follow.',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              description:
-                'Search query — use keywords like tool names, domain names, or methodology terms. ' +
-                'Examples: "latex thesis", "citation apa", "CNKI chinese", "machine learning survey", "bokeh visualization"',
-            },
-            max_results: {
-              type: 'number',
-              description: 'Maximum number of skills to return (default: 3, max: 5)',
-            },
-            list_catalog: {
-              type: 'boolean',
-              description: 'Set to true to get a full catalog summary instead of searching',
-            },
-          },
-          required: ['query'],
-        },
-        async execute(_toolCallId: string, params: Record<string, unknown>): Promise<unknown> {
-          const query = String(params.query ?? '');
-          const maxResults = Math.min(Number(params.max_results) || 3, 5);
-          const listCatalog = Boolean(params.list_catalog);
-
-          if (listCatalog) {
-            return {
-              content: [{ type: 'text', text: getSkillCatalogSummary() }],
-              details: { catalog: true },
-            };
-          }
-
-          if (!query.trim()) {
-            return {
-              content: [{ type: 'text', text: 'Error: Query cannot be empty. Provide keywords to search for skills.' }],
-              details: { error: 'empty_query' },
-            };
-          }
-
-          const matches = searchSkills(query, maxResults);
-          if (matches.length === 0) {
-            return {
-              content: [{
-                type: 'text',
-                text: `No skills found for "${query}". Try broader keywords or use skill_search({ query: "", list_catalog: true }) to see all categories.`,
-              }],
-              details: { query, matches: 0 },
-            };
-          }
-
-          const results: string[] = [];
-          for (const match of matches) {
-            const content = readSkillContent(match);
-            if (content) {
-              results.push(
-                `--- SKILL: ${match.name} (${match.category}/${match.subcategory}) ---\n${content}`,
-              );
-            } else {
-              results.push(
-                `--- SKILL: ${match.name} (${match.category}/${match.subcategory}) ---\n[Content not available at ${match.path}]`,
-              );
-            }
-          }
-
-          return {
-            content: [{
-              type: 'text',
-              text: `Found ${matches.length} skill(s) for "${query}":\n\n${results.join('\n\n')}`,
-            }],
-            details: {
-              query,
-              matches: matches.length,
-              skills: matches.map(m => ({ id: m.id, name: m.name, category: m.category, subcategory: m.subcategory })),
-            },
-          };
-        },
+      const registry = new SkillRegistry({
+        researchPluginsRoot: rpRoot,
+        openClaw: new OpenClawCliStatusProvider(),
       });
+      for (const tool of createSkillTools(registry)) api.registerTool(tool);
     }
 
     // ── 5. Register RPC methods (79 WS total) ────────────────────────
@@ -2095,6 +2020,17 @@ const plugin: PluginDefinition = {
     // Hooks MUST only be registered once — duplicate registration causes
     // handlers to fire multiple times per event.
     if (!_hooksRegistered) {
+    // Hook 0: Close OpenClaw's Python scanning gap for every external Skill
+    // install source. The ClawHub path is routed here by the small pnpm patch;
+    // local directory, Git, upload, and dependency-installer paths already call
+    // scanSkillInstallSource in OpenClaw 2026.6.1.
+    api.on('before_install', async (event: unknown) => {
+      return await runSkillBeforeInstall(
+        event as Parameters<typeof runSkillBeforeInstall>[0],
+        { getConfig: () => api.runtime.config.current() },
+      );
+    }, { priority: 1_000 });
+
     // Extends the probe's own config view rather than restating it: the tool
     // projection shapes are subtle enough that a second hand-written copy would
     // drift, and a drifted copy reads as "no projection configured".
@@ -2551,25 +2487,14 @@ const plugin: PluginDefinition = {
           durationMs: evt.durationMs,
           error: evt.error,
         });
-        if (evt.toolName === 'skill_search') {
-          const result = (event as { result?: { details?: { skills?: unknown[] } } }).result;
-          const skills = result?.details?.skills;
-          if (Array.isArray(skills)) {
-            for (const item of skills) {
-              const skill = item as { id?: unknown; name?: unknown };
-              if (typeof skill.id !== 'string' || typeof skill.name !== 'string') continue;
-              _executionTraceService.recordSkill({
-                sessionKey: ctx?.sessionKey ?? 'unknown',
-                runId,
-                skillKey: skill.id,
-                skillName: skill.name,
-                skillSource: 'research-plugins',
-                activation: 'command',
-                toolCallId: evt.toolCallId ?? ctx?.toolCallId,
-              });
-            }
-          }
-        }
+        recordSkillLifecycleFromToolResult(_executionTraceService, {
+          toolName: evt.toolName,
+          result: (event as { result?: unknown }).result,
+          sessionKey: ctx?.sessionKey ?? 'unknown',
+          runId,
+          toolCallId: evt.toolCallId ?? ctx?.toolCallId,
+          timestamp: Date.now(),
+        });
       } catch (err) {
         api.logger.warn(`[ExecutionTrace] after_tool_call capture failed: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -3203,7 +3128,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (56 tools, 138 WS RPC + 3 HTTP = 141 interfaces, 14 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
+    api.logger.info('Research-Claw Core registered (56 tools, 138 WS RPC + 3 HTTP = 141 interfaces, 15 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
     _hooksRegistered = true;
     }
   },

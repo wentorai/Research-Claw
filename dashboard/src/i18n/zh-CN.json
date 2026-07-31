@@ -229,13 +229,20 @@
     "title": "执行详情",
     "summary": "调用 {{tools}} 个工具，检测到 {{skills}} 个 Skill",
     "tools": "使用的工具",
-    "skills": "检测到的 Skills",
+    "skills": "实际加载或执行的 Skills",
+    "candidates": "检索候选",
     "review": "可信审查",
     "noneDetected": "本次未检测到 Skill 激活",
     "noLinkedReview": "本次运行暂无可关联的审查结果",
     "activation": {
       "read": "读取启用",
       "command": "指令启用"
+    },
+    "lifecycle": {
+      "candidate": "候选",
+      "selected": "已选择",
+      "loaded": "已加载",
+      "executed": "已执行"
     },
     "skillSource": {
       "workspace": "工作区",
@@ -1451,6 +1458,7 @@
     "disconnected": "连接网关后查看扩展",
     "tabs": {
       "skills": "技能",
+      "install": "安装",
       "workshop": "技能工坊",
       "channels": "通道",
       "plugins": "插件",
@@ -1569,8 +1577,77 @@
       "group": {
         "local": "科研龙虾本地",
         "research-plugins": "科研技能库",
-        "managed": "科研龙虾内置",
-        "bundled": "OpenClaw 内置"
+        "workspace": "工作区技能",
+        "extra": "插件／额外目录",
+        "managed": "托管／个人技能",
+        "bundled": "OpenClaw 内置",
+        "other": "其他／未知来源"
+      },
+      "runtime": {
+        "disabled": "已禁用",
+        "allowlistBlocked": "被允许列表阻止",
+        "agentBlocked": "当前 Agent 不可用",
+        "requirementsMissing": "缺少运行依赖",
+        "modelAndCommand": "模型与命令均可用",
+        "modelVisible": "模型可见",
+        "commandOnly": "仅快捷命令可用",
+        "enabledHidden": "已启用但未披露",
+        "title": "真实运行状态",
+        "configured": "配置开关",
+        "eligibility": "依赖资格",
+        "agentFilter": "Agent 过滤",
+        "modelVisibility": "模型可见性",
+        "userInvocable": "允许用户调用",
+        "commandVisibility": "命令可见性"
+      }
+    },
+    "install": {
+      "search": "搜索",
+      "review": "查看详情",
+      "install": "安装",
+      "installNow": "立即安装",
+      "clawhub": {
+        "tab": "ClawHub",
+        "native": "OpenClaw 原生来源",
+        "description": "通过 skills.search 查询 ClawHub、读取注册表详情，再由 skills.install 安装。",
+        "searchPlaceholder": "搜索 ClawHub 技能",
+        "empty": "没有匹配的技能。",
+        "confirmTitle": "确认安装技能",
+        "confirmDescription": "OpenClaw 将下载、校验、扫描并把该技能安装到当前工作区。",
+        "installedFallback": "已安装 {{slug}}"
+      },
+      "local": {
+        "tab": "本地 ZIP",
+        "selectCandidate": "选择 {{name}}",
+        "invalidSlug": "标识无效",
+        "existing": "已有同名技能",
+        "scanPassed": "本地结构检查通过",
+        "scanWarning": "本地结构检查有警告",
+        "scanBlocked": "本地结构检查已阻止",
+        "noDependencies": "未声明外部依赖",
+        "overwrite": "覆盖已有技能",
+        "partial": "成功 {{installed}} 个，失败 {{failed}} 个",
+        "allFailed": "没有技能安装成功",
+        "complete": "已安装 {{count}} 个技能",
+        "disabled": "Gateway 配置未启用本地压缩包上传。",
+        "disabledDescription": "请在 openclaw.json 中启用 skills.install.allowUploadedArchives 后重新连接。禁用期间仍可检查 ZIP 内容，但不能安装。",
+        "preflightTitle": "本地结构预检",
+        "preflightBoundary": "浏览器预检不是安全边界。每个所选技能都会原子安装，并在安装过程中接受 Gateway 安全扫描。",
+        "chooseZip": "选择技能 ZIP",
+        "skillsFound": "发现 {{count}} 个技能",
+        "multiSkillZip": "多技能 ZIP",
+        "singleSkillZip": "单技能 ZIP",
+        "gatewayScan": "Gateway 安全扫描会在安装时执行。",
+        "noPreview": "OpenClaw 2026.6.1 没有仅扫描不安装的裁决 RPC，因此此处不会虚构安装前安全结论。",
+        "review": "复核安装",
+        "resolveConflict": "请为每个所选冲突技能明确确认覆盖。",
+        "confirmTitle": "确认安装本地技能",
+        "installSelected": "安装所选技能",
+        "selectedCount": "已选择 {{count}} 个技能",
+        "atomicPartial": "技能会逐个安装。某项失败不会回滚已经成功的项目，界面会分别报告每项结果。",
+        "securityAcknowledge": "我理解 Gateway 的安全裁决只会在安装过程中产生。",
+        "resultInstalled": "安装成功：{{name}}",
+        "resultFailed": "安装失败：{{name}}"
       }
     },
     "channels": {
@@ -1616,7 +1693,15 @@
       "config": "配置",
       "copyConfigPath": "复制 openclaw.json 路径",
       "toggleFailed": "切换插件失败 — 网关可能正在重启，请稍后重试",
-      "packages": "已安装技能包"
+      "packages": "已安装技能包",
+      "installed": "已安装",
+      "configured": "已配置",
+      "enabled": "配置中已启用",
+      "disabled": "配置中已禁用",
+      "allowUnknown": "未显式配置允许列表",
+      "allowed": "已允许",
+      "notAllowed": "未允许",
+      "installSource": "安装来源"
     }
   }
 }

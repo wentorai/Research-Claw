@@ -48,6 +48,14 @@ describe('OpenClaw-resolved Skill activation trace', () => {
       activation: 'read',
       tool_call_id: 'call-skill-read',
     });
+    expect(service.skillLifecycleDetail('run-real-read')).toEqual([
+      expect.objectContaining({
+        skill_key: 'workspace:searching-literature',
+        lifecycle: 'executed',
+        activation: 'read',
+        tool_call_id: 'call-skill-read',
+      }),
+    ]);
     db.close();
   });
 
@@ -85,6 +93,10 @@ describe('OpenClaw-resolved Skill activation trace', () => {
         skill_name: 'multi-search-engine',
         skill_source: 'workspace',
         activation: 'read',
+      });
+      expect(new ExecutionTraceService(db).skillLifecycleDetail('run-real-bus')[0]).toMatchObject({
+        skill_name: 'multi-search-engine',
+        lifecycle: 'executed',
       });
     } finally {
       unsubscribe();

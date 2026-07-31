@@ -26,6 +26,33 @@ export interface ExecutionSkill {
   first_used_at: number;
 }
 
+export type ExecutionSkillLifecycle = 'candidate' | 'selected' | 'loaded' | 'executed';
+
+export interface ExecutionSkillEvent {
+  id: string;
+  session_key: string;
+  run_id: string;
+  skill_key: string;
+  skill_name: string;
+  skill_source: string;
+  lifecycle: ExecutionSkillLifecycle;
+  activation: 'read' | 'command' | null;
+  tool_call_id: string | null;
+  observed_at: number;
+}
+
+interface SkillLifecycleInput {
+  sessionKey: string;
+  runId: string;
+  skillKey: string;
+  skillName: string;
+  skillSource: string;
+  lifecycle: ExecutionSkillLifecycle;
+  activation?: 'read' | 'command';
+  toolCallId?: string;
+  timestamp?: number;
+}
+
 export interface ExecutionReplyCandidate {
   index: number;
   timestamp: number;
@@ -111,6 +138,56 @@ export class ExecutionTraceService {
       input.skillSource ?? 'research-plugins', input.activation ?? 'read',
       input.toolCallId ?? null, input.timestamp ?? Date.now(),
     );
+  }
+
+  recordSkillLifecycle(input: SkillLifecycleInput): boolean {
+    const inserted = this.db.prepare(`
+      INSERT INTO rc_execution_skill_events
+        (id, session_key, run_id, skill_key, skill_name, skill_source,
+         lifecycle, activation, tool_call_id, observed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(run_id, skill_key, lifecycle) DO NOTHING
+    `).run(
+      randomUUID(), input.sessionKey, input.runId, input.skillKey, input.skillName,
+      input.skillSource, input.lifecycle, input.activation ?? null,
+      input.toolCallId ?? null, input.timestamp ?? Date.now(),
+    );
+    return inserted.changes > 0;
+  }
+
+  recordSkillCandidates(inputs: SkillLifecycleInput[]): number {
+    const record = this.db.transaction((items: SkillLifecycleInput[]) => (
+      items.reduce((count, input) => count + (this.recordSkillLifecycle({
+        ...input,
+        lifecycle: 'candidate',
+      }) ? 1 : 0), 0)
+    ));
+    return record(inputs);
+  }
+
+  recordLoadedSkill(input: Omit<SkillLifecycleInput, 'lifecycle'>): {
+    selected: boolean;
+    loaded: boolean;
+  } {
+    return this.db.transaction(() => {
+      const selected = this.recordSkillLifecycle({ ...input, lifecycle: 'selected' });
+      const loaded = this.recordSkillLifecycle({ ...input, lifecycle: 'loaded' });
+      this.recordSkill({
+        ...input,
+        activation: input.activation ?? 'command',
+      });
+      return { selected, loaded };
+    })();
+  }
+
+  recordExecutedSkill(input: Omit<SkillLifecycleInput, 'lifecycle'>): boolean {
+    return this.db.transaction(() => {
+      this.recordSkill({
+        ...input,
+        activation: input.activation ?? 'read',
+      });
+      return this.recordSkillLifecycle({ ...input, lifecycle: 'executed' });
+    })();
   }
 
   recordReply(input: {
@@ -256,5 +333,19 @@ export class ExecutionTraceService {
       SELECT * FROM rc_execution_skills WHERE run_id = ?
       ORDER BY first_used_at ASC, id ASC
     `).all(runId) as ExecutionSkill[];
+  }
+
+  skillLifecycleDetail(runId: string): ExecutionSkillEvent[] {
+    return this.db.prepare(`
+      SELECT * FROM rc_execution_skill_events WHERE run_id = ?
+      ORDER BY observed_at ASC,
+        CASE lifecycle
+          WHEN 'candidate' THEN 0
+          WHEN 'selected' THEN 1
+          WHEN 'loaded' THEN 2
+          WHEN 'executed' THEN 3
+        END ASC,
+        id ASC
+    `).all(runId) as ExecutionSkillEvent[];
   }
 }

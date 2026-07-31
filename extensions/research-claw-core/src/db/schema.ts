@@ -1,7 +1,7 @@
 /**
  * Research-Claw Core — SQLite Schema DDL
  *
- * 30 tables + FTS5 virtual table + triggers + indexes.
+ * 32 tables + FTS5 virtual table + triggers + indexes.
  * All table names prefixed with `rc_` to avoid collision with OpenClaw internals.
  *
  * Tables:
@@ -36,12 +36,13 @@
  *  29. rc_execution_tools   — Per-run tool invocation trace
  *  30. rc_execution_skills  — Per-run verified Skill activation trace
  *  31. rc_execution_replies — Privacy-safe reply hash → run binding
+ *  32. rc_execution_skill_events — Candidate/selected/loaded/executed lifecycle trace
  *
  * FTS5: rc_papers_fts (title, authors, abstract, notes, keywords)
  */
 
 // ── Current schema version ──────────────────────────────────────────
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 // ── CREATE TABLE statements ─────────────────────────────────────────
 
@@ -453,6 +454,22 @@ CREATE TABLE IF NOT EXISTS rc_execution_replies (
   recorded_at     INTEGER NOT NULL
 );`;
 
+export const CREATE_RC_EXECUTION_SKILL_EVENTS_SQL = `
+CREATE TABLE IF NOT EXISTS rc_execution_skill_events (
+  id            TEXT PRIMARY KEY,
+  session_key   TEXT NOT NULL,
+  run_id        TEXT NOT NULL,
+  skill_key     TEXT NOT NULL,
+  skill_name    TEXT NOT NULL,
+  skill_source  TEXT NOT NULL,
+  lifecycle     TEXT NOT NULL
+                  CHECK(lifecycle IN ('candidate', 'selected', 'loaded', 'executed')),
+  activation    TEXT CHECK(activation IS NULL OR activation IN ('read', 'command')),
+  tool_call_id  TEXT,
+  observed_at   INTEGER NOT NULL,
+  UNIQUE(run_id, skill_key, lifecycle)
+);`;
+
 // ── Aggregate table creation list ───────────────────────────────────
 
 export const CREATE_TABLES_SQL: readonly string[] = [
@@ -487,6 +504,7 @@ export const CREATE_TABLES_SQL: readonly string[] = [
   CREATE_RC_EXECUTION_TOOLS_SQL,
   CREATE_RC_EXECUTION_SKILLS_SQL,
   CREATE_RC_EXECUTION_REPLIES_SQL,
+  CREATE_RC_EXECUTION_SKILL_EVENTS_SQL,
 ];
 
 // ── Indexes ─────────────────────────────────────────────────────────
@@ -591,6 +609,8 @@ export const CREATE_INDEXES_SQL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_rc_execution_skills_run ON rc_execution_skills(run_id);`,
   `CREATE INDEX IF NOT EXISTS idx_rc_execution_replies_session
     ON rc_execution_replies(session_key, reply_timestamp);`,
+  `CREATE INDEX IF NOT EXISTS idx_rc_execution_skill_events_run
+    ON rc_execution_skill_events(run_id, lifecycle, observed_at);`,
 ];
 
 // ── FTS5 virtual table ──────────────────────────────────────────────

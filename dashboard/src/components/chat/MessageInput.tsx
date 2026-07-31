@@ -92,23 +92,6 @@ export default function MessageInput() {
    *  (e.g. ToDesk) that break React's built-in composition detection. */
   const composingRef = useRef(false);
   const lastSelectionRef = useRef<TextSelection>({ start: 0, end: 0 });
-  /** The browser/IME owns the live textarea value. React state mirrors it for
-   *  menus, persistence, and toolbar state, but must not write stale state back
-   *  while Chrome/remote IME preedit is bootstrapping. */
-  const initialTextRef = useRef(text);
-
-  const replaceComposerText = useCallback((next: string, nextCaret = next.length) => {
-    setText(next);
-    const el = textareaRef.current;
-    if (!el) return;
-    if (el.value !== next) el.value = next;
-    const boundedCaret = Math.max(0, Math.min(nextCaret, next.length));
-    el.selectionStart = el.selectionEnd = boundedCaret;
-    setCaret(boundedCaret);
-    lastSelectionRef.current = { start: boundedCaret, end: boundedCaret };
-    el.style.height = 'auto';
-    if (next) resizeComposerInput(el);
-  }, []);
 
   const isConnected = connState === 'connected';
   const hasReadyReference = references.some((r) => r.status === 'ready');
@@ -153,15 +136,22 @@ export default function MessageInput() {
     draftRef.current = null;
     try {
       const saved = localStorage.getItem(DRAFT_STORAGE_PREFIX + sessionKey) ?? '';
-      replaceComposerText(saved);
+      setText(saved);
+      // Resize textarea to fit restored draft
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        if (saved) {
+          resizeComposerInput(textareaRef.current);
+        }
+      }
     } catch { /* ignore */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- inputHistory ref is stable
-  }, [sessionKey, replaceComposerText]);
+  }, [sessionKey]);
 
   // Restore draft to input after user aborts generation
   useEffect(() => {
     if (!inputRestore) return;
-    replaceComposerText(inputRestore.text);
+    setText(inputRestore.text);
     setAttachments(inputRestore.attachments);
     clearInputRestore();
     try {
@@ -179,12 +169,12 @@ export default function MessageInput() {
       el.focus();
       el.selectionStart = el.selectionEnd = el.value.length;
     });
-  }, [inputRestore, inputRestoreSeq, clearInputRestore, sessionKey, replaceComposerText]);
+  }, [inputRestore, inputRestoreSeq, clearInputRestore, sessionKey]);
 
   // Skill Workshop / other panels can push a one-shot message into the composer
   useEffect(() => {
     if (!chatInputPrefill) return;
-    replaceComposerText(chatInputPrefill);
+    setText(chatInputPrefill);
     setChatInputPrefill(null);
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -194,7 +184,7 @@ export default function MessageInput() {
       resizeComposerInput(el);
       el.selectionStart = el.selectionEnd = el.value.length;
     });
-  }, [chatInputPrefill, setChatInputPrefill, replaceComposerText]);
+  }, [chatInputPrefill, setChatInputPrefill]);
 
   // Peripherals panel / other panels can push attachments into the composer (append semantics)
   useEffect(() => {
@@ -226,7 +216,7 @@ export default function MessageInput() {
 
   // Slash command autocomplete menu
   const slashMenu = useSlashCommandMenu(text, (completed) => {
-    replaceComposerText(completed);
+    setText(completed);
     // Focus textarea and move cursor to end
     if (textareaRef.current) {
       textareaRef.current.focus();
@@ -535,7 +525,7 @@ export default function MessageInput() {
 
   // `@`-mention reference menu (workspace files)
   const refMenu = useReferenceMenu(text, caret, wsFilePaths, (path, strippedText, newCaret) => {
-    replaceComposerText(strippedText, newCaret);
+    setText(strippedText);
     void addWorkspaceReference(path);
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -611,9 +601,7 @@ export default function MessageInput() {
   );
 
   const handleSend = useCallback(() => {
-    // Read the browser-owned value at the send boundary. This also protects the
-    // final IME commit when React receives its state update one frame later.
-    const msg = (textareaRef.current?.value ?? text).trim();
+    const msg = text.trim();
     const readyRefs = references.filter((r) => r.status === 'ready');
     if ((!msg && attachments.length === 0 && readyRefs.length === 0) || !isConnected || sending) return;
     if (references.some((r) => r.status === 'uploading')) {
@@ -628,7 +616,7 @@ export default function MessageInput() {
         draftRef.current = null;
       }
       setHistoryPopupOpen(false);
-      replaceComposerText('');
+      setText('');
       setAttachments([]);
       setReferences([]);
       try { localStorage.removeItem(DRAFT_STORAGE_PREFIX + sessionKey); } catch { /* ignore */ }
@@ -667,7 +655,7 @@ export default function MessageInput() {
     }
 
     doSend();
-  }, [text, attachments, references, isConnected, sending, send, sessionKey, inputHistory, t, modal, replaceComposerText]);
+  }, [text, attachments, references, isConnected, sending, send, sessionKey, inputHistory, t, modal]);
 
   const abortShortcut = abortChatShortcutLabel();
   const abortTooltip = t('chat.abortWithShortcut', {
@@ -680,22 +668,9 @@ export default function MessageInput() {
     setIsComposing(true);
   };
 
-  const handleCompositionEnd = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+  const handleCompositionEnd = () => {
     composingRef.current = false;
     setIsComposing(false);
-    // Some remote IMEs do not emit a final React change event. Composition end
-    // is therefore an explicit state/persistence commit boundary.
-    const value = e.currentTarget.value;
-    const selection = e.currentTarget.selectionStart ?? value.length;
-    setText(value);
-    setCaret(selection);
-    lastSelectionRef.current = { start: selection, end: e.currentTarget.selectionEnd ?? selection };
-  };
-
-  const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
-    // Match OpenClaw's local-draft boundary: persist any browser-owned value
-    // before focus leaves, even if a remote IME skipped React's change event.
-    setText(e.currentTarget.value);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -720,9 +695,9 @@ export default function MessageInput() {
           e.preventDefault();
           // Stash current text as draft on first history navigation
           if (draftRef.current === null) {
-            draftRef.current = el.value;
+            draftRef.current = text;
           }
-          replaceComposerText(prev);
+          setText(prev);
           // Move cursor to end after React re-render
           requestAnimationFrame(() => {
             if (el) {
@@ -743,10 +718,10 @@ export default function MessageInput() {
         const next = inputHistory.down();
         e.preventDefault();
         if (next !== null) {
-          replaceComposerText(next);
+          setText(next);
         } else {
           // Back to draft
-          replaceComposerText(draftRef.current ?? '');
+          setText(draftRef.current ?? '');
           draftRef.current = null;
         }
         requestAnimationFrame(() => {
@@ -902,7 +877,7 @@ export default function MessageInput() {
         <textarea
           ref={textareaRef}
           className="chat-composer-input"
-          defaultValue={initialTextRef.current}
+          value={text}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
           onKeyUp={syncCaret}
@@ -910,7 +885,6 @@ export default function MessageInput() {
           onSelect={syncCaret}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
-          onBlur={handleBlur}
           onPaste={handlePaste}
           placeholder={t('chat.placeholder')}
           disabled={!isConnected || sending}
@@ -963,7 +937,7 @@ export default function MessageInput() {
               align="right"
               anchorRef={historyAnchorRef}
               onSelect={(historyText) => {
-                replaceComposerText(historyText);
+                setText(historyText);
                 setHistoryPopupOpen(false);
                 textareaRef.current?.focus();
                 requestAnimationFrame(() => {

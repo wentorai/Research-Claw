@@ -22,6 +22,8 @@ describe('research-claw-core plugin contracts', () => {
     expect(runtimeTools).toContain('monitor_list');
     expect(runtimeTools).toContain('monitor_update');
     expect(runtimeTools).toContain('monitor_collect_candidates');
+    expect(runtimeTools).toContain('skill_search');
+    expect(runtimeTools).toContain('skill_load');
   });
 
   // The HLS/upload/download route tests stand up their OWN http.Server with a
@@ -33,6 +35,7 @@ describe('research-claw-core plugin contracts', () => {
   it('registers every HTTP route behind gateway auth', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-plugin-http-auth-'));
     const routes: Array<{ path?: string; auth?: string; match?: string }> = [];
+    const hooks: string[] = [];
     await plugin.register?.({
       id: 'research-claw-core',
       name: 'Research-Claw Core',
@@ -51,7 +54,9 @@ describe('research-claw-core plugin contracts', () => {
         routes.push(route as { path?: string; auth?: string; match?: string });
       },
       registerService: () => {},
-      on: () => {},
+      on: (hookName: string) => {
+        hooks.push(hookName);
+      },
       registerHook: () => {},
     } as never);
 
@@ -68,6 +73,7 @@ describe('research-claw-core plugin contracts', () => {
     // The HLS route serves <token>/<file> under its prefix, so it must be a
     // prefix match; the other two are single endpoints.
     expect(routes.find((r) => r.path === '/rc/rtsp-preview')?.match).toBe('prefix');
+    expect(hooks).toContain('before_install');
   });
 
   it('registers agent tools on every plugin register pass', async () => {
@@ -113,7 +119,9 @@ describe('research-claw-core plugin contracts', () => {
 
     expect(first.tools.map(tool => tool.name)).toContain('library_batch_add');
     expect(first.tools.map(tool => tool.name)).toContain('job_start');
+    expect(first.tools.map(tool => tool.name)).toContain('skill_load');
     expect(second.tools.map(tool => tool.name)).toContain('library_batch_add');
     expect(second.tools.map(tool => tool.name)).toContain('job_start');
+    expect(second.tools.map(tool => tool.name)).toContain('skill_load');
   });
 });

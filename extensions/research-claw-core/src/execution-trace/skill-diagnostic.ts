@@ -19,7 +19,7 @@ export function recordSkillUsedDiagnostic(
 ): boolean {
   if (!metadata.trusted || event.type !== 'skill.used') return false;
   if (!event.runId || !event.sessionKey) return false;
-  service.recordSkill({
+  service.recordExecutedSkill({
     sessionKey: event.sessionKey,
     runId: event.runId,
     skillKey: `${event.skillSource}:${event.skillName}`,
