@@ -81,6 +81,11 @@ export function syncOpenClawSubagentJobs(
     .slice(0, maxSessions);
 
   let synced = 0;
+  // Entries are newest-first. A Gateway-restart recovery can leave an older
+  // interrupted child and a newer replacement carrying the same durable Job
+  // ID. Let the newest child claim that Job once per sweep so the older session
+  // cannot overwrite the replacement later in this loop.
+  const claimedJobIds = new Set<string>();
   for (const [sessionKey, session] of entries) {
     try {
       const sessionId = session.sessionId;
@@ -89,17 +94,24 @@ export function syncOpenClawSubagentJobs(
       if (session.sessionFile) seenFiles.add(session.sessionFile);
       // Resolve the target job id in priority order:
       //   1. Job ID echoed in the child transcript (exact, preferred).
-      //   2. A still-pending long-task job spawned by this session's parent
+      //   2. An active long-task already checkpoint-bound to this exact child.
+      //   3. A still-pending long-task job spawned by this session's parent
       //      (heuristic rebind — avoids orphaning the tracked job when the model
       //      forgot to print the Job ID).
-      //   3. A fresh openclaw:<sessionId> row.
+      //   4. A fresh openclaw:<sessionId> row.
       let jobId = transcript.jobId;
       let existingJob = jobId ? getExistingJob(service, jobId) : null;
+      if (!jobId) {
+        const bound = service.findActiveLongTaskForSession(sessionKey);
+        if (bound) { jobId = bound.id; existingJob = bound; }
+      }
       if (!jobId && session.spawnedBy) {
         const bound = service.findBindableLongTask(session.spawnedBy);
         if (bound) { jobId = bound.id; existingJob = bound; }
       }
       if (!jobId) jobId = `openclaw:${sessionId}`;
+      if (claimedJobIds.has(jobId)) continue;
+      claimedJobIds.add(jobId);
       const mappedStatus = mapOpenClawStatus(session.status, session.updatedAt, now, staleAfterMs);
       const preserveResumeRequest = shouldPreserveResumeRequest(existingJob, mappedStatus, session.updatedAt, now);
       const status = preserveResumeRequest ? 'running' : mappedStatus;
@@ -172,6 +184,7 @@ export function syncOpenClawSubagentJobs(
         updated_at: updatedAt,
         steps,
       });
+      service.removeProvisionalOpenClawMirror(sessionId, sessionKey, jobId);
       synced++;
     } catch (err) {
       options.logger?.warn?.(`[Jobs] Failed to sync OpenClaw subagent job: ${err instanceof Error ? err.message : String(err)}`);

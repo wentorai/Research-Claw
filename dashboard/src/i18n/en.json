@@ -37,12 +37,42 @@
     "hint": "Long-running work continues here even when a chat turn ends.",
     "empty": "No background jobs",
     "waiting": "Waiting to start",
-    "refresh": "Refresh job",
+    "currentActivity": "Latest known activity: ",
+    "refreshAll": "Refresh all",
+    "refreshing": "Syncing job status…",
+    "refreshSuccess": "Background job status updated",
+    "refreshFailed": "Could not refresh background jobs. Check the Gateway connection.",
+    "lastUpdated": "Last updated: {{time}}",
+    "autoRefreshHint": "Job status syncs automatically; use Refresh all for an immediate check.",
     "cancel": "Stop job",
+    "cancelledSuccess": "The background job and its run were stopped",
+    "cancelledNoActiveBacking": "The background job was stopped; there is no active child session to stop",
+    "cancelledBackingUnconfirmed": "The job record was stopped, but the OC child-session stop is not confirmed. Refresh again shortly.",
     "resume": "Continue job",
     "retry": "Retry job",
     "actionFailed": "Job action failed",
     "backgroundActive": "{{count}} background job(s)",
+    "type": {
+      "researchAgent": "Research Agent job",
+      "stagedWriting": "Staged writing job",
+      "upload": "Upload job",
+      "export": "Export job",
+      "other": "Background job"
+    },
+    "error": {
+      "heartbeatExpired": "This background record needs your attention. Continue, retry, or stop it.",
+      "notStarted": "The job did not start successfully. Retry or stop it.",
+      "noActiveRun": "No active child session was found. Refresh status or start again.",
+      "generic": "The job encountered a problem. Refresh, retry, or stop it."
+    },
+    "step": {
+      "agentRunning": "Research Agent is working",
+      "resumed": "Continued at your request",
+      "cancelled": "Stopped at your request.",
+      "completed": "The job completed. Expand its steps for the recorded activity; find outputs in the linked chat or workspace.",
+      "failed": "The job did not complete. Review the notice, then retry or stop it.",
+      "partial": "The job completed only part of the requested work."
+    },
     "notify": {
       "completed": "Background job completed",
       "partial": "Background job partially completed",
@@ -54,7 +84,7 @@
       "completed": "Completed",
       "partial": "Partial",
       "failed": "Failed",
-      "stalled": "Stalled",
+      "stalled": "Needs attention",
       "cancelled": "Cancelled"
     },
     "steps": "Sub-steps",
@@ -93,9 +123,10 @@
   "chat": {
     "longTask": {
       "confirmTitle": "Run as a background job?",
-      "confirmBody": "This looks like a long task: \"{{title}}\". Run it in the background (spawns an OpenClaw subagent)? Choose \"Answer now\" to respond in this turn instead.",
+      "confirmBody": "This request contains explicit long-duration and bulk-work signals: \"{{title}}\". Background execution starts an OpenClaw subagent; foreground execution continues in this session. You can also cancel without sending.",
       "confirmOk": "Run in background",
-      "confirmCancel": "Answer now"
+      "confirmForeground": "Run in foreground",
+      "confirmDismiss": "Cancel send"
     },
     "placeholder": "Ask your research assistant...",
     "composerHint": "Enter send · Shift+Enter newline",
@@ -103,10 +134,10 @@
     "thinking": "Thinking...",
     "compacting": "Compacting conversation history...",
     "runEndedNoOutput": "OC reports that the run ended without a visible reply. Refresh session history; if it remains empty, inspect the reported failure or resend the request.",
-    "runIssueTitle": "This run may have been interrupted",
-    "runIssueNotificationTitle": "Run interrupted",
-    "runTimedOut": "The run was stopped after reaching the time limit. The reply may be incomplete — click Continue to pick up where it left off.",
-    "runTimedOutNoOutput": "The run reached its time limit before producing a reply. Resend the original message to try again.",
+    "runIssueTitle": "This run needs attention",
+    "runIssueNotificationTitle": "Run status notice",
+    "runTimedOut": "OC explicitly reported that this run timed out and stopped. The reply may be incomplete — click Continue to pick up where it left off.",
+    "runTimedOutNoOutput": "OC explicitly reported that this run timed out and stopped before producing a reply. Resend the original message to try again.",
     "runInterrupted": "The run was interrupted and the reply may be incomplete — you can keep waiting for reconciliation or click Continue to resume.",
     "runInterruptedNoOutput": "The run ended before producing a reply, but OC did not report a timeout cause. Refresh the history or resend the original message.",
     "continueRun": "Continue",
@@ -275,6 +306,10 @@
         "title": "Submitting request",
         "detail": "Waiting for the Gateway to acknowledge this request."
       },
+      "accepted": {
+        "title": "Request accepted",
+        "detail": "The Gateway accepted this request and OC run state is being checked. You can Stop."
+      },
       "confirming-submit": {
         "title": "Confirming request acceptance",
         "detail": "The acknowledgement was uncertain. Checking OC session history without sending the request again automatically."
@@ -308,6 +343,10 @@
         "title": "Confirming result",
         "detail": "OC reports no active run while the persisted status still says running. Refreshing session history instead of calling this running or failed."
       },
+      "result-unconfirmed": {
+        "title": "Run result not confirmed",
+        "detail": "OC confirms there is no active run but did not return a complete terminal result. Refresh the session record or start a new request."
+      },
       "done": {
         "title": "Run complete",
         "detail": "OC reports that the run completed."
@@ -317,7 +356,7 @@
         "detail": "OC confirms that the run was stopped."
       },
       "timeout": {
-        "title": "Run reached its time limit",
+        "title": "Run timed out and stopped",
         "detail": "OC explicitly reported a timeout."
       },
       "failed": {

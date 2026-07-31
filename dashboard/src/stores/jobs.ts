@@ -36,9 +36,15 @@ export interface Job {
 
 type JobAction = 'cancel' | 'resume' | 'retry';
 
+export interface JobCancelResult {
+  jobCancelled: true;
+  backingStop: 'stopped' | 'not-active' | 'unconfirmed' | 'not-applicable';
+}
+
 interface OpenClawTask {
   id?: string;
   taskId?: string;
+  runtime?: 'subagent' | 'cli' | 'acp' | string;
   status?: 'queued' | 'running' | 'completed' | 'failed' | 'timed_out' | 'cancelled';
   childSessionKey?: string;
   sessionKey?: string;
@@ -48,27 +54,55 @@ interface OpenClawTask {
 interface JobsState {
   jobs: Job[];
   loading: boolean;
+  lastLoadedAt: number | null;
   actionById: Record<string, JobAction | undefined>;
-  loadJobs: () => Promise<void>;
+  loadJobs: () => Promise<boolean>;
   loadJob: (id: string) => Promise<Job | null>;
-  cancelJob: (id: string) => Promise<void>;
+  cancelJob: (id: string) => Promise<JobCancelResult>;
   resumeJob: (id: string) => Promise<void>;
   retryJob: (id: string) => Promise<void>;
+}
+
+/**
+ * Older sync ordering could leave both a user-facing longtask:* row and an
+ * automatically mirrored openclaw:* row for the same child session. They are
+ * one execution, not two jobs. Prefer the durable user-titled row while
+ * retaining standalone OpenClaw jobs that have no matching long-task record.
+ */
+export function collapseMirroredOpenClawJobs(jobs: Job[]): Job[] {
+  const trackedSessions = new Set(
+    jobs
+      .filter((job) =>
+        job.type === 'openclaw-subagent'
+        && !job.id.startsWith('openclaw:')
+        && Boolean(job.session_key),
+      )
+      .map((job) => job.session_key as string),
+  );
+  return jobs.filter((job) => !(
+    job.type === 'openclaw-subagent'
+    && job.id.startsWith('openclaw:')
+    && Boolean(job.session_key)
+    && trackedSessions.has(job.session_key as string)
+  ));
 }
 
 export const useJobsStore = create<JobsState>()((set, get) => ({
   jobs: [],
   loading: false,
+  lastLoadedAt: null,
   actionById: {},
   loadJobs: async () => {
     const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
+    if (!client?.isConnected) return false;
     set({ loading: true });
     try {
       const jobs = await client.request<Job[]>('rc.job.list', { limit: 100 });
-      set({ jobs, loading: false });
+      set({ jobs: collapseMirroredOpenClawJobs(jobs), loading: false, lastLoadedAt: Date.now() });
+      return true;
     } catch {
       set({ loading: false });
+      return false;
     }
   },
   loadJob: async (id) => {
@@ -84,7 +118,9 @@ export const useJobsStore = create<JobsState>()((set, get) => ({
   },
   cancelJob: async (id) => {
     const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
+    if (!client?.isConnected) {
+      throw new Error('Gateway is not connected.');
+    }
     const job = get().jobs.find((item) => item.id === id) ?? await get().loadJob(id);
     setAction(id, 'cancel');
     try {
@@ -102,14 +138,17 @@ export const useJobsStore = create<JobsState>()((set, get) => ({
       // Best-effort: stop the live OpenClaw subagent run. Never block (or fail)
       // the cancel on this — the job is already cancelled above, and "no active
       // run found" is an expected, non-fatal outcome here.
+      let backingStop: JobCancelResult['backingStop'] = 'not-applicable';
       if (job?.type === 'openclaw-subagent') {
         try {
-          await cancelOpenClawBacking(client, job);
+          backingStop = await cancelOpenClawBacking(client, job);
         } catch (err) {
           console.warn('[Jobs] Job cancelled; backing OpenClaw run not stopped:', err);
+          backingStop = 'unconfirmed';
         }
       }
       await get().loadJobs();
+      return { jobCancelled: true, backingStop };
     } finally {
       setAction(id, undefined);
     }
@@ -182,33 +221,64 @@ async function listOpenClawTasks(client: NonNullable<ReturnType<typeof useGatewa
   return tasks;
 }
 
-async function cancelOpenClawBacking(client: NonNullable<ReturnType<typeof useGatewayStore.getState>['client']>, job: Job): Promise<void> {
-  const directTaskIds = getOpenClawTaskIds(job);
-  for (const taskId of directTaskIds) {
-    const result = await client.request<{ cancelled?: boolean; found?: boolean }>('tasks.cancel', {
-      taskId,
-      reason: 'Cancelled from Research-Claw Jobs panel',
-    });
-    if (result.cancelled || result.found) return;
+async function cancelOpenClawBacking(
+  client: NonNullable<ReturnType<typeof useGatewayStore.getState>['client']>,
+  job: Job,
+): Promise<JobCancelResult['backingStop']> {
+  const tasks = await listOpenClawTasks(client, job);
+  const activeTasks = tasks.filter(isActiveOpenClawTask);
+  // OC registers both a subagent wrapper and, while the model is running, a CLI
+  // task for the same run. Cancelling the CLI mirror does not kill the wrapper.
+  // The subagent wrapper is the authoritative control task: OC only returns
+  // cancelled=true after killSubagentRunAdmin reports killed=true.
+  const wrapper = activeTasks.find((task) => task.runtime === 'subagent');
+  if (wrapper) {
+    const taskId = wrapper.taskId ?? wrapper.id;
+    if (taskId) {
+      const result = await client.request<{ cancelled?: boolean; found?: boolean }>('tasks.cancel', {
+        taskId,
+        reason: 'Cancelled from Research-Claw Jobs panel',
+      });
+      if (result.cancelled === true) return 'stopped';
+      // found=true only proves that OC recognized the task. Its own contract
+      // uses cancelled=false for terminal/not-running/failed-to-kill results.
+      // Keep looking for an exact run abort, but never call this confirmed.
+    }
+  } else if (activeTasks.length > 0) {
+    let allCancelled = true;
+    for (const task of activeTasks) {
+      const taskId = task.taskId ?? task.id;
+      if (!taskId) {
+        allCancelled = false;
+        continue;
+      }
+      const result = await client.request<{ cancelled?: boolean }>('tasks.cancel', {
+        taskId,
+        reason: 'Cancelled from Research-Claw Jobs panel',
+      });
+      if (result.cancelled !== true) allCancelled = false;
+    }
+    if (allCancelled) return 'stopped';
   }
 
-  const tasks = await listOpenClawTasks(client, job);
-  const active = tasks.find(isActiveOpenClawTask) ?? tasks[0];
-  const taskId = active?.taskId ?? active?.id;
-  if (taskId) {
-    const result = await client.request<{ cancelled?: boolean; found?: boolean }>('tasks.cancel', {
+  const listedIds = new Set(tasks.flatMap((task) => {
+    const taskId = task.taskId ?? task.id;
+    return taskId ? [taskId] : [];
+  }));
+  for (const taskId of getOpenClawTaskIds(job)) {
+    if (listedIds.has(taskId)) continue;
+    const result = await client.request<{ cancelled?: boolean }>('tasks.cancel', {
       taskId,
       reason: 'Cancelled from Research-Claw Jobs panel',
     });
-    if (result.cancelled || result.found) return;
+    if (result.cancelled === true) return 'stopped';
   }
 
   const sessionKey = getOpenClawSessionKeys(job)[0];
-  if (!sessionKey) return;
+  if (!sessionKey) return activeTasks.length > 0 ? 'unconfirmed' : 'not-active';
   const aborted = await client.request<{ aborted?: boolean }>('chat.abort', { sessionKey });
-  if (!aborted.aborted && job.status === 'running') {
-    throw new Error('No active OpenClaw subagent run was found for this job.');
-  }
+  if (aborted.aborted === true) return 'stopped';
+  return activeTasks.length > 0 ? 'unconfirmed' : 'not-active';
 }
 
 /**

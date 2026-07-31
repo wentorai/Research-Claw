@@ -78,7 +78,11 @@ import { MemoryService, SessionMonitoringService, registerMemoryRpcMethods, regi
 import { ClaudeMemSyncService } from './src/memory/claude-mem-sync.js';
 import { hydrateDashboardSystemPromptFromConfigPath } from './src/dashboard/config.js';
 import { formatDashboardSystemPromptBlock } from './src/dashboard/prompt-append.js';
-import { TASK_FLOW_AGENT_GUIDANCE } from './src/tasks/task-flow-prompt.js';
+import { buildTaskFlowAgentGuidance } from './src/tasks/task-flow-prompt.js';
+import {
+  isToolDedupEligible,
+  processPollIntervention,
+} from './src/tasks/process-poll-policy.js';
 import { SELF_CHECK_AGENT_GUIDANCE } from './src/self-check/prompt.js';
 import { registerDashboardRpc } from './src/dashboard/rpc.js';
 import { PaperReviewService } from './src/paper-review/service.js';
@@ -2211,7 +2215,7 @@ const plugin: PluginDefinition = {
     //   - Overdue tasks (past deadline)
     //   - Upcoming tasks (within deadline warning window)
     //   - Active task overview (todo + in_progress, both agent and user tasks)
-    api.on('before_prompt_build', () => {
+    api.on('before_prompt_build', (event) => {
       try {
         const stats = litService.getStats();
         const overdue = taskService.overdue();
@@ -2326,7 +2330,7 @@ const plugin: PluginDefinition = {
           lines.push(userSystemPrompt);
         }
 
-        lines.push(TASK_FLOW_AGENT_GUIDANCE);
+        lines.push(buildTaskFlowAgentGuidance(event));
         lines.push(SELF_CHECK_AGENT_GUIDANCE);
 
         return lines.length > 0 ? { prependContext: lines.join('\n') } : {};
@@ -2535,39 +2539,34 @@ const plugin: PluginDefinition = {
       const evt = event as { toolName?: string; params?: Record<string, unknown> } | undefined;
       if (!evt) return {};
 
-      // Long-running processes must outlive the chat turn. A long process.poll
-      // consumes the agent's entire 300s run budget and makes the UI look stuck
-      // even when the worker continues successfully in the background.
-      if (evt.toolName === 'process' && evt.params?.action === 'poll') {
-        const timeout = Number(evt.params.timeout ?? 0);
-        if (Number.isFinite(timeout) && timeout > 15_000) {
-          return {
-            block: true,
-            blockReason:
-              'Blocked: process.poll timeout exceeds 15 seconds. Create/update a persistent job, ' +
-              'return control to the user, and check job_status in a later turn.',
-          };
-        }
-      }
+      const processPollDecision = processPollIntervention(evt.toolName, evt.params);
+      if (processPollDecision) return processPollDecision;
 
       // ── Duplicate tool call guard ───────────────────────────────────
-      const toolSig = `${evt.toolName ?? ''}::${JSON.stringify(evt.params ?? {})}`;
-      if (toolSig === _lastToolSig) {
-        _lastToolCount++;
-        if (_lastToolCount > TOOL_DEDUP_MAX) {
-          api.logger.warn(
-            `[ToolDedup] Blocked "${evt.toolName}" — ${_lastToolCount} identical consecutive calls`,
-          );
-          return {
-            block: true,
-            blockReason:
-              `Blocked: "${evt.toolName}" called ${_lastToolCount} times with identical arguments. ` +
-              `This appears to be a model tool-call loop. Change the arguments or use a different approach.`,
-          };
+      if (isToolDedupEligible(evt.toolName, evt.params)) {
+        const toolSig = `${evt.toolName ?? ''}::${JSON.stringify(evt.params ?? {})}`;
+        if (toolSig === _lastToolSig) {
+          _lastToolCount++;
+          if (_lastToolCount > TOOL_DEDUP_MAX) {
+            api.logger.warn(
+              `[ToolDedup] Blocked "${evt.toolName}" — ${_lastToolCount} identical consecutive calls`,
+            );
+            return {
+              block: true,
+              blockReason:
+                `Blocked: "${evt.toolName}" called ${_lastToolCount} times with identical arguments. ` +
+                `This appears to be a model tool-call loop. Change the arguments or use a different approach.`,
+            };
+          }
+        } else {
+          _lastToolSig = toolSig;
+          _lastToolCount = 1;
         }
       } else {
-        _lastToolSig = toolSig;
-        _lastToolCount = 1;
+        // A legitimate bounded wait also breaks a sequence of consecutive
+        // duplicate tool calls for purposes of the generic loop guard.
+        _lastToolSig = null;
+        _lastToolCount = 0;
       }
 
       // ── Error-aware preemptive block ───────────────────────────────

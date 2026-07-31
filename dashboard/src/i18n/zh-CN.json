@@ -37,12 +37,42 @@
     "hint": "聊天轮次结束后，长任务仍会在这里继续运行。",
     "empty": "暂无后台任务",
     "waiting": "等待开始",
-    "refresh": "刷新任务",
+    "currentActivity": "当前已知活动：",
+    "refreshAll": "刷新全部",
+    "refreshing": "正在同步任务状态…",
+    "refreshSuccess": "后台任务状态已更新",
+    "refreshFailed": "未能刷新后台任务，请检查 Gateway 连接",
+    "lastUpdated": "最近更新：{{time}}",
+    "autoRefreshHint": "任务状态会自动同步；需要立即核对时可刷新全部。",
     "cancel": "停止任务",
+    "cancelledSuccess": "后台任务及其运行已停止",
+    "cancelledNoActiveBacking": "后台任务已停止；当前没有需要停止的活跃子会话",
+    "cancelledBackingUnconfirmed": "后台任务记录已停止，但尚无法确认 OC 子会话是否停止；请稍后刷新核对",
     "resume": "继续任务",
     "retry": "重试任务",
     "actionFailed": "任务操作失败",
     "backgroundActive": "{{count}} 个后台任务",
+    "type": {
+      "researchAgent": "科研 Agent 任务",
+      "stagedWriting": "分阶段写作任务",
+      "upload": "上传任务",
+      "export": "导出任务",
+      "other": "后台任务"
+    },
+    "error": {
+      "heartbeatExpired": "后台记录需要你确认。可继续任务、重试或停止。",
+      "notStarted": "任务尚未成功启动。可重试或停止。",
+      "noActiveRun": "没有找到仍在运行的子会话。可刷新状态或重新发起。",
+      "generic": "任务遇到问题。可刷新状态、重试或停止。"
+    },
+    "step": {
+      "agentRunning": "科研 Agent 正在处理",
+      "resumed": "已按你的操作继续任务",
+      "cancelled": "已按你的操作停止。",
+      "completed": "任务已完成；展开子步骤查看记录，产出请到对应会话或工作区查看。",
+      "failed": "任务未完成。请查看提示并选择重试或停止。",
+      "partial": "任务只完成了一部分。"
+    },
     "notify": {
       "completed": "后台任务已完成",
       "partial": "后台任务部分完成",
@@ -54,7 +84,7 @@
       "completed": "已完成",
       "partial": "部分完成",
       "failed": "失败",
-      "stalled": "已停滞",
+      "stalled": "需要处理",
       "cancelled": "已取消"
     },
     "steps": "子步骤",
@@ -93,9 +123,10 @@
   "chat": {
     "longTask": {
       "confirmTitle": "转为后台长任务？",
-      "confirmBody": "这条请求看起来是个长任务：「{{title}}」。要放到后台执行吗（会启动 OpenClaw 子会话）？选择「本轮直接回答」则在当前会话内立即作答。",
+      "confirmBody": "这条请求同时包含明确的长时与批量执行信号：「{{title}}」。后台执行会启动 OpenClaw 子会话；前台执行会在当前会话继续。也可以取消，不发送本条请求。",
       "confirmOk": "后台执行",
-      "confirmCancel": "本轮直接回答"
+      "confirmForeground": "前台执行",
+      "confirmDismiss": "取消发送"
     },
     "placeholder": "向你的科研助手提问...",
     "composerHint": "Enter 发送 · Shift+Enter 换行",
@@ -103,10 +134,10 @@
     "thinking": "思考中...",
     "compacting": "正在压缩对话历史...",
     "runEndedNoOutput": "OC 报告本次运行已结束，但没有可见回复。请刷新会话记录；若仍为空，请查看已报告的失败信息或重新发送。",
-    "runIssueTitle": "本次运行可能已中断",
-    "runIssueNotificationTitle": "运行中断提醒",
-    "runTimedOut": "本次运行因达到时间上限而停止,回复可能不完整 —— 点击「继续」可从中断处接着执行。",
-    "runTimedOutNoOutput": "本次运行在生成回复前达到时间上限。请重新发送原消息后再试。",
+    "runIssueTitle": "本次运行需要处理",
+    "runIssueNotificationTitle": "运行状态提醒",
+    "runTimedOut": "OC 明确报告本次运行已超时并停止，回复可能不完整 —— 点击「继续」可从中断处接着执行。",
+    "runTimedOutNoOutput": "OC 明确报告本次运行在生成回复前已超时并停止。请重新发送原消息后再试。",
     "runInterrupted": "本次运行已中断，回复可能不完整 —— 可以继续等待结果，或点击「继续」接着执行。",
     "runInterruptedNoOutput": "本次运行在生成回复前结束，但 OC 未报告超时原因。请刷新历史记录或重新发送原消息。",
     "continueRun": "继续",
@@ -275,6 +306,10 @@
         "title": "正在提交请求",
         "detail": "正在等待 Gateway 确认收到这次请求。"
       },
+      "accepted": {
+        "title": "请求已接收",
+        "detail": "Gateway 已接收这次请求，正在核对 OC 运行状态。你可以停止。"
+      },
       "confirming-submit": {
         "title": "正在确认请求是否已接收",
         "detail": "发送确认不确定。正在核对 OC 会话记录，不会自动重复发送。"
@@ -308,6 +343,10 @@
         "title": "正在确认结果",
         "detail": "OC 报告当前没有活跃运行，但持久化状态仍为 running。正在刷新会话记录，不将其显示为运行中或失败。"
       },
+      "result-unconfirmed": {
+        "title": "运行结果尚未确认",
+        "detail": "OC 已确认当前没有活跃运行，但没有返回完整终态。可刷新会话记录或重新发起请求。"
+      },
       "done": {
         "title": "运行已完成",
         "detail": "OC 报告本次运行已完成。"
@@ -317,7 +356,7 @@
         "detail": "OC 确认本次运行已停止。"
       },
       "timeout": {
-        "title": "运行达到时间上限",
+        "title": "运行已超时并停止",
         "detail": "OC 已明确报告本次运行超时。"
       },
       "failed": {
