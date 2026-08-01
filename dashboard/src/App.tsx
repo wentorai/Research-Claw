@@ -30,8 +30,9 @@ import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
 import { useSessionRunsStore } from './stores/session-runs';
-import { normalizeSessionKey } from './utils/session-key';
+import { isInternalSessionNamingKey, normalizeSessionKey } from './utils/session-key';
 import { resolveObservedRunActivity } from './utils/run-status-presentation';
+import { autoNameSessionKeyForEvent } from './utils/session-auto-name-event';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -174,6 +175,13 @@ export default function App() {
           source: 'chat-event',
         });
       }
+      const autoNameSessionKey = autoNameSessionKeyForEvent(event);
+      if (autoNameSessionKey) {
+        // This listener sees every project session, including a session that
+        // finishes after the user switches elsewhere. Capture the event key;
+        // never read whichever session happens to be active 500ms later.
+        useSessionsStore.getState().scheduleAutoNameSession(autoNameSessionKey, 500);
+      }
       handleChatEvent(event);
       // Clear foreground tool stream when a run completes
       if (
@@ -195,6 +203,11 @@ export default function App() {
         stream?: string;
         data?: { phase?: string; name?: string; toolName?: string };
       };
+
+      // OC's embedded one-shot model runner emits normal global agent events.
+      // Session-title inference is internal plumbing: its lifecycle, including
+      // an error, must never alter a user's run state or visible tool timeline.
+      if (status.sessionKey && isInternalSessionNamingKey(status.sessionKey)) return;
 
       if (status.stream === 'compaction' && status.data?.phase) {
         useChatStore.getState().handleCompactionAgentEvent(status);

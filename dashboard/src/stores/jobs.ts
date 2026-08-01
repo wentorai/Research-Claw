@@ -337,7 +337,7 @@ async function continueOpenClawJob(id: string, mode: 'resume' | 'retry'): Promis
   const job = useJobsStore.getState().jobs.find((item) => item.id === id) ?? await useJobsStore.getState().loadJob(id);
   if (!job) return;
   const candidates = getOpenClawSessionKeys(job);
-  if (candidates.length === 0) throw new Error('This job is not linked to an OpenClaw child session yet.');
+  if (candidates.length === 0) throw new Error('This job is not linked to a Research-Claw child session yet.');
 
   setAction(id, mode);
   try {
@@ -345,7 +345,7 @@ async function continueOpenClawJob(id: string, mode: 'resume' | 'retry'): Promis
     // the job running — otherwise a resume/retry silently no-ops and reverts.
     const sessionKey = await resolveLiveSessionKey(client, candidates);
     if (!sessionKey) {
-      throw new Error('关联的 OpenClaw 子会话已不存在，无法继续或重试；请改为新建任务重新发起。');
+      throw new Error('关联的科研龙虾子会话已不存在，无法继续或重试；请改为新建任务重新发起。');
     }
     await client.request('chat.send', {
       sessionKey,
@@ -356,8 +356,8 @@ async function continueOpenClawJob(id: string, mode: 'resume' | 'retry'): Promis
     const updated = await client.request<Job>('rc.job.resume', {
       id,
       current_step: mode === 'retry'
-        ? '已请求 OpenClaw 子会话重试'
-        : '已请求 OpenClaw 子会话继续',
+        ? '已请求科研龙虾子会话重试'
+        : '已请求科研龙虾子会话继续',
     });
     invalidateJobReads(id);
     replaceJob(updated);

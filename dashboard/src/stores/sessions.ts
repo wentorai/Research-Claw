@@ -73,6 +73,8 @@ interface SessionsState {
   clearSession: (key: string) => Promise<void>;
   /** Auto-name a default-labelled session from its first exchange (at most once). */
   autoNameSession: (key: string) => Promise<void>;
+  /** Schedule naming for this exact session key; active-session changes cannot retarget it. */
+  scheduleAutoNameSession: (key: string, delayMs?: number) => void;
   renameSession: (key: string, label: string) => Promise<void>;
   /**
    * General-purpose session patch (aligned with OC sessions.patch — supports all fields).
@@ -122,12 +124,15 @@ import { useSessionRunsStore } from './session-runs';
  * a session is named at most once (user rename then wins forever).
  */
 const autoNameGuard = new Set<string>();
+const autoNameTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let sessionsLoadGeneration = 0;
 let sessionsLoadInFlight: Promise<void> | null = null;
 
 /** Test-only: reset the auto-name guard between test cases. */
 export function _resetAutoNameGuard(): void {
   autoNameGuard.clear();
+  for (const timer of autoNameTimers.values()) clearTimeout(timer);
+  autoNameTimers.clear();
 }
 
 /** Check if a key refers to the main session (handles both bare and canonical forms). */
@@ -186,6 +191,10 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
           loading: false,
           activeSessionStale: computeActiveSessionStale(sessions, get().activeSessionKey),
         });
+        // F5/reconnect recovery: only probe the persisted active session. This
+        // is intentionally bounded, rather than firing model calls for every
+        // historical default-labelled session in the list.
+        get().scheduleAutoNameSession(get().activeSessionKey, 750);
       } catch {
         if (generation === sessionsLoadGeneration) set({ loading: false });
       }
@@ -218,9 +227,14 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     persistKey(safeKey);
     // Switch chat store and reload history + usage for the new session
     useChatStore.getState().setSessionKey(safeKey);
-    useChatStore.getState().loadHistory();
+    const historyLoad = useChatStore.getState().loadHistory();
     useChatStore.getState().loadSessionUsage();
     void useSessionRunsStore.getState().requestReconcile(safeKey, 'session-switch');
+    // A default-labelled session may have completed while another session was
+    // visible or while this dashboard was closed. Bind the retry to safeKey.
+    void Promise.resolve(historyLoad).then(() => {
+      get().scheduleAutoNameSession(safeKey, 0);
+    });
   },
 
   createSession: async () => {
@@ -327,15 +341,36 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
         autoNameGuard.delete(guardKey);
         return;
       }
+      // The model call is asynchronous. A user may have renamed (or deleted)
+      // the session while it was in flight; that newer explicit state wins.
+      const latestRow = findSessionRow(get().sessions, key);
+      if (!latestRow || !isAutoNameCandidate({ key, label: latestRow.label })) return;
       await client.request('sessions.patch', { key, label: title });
       set((s) => ({
         sessions: s.sessions.map((sess) =>
           normalizeSessionKey(sess.key) === guardKey ? { ...sess, label: title } : sess,
         ),
       }));
-    } catch {
+    } catch (error) {
       autoNameGuard.delete(guardKey); // naming failed — allow retry
+      console.warn('[Sessions] Auto-name failed', {
+        sessionKey: key,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
+  },
+
+  scheduleAutoNameSession: (key: string, delayMs = 500) => {
+    const row = findSessionRow(get().sessions, key);
+    if (!isAutoNameCandidate({ key, label: row?.label })) return;
+    const guardKey = normalizeSessionKey(key);
+    const pending = autoNameTimers.get(guardKey);
+    if (pending) clearTimeout(pending);
+    const timer = setTimeout(() => {
+      autoNameTimers.delete(guardKey);
+      void get().autoNameSession(key);
+    }, Math.max(0, delayMs));
+    autoNameTimers.set(guardKey, timer);
   },
 
   renameSession: async (key: string, label: string) => {

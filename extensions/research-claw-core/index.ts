@@ -41,7 +41,14 @@ import { createMonitorTools } from './src/monitor/tools.js';
 import { PptService } from './src/ppt/service.js';
 import { registerPptRpc } from './src/ppt/rpc.js';
 import { registerSessionNamingRpc } from './src/session-naming/rpc.js';
-import { SessionNamingService } from './src/session-naming/service.js';
+import {
+  SessionNamingService,
+} from './src/session-naming/service.js';
+import {
+  createSessionNamingRuntimeComplete,
+  type SessionNamingEmbeddedRunParams,
+  type SessionNamingEmbeddedRunResult,
+} from './src/session-naming/host-runtime.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
 import { buildRpcErrorOutcome } from './src/rpc-error.js';
@@ -155,6 +162,13 @@ interface PluginApi {
         afterWrite?: unknown;
         followUp?: unknown;
       }>;
+    };
+    /** Available on the locked 6.1 host; optional keeps older test/plugin hosts compatible. */
+    agent?: {
+      runEmbeddedAgent?: (
+        params: SessionNamingEmbeddedRunParams,
+      ) => Promise<SessionNamingEmbeddedRunResult>;
+      resolveAgentWorkspaceDir?: (config: Record<string, unknown>, agentId: string) => string;
     };
   };
   resolvePath: (input: string) => string;
@@ -1433,7 +1447,17 @@ const plugin: PluginDefinition = {
     });
     registerPaperReviewRpc(registerMethod, reviewService); // 6 methods
     registerPptRpc(registerMethod, pptService);           // 3 methods
-    registerSessionNamingRpc(registerMethod, new SessionNamingService()); // 1 method
+    // Use OC's one-shot modelRun path so naming follows the same full model
+    // discovery and live credentials as chat. The lighter runtime.llm.complete
+    // skips agent discovery and rejects RC's plugin-supplied default model.
+    registerSessionNamingRpc(registerMethod, new SessionNamingService({
+      runtimeComplete: createSessionNamingRuntimeComplete({
+        runEmbeddedAgent: api.runtime.agent?.runEmbeddedAgent,
+        getConfig: () => api.runtime.config.current(),
+        resolveWorkspaceDir: (config, agentId) =>
+          api.runtime.agent?.resolveAgentWorkspaceDir?.(config, agentId) ?? api.resolvePath('.'),
+      }),
+    })); // 1 method
     registerProviderRpc(registerMethod, {
       config: api.runtime.config,
       logger: api.logger,

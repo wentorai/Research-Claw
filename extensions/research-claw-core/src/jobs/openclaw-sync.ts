@@ -119,9 +119,9 @@ export function syncOpenClawSubagentJobs(
       const updatedAt = formatDbDate(session.updatedAt ?? session.lastInteractionAt);
       const completedAt = isTerminal(status) ? updatedAt : null;
       const title = existingJob?.title
-        ?? formatJobTitleFromMessage(transcript.title || session.label || `子任务 ${sessionId.slice(0, 8)}`, 'OpenClaw 子任务');
+        ?? formatJobTitleFromMessage(transcript.title || session.label || `子任务 ${sessionId.slice(0, 8)}`, '科研龙虾子任务');
       const currentStep = preserveResumeRequest
-        ? existingJob?.current_step ?? '已请求 OpenClaw 子会话继续'
+        ? existingJob?.current_step ?? '已请求科研龙虾子会话继续'
         : currentStepFor(status, session.updatedAt, transcript.latestText);
       const message = transcript.title || existingJob?.input?.message;
       const references = Array.isArray(existingJob?.input?.references)
@@ -244,13 +244,13 @@ function progressFor(status: JobStatus): number {
 }
 
 function currentStepFor(status: JobStatus, updatedAt: number | undefined, latestText: string | null): string {
-  if (status === 'completed') return latestText ? `已完成：${latestText.slice(0, 80)}` : 'OpenClaw 子会话已完成';
-  if (status === 'failed') return 'OpenClaw 子会话失败';
-  if (status === 'cancelled') return 'OpenClaw 子会话已取消';
-  if (status === 'stalled') return 'OpenClaw 子会话长时间未更新';
-  if (status === 'queued') return 'OpenClaw 子会话等待启动';
+  if (status === 'completed') return latestText ? `已完成：${latestText.slice(0, 80)}` : '科研龙虾子会话已完成';
+  if (status === 'failed') return '科研龙虾子会话失败';
+  if (status === 'cancelled') return '科研龙虾子会话已取消';
+  if (status === 'stalled') return '科研龙虾子会话状态需要核对';
+  if (status === 'queued') return '科研龙虾子会话等待启动';
   const suffix = updatedAt ? `，最后活动 ${formatDbDate(updatedAt)}` : '';
-  return `OpenClaw 子会话运行中${suffix}`;
+  return `科研龙虾子会话运行中${suffix}`;
 }
 
 function isTerminal(status: JobStatus): boolean {

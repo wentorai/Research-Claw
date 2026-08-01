@@ -262,7 +262,7 @@ describe('ExtensionsPanel', () => {
 
     clickSegmentedTab('Install');
 
-    expect(await screen.findByText('Native OpenClaw source')).toBeTruthy();
+    expect(await screen.findByText('Native Research-Claw source')).toBeTruthy();
     expect(screen.getByText('ClawHub')).toBeTruthy();
     expect(screen.getByText('Local ZIP')).toBeTruthy();
     expect(gatewayRequest).toHaveBeenCalledWith('config.get', {});

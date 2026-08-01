@@ -54,6 +54,17 @@ export function isSubagentSessionKey(key: string): boolean {
   return rest === 'subagent' || rest.startsWith('subagent:');
 }
 
+/**
+ * Check if a key belongs to RC's ephemeral one-shot model run used only to
+ * generate a session title. OC broadcasts agent lifecycle events for embedded
+ * model runs, so the dashboard must not project these internal events onto a
+ * user's foreground run state or tool timeline.
+ */
+export function isInternalSessionNamingKey(key: string): boolean {
+  const rest = normalizeSessionKey(key);
+  return rest === 'session-naming' || rest.startsWith('session-naming:');
+}
+
 /** Bare dashboard key → gateway session store key (agent:main:…). */
 export function toGatewaySessionKey(key: string): string {
   if (!key) return 'agent:main:main';

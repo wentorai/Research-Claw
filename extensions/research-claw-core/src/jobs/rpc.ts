@@ -40,7 +40,7 @@ export function registerJobRpc(registerMethod: RegisterMethod, service: JobServi
       session_key: sessionKey,
       status: 'queued',
       progress: 0,
-      current_step: '等待 OpenClaw 子会话启动',
+      current_step: '等待科研龙虾子会话启动',
       input: {
         source: 'auto-long-task',
         message,

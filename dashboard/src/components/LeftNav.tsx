@@ -273,7 +273,7 @@ export default function LeftNav() {
       {/* Scrollable session list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
         {filteredSessions.map((session) => {
-          const isActive = session.key === activeSessionKey;
+          const isActive = normalizeSessionKey(session.key) === normalizeSessionKey(activeSessionKey);
           const isMain = isMainSession(session.key);
           const name = getSessionName(session, t);
           const sessionRun = selectSessionRunView(sessionRunsState, session.key);
@@ -379,7 +379,7 @@ export default function LeftNav() {
               <span style={{ flex: 1 }}>{t('cron.cronSessions')} ({filteredCronSessions.length})</span>
             </div>
             {!cronFolded && filteredCronSessions.map((session) => {
-              const isActive = session.key === activeSessionKey;
+              const isActive = normalizeSessionKey(session.key) === normalizeSessionKey(activeSessionKey);
               const name = getSessionName(session, t);
               const sessionRun = selectSessionRunView(sessionRunsState, session.key);
               return (
@@ -449,7 +449,8 @@ export default function LeftNav() {
   ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, sessionRunsState, t, handleDeleteCronSession, handleClearSession, closeSessionDropdown]);
 
   const activeSessionLabel = useMemo(() => {
-    const session = sessions.find((s) => s.key === activeSessionKey);
+    const activeKey = normalizeSessionKey(activeSessionKey);
+    const session = sessions.find((s) => normalizeSessionKey(s.key) === activeKey);
     if (session) return getSessionName(session, t);
     // Active key not in list yet (e.g. just created, not yet on server)
     if (isMainSession(activeSessionKey)) return t('project.mainSession');

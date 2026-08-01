@@ -43,16 +43,34 @@ function friendlyJobError(error: string, t: (key: string) => string): string {
   return t('jobs.error.generic');
 }
 
+function friendlyJobTitle(job: Job, t: (key: string) => string): string {
+  // Only rewrite the generated fallback title on a framework-owned mirror row;
+  // user-authored titles/messages are left byte-for-byte unchanged.
+  if (job.id.startsWith('openclaw:') && /^(?:openclaw|oc)\s*子任务(?:\s+|$)/i.test(job.title)) {
+    const suffix = job.title.replace(/^(?:openclaw|oc)\s*子任务\s*/i, '').trim();
+    return suffix ? `${t('jobs.researchTaskTitle')} ${suffix}` : t('jobs.researchTaskTitle');
+  }
+  return job.title;
+}
+
 function friendlyCurrentStep(job: Job, t: (key: string) => string): string {
   if (job.status === 'cancelled') return t('jobs.step.cancelled');
   if (job.status === 'completed') return t('jobs.step.completed');
   if (job.status === 'failed') return t('jobs.step.failed');
   if (job.status === 'partial') return t('jobs.step.partial');
   if (job.status === 'queued') return t('jobs.waiting');
+  if (job.status === 'stalled') return t('jobs.step.needsCheck');
+  if (job.type === 'openclaw-subagent' && job.status === 'running') return t('jobs.step.agentRunning');
   if (!job.current_step) return t('jobs.waiting');
-  if (/openclaw.*子会话.*运行中/i.test(job.current_step)) return t('jobs.step.agentRunning');
   if (/resumed by user/i.test(job.current_step)) return t('jobs.step.resumed');
   return job.current_step;
+}
+
+function friendlyStepLabel(step: NonNullable<Job['steps']>[number], t: (key: string) => string): string {
+  if (step.step_key === 'scope') return t('jobs.stepLabel.scope');
+  if (step.step_key === 'execute') return t('jobs.stepLabel.execute');
+  if (step.step_key === 'review') return t('jobs.stepLabel.review');
+  return step.label;
 }
 
 const STATUS_COLORS: Record<JobStatus, string> = {
@@ -73,7 +91,13 @@ const STEP_STATUS_COLORS: Record<JobStepStatus, string> = {
   skipped: 'default',
 };
 
-function JobSteps({ steps }: { steps: NonNullable<Job['steps']> }) {
+function JobSteps({
+  steps,
+  normalizeSystemLabels,
+}: {
+  steps: NonNullable<Job['steps']>;
+  normalizeSystemLabels: boolean;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (steps.length === 0) return null;
@@ -95,7 +119,9 @@ function JobSteps({ steps }: { steps: NonNullable<Job['steps']> }) {
                 <Tag color={STEP_STATUS_COLORS[step.status]} style={{ marginInlineEnd: 0 }}>
                   {t(`jobs.stepStatus.${step.status}`)}
                 </Tag>
-                <Text style={{ fontSize: 12, flex: 1 }}>{step.label}</Text>
+                <Text style={{ fontSize: 12, flex: 1 }}>
+                  {normalizeSystemLabels ? friendlyStepLabel(step, t) : step.label}
+                </Text>
                 {step.attempt > 1 && (
                   <Text type="secondary" style={{ fontSize: 11 }}>{t('jobs.stepAttempt', { count: step.attempt })}</Text>
                 )}
@@ -154,7 +180,7 @@ function JobCard({ job }: { job: Job }) {
   return (
     <div style={{ padding: 12, borderBottom: '1px solid var(--border)', display: 'grid', gap: 8 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <Text strong style={{ flex: 1 }}>{job.title}</Text>
+        <Text strong style={{ flex: 1 }}>{friendlyJobTitle(job, t)}</Text>
         <Tag color={STATUS_COLORS[job.status]}>{t(`jobs.status.${job.status}`)}</Tag>
       </div>
       <Text type="secondary" style={{ fontSize: 12 }}>
@@ -165,7 +191,12 @@ function JobCard({ job }: { job: Job }) {
           {friendlyJobError(job.error, t)}
         </Text>
       )}
-      {job.steps && job.steps.length > 0 && <JobSteps steps={job.steps} />}
+      {job.steps && job.steps.length > 0 && (
+        <JobSteps
+          steps={job.steps}
+          normalizeSystemLabels={job.type === 'openclaw-subagent'}
+        />
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
         <Tooltip title={updatedLocal}>
           <Text type="secondary" style={{ fontSize: 11 }}>

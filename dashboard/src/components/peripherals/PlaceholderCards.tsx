@@ -246,13 +246,13 @@ export function EmbodiedPlaceholderCard() {
             <Paragraph style={{ color: tokens.text.secondary, marginBottom: 12 }}>
               {t(
                 'periph.placeholder.embodied.modalP2',
-                '技术路线:具身设备将对接 OpenClaw nodes 体系(role:node + node.invoke),通过 oc-node driver 接入外设子系统。每台具身设备在 OC 节点图中注册为独立节点,Agent 调用 node.invoke 发送指令,执行结果回写观测时间线。配对接入须经审批流程,防止未经授权的物理操作。',
+                '技术路线：具身设备将接入科研龙虾的设备节点体系。每台设备注册为独立节点，智能体通过受控调用发送指令，执行结果回写观测时间线；配对接入须经审批，防止未经授权的物理操作。',
               )}
             </Paragraph>
             <Paragraph style={{ color: tokens.text.secondary, marginBottom: 0 }}>
               {t(
                 'periph.placeholder.embodied.modalP3',
-                '在演进路线上,具身科研智能与摄像头桥同属一条演进线:摄像头桥已实现"agent 请求一帧 → 桥接 → 视觉查证"闭环,具身模块将在此基础上扩展为"agent 下指令 → oc-node → 物理执行 → 状态回传"链路。kind 预留为 embodied,driver 枚举位 oc-node 已在 schema 中占位。',
+                '在演进路线上，具身科研智能与摄像头桥同属一条演进线：摄像头桥已实现「智能体请求一帧 → 桥接 → 视觉查证」闭环，具身模块将在此基础上扩展为「智能体下指令 → 设备节点 → 物理执行 → 状态回传」链路。相关类型与驱动扩展位已在数据层预留。',
               )}
             </Paragraph>
           </div>

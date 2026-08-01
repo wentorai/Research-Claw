@@ -94,6 +94,57 @@ describe('JobsPanel user-facing refresh and status contract', () => {
     expect(container.textContent).not.toContain('Worker heartbeat expired');
   });
 
+  it('normalizes legacy system-owned job copy without rewriting user content', () => {
+    useJobsStore.setState({
+      jobs: [{
+        ...stalledJob,
+        id: 'openclaw:legacy-child',
+        title: 'OpenClaw 子任务 legacy-child',
+        current_step: 'OpenClaw 子会话长时间未更新',
+        steps: [{
+          job_id: 'openclaw:legacy-child',
+          step_key: 'execute',
+          label: 'OpenClaw 子会话执行',
+          status: 'running',
+          progress: 25,
+          error: null,
+          attempt: 1,
+          updated_at: '2026-08-01 00:01:00',
+        }],
+      }],
+    });
+
+    const { container } = render(<JobsPanel />);
+    fireEvent.click(screen.getByText(/jobs\.steps/));
+    expect(container.textContent).not.toMatch(/OpenClaw|\bOC\b/i);
+  });
+
+  it('preserves custom step labels for jobs that are not system-owned session mirrors', () => {
+    useJobsStore.setState({
+      jobs: [{
+        ...stalledJob,
+        id: 'writing:user-owned',
+        type: 'staged-writing',
+        title: '我的分阶段写作',
+        steps: [{
+          job_id: 'writing:user-owned',
+          step_key: 'execute',
+          label: '用户自定义执行阶段',
+          status: 'running',
+          progress: 25,
+          error: null,
+          attempt: 1,
+          updated_at: '2026-08-01 00:01:00',
+        }],
+      }],
+    });
+
+    render(<JobsPanel />);
+    fireEvent.click(screen.getByText(/jobs\.steps/));
+
+    expect(screen.getByText('用户自定义执行阶段')).toBeInTheDocument();
+  });
+
   it('does not present checkpoint bookkeeping as a percentage of real work', () => {
     const { container } = render(<JobsPanel />);
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();

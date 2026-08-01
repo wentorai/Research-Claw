@@ -26,14 +26,14 @@ vi.mock('react-i18next', () => ({
     t: (key: string, params?: { tool?: string }) => {
       const strings: Record<string, string> = {
         'taskFlow.runStatus.tool.title': 'Using {{tool}}',
-        'taskFlow.runStatus.tool.detail': 'OC confirms active. Wait or Stop.',
+        'taskFlow.runStatus.tool.detail': 'Research-Claw confirms active. Wait or Stop.',
         'taskFlow.runStatus.tool.fallback': 'a research tool',
         'taskFlow.runStatus.processing.title': 'Processing',
-        'taskFlow.runStatus.processing.detail': 'OC confirms active. Wait or Stop.',
+        'taskFlow.runStatus.processing.detail': 'Research-Claw confirms active. Wait or Stop.',
         'taskFlow.runStatus.confirming-result.title': 'Confirming result',
         'taskFlow.runStatus.confirming-result.detail': 'Refreshing session history.',
         'taskFlow.runStatus.reconnecting.title': 'Reconnecting to Gateway',
-        'taskFlow.runStatus.reconnecting.detail': 'Checking OC session state.',
+        'taskFlow.runStatus.reconnecting.detail': 'Checking Research-Claw session state.',
       };
       return (strings[key] ?? key).replace('{{tool}}', params?.tool ?? '');
     },
@@ -70,7 +70,7 @@ describe('TaskFlowTimeline truthful long-run UI', () => {
     const { container } = render(<TaskFlowTimeline />);
 
     expect(screen.getByText('Using search')).toBeTruthy();
-    expect(screen.getByText('OC confirms active. Wait or Stop.')).toBeTruthy();
+    expect(screen.getByText('Research-Claw confirms active. Wait or Stop.')).toBeTruthy();
     expect(container.textContent).not.toContain('/Users/');
     expect(container.querySelector('.task-flow-steps')).toBeNull();
   });

@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useLibraryStore } from '../../stores/library';
 import { useTasksStore } from '../../stores/tasks';
 import { useSessionsStore, _resetAutoNameGuard } from '../../stores/sessions';
+import { autoNameSessionKeyForEvent } from '../../utils/session-auto-name-event';
 
 import {
   RC_LIT_LIST_RESPONSE,
@@ -925,6 +926,50 @@ describe('Sessions store RPC parity (sessions.*)', () => {
       });
     }
 
+    it('binds a non-visible final event to its own session instead of the active session', () => {
+      useSessionsStore.setState({ activeSessionKey: 'agent:main:project-session-b' });
+      expect(autoNameSessionKeyForEvent({
+        state: 'final',
+        sessionKey: 'agent:main:project-session-a',
+        runId: 'run-a',
+      })).toBe('agent:main:project-session-a');
+      expect(autoNameSessionKeyForEvent({
+        state: 'delta',
+        sessionKey: 'agent:main:project-session-a',
+        runId: 'run-a',
+      })).toBeNull();
+    });
+
+    it('retries only the persisted active default session after an F5/reconnect list recovery', async () => {
+      vi.useFakeTimers();
+      try {
+        useSessionsStore.setState({
+          sessions: [],
+          activeSessionKey: CANDIDATE_KEY,
+        });
+        mockGatewayClient.request
+          .mockResolvedValueOnce(SESSIONS_LIST_RESPONSE)
+          .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+          .mockResolvedValueOnce(RC_SESSION_AUTONAME_RESPONSE)
+          .mockResolvedValueOnce({ ok: true });
+
+        await useSessionsStore.getState().loadSessions();
+        await vi.advanceTimersByTimeAsync(750);
+
+        expect(mockGatewayClient.request).toHaveBeenNthCalledWith(1, 'sessions.list', {
+          includeDerivedTitles: true,
+          limit: 1000,
+        });
+        expect(mockGatewayClient.request).toHaveBeenNthCalledWith(2, 'chat.history', {
+          sessionKey: CANDIDATE_KEY,
+          limit: 12,
+        });
+        expect(mockGatewayClient.request).toHaveBeenCalledTimes(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('names a default-labelled session: history → autoName → patch, with sanitized user text', async () => {
       seedSessions();
       mockGatewayClient.request
@@ -1029,6 +1074,71 @@ describe('Sessions store RPC parity (sessions.*)', () => {
       ]);
 
       expect(mockGatewayClient.request).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not overwrite a manual rename that wins while the model response is in flight', async () => {
+      seedSessions();
+      let resolveTitle!: (value: typeof RC_SESSION_AUTONAME_RESPONSE) => void;
+      const delayedTitle = new Promise<typeof RC_SESSION_AUTONAME_RESPONSE>((resolve) => {
+        resolveTitle = resolve;
+      });
+      mockGatewayClient.request
+        .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+        .mockReturnValueOnce(delayedTitle);
+
+      const naming = useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+      await vi.waitFor(() => expect(mockGatewayClient.request).toHaveBeenCalledTimes(2));
+      useSessionsStore.setState((state) => ({
+        sessions: state.sessions.map((session) => (
+          session.key === CANDIDATE_KEY ? { ...session, label: '用户手工标题' } : session
+        )),
+      }));
+      resolveTitle(RC_SESSION_AUTONAME_RESPONSE);
+      await naming;
+
+      expect(mockGatewayClient.request).not.toHaveBeenCalledWith(
+        'sessions.patch',
+        expect.anything(),
+      );
+      expect(useSessionsStore.getState().sessions.find((s) => s.key === CANDIDATE_KEY)?.label)
+        .toBe('用户手工标题');
+    });
+
+    it('keeps a delayed auto-name bound to session A after the active session switches to B', async () => {
+      vi.useFakeTimers();
+      try {
+        useSessionsStore.setState({
+          sessions: [
+            { key: 'agent:main:project-session-a', label: 'Session 41' },
+            { key: 'agent:main:project-session-b', label: 'Session 42' },
+          ],
+          activeSessionKey: 'agent:main:project-session-a',
+        });
+        mockGatewayClient.request
+          .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+          .mockResolvedValueOnce(RC_SESSION_AUTONAME_RESPONSE)
+          .mockResolvedValueOnce({ ok: true });
+
+        useSessionsStore.getState().scheduleAutoNameSession(
+          'agent:main:project-session-a',
+          500,
+        );
+        useSessionsStore.setState({ activeSessionKey: 'agent:main:project-session-b' });
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(mockGatewayClient.request).toHaveBeenNthCalledWith(
+          1,
+          'chat.history',
+          { sessionKey: 'agent:main:project-session-a', limit: 12 },
+        );
+        expect(mockGatewayClient.request).toHaveBeenNthCalledWith(
+          3,
+          'sessions.patch',
+          { key: 'agent:main:project-session-a', label: RC_SESSION_AUTONAME_RESPONSE.title },
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('ignores an empty title from the naming RPC', async () => {

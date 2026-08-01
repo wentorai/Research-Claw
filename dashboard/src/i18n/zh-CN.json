@@ -47,7 +47,7 @@
     "cancel": "停止任务",
     "cancelledSuccess": "后台任务及其运行已停止",
     "cancelledNoActiveBacking": "后台任务已停止；当前没有需要停止的活跃子会话",
-    "cancelledBackingUnconfirmed": "后台任务记录已停止，但尚无法确认 OC 子会话是否停止；请稍后刷新核对",
+    "cancelledBackingUnconfirmed": "后台任务记录已停止，但尚无法确认科研龙虾子会话是否停止；请稍后刷新核对",
     "resume": "继续任务",
     "retry": "重试任务",
     "actionFailed": "任务操作失败",
@@ -59,6 +59,7 @@
       "export": "导出任务",
       "other": "后台任务"
     },
+    "researchTaskTitle": "科研龙虾子任务",
     "error": {
       "heartbeatExpired": "后台记录需要你确认。可继续任务、重试或停止。",
       "notStarted": "任务尚未成功启动。可重试或停止。",
@@ -67,11 +68,17 @@
     },
     "step": {
       "agentRunning": "科研 Agent 正在处理",
+      "needsCheck": "运行状态需要核对",
       "resumed": "已按你的操作继续任务",
       "cancelled": "已按你的操作停止。",
       "completed": "任务已完成；展开子步骤查看记录，产出请到对应会话或工作区查看。",
       "failed": "任务未完成。请查看提示并选择重试或停止。",
       "partial": "任务只完成了一部分。"
+    },
+    "stepLabel": {
+      "scope": "确认范围与边界",
+      "execute": "科研智能体执行",
+      "review": "自检与回传"
     },
     "notify": {
       "completed": "后台任务已完成",
@@ -133,13 +140,13 @@
     "send": "发送",
     "thinking": "思考中...",
     "compacting": "正在压缩对话历史...",
-    "runEndedNoOutput": "OC 报告本次运行已结束，但没有可见回复。请刷新会话记录；若仍为空，请查看已报告的失败信息或重新发送。",
+    "runEndedNoOutput": "科研龙虾报告本次运行已结束，但没有可见回复。请刷新会话记录；若仍为空，请查看已报告的失败信息或重新发送。",
     "runIssueTitle": "本次运行需要处理",
     "runIssueNotificationTitle": "运行状态提醒",
-    "runTimedOut": "OC 明确报告本次运行已超时并停止，回复可能不完整 —— 点击「继续」可从中断处接着执行。",
-    "runTimedOutNoOutput": "OC 明确报告本次运行在生成回复前已超时并停止。请重新发送原消息后再试。",
+    "runTimedOut": "科研龙虾明确报告本次运行已超时并停止，回复可能不完整 —— 点击「继续」可从中断处接着执行。",
+    "runTimedOutNoOutput": "科研龙虾明确报告本次运行在生成回复前已超时并停止。请重新发送原消息后再试。",
     "runInterrupted": "本次运行已中断，回复可能不完整 —— 可以继续等待结果，或点击「继续」接着执行。",
-    "runInterruptedNoOutput": "本次运行在生成回复前结束，但 OC 未报告超时原因。请刷新历史记录或重新发送原消息。",
+    "runInterruptedNoOutput": "本次运行在生成回复前结束，但科研龙虾未报告超时原因。请刷新历史记录或重新发送原消息。",
     "continueRun": "继续",
     "continueInstruction": "请从中断处继续上一个任务。",
     "openSettings": "打开设置",
@@ -159,7 +166,7 @@
     "abortWithShortcut": "停止 ({{shortcut}})",
     "connectionBanner": {
       "reconnecting": "连接中断 — 正在自动重连...",
-      "disconnected": "与 Gateway 断开连接 — 当前运行结果未知。请重连后核对 OC 会话状态"
+      "disconnected": "与科研龙虾服务断开连接 — 当前运行结果未知。请重连后核对会话状态"
     },
     "toolCallWarning": "当前模型 ({{model}}) 可能不支持工具调用。命令可能无法执行，插件功能可能不可用，建议切换模型。",
     "notConnected": "未连接网关 — 请检查网关是否正在运行",
@@ -284,7 +291,7 @@
     },
     "skillSource": {
       "workspace": "工作区",
-      "bundled": "OpenClaw 内置",
+      "bundled": "科研龙虾内置",
       "unknown": "其他来源",
       "research-plugins": "Research Plugins"
     },
@@ -300,11 +307,11 @@
     "runStatus": {
       "reconnecting": {
         "title": "正在重连 Gateway",
-        "detail": "当前连接不可用，因此不会推断任务结果。正在重连并核对 OC 会话状态。"
+        "detail": "当前连接不可用，因此不会推断任务结果。正在重连并核对科研龙虾会话状态。"
       },
       "stopping": {
         "title": "正在停止运行",
-        "detail": "已请求停止，正在等待 OC 确认该运行不再活跃。"
+        "detail": "已请求停止，正在等待科研龙虾确认该运行不再活跃。"
       },
       "submitting": {
         "title": "正在提交请求",
@@ -312,64 +319,64 @@
       },
       "accepted": {
         "title": "请求已接收",
-        "detail": "Gateway 已接收这次请求，正在核对 OC 运行状态。你可以停止。"
+        "detail": "科研龙虾服务已接收这次请求，正在核对运行状态。你可以停止。"
       },
       "confirming-submit": {
         "title": "正在确认请求是否已接收",
-        "detail": "发送确认不确定。正在核对 OC 会话记录，不会自动重复发送。"
+        "detail": "发送确认不确定。正在核对科研龙虾会话记录，不会自动重复发送。"
       },
       "compacting": {
         "title": "正在压缩会话上下文",
-        "detail": "OC 确认运行仍活跃，当前正在压缩会话上下文。你可以继续等待或停止。"
+        "detail": "科研龙虾确认运行仍活跃，当前正在压缩会话上下文。你可以继续等待或停止。"
       },
       "tool": {
         "title": "正在使用 {{tool}}",
-        "detail": "OC 确认运行仍活跃。你可以继续等待或停止。",
+        "detail": "科研龙虾确认运行仍活跃。你可以继续等待或停止。",
         "fallback": "科研工具"
       },
       "fallback": {
         "title": "正在尝试可用模型线路",
-        "detail": "OC 已报告回退尝试，并确认运行仍活跃。你可以继续等待或停止。"
+        "detail": "科研龙虾已报告回退尝试，并确认运行仍活跃。你可以继续等待或停止。"
       },
       "streaming": {
         "title": "正在接收回复",
-        "detail": "OC 确认运行仍活跃，回复内容正在到达。你可以继续等待或停止。"
+        "detail": "科研龙虾确认运行仍活跃，回复内容正在到达。你可以继续等待或停止。"
       },
       "continuing": {
         "title": "运行仍在继续",
-        "detail": "OC 确认运行仍活跃。你可以继续等待或停止。"
+        "detail": "科研龙虾确认运行仍活跃。你可以继续等待或停止。"
       },
       "processing": {
         "title": "正在处理",
-        "detail": "OC 确认运行仍活跃，当前没有更具体的可显示活动。你可以继续等待或停止。"
+        "detail": "科研龙虾确认运行仍活跃，当前没有更具体的可显示活动。你可以继续等待或停止。"
       },
       "confirming-result": {
         "title": "正在确认结果",
-        "detail": "OC 报告当前没有活跃运行，但持久化状态仍为 running。正在刷新会话记录，不将其显示为运行中或失败。"
+        "detail": "科研龙虾报告当前没有活跃运行，但持久化状态仍为 running。正在刷新会话记录，不将其显示为运行中或失败。"
       },
       "result-unconfirmed": {
         "title": "运行结果尚未确认",
-        "detail": "OC 已确认当前没有活跃运行，但没有返回完整终态。可刷新会话记录或重新发起请求。"
+        "detail": "科研龙虾已确认当前没有活跃运行，但没有返回完整终态。可刷新会话记录或重新发起请求。"
       },
       "done": {
         "title": "运行已完成",
-        "detail": "OC 报告本次运行已完成。"
+        "detail": "科研龙虾报告本次运行已完成。"
       },
       "killed": {
         "title": "运行已停止",
-        "detail": "OC 确认本次运行已停止。"
+        "detail": "科研龙虾确认本次运行已停止。"
       },
       "timeout": {
         "title": "运行已超时并停止",
-        "detail": "OC 已明确报告本次运行超时。"
+        "detail": "科研龙虾已明确报告本次运行超时。"
       },
       "failed": {
         "title": "运行失败",
-        "detail": "OC 已明确报告本次运行失败。"
+        "detail": "科研龙虾已明确报告本次运行失败。"
       },
       "interrupted": {
         "title": "运行已中断",
-        "detail": "OC 报告本次运行已结束，但没有提供更具体的原因。"
+        "detail": "科研龙虾报告本次运行已结束，但没有提供更具体的原因。"
       }
     }
   },
@@ -1000,8 +1007,8 @@
           "hint": "面向机械臂、移动平台、人形机器人等具身设备接入,让 Agent 拥有物理执行能力。",
           "modalTitle": "具身科研智能 — 愿景",
           "modalP1": "具身科研智能模块旨在赋予 AI Agent 物理执行能力。目标设备包括机械臂、轮式移动平台与人形机器人等,覆盖实验室巡检、样品取放、操作台直接操控一体化场景——从感知到执行在同一 Agent 循环中闭合。",
-          "modalP2": "技术路线:具身设备将对接 OpenClaw nodes 体系(role:node + node.invoke),通过 oc-node driver 接入外设子系统。每台具身设备在 OC 节点图中注册为独立节点,Agent 调用 node.invoke 发送指令,执行结果回写观测时间线。配对接入须经审批流程,防止未经授权的物理操作。",
-          "modalP3": "在演进路线上,具身科研智能与摄像头桥同属一条演进线:摄像头桥已实现「agent 请求一帧 → 桥接 → 视觉查证」闭环,具身模块将在此基础上扩展为「agent 下指令 → oc-node → 物理执行 → 状态回传」链路。kind 预留为 embodied,driver 枚举位 oc-node 已在 schema 中占位。"
+          "modalP2": "技术路线：具身设备将接入科研龙虾的设备节点体系。每台设备注册为独立节点，智能体通过受控调用发送指令，执行结果回写观测时间线；配对接入须经审批，防止未经授权的物理操作。",
+          "modalP3": "在演进路线上，具身科研智能与摄像头桥同属一条演进线：摄像头桥已实现「智能体请求一帧 → 桥接 → 视觉查证」闭环，具身模块将在此基础上扩展为「智能体下指令 → 设备节点 → 物理执行 → 状态回传」链路。相关类型与驱动扩展位已在数据层预留。"
         }
       },
       "monitors": {
@@ -1176,7 +1183,7 @@
     "visionBaseUrl": "自定义视觉 API 地址",
     "visionApiKey": "视觉 API 密钥",
     "systemPromptAppend": "附加系统提示",
-    "systemPromptAppendHint": "写入 openclaw.json，每次发送前同步到 Agent 系统提示，无需点保存。",
+    "systemPromptAppendHint": "写入科研龙虾配置，每次发送前同步到智能体系统提示，无需点保存。",
     "systemPromptAppendPlaceholder": "可选：追加到 Agent 系统提示词的内容…",
     "proxyEnabled": "启用代理",
     "proxyUrl": "代理地址",
@@ -1185,7 +1192,7 @@
     "notificationSound": "通知音效",
     "notificationSoundHint": "收到新通知时播放短提示音",
     "aboutVersion": "Research-Claw v{{version}}",
-    "aboutOpenClaw": "由 OpenClaw v{{version}} 驱动",
+    "aboutOpenClaw": "科研龙虾服务内核 v{{version}}",
     "aboutGateway": "网关端点",
     "aboutPlugins": "插件",
     "aboutBootstrap": "引导文件",
@@ -1193,7 +1200,7 @@
     "aboutDiagnosticsCopied": "诊断信息已复制到剪贴板",
     "noVisionModel": "与文本模型相同",
     "noVisionModelHint": "该供应商暂无可选视觉模型,可直接手动输入模型名称",
-    "configSource": "配置来源：openclaw.json",
+    "configSource": "配置来源：科研龙虾配置文件",
     "configLoading": "加载配置中...",
     "refreshConfig": "刷新",
     "restartHint": "保存后将写入配置并自动重启网关，仪表盘会自动重连。",
@@ -1297,7 +1304,7 @@
     "apiKeyPlaceholder": "输入你的 API 密钥",
     "apiKeyExisting": "已有密钥将保留 — 输入新密钥可替换",
     "openaiCodexOauthNoApiKey": "无需 API Key（OAuth 提供方）",
-    "openaiCodexOauthHint": "使用 OpenAI ChatGPT OAuth 请运行：openclaw models auth login --provider openai。完成后在此选择 openai 并保存。",
+    "openaiCodexOauthHint": "使用 OpenAI ChatGPT OAuth 时，请在模型认证界面完成登录，然后选择 OpenAI 并保存。",
     "ollamaNoApiKey": "无需 API 密钥 —— Ollama 在本地运行",
     "ollamaDetecting": "检测中…",
     "ollamaDetectModels": "检测已安装模型",
@@ -1333,7 +1340,7 @@
     "connecting": "正在连接网关...",
     "gatewayUnreachable": "无法连接网关",
     "retryConnect": "重试连接",
-    "gatewayHint": "请确保 OpenClaw 网关正在运行：openclaw gateway --force",
+    "gatewayHint": "请确保科研龙虾服务正在运行；若已退出，请重新启动科研龙虾。",
     "needsToken": "需要网关令牌",
     "needsTokenHint": "请输入网关令牌以连接。令牌可在 Docker 日志或 .env 文件中找到。",
     "tokenPlaceholder": "网关令牌",
@@ -1386,7 +1393,7 @@
     "step1Title": "第 1 步：在提供方认证",
     "step1Desc": "点击按钮打开认证页面，登录并授权访问。",
     "googleClientIdTitle": "Google OAuth Client ID",
-    "googleClientIdDesc": "如果你已经安装 Gemini CLI，或已配置 OPENCLAW_GEMINI_OAUTH_CLIENT_ID，可以留空。若不想依赖本地 CLI，请把你自己的 Google 桌面应用 OAuth Client ID 粘贴到这里。",
+    "googleClientIdDesc": "如果你已经安装 Gemini CLI，或已配置 Gemini OAuth Client ID，可以留空。若不想依赖本地 CLI，请把你自己的 Google 桌面应用 OAuth Client ID 粘贴到这里。",
     "googleClientIdPlaceholder": "1234567890-xxxxx.apps.googleusercontent.com",
     "googleClientSecretTitle": "Google OAuth Client Secret",
     "googleClientSecretDesc": "可选。Google 桌面应用 OAuth 通常不需要这个值；如果你的 Google OAuth 客户端要求填写，再粘贴进来即可。",
@@ -1508,7 +1515,7 @@
     "configFailureTitle": "“{{name}}”需要修改配置",
     "configFailureBody": "{{error}} 请检查模型与服务商配置；重试无法恢复此类失败。",
     "transientFailureTitle": "“{{name}}”已连续失败 {{count}} 次",
-    "transientFailureBody": "{{error}} OpenClaw 会保留该任务并继续调度；可打开隔离运行查看详情。",
+    "transientFailureBody": "{{error}} 科研龙虾会保留该任务并继续调度；可打开隔离运行查看详情。",
     "skippedTitle": "“{{name}}”已连续 {{count}} 次未执行",
     "skippedBody": "{{error}} 模型服务不可达，任务被跳过；请确认服务商端点已启动。",
     "cronSessions": "定时任务",
@@ -1572,7 +1579,7 @@
     },
     "workshop": {
       "openTab": "技能工坊 — 创建与审查技能提案",
-      "hint": "通过 OpenClaw Skill Workshop 治理技能：先提案、审查、再应用。应用后的技能写入 workspace/skills，与下方「技能」列表联动。也可在对话中让助手使用 skill_workshop 工具。",
+      "hint": "通过科研龙虾技能工坊治理技能：先提案、审查、再应用。应用后的技能写入 workspace/skills，与下方「技能」列表联动。也可在对话中让助手使用 skill_workshop 工具。",
       "filter": {
         "pending": "待处理 ({{count}})",
         "today": "今日",
@@ -1686,7 +1693,7 @@
         "workspace": "工作区技能",
         "extra": "插件／额外目录",
         "managed": "托管／个人技能",
-        "bundled": "OpenClaw 内置",
+        "bundled": "科研龙虾内置",
         "other": "其他／未知来源"
       },
       "runtime": {
@@ -1714,12 +1721,12 @@
       "installNow": "立即安装",
       "clawhub": {
         "tab": "ClawHub",
-        "native": "OpenClaw 原生来源",
+        "native": "科研龙虾原生来源",
         "description": "通过 skills.search 查询 ClawHub、读取注册表详情，再由 skills.install 安装。",
         "searchPlaceholder": "搜索 ClawHub 技能",
         "empty": "没有匹配的技能。",
         "confirmTitle": "确认安装技能",
-        "confirmDescription": "OpenClaw 将下载、校验、扫描并把该技能安装到当前工作区。",
+        "confirmDescription": "科研龙虾将下载、校验、扫描并把该技能安装到当前工作区。",
         "installedFallback": "已安装 {{slug}}"
       },
       "local": {
@@ -1736,7 +1743,7 @@
         "allFailed": "没有技能安装成功",
         "complete": "已安装 {{count}} 个技能",
         "disabled": "Gateway 配置未启用本地压缩包上传。",
-        "disabledDescription": "请在 openclaw.json 中启用 skills.install.allowUploadedArchives 后重新连接。禁用期间仍可检查 ZIP 内容，但不能安装。",
+        "disabledDescription": "请在科研龙虾配置中启用本地技能压缩包上传后重新连接。禁用期间仍可检查 ZIP 内容，但不能安装。",
         "preflightTitle": "本地结构预检",
         "preflightBoundary": "浏览器预检不是安全边界。每个所选技能都会原子安装，并在安装过程中接受 Gateway 安全扫描。",
         "chooseZip": "选择技能 ZIP",
@@ -1744,7 +1751,7 @@
         "multiSkillZip": "多技能 ZIP",
         "singleSkillZip": "单技能 ZIP",
         "gatewayScan": "Gateway 安全扫描会在安装时执行。",
-        "noPreview": "OpenClaw 2026.6.1 没有仅扫描不安装的裁决 RPC，因此此处不会虚构安装前安全结论。",
+        "noPreview": "当前科研龙虾服务没有仅扫描不安装的安全裁决接口，因此此处不会虚构安装前安全结论。",
         "review": "复核安装",
         "resolveConflict": "请为每个所选冲突技能明确确认覆盖。",
         "confirmTitle": "确认安装本地技能",
@@ -1797,7 +1804,7 @@
       "empty": "未加载任何插件。",
       "path": "路径",
       "config": "配置",
-      "copyConfigPath": "复制 openclaw.json 路径",
+      "copyConfigPath": "复制科研龙虾配置路径",
       "toggleFailed": "切换插件失败 — 网关可能正在重启，请稍后重试",
       "packages": "已安装技能包",
       "installed": "已安装",

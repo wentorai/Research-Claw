@@ -173,6 +173,28 @@ describe('i18n locale files', () => {
     expect(zh.filter((k) => !en.includes(k))).toEqual([]);
   });
 
+  it.each(LOCALES)('%s 的系统文案不得向用户暴露 OC/OpenClaw 内部品牌', (file) => {
+    const leaked = Object.entries(loadFlat(file))
+      .filter(([, value]) => /OpenClaw|(^|[^A-Za-z])OC([^A-Za-z]|$)/i.test(value))
+      .map(([key, value]) => `${key}: ${value}`);
+    expect(leaked).toEqual([]);
+  });
+
+  it('t() 的硬编码 fallback 文案不得重新引入 OC/OpenClaw 内部品牌', () => {
+    const leaked: string[] = [];
+    for (const file of sourceFiles()) {
+      const src = fs.readFileSync(file, 'utf8');
+      const re = /\bt\(\s*['"`]([A-Za-z0-9_.]+)['"`]\s*,\s*['"`]([^'"`]*)['"`]/gs;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(src))) {
+        if (/OpenClaw|(^|[^A-Za-z])OC([^A-Za-z]|$)/i.test(match[2])) {
+          leaked.push(`${path.relative(SRC_DIR, file)}:${match[1]}: ${match[2]}`);
+        }
+      }
+    }
+    expect(leaked).toEqual([]);
+  });
+
   it('代码里引用的每个字面量键都必须在两个语言包中存在', () => {
     const en = loadFlat('en.json');
     const zh = loadFlat('zh-CN.json');

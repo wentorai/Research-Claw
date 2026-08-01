@@ -135,7 +135,7 @@ describe('truthful run status presentation', () => {
   it('does not label every actionable error as an interruption or invent a time limit', () => {
     expect(zh.chat.runIssueTitle).not.toContain('中断');
     expect(en.chat.runIssueTitle.toLowerCase()).not.toContain('interrupted');
-    expect(zh.chat.runTimedOut).toContain('OC 明确报告');
+    expect(zh.chat.runTimedOut).toContain('科研龙虾明确报告');
     expect(zh.chat.runTimedOut).not.toContain('时间上限');
     expect(zh.taskFlow.runStatus.timeout.title).not.toContain('时间上限');
   });

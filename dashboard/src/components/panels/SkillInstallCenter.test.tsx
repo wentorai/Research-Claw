@@ -115,7 +115,7 @@ describe('SkillInstallCenter', () => {
     selectSource('Local ZIP');
 
     expect(await screen.findByText('Local archive upload is disabled by the Gateway configuration.')).toBeTruthy();
-    expect(screen.getByText('Enable skills.install.allowUploadedArchives in openclaw.json, then reconnect. You can still inspect a ZIP while installation is blocked.')).toBeTruthy();
+    expect(screen.getByText('Enable local Skill archive uploads in Research-Claw configuration, then reconnect. You can still inspect a ZIP while installation is blocked.')).toBeTruthy();
     expect(screen.getByLabelText('Choose Skill ZIP')).toBeTruthy();
   });
 
