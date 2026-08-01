@@ -181,9 +181,7 @@ export const useExecutionTraceStore = create<ExecutionTraceState>()((set, get) =
       const [summaryResult, presentationResult] = await Promise.allSettled([
         client.request<{ summaries: Record<string, ExecutionSummary> }>(
           'rc.execution.summary', { sessionKey: canonicalSessionKey, runIds: runIdBatch },
-        ).catch(() => client.request<{ summaries: Record<string, ExecutionSummary> }>(
-          'rc.execution.summary', { runIds: runIdBatch },
-        )),
+        ),
         client.request<{ presentations: Record<string, RunPresentation> }>(
           'rc.execution.presentations', { sessionKey: canonicalSessionKey, runIds: runIdBatch },
         ),
@@ -296,9 +294,7 @@ export const useExecutionTraceStore = create<ExecutionTraceState>()((set, get) =
     const [execution, reviewResult] = await Promise.all([
       client.request<Omit<ExecutionDetail, 'reviews'>>(
         'rc.execution.detail', { sessionKey: toGatewaySessionKey(sessionKey), runId },
-      ).catch(() => client.request<Omit<ExecutionDetail, 'reviews'>>(
-        'rc.execution.detail', { runId },
-      )),
+      ),
       client.request<{ reviews: ExecutionDetail['reviews'] }>(
         'rc.supervisor.reviews.list', { runId, limit: 20 },
       ).catch(() => ({ reviews: [] })),

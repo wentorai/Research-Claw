@@ -71,25 +71,24 @@ describe('shared execution-details coordinator', () => {
     expect(useExecutionTraceStore.getState().presentations[executionKey('session-a', 'runA')]?.recordsRevision).toBe(2);
   });
 
-  it('falls back to legacy execution RPC shapes when presentation RPC is unavailable', async () => {
-    request.mockImplementation(async (method: string, params: Record<string, unknown>) => {
-      if (method === 'rc.execution.presentations') throw new Error('method not found');
-      if (method === 'rc.execution.summary' && params.sessionKey) throw new Error('legacy params');
-      if (method === 'rc.execution.summary') {
-        return { summaries: { runA: { toolCount: 3, errorCount: 0, skillCount: 2 } } };
-      }
-      if (method === 'rc.execution.detail' && params.sessionKey) throw new Error('legacy params');
-      if (method === 'rc.execution.detail') {
-        return { runId: 'runA', tools: [], skills: [], skillEvents: [] };
-      }
-      return { reviews: [] };
+  it('never retries session-scoped execution RPCs without their sessionKey', async () => {
+    request.mockImplementation(async (method: string) => {
+      if (method === 'rc.supervisor.reviews.list') return { reviews: [] };
+      throw new Error('scoped request unavailable');
     });
 
     await useExecutionTraceStore.getState().loadRuns('session-a', ['runA']);
-    expect(useExecutionTraceStore.getState().summaries[executionKey('session-a', 'runA')]?.toolCount).toBe(3);
-    expect(useExecutionTraceStore.getState().presentations[executionKey('session-a', 'runA')]).toBeUndefined();
-    await useExecutionTraceStore.getState().loadDetail('session-a', 'runA');
-    expect(useExecutionTraceStore.getState().details[executionKey('session-a', 'runA')]).toMatchObject({ runId: 'runA' });
+    await expect(useExecutionTraceStore.getState().loadDetail('session-a', 'runA'))
+      .rejects.toThrow('scoped request unavailable');
+
+    expect(request.mock.calls.filter(([method]) => method === 'rc.execution.summary'))
+      .toEqual([['rc.execution.summary', {
+        sessionKey: 'agent:main:session-a', runIds: ['runA'],
+      }]]);
+    expect(request.mock.calls.filter(([method]) => method === 'rc.execution.detail'))
+      .toEqual([['rc.execution.detail', {
+        sessionKey: 'agent:main:session-a', runId: 'runA',
+      }]]);
   });
 
   it('drops a late session-A response after a rapid switch to session B', async () => {
