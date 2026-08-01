@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "runtime": "OpenClaw 2026.6.1",
+    "capturedAt": "2026-07-31",
+    "realCases": "workspace export/download are non-throwing business errors; Wentor is a thrown missing-tool error caused by a real MCP RATE_LIMITED catalog failure.",
+    "derivedSecurityCases": "missing/synthetic/malicious are explicitly mutated from the real workspace_save hierarchy and are not represented as live captures."
+  },
+  "real": {
+    "workspace_export_business_error": {
+      "after_tool_call": {
+        "kind": "after_tool_call",
+        "event": {
+          "toolName": "workspace_export",
+          "params": {
+            "source": "outputs/contracts/base.md",
+            "format": "docx",
+            "output": "outputs/contracts/base.docx"
+          },
+          "runId": "presentation-contract-run-3",
+          "toolCallId": "contract-workspace_export-1785508943482",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Error: Conversion failed (pandoc): spawn pandoc ENOENT"
+              }
+            ],
+            "details": {
+              "error": "Conversion failed (pandoc): spawn pandoc ENOENT"
+            }
+          },
+          "durationMs": 49
+        },
+        "context": {
+          "toolName": "workspace_export",
+          "agentId": "main",
+          "sessionKey": "agent:main:presentation-contract-3",
+          "sessionId": "0169a784-14f1-4b8f-883a-14de2cd89346",
+          "runId": "presentation-contract-run-3",
+          "toolCallId": "contract-workspace_export-1785508943482"
+        },
+        "capturedAt": 1785508943537
+      },
+      "tool_result_persist": {
+        "kind": "tool_result_persist",
+        "event": {
+          "toolName": "workspace_export",
+          "toolCallId": "contract-workspace_export-1785508943482",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "contract-workspace_export-1785508943482",
+            "toolName": "workspace_export",
+            "content": [
+              {
+                "type": "text",
+                "text": "Error: Conversion failed (pandoc): spawn pandoc ENOENT"
+              }
+            ],
+            "details": {
+              "error": "Conversion failed (pandoc): spawn pandoc ENOENT"
+            },
+            "isError": false,
+            "timestamp": 1785508943537
+          },
+          "isSynthetic": false
+        },
+        "context": {
+          "agentId": "main",
+          "sessionKey": "agent:main:presentation-contract-3",
+          "toolName": "workspace_export",
+          "toolCallId": "contract-workspace_export-1785508943482"
+        },
+        "capturedAt": 1785508943537
+      }
+    },
+    "workspace_download_business_error": {
+      "after_tool_call": {
+        "kind": "after_tool_call",
+        "event": {
+          "toolName": "workspace_download",
+          "params": {
+            "url": "https://httpbin.org/bytes/16",
+            "path": "outputs/contracts/download.bin"
+          },
+          "runId": "presentation-contract-run-4",
+          "toolCallId": "contract-workspace_download-1785508945928",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Error: Download failed: HTTP 503 Service Temporarily Unavailable"
+              }
+            ],
+            "details": {
+              "error": "Download failed: HTTP 503 Service Temporarily Unavailable"
+            }
+          },
+          "durationMs": 1715
+        },
+        "context": {
+          "toolName": "workspace_download",
+          "agentId": "main",
+          "sessionKey": "agent:main:presentation-contract-4",
+          "sessionId": "49ab5452-e62a-4448-b739-a484fc864693",
+          "runId": "presentation-contract-run-4",
+          "toolCallId": "contract-workspace_download-1785508945928"
+        },
+        "capturedAt": 1785508947648
+      },
+      "tool_result_persist": {
+        "kind": "tool_result_persist",
+        "event": {
+          "toolName": "workspace_download",
+          "toolCallId": "contract-workspace_download-1785508945928",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "contract-workspace_download-1785508945928",
+            "toolName": "workspace_download",
+            "content": [
+              {
+                "type": "text",
+                "text": "Error: Download failed: HTTP 503 Service Temporarily Unavailable"
+              }
+            ],
+            "details": {
+              "error": "Download failed: HTTP 503 Service Temporarily Unavailable"
+            },
+            "isError": false,
+            "timestamp": 1785508947649
+          },
+          "isSynthetic": false
+        },
+        "context": {
+          "agentId": "main",
+          "sessionKey": "agent:main:presentation-contract-4",
+          "toolName": "workspace_download",
+          "toolCallId": "contract-workspace_download-1785508945928"
+        },
+        "capturedAt": 1785508947650
+      }
+    },
+    "wentor_mcp_catalog_error": {
+      "after_tool_call": {
+        "kind": "after_tool_call",
+        "event": {
+          "toolName": "wentor-network__search_papers",
+          "params": {
+            "query": "scientific knowledge graph",
+            "top_k": 1
+          },
+          "runId": "presentation-contract-run-1",
+          "toolCallId": "contract-wentor-network__search_papers-1785509269047",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Tool wentor-network__search_papers not found"
+              }
+            ],
+            "details": {}
+          },
+          "error": "Tool wentor-network__search_papers not found",
+          "durationMs": 12
+        },
+        "context": {
+          "toolName": "wentor-network__search_papers",
+          "agentId": "main",
+          "sessionKey": "agent:main:presentation-contract-1",
+          "sessionId": "576a7451-d344-4964-bb5c-c42f8c59af50",
+          "runId": "presentation-contract-run-1",
+          "toolCallId": "contract-wentor-network__search_papers-1785509269047"
+        },
+        "capturedAt": 1785509269076
+      },
+      "tool_result_persist": {
+        "kind": "tool_result_persist",
+        "event": {
+          "toolCallId": "contract-wentor-network__search_papers-1785509269047",
+          "message": {
+            "role": "toolResult",
+            "toolCallId": "contract-wentor-network__search_papers-1785509269047",
+            "toolName": "wentor-network__search_papers",
+            "content": [
+              {
+                "type": "text",
+                "text": "Tool wentor-network__search_papers not found"
+              }
+            ],
+            "details": {},
+            "isError": true,
+            "timestamp": 1785509269069
+          },
+          "isSynthetic": false
+        },
+        "context": {
+          "agentId": "main",
+          "sessionKey": "agent:main:presentation-contract-1",
+          "toolCallId": "contract-wentor-network__search_papers-1785509269047"
+        },
+        "capturedAt": 1785509269077
+      }
+    }
+  },
+  "derived": {
+    "missing_tool_call_id": {
+      "kind": "tool_result_persist",
+      "event": {
+        "toolName": "workspace_save",
+        "message": {
+          "role": "toolResult",
+          "toolName": "workspace_save",
+          "content": [
+            {
+              "type": "text",
+              "text": "Saved outputs/contracts/base.csv (24 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"base.csv\",\"path\":\"outputs/contracts/base.csv\",\"size_bytes\":24,\"mime_type\":\"text/csv\",\"git_status\":\"new\"}\n```"
+            }
+          ],
+          "details": {
+            "path": "outputs/contracts/base.csv",
+            "size": 24,
+            "committed": false
+          },
+          "isError": false,
+          "timestamp": 1785509228732
+        },
+        "isSynthetic": false
+      },
+      "context": {
+        "agentId": "main",
+        "sessionKey": "agent:main:presentation-contract-1",
+        "toolName": "workspace_save"
+      },
+      "capturedAt": 1785509228739
+    },
+    "synthetic_tool_result": {
+      "kind": "tool_result_persist",
+      "event": {
+        "toolName": "workspace_save",
+        "toolCallId": "contract-workspace_save-1785509228657",
+        "message": {
+          "role": "toolResult",
+          "toolCallId": "contract-workspace_save-1785509228657",
+          "toolName": "workspace_save",
+          "content": [
+            {
+              "type": "text",
+              "text": "Saved outputs/contracts/base.csv (24 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"base.csv\",\"path\":\"outputs/contracts/base.csv\",\"size_bytes\":24,\"mime_type\":\"text/csv\",\"git_status\":\"new\"}\n```"
+            }
+          ],
+          "details": {
+            "path": "outputs/contracts/base.csv",
+            "size": 24,
+            "committed": false
+          },
+          "isError": false,
+          "timestamp": 1785509228732
+        },
+        "isSynthetic": true
+      },
+      "context": {
+        "agentId": "main",
+        "sessionKey": "agent:main:presentation-contract-1",
+        "toolName": "workspace_save",
+        "toolCallId": "contract-workspace_save-1785509228657"
+      },
+      "capturedAt": 1785509228739
+    },
+    "malicious_fields": {
+      "kind": "after_tool_call",
+      "event": {
+        "toolName": "workspace_save",
+        "params": {
+          "path": "outputs/contracts/base.csv",
+          "content": "title,year\nFixture,2026\n"
+        },
+        "runId": "presentation-contract-run-1",
+        "toolCallId": "contract-workspace_save-1785509228657",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "untrusted card claims an absolute system path"
+            }
+          ],
+          "details": {
+            "path": "../../Library/Secrets\u0000.md",
+            "size": 9007199254740991,
+            "committed": true,
+            "url": "javascript:alert(1)"
+          }
+        },
+        "durationMs": 67
+      },
+      "context": {
+        "toolName": "workspace_save",
+        "agentId": "main",
+        "sessionKey": "agent:main:presentation-contract-1",
+        "sessionId": "a0d6ef42-7b59-41d1-8adf-c63acd86af1c",
+        "runId": "presentation-contract-run-1",
+        "toolCallId": "contract-workspace_save-1785509228657"
+      },
+      "capturedAt": 1785509228738
+    }
+  }
+}

@@ -30,6 +30,7 @@ import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
 import { useSessionRunsStore } from './stores/session-runs';
+import { useExecutionTraceStore } from './stores/execution-trace';
 import { isInternalSessionNamingKey, normalizeSessionKey } from './utils/session-key';
 import { resolveObservedRunActivity } from './utils/run-status-presentation';
 import { autoNameSessionKeyForEvent } from './utils/session-auto-name-event';
@@ -45,6 +46,20 @@ const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ??
 /** Default token for local deployment (matches OPENCLAW_GATEWAY_TOKEN default in run.sh) */
 const DEFAULT_TOKEN = 'research-claw';
 const TOKEN_STORAGE_KEY = 'rc-gateway-token';
+
+const PRESENTATION_TOOL_ALLOWLIST = new Set([
+  'workspace_save',
+  'workspace_export',
+  'workspace_append',
+  'workspace_download',
+  'get_arxiv_paper',
+  'wentor-network__search_papers',
+  'search_openalex',
+  'search_crossref',
+  'search_arxiv',
+  'search_dblp',
+  'rp_search',
+]);
 
 /** Read gateway token: URL param > localStorage (remote users) > hardcoded default */
 function getGatewayToken(): string {
@@ -183,33 +198,91 @@ export default function App() {
         useSessionsStore.getState().scheduleAutoNameSession(autoNameSessionKey, 500);
       }
       handleChatEvent(event);
-      // Clear foreground tool stream when a run completes
-      if (
-        normalizeSessionKey(event.sessionKey) === normalizeSessionKey(chatBeforeEvent.sessionKey)
-        && (!event.runId || !chatBeforeEvent.runId || event.runId === chatBeforeEvent.runId)
-        && (event.state === 'final' || event.state === 'aborted' || event.state === 'error')
-      ) {
-        useToolStreamStore.getState().clearSession(
-          event.sessionKey ?? chatBeforeEvent.sessionKey,
-        );
+      if (event.state === 'final' || event.state === 'aborted' || event.state === 'error') {
+        // Terminal events for another session or an older run must not erase
+        // the active session's foreground tools.
+        const sameSession = normalizeSessionKey(event.sessionKey)
+          === normalizeSessionKey(chatBeforeEvent.sessionKey);
+        const sameRun = !event.runId
+          || !chatBeforeEvent.runId
+          || event.runId === chatBeforeEvent.runId;
+        if (sameSession && sameRun) {
+          useToolStreamStore.getState().clearSession(
+            event.sessionKey ?? chatBeforeEvent.sessionKey,
+          );
+        }
+
+        // Card projections are read models. A matching terminal invalidates
+        // the presentation cache, while the lifecycle/session stores remain
+        // the authority for whether the run is active.
+        const activeSessionKey = useChatStore.getState().sessionKey;
+        if (
+          typeof event.runId === 'string'
+          && (!event.sessionKey
+            || normalizeSessionKey(event.sessionKey) === normalizeSessionKey(activeSessionKey))
+        ) {
+          void useExecutionTraceStore.getState().refreshPresentations(activeSessionKey, [event.runId]);
+        }
       }
     });
 
-    const handleAgentPayload = (payload: unknown) => {
+    const handleAgentPayload = (payload: unknown, source: 'agent' | 'session.tool' = 'agent') => {
       const status = payload as {
         runId?: string;
         sessionKey?: string;
         state?: string;
         stream?: string;
-        data?: { phase?: string; name?: string; toolName?: string };
+        data?: {
+          phase?: string;
+          schemaVersion?: number;
+          sessionKey?: string;
+          runId?: string;
+          recordsRevision?: number;
+          name?: string;
+          toolName?: string;
+          toolCallId?: string;
+        };
       };
 
       // OC's embedded one-shot model runner emits normal global agent events.
       // Session-title inference is internal plumbing: its lifecycle, including
-      // an error, must never alter a user's run state or visible tool timeline.
+      // an error, must never alter a user's run state, presentation cache or
+      // visible tool timeline.
       if (status.sessionKey && isInternalSessionNamingKey(status.sessionKey)) return;
 
-      if (status.stream === 'compaction' && status.data?.phase) {
+      if (status.stream === 'research-claw-core.presentation_changed') {
+        const data = status.data;
+        if (
+          data?.schemaVersion === 1
+          && typeof data.sessionKey === 'string'
+          && typeof data.runId === 'string'
+          && Number.isInteger(data.recordsRevision)
+          && normalizeSessionKey(useChatStore.getState().sessionKey) === normalizeSessionKey(data.sessionKey)
+        ) {
+          const store = useExecutionTraceStore.getState();
+          const activeSessionKey = useChatStore.getState().sessionKey;
+          const current = store.presentations[`${activeSessionKey}\0${data.runId}`];
+          if (!current || current.recordsRevision < (data.recordsRevision ?? 0)) {
+            void store.refreshPresentations(activeSessionKey, [data.runId]);
+          }
+        }
+      } else if (
+        status.stream === 'tool'
+        && (status.data?.phase === 'result' || status.data?.phase === 'end')
+        && typeof status.runId === 'string'
+        && typeof status.sessionKey === 'string'
+        && typeof status.data.toolCallId === 'string'
+        && PRESENTATION_TOOL_ALLOWLIST.has(status.data.name ?? status.data.toolName ?? '')
+      ) {
+        const activeSessionKey = useChatStore.getState().sessionKey;
+        if (normalizeSessionKey(status.sessionKey) === normalizeSessionKey(activeSessionKey)) {
+          useExecutionTraceStore.getState().schedulePresentationRefresh(
+            activeSessionKey,
+            status.runId,
+            status.data.toolCallId,
+          );
+        }
+      } else if (status.stream === 'compaction' && status.data?.phase) {
         useChatStore.getState().handleCompactionAgentEvent(status);
       } else if (
         status.stream === 'lifecycle'
@@ -219,7 +292,10 @@ export default function App() {
       } else if (status.stream === 'error') {
         useChatStore.getState().handleAgentFailureEvent(status);
       }
-      if (status.sessionKey) {
+      // session.tool result frames describe a completed observation and may
+      // contain sanitized output. They invalidate cards above, but must not
+      // overwrite the currently-known activity or failure state.
+      if (source === 'agent' && status.sessionKey) {
         const activity = resolveObservedRunActivity(status);
         if (activity) {
           useSessionRunsStore.getState().observeActivity({
@@ -232,16 +308,23 @@ export default function App() {
           });
         }
       }
-      // Feed tool stream store for P1-2 (inline tool display) and P1-3 (bg activity)
-      const chatRunId = useChatStore.getState().runId;
-      const activeSessionKey = useChatStore.getState().sessionKey;
-      useToolStreamStore.getState().handleAgentEvent(payload, chatRunId, activeSessionKey);
+      // session.tool result frames include the sanitized tool result. They are
+      // invalidations only: never copy that payload into activity/execution
+      // state or render it as chat content. The ordinary agent stream remains
+      // the sole input for existing inline/background tool activity.
+      if (source === 'agent') {
+        const chatRunId = useChatStore.getState().runId;
+        const activeSessionKey = useChatStore.getState().sessionKey;
+        useToolStreamStore.getState().handleAgentEvent(payload, chatRunId, activeSessionKey);
+      }
     };
 
-    const unsubAgent = client.subscribe('agent', handleAgentPayload);
+    const unsubAgent = client.subscribe('agent', (payload) => handleAgentPayload(payload, 'agent'));
     // session.tool mirrors tool events to late-joining operator UIs (reconnect scenario).
     // Source: openclaw/src/gateway/server-chat.ts:747-751
-    const unsubSessionTool = client.subscribe('session.tool', handleAgentPayload);
+    const unsubSessionTool = client.subscribe('session.tool', (payload) => (
+      handleAgentPayload(payload, 'session.tool')
+    ));
 
     return () => {
       unsubChat();

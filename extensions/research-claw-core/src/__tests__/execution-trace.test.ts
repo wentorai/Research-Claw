@@ -22,7 +22,7 @@ const fixture = JSON.parse(fs.readFileSync(
 describe('execution trace parity with OpenClaw 2026.6.1 hook payloads', () => {
   it('ships the durable Skill lifecycle schema in fresh databases', () => {
     const db = createTestDb();
-    expect(SCHEMA_VERSION).toBe(22);
+    expect(SCHEMA_VERSION).toBe(23);
     const table = db.prepare(`
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name = 'rc_execution_skill_events'
@@ -42,7 +42,7 @@ describe('execution trace parity with OpenClaw 2026.6.1 hook payloads', () => {
     `);
     runMigrations(db);
 
-    expect(getCurrentVersion(db)).toBe(22);
+    expect(getCurrentVersion(db)).toBe(23);
     const service = new ExecutionTraceService(db);
     expect(service.recordSkillLifecycle({
       sessionKey: 'agent:main:migrated',
@@ -79,7 +79,10 @@ describe('execution trace parity with OpenClaw 2026.6.1 hook payloads', () => {
       new ExecutionTraceService(db),
     );
 
-    const detail = await handlers.get('rc.execution.detail')!({ runId: 'run-rpc' }) as {
+    const detail = await handlers.get('rc.execution.detail')!({
+      sessionKey: 'agent:main:rpc',
+      runId: 'run-rpc',
+    }) as {
       skillEvents: Array<Record<string, unknown>>;
     };
     expect(detail.skillEvents).toEqual([

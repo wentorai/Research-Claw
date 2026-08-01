@@ -301,6 +301,42 @@
       "error": "Error"
     }
   },
+  "presentation": {
+    "filesTitle": "Delivered files",
+    "noFinalFileFact": "The tool created this file successfully; this run has no final reply. This card comes from the tool fact.",
+    "rawRetrieved": "Raw retrieved results",
+    "candidateSummary": "{{count}} unique · {{sources}} sources",
+    "unavailableSummary": "Results unavailable",
+    "showCandidates": "View candidates",
+    "hideCandidates": "Hide candidates",
+    "unscreened": "Not screened",
+    "candidateDisclaimer": "These candidates came from tools. The Agent has not screened, read, cited, or verified them, and they are not Reliable Sources.",
+    "queries": "Query: {{queries}}",
+    "queryUnavailable": "Query parameters are unavailable",
+    "someQueriesUnavailable": "Some fallback query parameters are unavailable",
+    "partialSources": "Only persisted fallback results could be recovered for: {{sources}}",
+    "unavailableSources": "Results from these supported sources cannot be displayed for this run: {{sources}}",
+    "returnPositions": "API return position: {{positions}}",
+    "sourceResultsUnavailable": "A supported literature tool ran, but its results cannot be displayed. This is not reported as zero matches.",
+    "noResultsReturned": "The adapted source actually returned zero results for this run.",
+    "resultsUnavailable": "The tool returned results, but no candidate passed safe display validation; results are currently unavailable.",
+    "metadataConflict": "Metadata differs across sources: {{fields}}",
+    "openResult": "Open result",
+    "addToLibrary": "Add to library",
+    "saved": "Saved",
+    "addFailed": "Could not add to library",
+    "noStrongIdentity": "No DOI, arXiv ID, or provider ID; direct saving is disabled",
+    "showMore": "Show {{count}} more",
+    "showLess": "Show less",
+    "counts": {
+      "matchedTotal": "Matched total",
+      "returned": "Returned",
+      "eligible": "Eligible",
+      "stored": "Stored",
+      "unique": "Unique",
+      "shown": "Shown"
+    }
+  },
   "taskFlow": {
     "title": "Task progress",
     "compactingDetail": "Compacting conversation history before continuing",
@@ -1483,7 +1519,13 @@
       "type": "Type",
       "gitNew": "New",
       "gitModified": "Modified",
-      "gitCommitted": "Committed"
+      "gitCommitted": "Committed",
+      "availability": {
+        "deleted": "File deleted",
+        "missing": "File missing",
+        "blocked": "Path blocked",
+        "unknown": "Status unknown"
+      }
     },
     "monitor": {
       "title": "Monitor Results",

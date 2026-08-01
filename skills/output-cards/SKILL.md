@@ -10,19 +10,26 @@ description: >-
 <!-- SKILL MAINTENANCE NOTES:
      - Dashboard 用 JSON.parse() 解析卡片内容
      - 字段变更必须同步 dashboard/src/components/chat/ 中的渲染组件
-     - file_card 必须从 workspace_save / workspace_export 工具输出中复制，绝不可伪造
+     - workspace file facts and supported raw search results are projected automatically
+     - paper_card is an Agent-deliberate highlight, not a raw-result dump
      - approval_card 必须包含 approval_id（来自 exec.approval.requested）
 -->
 
 # Output Cards
 
-Use fenced code blocks with the card type as the language tag. Content MUST be
-valid JSON — the dashboard parser uses `JSON.parse()`.
+Use fenced code blocks with the card type as the language tag only for
+Agent-authored card semantics. Content MUST be valid JSON — the dashboard
+parser uses `JSON.parse()`. Research-Claw automatically presents successful
+Workspace file facts and supported raw literature results; do not copy tool
+JSON merely to make those cards appear. Keep ordinary paths and safe links in
+the surrounding prose for non-Dashboard channels.
 
 ## paper_card
 
-**ONLY for real academic publications** — from API queries, `library_search`, or
-user-identified papers. NEVER for concepts, tools, or non-scholarly content.
+**ONLY for real academic publications deliberately highlighted by the Agent** —
+from API queries, `library_search`, or user-identified papers. NEVER for
+concepts, tools, non-scholarly content, or every raw search hit. A raw result is
+only `retrieved`; the fence does not prove it was read, cited, saved, or verified.
 
 Required: `type`, `title`, `authors` (string[]).
 Optional: `venue`, `year`, `doi`, `url`, `arxiv_id`, `abstract_preview`,
@@ -50,8 +57,10 @@ Optional: `details` (**must be a JSON object**, not a string — e.g. `{"paper_c
 
 ## file_card
 
-**CRITICAL**: ONLY copy the file_card from `workspace_save` or `workspace_export` tool output verbatim.
-**NEVER fabricate** — causes "file not found" errors.
+Successful `workspace_save`, `workspace_export`, `workspace_append`, and
+`workspace_download` results are presented automatically. State the ordinary
+workspace-relative path in prose; no fence is required. Legacy fences remain
+compatible, but **NEVER fabricate** a path.
 
 ## monitor_digest
 

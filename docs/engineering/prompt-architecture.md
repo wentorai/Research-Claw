@@ -1,9 +1,9 @@
 ---
 doc: engineering/prompt-architecture.md
 audience: 开发者 — 渠道 B(仓库按需阅读,不注入运行时)
-status: 现行 · 2026-06-09 依代码/提示词重建(对齐 AGENTS.md v4.1)
+status: 现行 · 2026-07-31 对齐确定性 presentation 投影
 source-of-truth: 代码优先(workspace/.ResearchClaw/ 八件提示词 + OC 装载器);本文保留设计 why,逐字内容以文件为准
-baseline: OpenClaw 2026.6.1 · AGENTS.md v4.1 · DB SCHEMA_VERSION 14
+baseline: OpenClaw 2026.6.1 · AGENTS.md v4.1 · DB SCHEMA_VERSION 23
 ---
 
 # 提示词架构(Bootstrap 文件系统)
@@ -62,8 +62,8 @@ AGENTS.md 是行为规格核心(§1–§10)。v4.1(2026-04-05)的关键设计,�
 
 1. **多层锚定**:关键规则**有意**出现在 2–3 处(如"绝不声称 web_search 不可用"同时在 §3、§3.2、SOUL #6)。这是冗余换可靠,不是重复。
 2. **内联关键 schema**:§9 直接写全 6 类卡片的 Required/Optional 字段,而非只给个指向 Output Cards skill 的指针——**skills 退为"增强"而非"必需"**。根因教训:关键规则若只放在 lazy-load 的 skill 里,always-load 的 system prompt 拿不到,卡片就不可靠发出。
-3. **工具文本内嵌卡片**:工具在返回文本里带卡片 JSON("Include this card in your response:"),从 `workspace_save` 推广到 `library_add_paper`/`task_create` 等。
-4. **卡片分类**:`paper_card`/`task_card`/`file_card` 由**工具发出**;`progress_card`/`monitor_digest` 由**agent 自行组装**(AGENTS §3.1)。
+3. **确定性工具事实投影**:`workspace_save/export/append/download` 与受支持的文献检索工具由 RC hook 持久投影，Dashboard 通过 session-scoped RPC 恢复；模型只需在普通文本中说明交付物和判断，不再抄写工具 JSON。
+4. **语义分类**:Workspace 投影是成功文件事实；文献检索投影是 `retrieved/尚未筛选`；fenced `paper_card` 只表示 Agent 主动呈现。`task_card`/`progress_card`/`approval_card`/`monitor_digest` 仍按 AGENTS §3.1 由既有通道产生。
 5. **段号神圣**:§1–§10 不可重编号——6 个 skills + SOUL.md 引用了具体 §号;新内容进子节(§3.1/§3.2/…)。
 
 > 完整改版动机与对照(基于 Claude Code system prompt 模式)见 archive 设计稿:`docs/archive/planning/PROMPT-ARCHITECTURE-REDESIGN.md`(历史参考)。
@@ -77,6 +77,10 @@ AGENTS.md 是行为规格核心(§1–§10)。v4.1(2026-04-05)的关键设计,�
 ## 6. 一致性测试
 
 `bootstrap-consistency.test.ts` 校验结构(章节头、工具数、卡片类型、红线);版本正则接受 `4.[01]`。改提示词后跑它防回归。
+
+文件卡/原始检索结果的可靠性不能由 prompt 测试证明；删除本节新增文案后，
+hook → immutable projection → event invalidation（custom 快路径或
+`session.tool` 有界重查）→ session-scoped batch RPC 链仍必须通过合同和真实 E2E。
 
 ---
 

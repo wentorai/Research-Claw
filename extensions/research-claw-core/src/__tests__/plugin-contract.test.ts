@@ -81,8 +81,10 @@ describe('research-claw-core plugin contracts', () => {
     const dbPath = path.join(root, 'library.db');
     const makeApi = () => {
       const tools: Array<{ name?: string }> = [];
+      const hooks: string[] = [];
       return {
         tools,
+        hooks,
         api: {
           id: 'research-claw-core',
           name: 'Research-Claw Core',
@@ -106,7 +108,7 @@ describe('research-claw-core plugin contracts', () => {
           registerGatewayMethod: () => {},
           registerHttpRoute: () => {},
           registerService: () => {},
-          on: () => {},
+          on: (hookName: string) => { hooks.push(hookName); },
           registerHook: () => {},
         },
       };
@@ -123,5 +125,11 @@ describe('research-claw-core plugin contracts', () => {
     expect(second.tools.map(tool => tool.name)).toContain('library_batch_add');
     expect(second.tools.map(tool => tool.name)).toContain('job_start');
     expect(second.tools.map(tool => tool.name)).toContain('skill_load');
+    expect(first.hooks).toContain('tool_result_persist');
+    expect(second.hooks).toContain('tool_result_persist');
+
+    const hookCount = second.hooks.length;
+    await plugin.register?.(second.api);
+    expect(second.hooks).toHaveLength(hookCount);
   });
 });

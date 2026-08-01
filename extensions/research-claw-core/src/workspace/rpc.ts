@@ -1,7 +1,7 @@
 /**
- * workspace/rpc — Gateway WS RPC handlers (13 rc.ws.* methods)
+ * workspace/rpc — Gateway WS RPC handlers (14 rc.ws.* methods)
  *
- * Registers rc.ws.tree, rc.ws.exists, rc.ws.read, rc.ws.save, rc.ws.history,
+ * Registers rc.ws.tree, rc.ws.exists, rc.ws.availability, rc.ws.read, rc.ws.save, rc.ws.history,
  * rc.ws.diff, rc.ws.restore, rc.ws.delete, rc.ws.saveImage,
  * rc.ws.openExternal, rc.ws.openFolder, rc.ws.mkdir, and rc.ws.move as
  * gateway WebSocket RPC methods. (Recount `registerMethod('rc.ws.` when
@@ -129,7 +129,7 @@ function mapError(err: unknown): never {
 // ---------------------------------------------------------------------------
 
 /**
- * Register the 13 workspace WS RPC methods with the gateway.
+ * Register the 14 workspace WS RPC methods with the gateway.
  *
  * @param registerMethod - Function to register a gateway RPC method
  * @param service        - WorkspaceService instance to delegate operations to
@@ -181,6 +181,43 @@ export function registerWorkspaceRpc(
     } catch (err) {
       mapError(err);
     }
+  });
+
+  // -----------------------------------------------------------------------
+  // 2c. rc.ws.availability — Runtime enrichment for server-projected FileCards.
+  //     This state is intentionally not part of recordsRevision: deleting a
+  //     file does not rewrite immutable tool facts.
+  // -----------------------------------------------------------------------
+  registerMethod('rc.ws.availability', async (params: Record<string, unknown>) => {
+    if (!Array.isArray(params.files) || params.files.length < 1 || params.files.length > 100) {
+      throw new Error('files must be an array of 1-100 items');
+    }
+    const files = await Promise.all(params.files.map(async (item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        throw new Error('each file must be an object');
+      }
+      const record = item as Record<string, unknown>;
+      const filePath = requireString(record, 'path');
+      const expected = record.expected === true;
+      try {
+        const stat = await fs.promises.stat(service.resolvePath(filePath));
+        if (!stat.isFile()) return { path: filePath, status: 'blocked' as const };
+        return {
+          path: filePath,
+          status: 'present' as const,
+          sizeBytes: stat.size,
+          modifiedAt: stat.mtimeMs,
+        };
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException | undefined)?.code;
+        if (code === 'ENOENT') return { path: filePath, status: expected ? 'deleted' as const : 'missing' as const };
+        if (code === 'EACCES' || code === 'EPERM' || (err as { code?: number })?.code === -32001) {
+          return { path: filePath, status: 'blocked' as const };
+        }
+        return { path: filePath, status: 'unknown' as const };
+      }
+    }));
+    return { files };
   });
 
   // -----------------------------------------------------------------------

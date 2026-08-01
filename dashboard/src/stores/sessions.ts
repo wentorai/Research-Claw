@@ -111,6 +111,7 @@ import {
   isMainSessionKey,
   isSubagentSessionKey,
   normalizeSessionKey,
+  toGatewaySessionKey,
 } from '../utils/session-key';
 import { isSessionRowStale } from '../utils/session-freshness';
 import { isAutoNameCandidate, extractFirstExchange, type HistoryMessage } from '../utils/auto-name';
@@ -276,10 +277,23 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     if (isMain(key)) return; // Main session cannot be deleted
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
+    let deletionConfirmed = false;
     try {
       await client.request('sessions.delete', { key, deleteTranscript: true });
+      deletionConfirmed = true;
     } catch {
       // Deletion failed — session may already be gone
+    }
+    if (deletionConfirmed) {
+      try {
+        // Best-effort compatibility: old gateways do not expose this RPC. The
+        // canonical key matches the hook-side session scope stored by RC Core.
+        await client.request('rc.execution.cleanupSession', {
+          sessionKey: toGatewaySessionKey(key),
+        });
+      } catch {
+        // Session deletion remains available on pre-v23 gateways.
+      }
     }
     const wasActive = get().activeSessionKey === key;
     set((s) => ({
@@ -303,6 +317,13 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
       await client.request('sessions.reset', { key });
     } catch {
       return; // Reset failed — keep local state untouched
+    }
+    try {
+      await client.request('rc.execution.cleanupSession', {
+        sessionKey: toGatewaySessionKey(key),
+      });
+    } catch {
+      // Old gateway: reset still succeeds; only v23 enrichment cleanup is absent.
     }
     const isActive = normalizeSessionKey(get().activeSessionKey) === normalizeSessionKey(key);
     if (isActive) {

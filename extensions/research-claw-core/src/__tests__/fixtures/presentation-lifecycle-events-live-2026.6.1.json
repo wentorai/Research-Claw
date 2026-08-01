@@ -1,0 +1,1850 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "runtime": "OpenClaw 2026.6.1",
+    "node": "v22.22.2",
+    "capturedAt": "2026-07-31",
+    "method": "Isolated real Gateway with deterministic provider. timeout uses agents.defaults.timeoutSeconds=2; cancellation uses chat.abort.",
+    "observedGap": "Only the first run was present in the pre-existing rc_execution_tools/replies tables; queued resolver bindings were empty. Hook/chat ACK identities remained canonical. Task 1 must fix this shared coordinator persistence gap.",
+    "historyEvidence": "A separate repeat captured projected chat.history after each terminal path. User idempotencyKey is preserved as <runId>:user even when final text is absent."
+  },
+  "lifecycle": {
+    "cases": {
+      "presentation-lifecycle-run-normal": {
+        "sessionKey": "agent:main:presentation-lifecycle-normal",
+        "requestedRunId": "presentation-lifecycle-run-normal",
+        "acknowledgedRunId": "presentation-lifecycle-run-normal",
+        "finalText": "Lifecycle normal final.",
+        "after_tool_call": {
+          "kind": "after_tool_call",
+          "event": {
+            "toolName": "workspace_save",
+            "params": {
+              "path": "outputs/contracts/normal.md",
+              "content": "# normal\n"
+            },
+            "runId": "presentation-lifecycle-run-normal",
+            "toolCallId": "contract-reused-tool-call",
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/normal.md (9 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"normal.md\",\"path\":\"outputs/contracts/normal.md\",\"size_bytes\":9,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/normal.md",
+                "size": 9,
+                "committed": false
+              }
+            },
+            "durationMs": 79
+          },
+          "context": {
+            "toolName": "workspace_save",
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-normal",
+            "sessionId": "4f697b91-93a9-4ab2-856f-4f0b2bca240d",
+            "runId": "presentation-lifecycle-run-normal",
+            "toolCallId": "contract-reused-tool-call"
+          },
+          "capturedAt": 1785509981847
+        },
+        "tool_result_persist": {
+          "kind": "tool_result_persist",
+          "event": {
+            "toolName": "workspace_save",
+            "toolCallId": "contract-reused-tool-call",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "contract-reused-tool-call",
+              "toolName": "workspace_save",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/normal.md (9 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"normal.md\",\"path\":\"outputs/contracts/normal.md\",\"size_bytes\":9,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/normal.md",
+                "size": 9,
+                "committed": false
+              },
+              "isError": false,
+              "timestamp": 1785509981841
+            },
+            "isSynthetic": false
+          },
+          "context": {
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-normal",
+            "toolName": "workspace_save",
+            "toolCallId": "contract-reused-tool-call"
+          },
+          "capturedAt": 1785509981848
+        },
+        "agent_end": {
+          "kind": "agent_end",
+          "event": {
+            "success": true,
+            "durationMs": 222,
+            "runId": "presentation-lifecycle-run-normal",
+            "finalAssistantTexts": [
+              "Lifecycle normal final."
+            ]
+          },
+          "context": {
+            "runId": "presentation-lifecycle-run-normal",
+            "trace": {
+              "traceId": "7ec1fbfd443985349f734b1876167a44",
+              "spanId": "6af9d462f82200d3",
+              "parentSpanId": "42b7dd0165eaf8eb",
+              "traceFlags": "01"
+            },
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-normal",
+            "sessionId": "4f697b91-93a9-4ab2-856f-4f0b2bca240d",
+            "workspaceDir": "<isolated-temp-root>/workspace",
+            "messageProvider": "webchat",
+            "trigger": "user",
+            "channelId": "webchat"
+          },
+          "capturedAt": 1785509981891
+        }
+      },
+      "presentation-lifecycle-run-queued-a": {
+        "sessionKey": "agent:main:presentation-lifecycle-queued",
+        "requestedRunId": "presentation-lifecycle-run-queued-a",
+        "acknowledgedRunId": "presentation-lifecycle-run-queued-a",
+        "finalText": "Lifecycle queued A final.",
+        "after_tool_call": {
+          "kind": "after_tool_call",
+          "event": {
+            "toolName": "workspace_save",
+            "params": {
+              "path": "outputs/contracts/queued-a.md",
+              "content": "# queued-a\n"
+            },
+            "runId": "presentation-lifecycle-run-queued-a",
+            "toolCallId": "contract-queued-a",
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/queued-a.md (11 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"queued-a.md\",\"path\":\"outputs/contracts/queued-a.md\",\"size_bytes\":11,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/queued-a.md",
+                "size": 11,
+                "committed": false
+              }
+            },
+            "durationMs": 63
+          },
+          "context": {
+            "toolName": "workspace_save",
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-queued",
+            "sessionId": "61e9c190-447f-4bcd-8453-a0de5f25b224",
+            "runId": "presentation-lifecycle-run-queued-a",
+            "toolCallId": "contract-queued-a"
+          },
+          "capturedAt": 1785509985520
+        },
+        "tool_result_persist": {
+          "kind": "tool_result_persist",
+          "event": {
+            "toolName": "workspace_save",
+            "toolCallId": "contract-queued-a",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "contract-queued-a",
+              "toolName": "workspace_save",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/queued-a.md (11 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"queued-a.md\",\"path\":\"outputs/contracts/queued-a.md\",\"size_bytes\":11,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/queued-a.md",
+                "size": 11,
+                "committed": false
+              },
+              "isError": false,
+              "timestamp": 1785509985520
+            },
+            "isSynthetic": false
+          },
+          "context": {
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-queued",
+            "toolName": "workspace_save",
+            "toolCallId": "contract-queued-a"
+          },
+          "capturedAt": 1785509985521
+        },
+        "agent_end": {
+          "kind": "agent_end",
+          "event": {
+            "success": true,
+            "durationMs": 1397,
+            "runId": "presentation-lifecycle-run-queued-a",
+            "finalAssistantTexts": [
+              "Lifecycle queued A final."
+            ]
+          },
+          "context": {
+            "runId": "presentation-lifecycle-run-queued-a",
+            "trace": {
+              "traceId": "2217fe1259d060e0e672f4ca218b8b69",
+              "spanId": "98da24ceacac1a81",
+              "parentSpanId": "a491773151285fac",
+              "traceFlags": "01"
+            },
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-queued",
+            "sessionId": "61e9c190-447f-4bcd-8453-a0de5f25b224",
+            "workspaceDir": "<isolated-temp-root>/workspace",
+            "messageProvider": "webchat",
+            "trigger": "user",
+            "channelId": "webchat"
+          },
+          "capturedAt": 1785509986763
+        }
+      },
+      "presentation-lifecycle-run-queued-b": {
+        "sessionKey": "agent:main:presentation-lifecycle-queued",
+        "requestedRunId": "presentation-lifecycle-run-queued-b",
+        "acknowledgedRunId": "presentation-lifecycle-run-queued-b",
+        "finalText": "Lifecycle queued B final.",
+        "after_tool_call": {
+          "kind": "after_tool_call",
+          "event": {
+            "toolName": "workspace_save",
+            "params": {
+              "path": "outputs/contracts/queued-b.md",
+              "content": "# queued-b\n"
+            },
+            "runId": "presentation-lifecycle-run-queued-b",
+            "toolCallId": "contract-queued-b",
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/queued-b.md (11 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"queued-b.md\",\"path\":\"outputs/contracts/queued-b.md\",\"size_bytes\":11,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/queued-b.md",
+                "size": 11,
+                "committed": false
+              }
+            },
+            "durationMs": 47
+          },
+          "context": {
+            "toolName": "workspace_save",
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-queued",
+            "sessionId": "61e9c190-447f-4bcd-8453-a0de5f25b224",
+            "runId": "presentation-lifecycle-run-queued-b",
+            "toolCallId": "contract-queued-b"
+          },
+          "capturedAt": 1785509987157
+        },
+        "tool_result_persist": {
+          "kind": "tool_result_persist",
+          "event": {
+            "toolName": "workspace_save",
+            "toolCallId": "contract-queued-b",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "contract-queued-b",
+              "toolName": "workspace_save",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/queued-b.md (11 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"queued-b.md\",\"path\":\"outputs/contracts/queued-b.md\",\"size_bytes\":11,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/queued-b.md",
+                "size": 11,
+                "committed": false
+              },
+              "isError": false,
+              "timestamp": 1785509987157
+            },
+            "isSynthetic": false
+          },
+          "context": {
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-queued",
+            "toolName": "workspace_save",
+            "toolCallId": "contract-queued-b"
+          },
+          "capturedAt": 1785509987157
+        },
+        "agent_end": {
+          "kind": "agent_end",
+          "event": {
+            "success": true,
+            "durationMs": 105,
+            "runId": "presentation-lifecycle-run-queued-b",
+            "finalAssistantTexts": [
+              "Lifecycle queued A final.",
+              "Lifecycle queued B final."
+            ]
+          },
+          "context": {
+            "runId": "presentation-lifecycle-run-queued-b",
+            "trace": {
+              "traceId": "44354a74b1d40e200844b98ce6b566a2",
+              "spanId": "0487cf332d330b60",
+              "parentSpanId": "a3d44e3dff473162",
+              "traceFlags": "01"
+            },
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-queued",
+            "sessionId": "61e9c190-447f-4bcd-8453-a0de5f25b224",
+            "workspaceDir": "<isolated-temp-root>/workspace",
+            "messageProvider": "webchat",
+            "trigger": "user",
+            "channelId": "webchat"
+          },
+          "capturedAt": 1785509987179
+        }
+      },
+      "presentation-lifecycle-run-timeout": {
+        "sessionKey": "agent:main:presentation-lifecycle-timeout",
+        "requestedRunId": "presentation-lifecycle-run-timeout",
+        "acknowledgedRunId": "presentation-lifecycle-run-timeout",
+        "finalText": "Lifecycle timeout final must not be delivered.",
+        "after_tool_call": {
+          "kind": "after_tool_call",
+          "event": {
+            "toolName": "workspace_save",
+            "params": {
+              "path": "outputs/contracts/timeout.md",
+              "content": "# timeout\n"
+            },
+            "runId": "presentation-lifecycle-run-timeout",
+            "toolCallId": "contract-reused-tool-call",
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/timeout.md (10 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"timeout.md\",\"path\":\"outputs/contracts/timeout.md\",\"size_bytes\":10,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/timeout.md",
+                "size": 10,
+                "committed": false
+              }
+            },
+            "durationMs": 47
+          },
+          "context": {
+            "toolName": "workspace_save",
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-timeout",
+            "sessionId": "20b1e99f-692d-42e9-86d2-fe2396726793",
+            "runId": "presentation-lifecycle-run-timeout",
+            "toolCallId": "contract-reused-tool-call"
+          },
+          "capturedAt": 1785509990210
+        },
+        "tool_result_persist": {
+          "kind": "tool_result_persist",
+          "event": {
+            "toolName": "workspace_save",
+            "toolCallId": "contract-reused-tool-call",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "contract-reused-tool-call",
+              "toolName": "workspace_save",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/normal.md (9 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"normal.md\",\"path\":\"outputs/contracts/normal.md\",\"size_bytes\":9,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/normal.md",
+                "size": 9,
+                "committed": false
+              },
+              "isError": false,
+              "timestamp": 1785509981841
+            },
+            "isSynthetic": false
+          },
+          "context": {
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-normal",
+            "toolName": "workspace_save",
+            "toolCallId": "contract-reused-tool-call"
+          },
+          "capturedAt": 1785509981848
+        },
+        "agent_end": {
+          "kind": "agent_end",
+          "event": {
+            "success": false,
+            "durationMs": 2068,
+            "runId": "presentation-lifecycle-run-timeout",
+            "finalAssistantTexts": []
+          },
+          "context": {
+            "runId": "presentation-lifecycle-run-timeout",
+            "trace": {
+              "traceId": "f61cfe67c9b90dc7790cc917dcd75be7",
+              "spanId": "a7f5fba8c4ebef72",
+              "parentSpanId": "e29f54500e5b91de",
+              "traceFlags": "01"
+            },
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-timeout",
+            "sessionId": "20b1e99f-692d-42e9-86d2-fe2396726793",
+            "workspaceDir": "<isolated-temp-root>/workspace",
+            "messageProvider": "webchat",
+            "trigger": "user",
+            "channelId": "webchat"
+          },
+          "capturedAt": 1785509992199
+        }
+      },
+      "presentation-lifecycle-run-cancelled": {
+        "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+        "requestedRunId": "presentation-lifecycle-run-cancelled",
+        "acknowledgedRunId": "presentation-lifecycle-run-cancelled",
+        "finalText": "Lifecycle cancelled final must not be delivered.",
+        "after_tool_call": {
+          "kind": "after_tool_call",
+          "event": {
+            "toolName": "workspace_save",
+            "params": {
+              "path": "outputs/contracts/cancelled.md",
+              "content": "# cancelled\n"
+            },
+            "runId": "presentation-lifecycle-run-cancelled",
+            "toolCallId": "contract-reused-tool-call",
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/cancelled.md (12 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"cancelled.md\",\"path\":\"outputs/contracts/cancelled.md\",\"size_bytes\":12,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/cancelled.md",
+                "size": 12,
+                "committed": false
+              }
+            },
+            "durationMs": 50
+          },
+          "context": {
+            "toolName": "workspace_save",
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+            "sessionId": "074b791e-4085-42b1-acad-a37a0e3ee6dc",
+            "runId": "presentation-lifecycle-run-cancelled",
+            "toolCallId": "contract-reused-tool-call"
+          },
+          "capturedAt": 1785509995161
+        },
+        "tool_result_persist": {
+          "kind": "tool_result_persist",
+          "event": {
+            "toolName": "workspace_save",
+            "toolCallId": "contract-reused-tool-call",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "contract-reused-tool-call",
+              "toolName": "workspace_save",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Saved outputs/contracts/normal.md (9 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"normal.md\",\"path\":\"outputs/contracts/normal.md\",\"size_bytes\":9,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+                }
+              ],
+              "details": {
+                "path": "outputs/contracts/normal.md",
+                "size": 9,
+                "committed": false
+              },
+              "isError": false,
+              "timestamp": 1785509981841
+            },
+            "isSynthetic": false
+          },
+          "context": {
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-normal",
+            "toolName": "workspace_save",
+            "toolCallId": "contract-reused-tool-call"
+          },
+          "capturedAt": 1785509981848
+        },
+        "agent_end": {
+          "kind": "agent_end",
+          "event": {
+            "success": false,
+            "durationMs": 2108,
+            "runId": "presentation-lifecycle-run-cancelled",
+            "finalAssistantTexts": []
+          },
+          "context": {
+            "runId": "presentation-lifecycle-run-cancelled",
+            "trace": {
+              "traceId": "39159a547cd505d9d4368aebfa943f16",
+              "spanId": "cfb665695584e38f",
+              "parentSpanId": "161a71d90cab4d79",
+              "traceFlags": "01"
+            },
+            "agentId": "main",
+            "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+            "sessionId": "074b791e-4085-42b1-acad-a37a0e3ee6dc",
+            "workspaceDir": "<isolated-temp-root>/workspace",
+            "messageProvider": "webchat",
+            "trigger": "user",
+            "channelId": "webchat"
+          },
+          "capturedAt": 1785509997181
+        }
+      }
+    },
+    "chatAndAgentFrames": [
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-normal",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "start",
+            "startedAt": 1785509981694
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-normal",
+          "sessionId": "4f697b91-93a9-4ab2-856f-4f0b2bca240d",
+          "seq": 1,
+          "ts": 1785509981694,
+          "isHeartbeat": false
+        },
+        "seq": 4
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-normal",
+          "stream": "item",
+          "data": {
+            "itemId": "tool:contract-reused-tool-call",
+            "phase": "end",
+            "kind": "tool",
+            "title": "workspace_save outputs/contracts/normal.md",
+            "status": "completed",
+            "name": "workspace_save",
+            "meta": "outputs/contracts/normal.md",
+            "toolCallId": "contract-reused-tool-call",
+            "startedAt": 1785509981767,
+            "endedAt": 1785509981838
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-normal",
+          "seq": 5,
+          "ts": 1785509981838,
+          "isHeartbeat": false
+        },
+        "seq": 6
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-normal",
+          "sessionKey": "agent:main:presentation-lifecycle-normal",
+          "seq": 6,
+          "state": "delta",
+          "deltaText": "Lifecycle normal final.",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle normal final."
+              }
+            ],
+            "timestamp": 1785509981867
+          }
+        },
+        "seq": 8
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-normal",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "end",
+            "livenessState": "working",
+            "endedAt": 1785509981878
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-normal",
+          "sessionId": "4f697b91-93a9-4ab2-856f-4f0b2bca240d",
+          "seq": 7,
+          "ts": 1785509981878,
+          "isHeartbeat": false
+        },
+        "seq": 9
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-normal",
+          "sessionKey": "agent:main:presentation-lifecycle-normal",
+          "seq": 7,
+          "state": "final",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle normal final."
+              }
+            ],
+            "timestamp": 1785509981878
+          }
+        },
+        "seq": 10
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-a",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "start",
+            "startedAt": 1785509985403
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "sessionId": "61e9c190-447f-4bcd-8453-a0de5f25b224",
+          "seq": 1,
+          "ts": 1785509985403,
+          "isHeartbeat": false
+        },
+        "seq": 12
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-a",
+          "stream": "item",
+          "data": {
+            "itemId": "tool:contract-queued-a",
+            "phase": "end",
+            "kind": "tool",
+            "title": "workspace_save outputs/contracts/queued-a.md",
+            "status": "completed",
+            "name": "workspace_save",
+            "meta": "outputs/contracts/queued-a.md",
+            "toolCallId": "contract-queued-a",
+            "startedAt": 1785509985457,
+            "endedAt": 1785509985518
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "seq": 5,
+          "ts": 1785509985518,
+          "isHeartbeat": false
+        },
+        "seq": 14
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-a",
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "seq": 6,
+          "state": "delta",
+          "deltaText": "Lifecycle queued A final.",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle queued A final."
+              }
+            ],
+            "timestamp": 1785509986741
+          }
+        },
+        "seq": 17
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-a",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "end",
+            "livenessState": "working",
+            "endedAt": 1785509986750
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "sessionId": "61e9c190-447f-4bcd-8453-a0de5f25b224",
+          "seq": 7,
+          "ts": 1785509986750,
+          "isHeartbeat": false
+        },
+        "seq": 18
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-a",
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "seq": 7,
+          "state": "final",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle queued A final."
+              }
+            ],
+            "timestamp": 1785509986751
+          }
+        },
+        "seq": 19
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-b",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "start",
+            "startedAt": 1785509987092
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "sessionId": "61e9c190-447f-4bcd-8453-a0de5f25b224",
+          "seq": 1,
+          "ts": 1785509987092,
+          "isHeartbeat": false
+        },
+        "seq": 20
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-b",
+          "stream": "item",
+          "data": {
+            "itemId": "tool:contract-queued-b",
+            "phase": "end",
+            "kind": "tool",
+            "title": "workspace_save outputs/contracts/queued-b.md",
+            "status": "completed",
+            "name": "workspace_save",
+            "meta": "outputs/contracts/queued-b.md",
+            "toolCallId": "contract-queued-b",
+            "startedAt": 1785509987109,
+            "endedAt": 1785509987155
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "seq": 5,
+          "ts": 1785509987155,
+          "isHeartbeat": false
+        },
+        "seq": 22
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-b",
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "seq": 6,
+          "state": "delta",
+          "deltaText": "Lifecycle queued B final.",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle queued B final."
+              }
+            ],
+            "timestamp": 1785509987168
+          }
+        },
+        "seq": 24
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-b",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "end",
+            "livenessState": "working",
+            "endedAt": 1785509987171
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "sessionId": "61e9c190-447f-4bcd-8453-a0de5f25b224",
+          "seq": 7,
+          "ts": 1785509987171,
+          "isHeartbeat": false
+        },
+        "seq": 25
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-queued-b",
+          "sessionKey": "agent:main:presentation-lifecycle-queued",
+          "seq": 7,
+          "state": "final",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle queued B final."
+              }
+            ],
+            "timestamp": 1785509987171
+          }
+        },
+        "seq": 26
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-timeout",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "start",
+            "startedAt": 1785509990144
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-timeout",
+          "sessionId": "20b1e99f-692d-42e9-86d2-fe2396726793",
+          "seq": 1,
+          "ts": 1785509990144,
+          "isHeartbeat": false
+        },
+        "seq": 28
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-timeout",
+          "stream": "item",
+          "data": {
+            "itemId": "tool:contract-reused-tool-call",
+            "phase": "end",
+            "kind": "tool",
+            "title": "workspace_save outputs/contracts/timeout.md",
+            "status": "completed",
+            "name": "workspace_save",
+            "meta": "outputs/contracts/timeout.md",
+            "toolCallId": "contract-reused-tool-call",
+            "startedAt": 1785509990162,
+            "endedAt": 1785509990208
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-timeout",
+          "seq": 5,
+          "ts": 1785509990208,
+          "isHeartbeat": false
+        },
+        "seq": 30
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-timeout",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "end",
+            "livenessState": "working",
+            "endedAt": 1785509992146
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-timeout",
+          "sessionId": "20b1e99f-692d-42e9-86d2-fe2396726793",
+          "seq": 6,
+          "ts": 1785509992146,
+          "isHeartbeat": false
+        },
+        "seq": 31
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-timeout",
+          "sessionKey": "agent:main:presentation-lifecycle-timeout",
+          "seq": 6,
+          "state": "final"
+        },
+        "seq": 32
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-timeout",
+          "sessionKey": "agent:main:presentation-lifecycle-timeout",
+          "seq": 1,
+          "state": "error",
+          "errorMessage": "LLM request failed. | Request timed out before a response was generated. Please try again, or increase `agents.defaults.timeoutSeconds` in your config.",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Error: LLM request failed. | Request timed out before a response was generated. Please try again, or increase `agents.defaults.timeoutSeconds` in your config."
+              }
+            ],
+            "timestamp": 1785509992246
+          }
+        },
+        "seq": 33
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-cancelled",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "start",
+            "startedAt": 1785509995087
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+          "sessionId": "074b791e-4085-42b1-acad-a37a0e3ee6dc",
+          "seq": 1,
+          "ts": 1785509995087,
+          "isHeartbeat": false
+        },
+        "seq": 35
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-cancelled",
+          "stream": "item",
+          "data": {
+            "itemId": "tool:contract-reused-tool-call",
+            "phase": "end",
+            "kind": "tool",
+            "title": "workspace_save outputs/contracts/cancelled.md",
+            "status": "completed",
+            "name": "workspace_save",
+            "meta": "outputs/contracts/cancelled.md",
+            "toolCallId": "contract-reused-tool-call",
+            "startedAt": 1785509995111,
+            "endedAt": 1785509995159
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+          "seq": 5,
+          "ts": 1785509995159,
+          "isHeartbeat": false
+        },
+        "seq": 37
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-cancelled",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "end",
+            "livenessState": "working",
+            "endedAt": 1785509997102
+          },
+          "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+          "sessionId": "074b791e-4085-42b1-acad-a37a0e3ee6dc",
+          "seq": 6,
+          "ts": 1785509997102,
+          "isHeartbeat": false
+        },
+        "seq": 38
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-cancelled",
+          "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+          "seq": 6,
+          "state": "final"
+        },
+        "seq": 39
+      },
+      {
+        "type": "event",
+        "event": "chat",
+        "payload": {
+          "runId": "presentation-lifecycle-run-cancelled",
+          "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+          "seq": 1,
+          "state": "aborted",
+          "stopReason": "rpc"
+        },
+        "seq": 41
+      },
+      {
+        "type": "event",
+        "event": "agent",
+        "payload": {
+          "runId": "presentation-lifecycle-run-cancelled",
+          "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+          "stream": "lifecycle",
+          "data": {
+            "phase": "end",
+            "status": "cancelled",
+            "aborted": true,
+            "stopReason": "rpc",
+            "startedAt": 1785509994074,
+            "endedAt": 1785509997279
+          },
+          "seq": 1,
+          "ts": 1785509997279
+        },
+        "seq": 42
+      }
+    ],
+    "resolver": {
+      "normal": {
+        "bindings": [
+          {
+            "index": 0,
+            "runId": "presentation-lifecycle-run-normal"
+          }
+        ]
+      },
+      "queued": {
+        "bindings": []
+      },
+      "incomplete": [
+        {
+          "bindings": []
+        },
+        {
+          "bindings": []
+        }
+      ]
+    },
+    "histories": {
+      "agent:main:presentation-lifecycle-normal": {
+        "sessionKey": "agent:main:presentation-lifecycle-normal",
+        "sessionId": "7b574ccb-c2da-4b28-ba8f-deb1bd2c4066",
+        "messages": [
+          {
+            "role": "user",
+            "content": "RC_CONTRACT_TOOL_CALL {\"name\":\"workspace_save\",\"arguments\":{\"path\":\"outputs/contracts/normal.md\",\"content\":\"# normal\\n\"},\"finalText\":\"Lifecycle normal final.\",\"finalDelayMs\":0,\"toolCallId\":\"contract-reused-tool-call\"}",
+            "timestamp": 1785510377667,
+            "idempotencyKey": "presentation-lifecycle-run-normal:user",
+            "__openclaw": {
+              "id": "e5f8e099",
+              "recordTimestampMs": 1785510382426,
+              "seq": 1
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "contract-reused-tool-call",
+                "name": "workspace_save",
+                "arguments": {
+                  "path": "outputs/contracts/normal.md",
+                  "content": "# normal\n"
+                },
+                "partialArgs": "{\"path\":\"outputs/contracts/normal.md\",\"content\":\"# normal\\n\"}"
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1785510382440,
+            "responseId": "chatcmpl-1785510382461",
+            "__openclaw": {
+              "id": "3ede516d",
+              "recordTimestampMs": 1785510382474,
+              "seq": 2
+            }
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "contract-reused-tool-call",
+            "toolName": "workspace_save",
+            "content": [
+              {
+                "type": "text",
+                "text": "Saved outputs/contracts/normal.md (9 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"normal.md\",\"path\":\"outputs/contracts/normal.md\",\"size_bytes\":9,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1785510382539,
+            "__openclaw": {
+              "id": "ca4312cd",
+              "recordTimestampMs": 1785510382545,
+              "seq": 3
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle normal final."
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1785510382548,
+            "responseId": "chatcmpl-1785510382555",
+            "__openclaw": {
+              "id": "b7bc6156",
+              "recordTimestampMs": 1785510382566,
+              "seq": 4
+            }
+          }
+        ],
+        "defaults": {
+          "modelProvider": "fixture",
+          "model": "tool-driver",
+          "contextTokens": 128000,
+          "thinkingLevels": [
+            {
+              "id": "off",
+              "label": "off"
+            }
+          ],
+          "thinkingOptions": [
+            "off"
+          ],
+          "thinkingDefault": "off"
+        },
+        "sessionInfo": {
+          "key": "agent:main:presentation-lifecycle-normal",
+          "kind": "direct",
+          "chatType": "direct",
+          "origin": {
+            "provider": "webchat",
+            "surface": "webchat",
+            "chatType": "direct"
+          },
+          "updatedAt": 1785510382617,
+          "sessionId": "7b574ccb-c2da-4b28-ba8f-deb1bd2c4066",
+          "systemSent": true,
+          "abortedLastRun": false,
+          "thinkingLevels": [
+            {
+              "id": "off",
+              "label": "off"
+            }
+          ],
+          "thinkingOptions": [
+            "off"
+          ],
+          "thinkingDefault": "off",
+          "totalTokensFresh": false,
+          "status": "done",
+          "startedAt": 1785510382405,
+          "endedAt": 1785510382569,
+          "runtimeMs": 164,
+          "modelProvider": "fixture",
+          "model": "tool-driver",
+          "agentRuntime": {
+            "id": "auto",
+            "source": "implicit"
+          },
+          "contextTokens": 128000,
+          "deliveryContext": {
+            "channel": "webchat"
+          },
+          "lastChannel": "webchat",
+          "hasActiveRun": false
+        },
+        "thinkingLevel": "off"
+      },
+      "agent:main:presentation-lifecycle-queued": {
+        "sessionKey": "agent:main:presentation-lifecycle-queued",
+        "sessionId": "8d4e2fab-8eb8-49b5-a0a5-58339dee682c",
+        "messages": [
+          {
+            "role": "user",
+            "content": "RC_CONTRACT_TOOL_CALL {\"name\":\"workspace_save\",\"arguments\":{\"path\":\"outputs/contracts/queued-a.md\",\"content\":\"# queued-a\\n\"},\"finalText\":\"Lifecycle queued A final.\",\"finalDelayMs\":1200,\"toolCallId\":\"contract-queued-a\"}",
+            "timestamp": 1785510384193,
+            "idempotencyKey": "presentation-lifecycle-run-queued-a:user",
+            "__openclaw": {
+              "id": "cb250309",
+              "recordTimestampMs": 1785510386571,
+              "seq": 1
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "contract-queued-a",
+                "name": "workspace_save",
+                "arguments": {
+                  "path": "outputs/contracts/queued-a.md",
+                  "content": "# queued-a\n"
+                },
+                "partialArgs": "{\"path\":\"outputs/contracts/queued-a.md\",\"content\":\"# queued-a\\n\"}"
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1785510386573,
+            "responseId": "chatcmpl-1785510386582",
+            "__openclaw": {
+              "id": "e24a674e",
+              "recordTimestampMs": 1785510386585,
+              "seq": 2
+            }
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "contract-queued-a",
+            "toolName": "workspace_save",
+            "content": [
+              {
+                "type": "text",
+                "text": "Saved outputs/contracts/queued-a.md (11 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"queued-a.md\",\"path\":\"outputs/contracts/queued-a.md\",\"size_bytes\":11,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1785510386630,
+            "__openclaw": {
+              "id": "4c0ba7f5",
+              "recordTimestampMs": 1785510386631,
+              "seq": 3
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle queued A final."
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1785510386632,
+            "responseId": "chatcmpl-1785510387841",
+            "__openclaw": {
+              "id": "56f799da",
+              "recordTimestampMs": 1785510387859,
+              "seq": 4
+            }
+          },
+          {
+            "role": "user",
+            "content": "RC_CONTRACT_TOOL_CALL {\"name\":\"workspace_save\",\"arguments\":{\"path\":\"outputs/contracts/queued-b.md\",\"content\":\"# queued-b\\n\"},\"finalText\":\"Lifecycle queued B final.\",\"finalDelayMs\":0,\"toolCallId\":\"contract-queued-b\"}",
+            "timestamp": 1785510385885,
+            "idempotencyKey": "presentation-lifecycle-run-queued-b:user",
+            "__openclaw": {
+              "id": "2e846563",
+              "recordTimestampMs": 1785510388467,
+              "seq": 5
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "contract-queued-b",
+                "name": "workspace_save",
+                "arguments": {
+                  "path": "outputs/contracts/queued-b.md",
+                  "content": "# queued-b\n"
+                },
+                "partialArgs": "{\"path\":\"outputs/contracts/queued-b.md\",\"content\":\"# queued-b\\n\"}"
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1785510388471,
+            "responseId": "chatcmpl-1785510388485",
+            "__openclaw": {
+              "id": "3d46e5ec",
+              "recordTimestampMs": 1785510388489,
+              "seq": 6
+            }
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "contract-queued-b",
+            "toolName": "workspace_save",
+            "content": [
+              {
+                "type": "text",
+                "text": "Saved outputs/contracts/queued-b.md (11 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"queued-b.md\",\"path\":\"outputs/contracts/queued-b.md\",\"size_bytes\":11,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1785510388539,
+            "__openclaw": {
+              "id": "09e51fce",
+              "recordTimestampMs": 1785510388540,
+              "seq": 7
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Lifecycle queued B final."
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1785510388547,
+            "responseId": "chatcmpl-1785510388555",
+            "__openclaw": {
+              "id": "1232866d",
+              "recordTimestampMs": 1785510388560,
+              "seq": 8
+            }
+          }
+        ],
+        "defaults": {
+          "modelProvider": "fixture",
+          "model": "tool-driver",
+          "contextTokens": 128000,
+          "thinkingLevels": [
+            {
+              "id": "off",
+              "label": "off"
+            }
+          ],
+          "thinkingOptions": [
+            "off"
+          ],
+          "thinkingDefault": "off"
+        },
+        "sessionInfo": {
+          "key": "agent:main:presentation-lifecycle-queued",
+          "kind": "direct",
+          "chatType": "direct",
+          "origin": {
+            "provider": "webchat",
+            "surface": "webchat",
+            "chatType": "direct"
+          },
+          "updatedAt": 1785510388636,
+          "sessionId": "8d4e2fab-8eb8-49b5-a0a5-58339dee682c",
+          "systemSent": true,
+          "abortedLastRun": false,
+          "thinkingLevels": [
+            {
+              "id": "off",
+              "label": "off"
+            }
+          ],
+          "thinkingOptions": [
+            "off"
+          ],
+          "thinkingDefault": "off",
+          "totalTokensFresh": false,
+          "status": "done",
+          "startedAt": 1785510388464,
+          "endedAt": 1785510388562,
+          "runtimeMs": 98,
+          "modelProvider": "fixture",
+          "model": "tool-driver",
+          "agentRuntime": {
+            "id": "auto",
+            "source": "implicit"
+          },
+          "contextTokens": 128000,
+          "deliveryContext": {
+            "channel": "webchat"
+          },
+          "lastChannel": "webchat",
+          "hasActiveRun": false
+        },
+        "thinkingLevel": "off"
+      },
+      "agent:main:presentation-lifecycle-timeout": {
+        "sessionKey": "agent:main:presentation-lifecycle-timeout",
+        "sessionId": "f5226639-2861-43d6-813b-3cf52117d512",
+        "messages": [
+          {
+            "role": "user",
+            "content": "RC_CONTRACT_TOOL_CALL {\"name\":\"workspace_save\",\"arguments\":{\"path\":\"outputs/contracts/timeout.md\",\"content\":\"# timeout\\n\"},\"finalText\":\"Lifecycle timeout final must not be delivered.\",\"finalDelayMs\":5000,\"toolCallId\":\"contract-reused-tool-call\"}",
+            "timestamp": 1785510390427,
+            "idempotencyKey": "presentation-lifecycle-run-timeout:user",
+            "__openclaw": {
+              "id": "e251f121",
+              "recordTimestampMs": 1785510392995,
+              "seq": 1
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "contract-reused-tool-call",
+                "name": "workspace_save",
+                "arguments": {
+                  "path": "outputs/contracts/timeout.md",
+                  "content": "# timeout\n"
+                },
+                "partialArgs": "{\"path\":\"outputs/contracts/timeout.md\",\"content\":\"# timeout\\n\"}"
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1785510392997,
+            "responseId": "chatcmpl-1785510393005",
+            "__openclaw": {
+              "id": "15ed32a6",
+              "recordTimestampMs": 1785510393009,
+              "seq": 2
+            }
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "contract-reused-tool-call",
+            "toolName": "workspace_save",
+            "content": [
+              {
+                "type": "text",
+                "text": "Saved outputs/contracts/timeout.md (10 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"timeout.md\",\"path\":\"outputs/contracts/timeout.md\",\"size_bytes\":10,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1785510393062,
+            "__openclaw": {
+              "id": "1e79fc35",
+              "recordTimestampMs": 1785510393063,
+              "seq": 3
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "aborted",
+            "timestamp": 1785510393065,
+            "errorMessage": "Request was aborted.",
+            "__openclaw": {
+              "id": "e9580b97",
+              "recordTimestampMs": 1785510394985,
+              "seq": 4
+            }
+          }
+        ],
+        "defaults": {
+          "modelProvider": "fixture",
+          "model": "tool-driver",
+          "contextTokens": 128000,
+          "thinkingLevels": [
+            {
+              "id": "off",
+              "label": "off"
+            }
+          ],
+          "thinkingOptions": [
+            "off"
+          ],
+          "thinkingDefault": "off"
+        },
+        "sessionInfo": {
+          "key": "agent:main:presentation-lifecycle-timeout",
+          "kind": "direct",
+          "chatType": "direct",
+          "origin": {
+            "provider": "webchat",
+            "surface": "webchat",
+            "chatType": "direct"
+          },
+          "updatedAt": 1785510395096,
+          "sessionId": "f5226639-2861-43d6-813b-3cf52117d512",
+          "systemSent": true,
+          "abortedLastRun": false,
+          "thinkingLevels": [
+            {
+              "id": "off",
+              "label": "off"
+            }
+          ],
+          "thinkingOptions": [
+            "off"
+          ],
+          "thinkingDefault": "off",
+          "totalTokensFresh": false,
+          "status": "done",
+          "startedAt": 1785510392993,
+          "endedAt": 1785510394988,
+          "runtimeMs": 1995,
+          "modelProvider": "fixture",
+          "model": "tool-driver",
+          "agentRuntime": {
+            "id": "auto",
+            "source": "implicit"
+          },
+          "contextTokens": 128000,
+          "deliveryContext": {
+            "channel": "webchat"
+          },
+          "lastChannel": "webchat",
+          "hasActiveRun": false
+        },
+        "thinkingLevel": "off"
+      },
+      "agent:main:presentation-lifecycle-cancelled": {
+        "sessionKey": "agent:main:presentation-lifecycle-cancelled",
+        "sessionId": "a9a21d17-511d-4b1d-bff8-ba97fd847e07",
+        "messages": [
+          {
+            "role": "user",
+            "content": "RC_CONTRACT_TOOL_CALL {\"name\":\"workspace_save\",\"arguments\":{\"path\":\"outputs/contracts/cancelled.md\",\"content\":\"# cancelled\\n\"},\"finalText\":\"Lifecycle cancelled final must not be delivered.\",\"finalDelayMs\":5000,\"toolCallId\":\"contract-reused-tool-call\"}",
+            "timestamp": 1785510396840,
+            "idempotencyKey": "presentation-lifecycle-run-cancelled:user",
+            "__openclaw": {
+              "id": "b6347e25",
+              "recordTimestampMs": 1785510397910,
+              "seq": 1
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "contract-reused-tool-call",
+                "name": "workspace_save",
+                "arguments": {
+                  "path": "outputs/contracts/cancelled.md",
+                  "content": "# cancelled\n"
+                },
+                "partialArgs": "{\"path\":\"outputs/contracts/cancelled.md\",\"content\":\"# cancelled\\n\"}"
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "toolUse",
+            "timestamp": 1785510397912,
+            "responseId": "chatcmpl-1785510397921",
+            "__openclaw": {
+              "id": "33f6163d",
+              "recordTimestampMs": 1785510397924,
+              "seq": 2
+            }
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "contract-reused-tool-call",
+            "toolName": "workspace_save",
+            "content": [
+              {
+                "type": "text",
+                "text": "Saved outputs/contracts/cancelled.md (12 bytes, committed: false)\n\nInclude this card in your response:\n```file_card\n{\"type\":\"file_card\",\"name\":\"cancelled.md\",\"path\":\"outputs/contracts/cancelled.md\",\"size_bytes\":12,\"mime_type\":\"text/markdown\",\"git_status\":\"new\"}\n```"
+              }
+            ],
+            "isError": false,
+            "timestamp": 1785510397968,
+            "__openclaw": {
+              "id": "2ab86394",
+              "recordTimestampMs": 1785510397969,
+              "seq": 3
+            }
+          },
+          {
+            "role": "assistant",
+            "content": [],
+            "api": "openai-completions",
+            "provider": "fixture",
+            "model": "tool-driver",
+            "usage": {
+              "input": 0,
+              "output": 0,
+              "totalTokens": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "cost": {
+                "total": 0
+              }
+            },
+            "stopReason": "aborted",
+            "timestamp": 1785510397971,
+            "errorMessage": "Request was aborted.",
+            "__openclaw": {
+              "id": "6b292a02",
+              "recordTimestampMs": 1785510399901,
+              "seq": 4
+            }
+          }
+        ],
+        "defaults": {
+          "modelProvider": "fixture",
+          "model": "tool-driver",
+          "contextTokens": 128000,
+          "thinkingLevels": [
+            {
+              "id": "off",
+              "label": "off"
+            }
+          ],
+          "thinkingOptions": [
+            "off"
+          ],
+          "thinkingDefault": "off"
+        },
+        "sessionInfo": {
+          "key": "agent:main:presentation-lifecycle-cancelled",
+          "kind": "direct",
+          "chatType": "direct",
+          "origin": {
+            "provider": "webchat",
+            "surface": "webchat",
+            "chatType": "direct"
+          },
+          "updatedAt": 1785510399993,
+          "sessionId": "a9a21d17-511d-4b1d-bff8-ba97fd847e07",
+          "systemSent": true,
+          "abortedLastRun": false,
+          "thinkingLevels": [
+            {
+              "id": "off",
+              "label": "off"
+            }
+          ],
+          "thinkingOptions": [
+            "off"
+          ],
+          "thinkingDefault": "off",
+          "totalTokensFresh": false,
+          "status": "done",
+          "startedAt": 1785510397908,
+          "endedAt": 1785510399904,
+          "runtimeMs": 1996,
+          "modelProvider": "fixture",
+          "model": "tool-driver",
+          "agentRuntime": {
+            "id": "auto",
+            "source": "implicit"
+          },
+          "contextTokens": 128000,
+          "deliveryContext": {
+            "channel": "webchat"
+          },
+          "lastChannel": "webchat",
+          "hasActiveRun": false
+        },
+        "thinkingLevel": "off"
+      }
+    },
+    "abortResponse": {
+      "ok": true,
+      "aborted": true,
+      "runIds": [
+        "presentation-lifecycle-run-cancelled"
+      ]
+    }
+  },
+  "customEvent": {
+    "emission": {
+      "kind": "presentation_event_emitted",
+      "event": {
+        "runId": "presentation-contract-run-1",
+        "sessionKey": "agent:main:presentation-contract-1",
+        "emitted": {
+          "emitted": true,
+          "stream": "research-claw-core.presentation_changed"
+        }
+      },
+      "capturedAt": 1785509953611
+    },
+    "deliveredFrame": {
+      "type": "event",
+      "event": "agent",
+      "payload": {
+        "runId": "presentation-contract-run-1",
+        "stream": "research-claw-core.presentation_changed",
+        "sessionKey": "agent:main:presentation-contract-1",
+        "data": {
+          "schemaVersion": 1,
+          "runId": "presentation-contract-run-1",
+          "sessionKey": "agent:main:presentation-contract-1",
+          "recordsRevision": 1,
+          "pluginId": "research-claw-core",
+          "pluginName": "Research-Claw event transport probe"
+        },
+        "seq": 6,
+        "ts": 1785509953611,
+        "isHeartbeat": false
+      },
+      "seq": 8
+    },
+    "after_tool_call": {
+      "kind": "after_tool_call",
+      "event": {
+        "toolName": "presentation_event_probe",
+        "params": {},
+        "runId": "presentation-contract-run-1",
+        "toolCallId": "contract-presentation_event_probe-1785509953588",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Tool presentation_event_probe not found"
+            }
+          ],
+          "details": {}
+        },
+        "error": "Tool presentation_event_probe not found",
+        "durationMs": 10
+      },
+      "context": {
+        "toolName": "presentation_event_probe",
+        "agentId": "main",
+        "sessionKey": "agent:main:presentation-contract-1",
+        "sessionId": "b80afb6b-271e-4ded-babe-e2b3732d831d",
+        "runId": "presentation-contract-run-1",
+        "toolCallId": "contract-presentation_event_probe-1785509953588"
+      },
+      "capturedAt": 1785509953612
+    }
+  }
+}

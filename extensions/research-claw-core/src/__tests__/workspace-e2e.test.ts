@@ -119,7 +119,12 @@ describe.skipIf(!gitAvailable)('Workspace E2E (real filesystem + real git)', () 
     });
     expect(toolText(r1)).toContain('Saved');
     expect(toolText(r1)).not.toContain('Overwrote'); // new file, no warning
-    expect(toolText(r1)).toContain('file_card');
+    expect(toolText(r1)).not.toContain('file_card');
+    expect(toolDetails(r1).presentation).toMatchObject({
+      schemaVersion: 1,
+      kind: 'file',
+      path: 'outputs/drafts/paper.md',
+    });
     expect(toolDetails(r1).committed).toBe(true);
 
     // — Read back —
@@ -301,7 +306,12 @@ describe.skipIf(!gitAvailable)('Workspace E2E (real filesystem + real git)', () 
         content: entries[i],
       });
       expect(toolText(r)).toContain('Appended');
-      expect(toolText(r)).toContain('file_card');
+      expect(toolText(r)).not.toContain('file_card');
+      expect(toolDetails(r).presentation).toMatchObject({
+        schemaVersion: 1,
+        kind: 'file',
+        path: 'sources/references/refs.bib',
+      });
       expect(toolDetails(r).committed).toBe(true);
     }
 

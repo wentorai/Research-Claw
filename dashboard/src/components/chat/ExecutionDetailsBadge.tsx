@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import { Popover, Spin, Tag, Tooltip, Typography } from 'antd';
 import { SafetyCertificateOutlined, ToolOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { useExecutionTraceStore } from '../../stores/execution-trace';
+import { executionKey, useExecutionTraceStore } from '../../stores/execution-trace';
 
 const { Text } = Typography;
 
-export default function ExecutionDetailsBadge({ runId }: { runId: string }) {
+export default function ExecutionDetailsBadge({ sessionKey, runId }: { sessionKey: string; runId: string }) {
   const { t } = useTranslation();
-  const summary = useExecutionTraceStore((state) => state.summaries[runId]);
-  const detail = useExecutionTraceStore((state) => state.details[runId]);
+  const key = executionKey(sessionKey, runId);
+  const summary = useExecutionTraceStore((state) => state.summaries[key]);
+  const detail = useExecutionTraceStore((state) => state.details[key]);
   const loadDetail = useExecutionTraceStore((state) => state.loadDetail);
   const [loading, setLoading] = useState(false);
   if (!summary || (summary.toolCount === 0 && summary.skillCount === 0)) return null;
@@ -100,7 +101,7 @@ export default function ExecutionDetailsBadge({ runId }: { runId: string }) {
       onOpenChange={(open) => {
         if (!open || detail || loading) return;
         setLoading(true);
-        void loadDetail(runId).finally(() => setLoading(false));
+        void loadDetail(sessionKey, runId).finally(() => setLoading(false));
       }}
     >
       <Tooltip title={label}>

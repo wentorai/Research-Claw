@@ -59,7 +59,7 @@ from here into `sources/papers/` etc.
 
 | Tool | Purpose |
 |------|---------|
-| `workspace_save` | Write **text** file + auto-commit → emits `file_card` |
+| `workspace_save` | Write **text** file + auto-commit → Dashboard projects the file fact |
 | `workspace_read` | Read file contents |
 | `workspace_list` | List files (glob filter + git status) |
 | `workspace_diff` | Show changes (no range = uncommitted vs HEAD) |
@@ -68,13 +68,13 @@ from here into `sources/papers/` etc.
 | `workspace_move` | Rename/move file + commit |
 | `workspace_export` | Convert text → binary format (md→docx/pdf, csv→xlsx) |
 | `workspace_delete` | Delete a file + auto-commit (requires confirm=true) → recoverable via `workspace_restore` |
-| `workspace_append` | Append content to an existing file (or create) → emits `file_card` |
-| `workspace_download` | Download URL → save binary to workspace (PDFs, images) → emits `file_card` |
+| `workspace_append` | Append content to an existing file (or create) → automatic file projection |
+| `workspace_download` | Download URL → save binary to workspace → automatic file projection |
 
 ## Version Control Operations
 
 - **Undo / rollback**: `workspace_history` → present commits → user selects
-  → `workspace_restore` → report with `file_card`.
+  → `workspace_restore` → report the restored path in normal text.
 - **Diff**: `workspace_diff` (default: uncommitted vs HEAD).
 - **Proactive**: Mention git history after overwrites. Note `workspace_restore`
   on delete.
@@ -155,7 +155,7 @@ After downloading a PDF to `sources/papers/`, offer `library_add_paper` to index
 - PDF saved/downloaded to `sources/papers/` → offer `library_add_paper`
 - Paper added to library → suggest `workspace_save` BibTeX to `sources/references/refs.bib` via `workspace_append`
 - Code file created → suggest `task_create` to track the work
-- Analysis output generated → emit `file_card` + `task_complete` if linked
+- Analysis output generated → report its relative path + `task_complete` if linked
 
 ## Related Research-Plugins Skills
 

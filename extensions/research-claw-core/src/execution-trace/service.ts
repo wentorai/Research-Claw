@@ -321,6 +321,38 @@ export class ExecutionTraceService {
     }));
   }
 
+  summaryForSession(
+    sessionKey: string,
+    runIds: string[],
+  ): Record<string, { toolCount: number; errorCount: number; skillCount: number }> {
+    const foreign = runIds.find((runId) => this.hasForeignRun(sessionKey, runId) && !this.hasRun(sessionKey, runId));
+    if (foreign) throw new Error(`runId does not belong to sessionKey: ${foreign}`);
+    if (runIds.length === 0) return {};
+    const placeholders = runIds.map(() => '?').join(',');
+    const rows = this.db.prepare(`
+      SELECT run_id, COUNT(*) tool_count,
+             SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) error_count
+      FROM rc_execution_tools
+      WHERE session_key = ? AND run_id IN (${placeholders}) GROUP BY run_id
+    `).all(sessionKey, ...runIds) as Array<{ run_id: string; tool_count: number; error_count: number }>;
+    const skillRows = this.db.prepare(`
+      SELECT run_id, COUNT(*) skill_count
+      FROM rc_execution_skills
+      WHERE session_key = ? AND run_id IN (${placeholders}) GROUP BY run_id
+    `).all(sessionKey, ...runIds) as Array<{ run_id: string; skill_count: number }>;
+    const skillCounts = new Map(skillRows.map((row) => [row.run_id, row.skill_count]));
+    return Object.fromEntries(runIds.flatMap((runId) => {
+      const row = rows.find((candidate) => candidate.run_id === runId);
+      const skillCount = skillCounts.get(runId) ?? 0;
+      if (!row && skillCount === 0) return [];
+      return [[runId, {
+        toolCount: row?.tool_count ?? 0,
+        errorCount: row?.error_count ?? 0,
+        skillCount,
+      }]];
+    }));
+  }
+
   detail(runId: string): ExecutionTool[] {
     return this.db.prepare(`
       SELECT * FROM rc_execution_tools WHERE run_id = ?
@@ -347,5 +379,79 @@ export class ExecutionTraceService {
         END ASC,
         id ASC
     `).all(runId) as ExecutionSkillEvent[];
+  }
+
+  detailForSession(sessionKey: string, runId: string): {
+    tools: ExecutionTool[];
+    skills: ExecutionSkill[];
+    skillEvents: ExecutionSkillEvent[];
+  } {
+    if (this.hasForeignRun(sessionKey, runId) && !this.hasRun(sessionKey, runId)) {
+      throw new Error(`runId does not belong to sessionKey: ${runId}`);
+    }
+    return {
+      tools: this.db.prepare(`
+        SELECT * FROM rc_execution_tools
+        WHERE session_key = ? AND run_id = ? ORDER BY started_at ASC, id ASC
+      `).all(sessionKey, runId) as ExecutionTool[],
+      skills: this.db.prepare(`
+        SELECT * FROM rc_execution_skills
+        WHERE session_key = ? AND run_id = ? ORDER BY first_used_at ASC, id ASC
+      `).all(sessionKey, runId) as ExecutionSkill[],
+      skillEvents: this.db.prepare(`
+        SELECT * FROM rc_execution_skill_events
+        WHERE session_key = ? AND run_id = ?
+        ORDER BY observed_at ASC,
+          CASE lifecycle
+            WHEN 'candidate' THEN 0 WHEN 'selected' THEN 1
+            WHEN 'loaded' THEN 2 WHEN 'executed' THEN 3
+          END ASC, id ASC
+      `).all(sessionKey, runId) as ExecutionSkillEvent[],
+    };
+  }
+
+  findUniqueRunForTool(
+    sessionKey: string,
+    toolCallId: string,
+    observedAfter: number,
+  ): string | null {
+    const rows = this.db.prepare(`
+      SELECT DISTINCT run_id FROM rc_execution_tools
+      WHERE session_key = ? AND tool_call_id = ? AND started_at >= ?
+      ORDER BY run_id
+      LIMIT 2
+    `).all(sessionKey, toolCallId, observedAfter) as Array<{ run_id: string }>;
+    return rows.length === 1 ? rows[0].run_id : null;
+  }
+
+  hasRun(sessionKey: string, runId: string): boolean {
+    return Boolean(this.db.prepare(`
+      SELECT 1 FROM (
+        SELECT session_key, run_id FROM rc_execution_tools
+        UNION ALL SELECT session_key, run_id FROM rc_execution_skills
+        UNION ALL SELECT session_key, run_id FROM rc_execution_skill_events
+        UNION ALL SELECT session_key, run_id FROM rc_execution_replies
+      ) WHERE session_key = ? AND run_id = ? LIMIT 1
+    `).get(sessionKey, runId));
+  }
+
+  hasForeignRun(sessionKey: string, runId: string): boolean {
+    return Boolean(this.db.prepare(`
+      SELECT 1 FROM (
+        SELECT session_key, run_id FROM rc_execution_tools
+        UNION ALL SELECT session_key, run_id FROM rc_execution_skills
+        UNION ALL SELECT session_key, run_id FROM rc_execution_skill_events
+        UNION ALL SELECT session_key, run_id FROM rc_execution_replies
+      ) WHERE session_key <> ? AND run_id = ? LIMIT 1
+    `).get(sessionKey, runId));
+  }
+
+  deleteSession(sessionKey: string): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM rc_execution_skill_events WHERE session_key = ?').run(sessionKey);
+      this.db.prepare('DELETE FROM rc_execution_skills WHERE session_key = ?').run(sessionKey);
+      this.db.prepare('DELETE FROM rc_execution_tools WHERE session_key = ?').run(sessionKey);
+      this.db.prepare('DELETE FROM rc_execution_replies WHERE session_key = ?').run(sessionKey);
+    })();
   }
 }

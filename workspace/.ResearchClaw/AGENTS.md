@@ -102,21 +102,31 @@ API tools. Use `system.run` for Python data analysis when needed.
 For trigger-word mappings, domain routing, recency protocol, Zotero/EndNote
 bridge, and PDF import, read the **Search SOP** skill.
 
-### §3.1 Card Emission Protocol
+### §3.1 Card Presentation Protocol
 
-**After every data-producing tool call, emit the matching card:**
+Research-Claw automatically presents successful Workspace file facts and
+supported literature-search results in the Dashboard. Always explain important
+deliverables and judgments in normal language and include an ordinary relative
+file path or safe link so CLI and external channels remain useful. Do not copy
+tool JSON merely to make those automatic cards appear.
+
+Emit the remaining Agent-authored cards when their semantics apply:
 
 | Tool call | Card to emit |
 |:----------|:-------------|
 | `library_add_paper` / `library_batch_add` | `paper_card` |
 | `task_create` / `task_complete` / `task_update` | `task_card` |
-| `workspace_save` / `workspace_export` / `workspace_append` / `workspace_download` | `file_card` — **COPY from tool output verbatim, NEVER fabricate** |
+| Literature result the Agent deliberately highlights or recommends | `paper_card` — not every raw search hit |
+| `workspace_save` / `workspace_export` / `workspace_append` / `workspace_download` | No fence required; state the ordinary relative path |
 | HiL decision needed (§5) | `approval_card` — **MUST include `approval_id` from `exec.approval.requested`** |
 | Heartbeat/onboarding/session-level milestone summary | `progress_card` (agent-composed; never for ordinary search result summaries) |
 | `monitor_report` | `monitor_digest` (agent-composed from report results) |
 
 **CRITICAL:** `approval_card` without `approval_id` renders dashboard buttons non-functional.
-**CRITICAL:** `file_card` MUST be copied from tool response — fabricated cards cause "file not found" errors.
+**CRITICAL:** Raw retrieved results are not selected, read, cited, saved, verified,
+or Reliable Sources. Never imply those states unless a separate action established them.
+Legacy `paper_card` / `file_card` fences remain readable, but never fabricate a
+file path or emit a fence just to duplicate the Dashboard's automatic projection.
 
 ### §3.2 Search Fallback Chain
 
@@ -161,8 +171,9 @@ fall back to raw filesystem/DB access for production state.
 presentation only. Do **not** call `library_add_paper` or
 `library_batch_add` unless the user explicitly asks to persist results with
 wording such as "入库", "保存到文库", "加入文库", "添加到 library", or
-"记录下来". If intent is unclear, show candidate `paper_card`/text results and
-ask which items to add.
+"记录下来". If intent is unclear, summarize candidates in normal text and ask
+which items to add. The Dashboard may separately disclose supported raw results
+as “检索结果·尚未筛选”; that disclosure is not library storage or endorsement.
 
 Research-Plugins (RP) is preferred for methodology skills and academic APIs.
 For literature/survey/citation/writing/plotting/domain research, route through
@@ -188,16 +199,18 @@ approval for a specific high-risk command.
 
 ## §4 Cross-Module Handoff
 
-1. **monitor_report → new findings** → present `paper_card` per result; user
-   selects which to add → `library_add_paper`. Emit `monitor_digest`.
+1. **monitor_report → new findings** → summarize results; use `paper_card` only
+   for papers deliberately highlighted by the Agent; user selects which to add
+   → `library_add_paper`. Emit `monitor_digest`.
 2. **monitor_create** → suggest `cron`. Each tick: `monitor_get_context` → scan
    → `monitor_report` → `monitor_note`. Save digest via `workspace_save`.
    Use `monitor_update` for schedule/config changes; do not edit monitor SQLite directly.
 3. **library_add_paper + active project** → auto `task_link` (reversible, no confirm).
 4. **task_complete** → summarize accomplishments in normal text; use `progress_card`
    only when reporting a session-level milestone or heartbeat/onboarding progress.
-5. **Search phase complete** → summarize findings in normal text and `paper_card`
-   candidates; do not use `progress_card` for ordinary search result summaries.
+5. **Search phase complete** → summarize findings in normal text; use
+   `paper_card` only for deliberate highlights, not the automatic raw-result
+   disclosure. Do not use `progress_card` for ordinary search result summaries.
 6. **Phase 3 cites paper** → `library_search` first; if missing, add before citing.
 7. **PDF downloaded to sources/papers/** → offer `library_add_paper` to index it.
 8. **Paper added to library** → suggest saving BibTeX to `sources/references/` via `workspace_append`.
@@ -318,12 +331,14 @@ Use fenced code blocks with card type as language tag. Content MUST be valid
 JSON (`JSON.parse()`). Six types — inline schemas below; load **Output Cards**
 skill for full examples.
 
-### paper_card — real publications only (API queries or library)
+### paper_card — Agent-highlighted real publications only
 
 Required: `type`, `title`, `authors` (string[]).
 Optional: `venue`, `year`, `doi`, `url`, `arxiv_id`, `abstract_preview`,
 `read_status` ("unread"|"reading"|"read"|"reviewed"), `library_id`, `tags`.
-**NEVER** for concepts, tools, or non-scholarly content.
+**NEVER** for concepts, tools, non-scholarly content, or mechanical copies of
+every search hit. A fenced `paper_card` means the Agent deliberately chose to
+present that publication; it does not by itself mean cited, saved, or verified.
 
 ### task_card
 
@@ -349,8 +364,10 @@ Optional: `details` (must be a JSON object, not a string).
 
 ### file_card — workspace file references
 
-**COPY verbatim** from `workspace_save` / `workspace_export` tool output.
-**NEVER fabricate** — causes "file not found" errors in the dashboard.
+Successful `workspace_save` / `workspace_export` / `workspace_append` /
+`workspace_download` facts are presented automatically. In the final reply,
+state the ordinary workspace-relative path; do not mechanically emit a fence.
+Legacy fences are accepted, but **NEVER fabricate** a path.
 
 ### monitor_digest — monitor scan results
 
