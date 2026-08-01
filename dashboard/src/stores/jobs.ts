@@ -63,6 +63,15 @@ interface JobsState {
   retryJob: (id: string) => Promise<void>;
 }
 
+let jobsLoadGeneration = 0;
+const jobLoadGenerationById = new Map<string, number>();
+
+function invalidateJobReads(id: string): void {
+  jobsLoadGeneration += 1;
+  jobLoadGenerationById.set(id, (jobLoadGenerationById.get(id) ?? 0) + 1);
+  useJobsStore.setState({ loading: false });
+}
+
 /**
  * Older sync ordering could leave both a user-facing longtask:* row and an
  * automatically mirrored openclaw:* row for the same child session. They are
@@ -94,22 +103,32 @@ export const useJobsStore = create<JobsState>()((set, get) => ({
   actionById: {},
   loadJobs: async () => {
     const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return false;
+    if (!client?.isConnected) {
+      set({ loading: false });
+      return false;
+    }
+    const generation = ++jobsLoadGeneration;
     set({ loading: true });
     try {
       const jobs = await client.request<Job[]>('rc.job.list', { limit: 100 });
+      if (generation !== jobsLoadGeneration) return true;
       set({ jobs: collapseMirroredOpenClawJobs(jobs), loading: false, lastLoadedAt: Date.now() });
       return true;
     } catch {
-      set({ loading: false });
+      if (generation === jobsLoadGeneration) set({ loading: false });
       return false;
     }
   },
   loadJob: async (id) => {
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return null;
+    const generation = (jobLoadGenerationById.get(id) ?? 0) + 1;
+    jobLoadGenerationById.set(id, generation);
     try {
       const job = await client.request<Job>('rc.job.get', { id });
+      if (jobLoadGenerationById.get(id) !== generation) {
+        return get().jobs.find((item) => item.id === id) ?? null;
+      }
       set({ jobs: get().jobs.map((item) => item.id === id ? job : item) });
       return job;
     } catch {
@@ -134,6 +153,7 @@ export const useJobsStore = create<JobsState>()((set, get) => ({
           ? 'Cancelled from Research-Claw Jobs panel'
           : 'Cancelled by user',
       });
+      invalidateJobReads(id);
       replaceJob(cancelled);
       // Best-effort: stop the live OpenClaw subagent run. Never block (or fail)
       // the cancel on this — the job is already cancelled above, and "no active
@@ -339,6 +359,7 @@ async function continueOpenClawJob(id: string, mode: 'resume' | 'retry'): Promis
         ? '已请求 OpenClaw 子会话重试'
         : '已请求 OpenClaw 子会话继续',
     });
+    invalidateJobReads(id);
     replaceJob(updated);
     await useJobsStore.getState().loadJobs();
   } finally {

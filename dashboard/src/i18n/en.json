@@ -123,7 +123,7 @@
   "chat": {
     "longTask": {
       "confirmTitle": "Run as a background job?",
-      "confirmBody": "This request contains explicit long-duration and bulk-work signals: \"{{title}}\". Background execution starts an OpenClaw subagent; foreground execution continues in this session. You can also cancel without sending.",
+      "confirmBody": "Research-Claw can run this long task in the background or continue in the current session.",
       "confirmOk": "Run in background",
       "confirmForeground": "Run in foreground",
       "confirmDismiss": "Cancel send"
@@ -222,6 +222,10 @@
     "attachNoVisionModel": "Image attached. The current model can't view images directly — it'll be saved to the workspace and the assistant will try to read it with its tools (e.g. OCR, code). For reliable image understanding, enable a separate vision model in Settings.",
     "bgWorking": "Working in background...",
     "activityHistory": "Activity history",
+    "activityToolStarted": "Tool call started: {{name}}",
+    "activityToolCompleted": "Tool call completed: {{name}}",
+    "activityDurationSeconds": "{{duration}} s",
+    "activityDurationMilliseconds": "{{duration}} ms",
     "noActivityYet": "No activity yet",
     "clear": "Clear",
     "refresh": "Refresh chat",

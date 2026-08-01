@@ -54,6 +54,7 @@ describe('Chat store', () => {
     sessionStorage.removeItem('rc-local-chat-msgs');
     localStorage.removeItem('rc-local-chat-msgs-v2');
     localStorage.removeItem('rc-execution-bindings:main');
+    localStorage.removeItem('rc_active_session');
     useStagedWritingStore.setState({
       job: null,
       restored: false,
@@ -180,6 +181,29 @@ describe('Chat store', () => {
         attachments: [],
         references: [],
       });
+    });
+
+    it('keeps the long-task confirmation concise and in Research-Claw language', async () => {
+      const originalRequest = '这项任务预计需要较长时间，请批量分析 workspace 中的多篇论文并生成完整报告。';
+      let config: Parameters<typeof Modal.confirm>[0] | undefined;
+      const confirm = vi.spyOn(Modal, 'confirm').mockImplementation((next) => {
+        config = next;
+        (next.onCancel as (() => void) | undefined)?.();
+        return { destroy: vi.fn(), update: vi.fn() } as never;
+      });
+      mockGatewayClient.request.mockResolvedValue({});
+
+      try {
+        await useChatStore.getState().send(originalRequest);
+      } finally {
+        confirm.mockRestore();
+      }
+
+      const content = String(config?.content ?? '');
+      expect(content).toContain('Research-Claw');
+      expect(content).not.toContain('OpenClaw');
+      expect(content).not.toContain(originalRequest.slice(0, 20));
+      expect(content).not.toContain('也可以取消');
     });
 
     it('sends the unchanged request in the foreground when explicitly chosen', async () => {
@@ -916,6 +940,81 @@ describe('Chat store', () => {
       expect(useChatStore.getState().messages.map((m) => m.text)).toEqual([
         '根据资料完成一篇完整小论文',
       ]);
+    });
+
+    it('restores an optimistic first turn for the persisted non-main session after F5 bootstrap', async () => {
+      let resolveSend!: (value: unknown) => void;
+      mockGatewayClient.request.mockImplementation((method: string) => {
+        if (method === 'chat.send') {
+          return new Promise((resolve) => { resolveSend = resolve; });
+        }
+        return Promise.resolve({});
+      });
+
+      useChatStore.getState().setSessionKey('project-46d628bf');
+      const sending = useChatStore.getState().send('只回复 SESSION_B_OK。');
+      expect(useChatStore.getState()._pendingUserMsgs.map((message) => message.text)).toEqual([
+        '只回复 SESSION_B_OK。',
+      ]);
+
+      // F5 creates the chat store at its default `main` key. App.tsx then restores
+      // the persisted project key before the first chat.history response arrives.
+      useChatStore.setState({
+        sessionKey: 'main',
+        messages: [],
+        _pendingUserMsgs: [],
+      });
+      useChatStore.getState().setSessionKey('project-46d628bf');
+
+      expect(useChatStore.getState().messages.map((message) => message.text)).toContain(
+        '只回复 SESSION_B_OK。',
+      );
+      expect(useChatStore.getState()._pendingUserMsgs.map((message) => message.text)).toEqual([
+        '只回复 SESSION_B_OK。',
+      ]);
+
+      resolveSend({ runId: 'first-turn-run', status: 'started' });
+      await sending;
+    });
+
+    it('does not leak a pending optimistic turn into another session', async () => {
+      let resolveSend!: (value: unknown) => void;
+      mockGatewayClient.request.mockImplementation((method: string) => {
+        if (method === 'chat.send') {
+          return new Promise((resolve) => { resolveSend = resolve; });
+        }
+        return Promise.resolve({});
+      });
+
+      useChatStore.getState().setSessionKey('project-a');
+      const sending = useChatStore.getState().send('A_PENDING');
+      useChatStore.getState().setSessionKey('project-b');
+      expect(useChatStore.getState().messages).toEqual([]);
+
+      useChatStore.getState().setSessionKey('project-a');
+      expect(useChatStore.getState().messages.map((message) => message.text)).toEqual(['A_PENDING']);
+
+      resolveSend({ runId: 'a-run', status: 'started' });
+      await sending;
+    });
+
+    it('migrates the legacy global pending turn only into the persisted active session', () => {
+      const pending = {
+        role: 'user' as const,
+        text: 'LEGACY_PENDING',
+        timestamp: Date.now(),
+      };
+      localStorage.setItem('rc_active_session', 'project-legacy');
+      sessionStorage.setItem('rc-pending-user-msgs', JSON.stringify([pending]));
+
+      useChatStore.getState().setSessionKey('project-other');
+      expect(useChatStore.getState().messages).toEqual([]);
+
+      useChatStore.getState().setSessionKey('project-legacy');
+      expect(useChatStore.getState().messages.map((message) => message.text)).toEqual([
+        'LEGACY_PENDING',
+      ]);
+      expect(sessionStorage.getItem('rc-pending-user-msgs')).toBeNull();
     });
   });
 

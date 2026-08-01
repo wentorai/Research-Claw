@@ -18,7 +18,11 @@ import { useSessionsStore } from '../../stores/sessions';
 import { useUiStore } from '../../stores/ui';
 import type { ChatMessage } from '../../gateway/types';
 import { normalizeSessionKey } from '../../utils/session-key';
-import { fmtActivityRow, safeStringifyDetail } from '../../utils/activity-log';
+import {
+  collapseToolActivityEntries,
+  fmtTime,
+  safeStringifyDetail,
+} from '../../utils/activity-log';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import WelcomeCard from './WelcomeCard';
@@ -250,8 +254,8 @@ export default function ChatView() {
   ]);
   /** The run status region already shows authoritative state + activity. */
   const showThinkingPanel = activityActive && !taskFlowVisible && !showWritingTimeline;
-  const activityEntries = activityLog
-    .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey))
+  const activityEntries = collapseToolActivityEntries(activityLog
+    .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey)))
     .slice(-30)
     .reverse();
   const [openActivityId, setOpenActivityId] = useState<string | null>(null);
@@ -578,9 +582,26 @@ export default function ChatView() {
               {activityEntries.length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   {activityEntries.map((e) => {
-                    const rowText = fmtActivityRow(e);
                     const expanded = openActivityId === e.id;
                     const status = e.status || '';
+                    const separator = e.text.lastIndexOf(':');
+                    const toolName = e.toolName
+                      ?? (separator >= 0 ? e.text.slice(separator + 1).trim() : e.text);
+                    const activityText = status === 'tool_start'
+                      ? t('chat.activityToolStarted', { name: toolName })
+                      : status === 'tool_result' || status === 'tool_end'
+                        ? t('chat.activityToolCompleted', { name: toolName })
+                        : e.text;
+                    const durationText = typeof e.durationMs === 'number'
+                      ? e.durationMs >= 1_000
+                        ? ` ${t('chat.activityDurationSeconds', {
+                            duration: (e.durationMs / 1_000).toFixed(1),
+                          })}`
+                        : ` ${t('chat.activityDurationMilliseconds', {
+                            duration: Math.round(e.durationMs),
+                          })}`
+                      : '';
+                    const rowText = `${fmtTime(e.ts)} ${e.scope === 'background' ? 'BG' : 'FG'}  ${activityText}${durationText}`;
                     const icon = status.includes('error')
                       ? <CloseCircleOutlined style={{ color: '#ef4444' }} />
                       : (status.includes('result') || status.includes('end'))

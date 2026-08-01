@@ -60,6 +60,10 @@ JSON.stringify(window.__RC_RUN_TRACE__.snapshot(), null, 2)
 | TF-01 | TaskFlow is a global current-session projection | Flow/activity is keyed or strictly fenced by session/run; switch cannot show another Session’s flow | sessionKey/runId on flow decisions | Active A/B switching never leaks stages |
 | TF-02 | Foreground tool stream is global even though TaskFlow was isolated | Exact Run A `process` event followed by empty Session B selection; pending tool selector and clear operation must be keyed | A/B session key on every pending tool | Empty B shows no A tool; starting/finishing B cannot erase A tool state |
 | TF-03 | Lower-specificity agent `item` events overwrite an already observed concrete `tool` activity | Real OC event ordering fixture: tool start followed by item start; partial item event must not erase the tool observation | activity decision records ignored partial item and retained tool name | During real `process` polling, UI remains “正在使用 process” instead of regressing to generic processing |
+| LR-13 | A first-turn user message disappears after an immediate F5 until the Run completes | Pending optimistic messages are persisted by normalized `sessionKey`; startup `main` state cannot clear or steal a project Session's pending message; A/B pending messages stay isolated | local pending Session key and later authoritative history merge | In a new Session, send the first message and immediately F5; the user message remains visible before the assistant finishes |
+| UX-01 | Tool history renders raw duplicate English `started/returned` rows | Same Session/Run/scope/`toolCallId` start/result/end entries collapse into one latest lifecycle row; raw diagnostic detail remains expandable | original activity records are retained, presentation projection is collapsed | A real tool call shows one localized “开始工具调用” or “工具调用完成” row with a readable duration |
+| BG-06 | Long-task modal repeats the prompt and exposes OpenClaw implementation details | Modal copy contains no request excerpt, no `OpenClaw`, and no redundant button explanation; exact Research-Claw copy is asserted | detector decision only; prompt content is not copied into the explanation | Deliberate long request shows concise Research-Claw/科研龙虾 copy and the three explicit actions |
+| JOB-09 | An older delayed `rc.job.list/get` response overwrites a newer terminal/cancelled state | Request generations reject stale list/get responses; cancelling/resuming invalidates outstanding reads and disconnected refresh cannot leave loading stuck | jobs read generation and accepted/ignored response | Refresh while a Job changes state; the drawer never regresses from a newer terminal state |
 
 ## Captured real acceptance evidence
 
@@ -79,6 +83,12 @@ JSON.stringify(window.__RC_RUN_TRACE__.snapshot(), null, 2)
 | 2026-08-01 04:20 CST | JOB-01 / JOB-03 Jobs UX | Explicit background Job spawned a real OC child and updated the durable Job | Status count rendered immediately after heartbeat; drawer had one “刷新全部” control with success feedback and one merged Job after reconciliation |
 | 2026-08-01 04:21 CST | JOB-08 pre-fix failure | Parent Session `2b831ea9…` received completion for sleep Job `longtask:eeda…`, then revived an earlier aborted paper request and called 23 unrelated tools | Recorded as acceptance failure; exact parent transcript/OC completion prompt converted into a fixture before the boundary fix |
 | 2026-08-01 04:27–04:28 CST | JOB-08 post-fix | Parent Session `a8f8712c…`: old `sleep 90` Run was aborted; new child Session `50493fd4…` completed Job `longtask:ef422…`; announcement Run queried that exact Job once and observed terminal completed | Parent replied only `BOUNDARY_JOB_OK`; no duplicate `job_finish`, no repeated old exec, and no unrelated workspace/library tool |
+| 2026-08-01 11:15 CST | LR-13 reported first-turn F5 gap | `project-46d628bf` maps to OC transcript `52d64ea2-7c1c-44de-a961-9bf3a029bad4`; local user send was recorded at 11:15:37.613 and the authoritative transcript user row at 11:15:38.983, leaving a real ~1.37s persistence gap | The previous global pending key was loaded under bootstrap Session `main` and cleared on switching to the persisted project Session; this was converted to per-Session persistence/isolation tests before the fix |
+| 2026-08-01 11:19–11:21 CST | UX-01 reported activity duplication | The screenshot and live activity store showed matching `toolCallId` start/result records for repeated OC `exec`/`process` calls | Presentation now collapses each lifecycle pair without deleting raw evidence and uses localized action/duration labels |
+| 2026-08-01 11:40–11:50 CST | BG-06 / JOB-09 focused audit | The modal defect was confined to one explanation string; the Jobs service already made cancelled terminal state absorbing, but the client had no ordering guard for overlapping reads | Modal copy was reduced without detector changes; Jobs list/get reads now use generations and stale callers receive the currently accepted snapshot, while the accepted drawer layout remains unchanged |
+| 2026-08-01 11:58 CST | LR-13 post-fix first-turn F5 | New Session `project-f4979b0c` received `FIRST_TURN_REFRESH_OK`; the page was reloaded within about 0.5s of Enter while the OC Run was active | The first user message remained visible immediately after F5, authoritative active wording and Stop were restored, and the final answer arrived normally |
+| 2026-08-01 11:55 CST | BG-06 post-fix modal | The deliberately broad/long request still reached the existing suggestion gate; Cancel was selected | The body was exactly concise Research-Claw/科研龙虾 copy, contained neither the original prompt nor `OpenClaw`, retained three actions, restored the draft, and sent no request |
+| 2026-08-01 12:03–12:12 CST | UX-01 real-path failure then post-fix | The first component-only change targeted the unmounted `ToolActivityHistory` path, so real chat still lacked proof; a failing `ChatView` integration test was added before touching the live renderer. A real 45s `exec`/`process` Run was then refreshed mid-tool | After F5, the actual chat renderer showed one “工具调用完成：exec” row and one “开始工具调用：process” row, with no paired raw English duplicates; Run completed as `TOOL_GROUP_REFRESH_OK` |
 
 ## Observed OpenClaw process-stop boundary
 
@@ -105,6 +115,15 @@ Before handoff, all rows above must have evidence and the following must pass:
 6. browser acceptance on this worktree’s RC service after port 28789 is free;
 7. manual checklist delivered to the user, followed by an explicit wait for
    “手工验收通过，可以合并”.
+
+Latest follow-up automated gate after the 11:15 manual findings:
+
+- focused chat/activity/Jobs/component tests: 115 passed;
+- Dashboard full suite: 173 files, 2,447 passed and 1 skipped;
+- RC/plugin suite: 116 files passed and 4 skipped, 1,650 tests passed,
+  12 skipped and 22 todo;
+- Dashboard typecheck, production build, `verify:e2e`, and `git diff --check`
+  passed. Build emitted only the existing Vite chunk/import warnings.
 
 ## Runtime environment evidence
 

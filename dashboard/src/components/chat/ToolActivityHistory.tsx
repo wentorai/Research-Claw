@@ -3,7 +3,16 @@ import { useTranslation } from 'react-i18next';
 import { useToolStreamStore } from '../../stores/tool-stream';
 import { useChatStore } from '../../stores/chat';
 import { normalizeSessionKey } from '../../utils/session-key';
-import { fmtTime, safeStringifyDetail } from '../../utils/activity-log';
+import {
+  collapseToolActivityEntries,
+  fmtTime,
+  safeStringifyDetail,
+} from '../../utils/activity-log';
+
+function fallbackToolName(text: string): string {
+  const separator = text.lastIndexOf(':');
+  return separator >= 0 ? text.slice(separator + 1).trim() : text;
+}
 
 interface ToolActivityHistoryProps {
   resetKey?: number;
@@ -17,8 +26,8 @@ export default function ToolActivityHistory({ resetKey = 0 }: ToolActivityHistor
   const [expanded, setExpanded] = useState(false);
 
   const entries = useMemo(
-    () => activityLog
-      .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey))
+    () => collapseToolActivityEntries(activityLog
+      .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey)))
       .slice(-30)
       .reverse(),
     [activityLog, sessionKey],
@@ -130,9 +139,27 @@ export default function ToolActivityHistory({ resetKey = 0 }: ToolActivityHistor
                 <span style={{ color: e.scope === 'background' ? '#F59E0B' : 'var(--text-tertiary)', minWidth: 26 }}>
                   {e.scope === 'background' ? 'BG' : 'FG'}
                 </span>
-                <span>{e.text}</span>
+                <span>
+                  {e.status === 'tool_start'
+                    ? t('chat.activityToolStarted', {
+                        name: e.toolName ?? fallbackToolName(e.text),
+                      })
+                    : e.status === 'tool_result' || e.status === 'tool_end'
+                      ? t('chat.activityToolCompleted', {
+                          name: e.toolName ?? fallbackToolName(e.text),
+                        })
+                      : e.text}
+                </span>
                 {typeof e.durationMs === 'number' && (
-                  <span style={{ color: 'var(--text-tertiary)' }}>{Math.round(e.durationMs)}ms</span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>
+                    {e.durationMs >= 1_000
+                      ? t('chat.activityDurationSeconds', {
+                          duration: (e.durationMs / 1_000).toFixed(1),
+                        })
+                      : t('chat.activityDurationMilliseconds', {
+                          duration: Math.round(e.durationMs),
+                        })}
+                  </span>
                 )}
               </summary>
               <pre

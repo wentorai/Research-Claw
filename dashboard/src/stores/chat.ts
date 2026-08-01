@@ -197,7 +197,7 @@ function formatStructuredRunFailureForUser(data: AgentFailureData): string {
  */
 type LongTaskDecision = 'background' | 'foreground' | 'cancel';
 
-function confirmHeuristicLongTask(title: string): Promise<LongTaskDecision> {
+function confirmHeuristicLongTask(): Promise<LongTaskDecision> {
   return new Promise((resolve) => {
     let settled = false;
     let instance: ReturnType<typeof Modal.confirm> | undefined;
@@ -209,7 +209,7 @@ function confirmHeuristicLongTask(title: string): Promise<LongTaskDecision> {
     };
     instance = Modal.confirm({
       title: i18n.t('chat.longTask.confirmTitle'),
-      content: i18n.t('chat.longTask.confirmBody', { title }),
+      content: i18n.t('chat.longTask.confirmBody'),
       closable: true,
       footer: () => createElement(
         'div',
@@ -305,30 +305,51 @@ function startStaleStreamWatchdog(get: () => ChatState) {
  * Survives browser refresh (F5) within the same tab so optimistic messages
  * don't vanish when the gateway has queued them in-memory (collect mode).
  */
-const PENDING_MSGS_STORAGE_KEY = 'rc-pending-user-msgs';
+const PENDING_MSGS_STORAGE_KEY_PREFIX = 'rc-pending-user-msgs-v2:';
+const LEGACY_PENDING_MSGS_STORAGE_KEY = 'rc-pending-user-msgs';
+const ACTIVE_SESSION_STORAGE_KEY = 'rc_active_session';
 /** Dashboard-only messages (staged writing, etc.) — not in gateway transcript. */
 const LOCAL_MSGS_STORAGE_KEY = 'rc-local-chat-msgs-v2';
 const LEGACY_LOCAL_MSGS_STORAGE_KEY = 'rc-local-chat-msgs';
 const PENDING_EXPIRY_MS = 3 * 60 * 1000; // 3 min auto-expiry
 
-function savePendingMsgs(msgs: ChatMessage[]): void {
+function pendingMsgsStorageKey(sessionKey: string): string {
+  return `${PENDING_MSGS_STORAGE_KEY_PREFIX}${normalizeSessionKey(sessionKey) || 'main'}`;
+}
+
+function savePendingMsgs(sessionKey: string, msgs: ChatMessage[]): void {
   try {
     if (msgs.length === 0) {
-      sessionStorage.removeItem(PENDING_MSGS_STORAGE_KEY);
+      sessionStorage.removeItem(pendingMsgsStorageKey(sessionKey));
     } else {
-      sessionStorage.setItem(PENDING_MSGS_STORAGE_KEY, JSON.stringify(msgs));
+      sessionStorage.setItem(pendingMsgsStorageKey(sessionKey), JSON.stringify(msgs));
     }
   } catch { /* storage full — non-fatal */ }
 }
 
-function loadPendingMsgs(): ChatMessage[] {
+function loadPendingMsgs(sessionKey: string): ChatMessage[] {
   try {
-    const raw = sessionStorage.getItem(PENDING_MSGS_STORAGE_KEY);
+    let raw = sessionStorage.getItem(pendingMsgsStorageKey(sessionKey));
+    let migratedLegacy = false;
+    if (!raw) {
+      // Upgrade safety: the previous dashboard stored one global array. It can
+      // only belong to the persisted active session; never expose it elsewhere.
+      const persistedSessionKey = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) || 'main';
+      if (normalizeSessionKey(persistedSessionKey) === normalizeSessionKey(sessionKey)) {
+        raw = sessionStorage.getItem(LEGACY_PENDING_MSGS_STORAGE_KEY);
+        migratedLegacy = Boolean(raw);
+      }
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ChatMessage[];
     // Filter out expired entries
     const now = Date.now();
-    return parsed.filter((m) => m.timestamp && (now - m.timestamp) < PENDING_EXPIRY_MS);
+    const active = parsed.filter((m) => m.timestamp && (now - m.timestamp) < PENDING_EXPIRY_MS);
+    if (migratedLegacy) {
+      savePendingMsgs(sessionKey, active);
+      sessionStorage.removeItem(LEGACY_PENDING_MSGS_STORAGE_KEY);
+    }
+    return active;
   } catch { return []; }
 }
 
@@ -772,7 +793,7 @@ interface ChatState {
 }
 
 // Restore pending messages from sessionStorage on module load (survives F5).
-const _restoredPendingMsgs = loadPendingMsgs();
+const _restoredPendingMsgs = loadPendingMsgs('main');
 const _restoredLocalMsgs = loadLocalMsgs('main');
 const _restoredPendingSendAck = loadPendingSendAck('main');
 
@@ -1026,7 +1047,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         ? 'foreground'
         : promoteSilently
           ? 'background'
-          : await confirmHeuristicLongTask(longTask.title);
+          : await confirmHeuristicLongTask();
       if (decision === 'cancel') {
         // MessageInput clears optimistically before this async decision
         // resolves. Restore the exact unsent draft so "cancel" is genuinely
@@ -2223,9 +2244,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       runs.setLocalRunId(key, pendingAck.runId);
       runs.setCommand(key, 'ack_unknown');
     }
+    const pendingUserMsgs = loadPendingMsgs(key);
+    const localOnlyMsgs = loadLocalMsgs(key);
     set({
       sessionKey: key,
-      messages: loadLocalMsgs(key),
+      messages: mergeLocalMessages(pendingUserMsgs, localOnlyMsgs),
       streaming: false,
       compacting: false,
       streamText: null,
@@ -2237,8 +2260,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       tokensOut: 0,
       _pendingGapReload: false,
       _lastAgentFailureRunId: null,
-      _pendingUserMsgs: [],
-      _localOnlyMsgs: loadLocalMsgs(key),
+      _pendingUserMsgs: pendingUserMsgs,
+      _localOnlyMsgs: localOnlyMsgs,
       _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
       _lastSentDraft: null,
       _pendingSendAck: pendingAck,
@@ -2310,7 +2333,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 useChatStore.subscribe(
   (state, prev) => {
     if (state._pendingUserMsgs !== prev._pendingUserMsgs) {
-      savePendingMsgs(state._pendingUserMsgs);
+      savePendingMsgs(state.sessionKey, state._pendingUserMsgs);
     }
     if (state._localOnlyMsgs !== prev._localOnlyMsgs) {
       saveLocalMsgs(state.sessionKey, state._localOnlyMsgs);

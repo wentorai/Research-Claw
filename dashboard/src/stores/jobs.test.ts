@@ -166,3 +166,71 @@ describe('cancelJob outcome truthfulness', () => {
     });
   });
 });
+
+describe('Jobs list response ordering', () => {
+  const request = vi.fn();
+
+  beforeEach(() => {
+    request.mockReset();
+    useJobsStore.setState({
+      jobs: [],
+      loading: false,
+      lastLoadedAt: null,
+      actionById: {},
+    });
+    useGatewayStore.setState({
+      client: { isConnected: true, request } as unknown as GatewayClient,
+      state: 'connected',
+    });
+  });
+
+  afterEach(() => {
+    useGatewayStore.setState({ client: null, state: 'disconnected' });
+  });
+
+  it('does not let an older delayed refresh overwrite a newer terminal snapshot', async () => {
+    let resolveOlder!: (jobs: Job[]) => void;
+    let resolveNewer!: (jobs: Job[]) => void;
+    request
+      .mockImplementationOnce(() => new Promise<Job[]>((resolve) => { resolveOlder = resolve; }))
+      .mockImplementationOnce(() => new Promise<Job[]>((resolve) => { resolveNewer = resolve; }));
+
+    const olderRefresh = useJobsStore.getState().loadJobs();
+    const newerRefresh = useJobsStore.getState().loadJobs();
+
+    resolveNewer([cancelledJob]);
+    await newerRefresh;
+    expect(useJobsStore.getState().jobs[0]?.status).toBe('cancelled');
+
+    resolveOlder([activeJob]);
+    await olderRefresh;
+    expect(useJobsStore.getState().jobs[0]?.status).toBe('cancelled');
+  });
+
+  it('clears a stale loading indicator when refresh is attempted after disconnect', async () => {
+    useJobsStore.setState({ loading: true });
+    useGatewayStore.setState({ client: null, state: 'disconnected' });
+
+    await expect(useJobsStore.getState().loadJobs()).resolves.toBe(false);
+    expect(useJobsStore.getState().loading).toBe(false);
+  });
+
+  it('returns the accepted newer snapshot instead of a stale delayed get response', async () => {
+    let resolveOlder!: (job: Job) => void;
+    let resolveNewer!: (job: Job) => void;
+    request
+      .mockImplementationOnce(() => new Promise<Job>((resolve) => { resolveOlder = resolve; }))
+      .mockImplementationOnce(() => new Promise<Job>((resolve) => { resolveNewer = resolve; }));
+    useJobsStore.setState({ jobs: [activeJob] });
+
+    const olderGet = useJobsStore.getState().loadJob(activeJob.id);
+    const newerGet = useJobsStore.getState().loadJob(activeJob.id);
+
+    resolveNewer(cancelledJob);
+    await expect(newerGet).resolves.toMatchObject({ status: 'cancelled' });
+
+    resolveOlder(activeJob);
+    await expect(olderGet).resolves.toMatchObject({ status: 'cancelled' });
+    expect(useJobsStore.getState().jobs[0]?.status).toBe('cancelled');
+  });
+});

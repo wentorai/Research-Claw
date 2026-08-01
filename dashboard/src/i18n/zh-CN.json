@@ -123,7 +123,7 @@
   "chat": {
     "longTask": {
       "confirmTitle": "转为后台长任务？",
-      "confirmBody": "这条请求同时包含明确的长时与批量执行信号：「{{title}}」。后台执行会启动 OpenClaw 子会话；前台执行会在当前会话继续。也可以取消，不发送本条请求。",
+      "confirmBody": "Research-Claw（科研龙虾）可以在后台执行这项长任务，也可以继续在当前会话中执行。",
       "confirmOk": "后台执行",
       "confirmForeground": "前台执行",
       "confirmDismiss": "取消发送"
@@ -222,6 +222,10 @@
     "attachNoVisionModel": "已附加图片。当前模型无法直接识图，图片会存入工作区，助手将尝试用工具（如 OCR、代码）解读；如需稳定识图，建议在设置中启用独立视觉模型。",
     "bgWorking": "正在后台工作...",
     "activityHistory": "活动日志",
+    "activityToolStarted": "开始工具调用：{{name}}",
+    "activityToolCompleted": "工具调用完成：{{name}}",
+    "activityDurationSeconds": "{{duration}} 秒",
+    "activityDurationMilliseconds": "{{duration}} 毫秒",
     "noActivityYet": "暂无活动",
     "clear": "清空",
     "refresh": "刷新对话",

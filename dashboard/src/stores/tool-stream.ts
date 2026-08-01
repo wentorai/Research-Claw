@@ -34,6 +34,7 @@ export interface ActivityLogEntry {
   scope: 'foreground' | 'background';
   status: string;
   text: string;
+  toolName?: string;
   durationMs?: number;
   detail?: unknown;
 }
@@ -288,6 +289,7 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
                 scope: 'foreground',
                 status: 'tool_start',
                 text: `Tool started: ${name ?? 'unknown'}`,
+                toolName: name ?? 'unknown',
                 detail: evt.data,
               });
             }
@@ -323,6 +325,7 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
                   scope: 'foreground',
                   status: 'tool_result',
                   text: `Tool returned: ${name ?? 'unknown'}`,
+                  toolName: name ?? matched?.name ?? 'unknown',
                   durationMs,
                   detail: evt.data,
                 });
@@ -345,6 +348,7 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
                   scope: 'foreground',
                   status: 'tool_end',
                   text: `Tool finished: ${name ?? 'unknown'}`,
+                  toolName: name ?? matched?.name ?? 'unknown',
                   durationMs,
                   detail: evt.data,
                 });
@@ -374,6 +378,7 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
                 scope: 'background',
                 status: 'tool_start',
                 text: `Background tool started: ${name ?? 'unknown'}`,
+                toolName: name ?? 'unknown',
                 detail: evt.data,
               });
             }
