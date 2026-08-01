@@ -82,6 +82,21 @@ describe('ensure-config.cjs — agent run timeout migration', () => {
     expect(migrate(configPath).timeoutSeconds).toBe(EXPECTED_AGENT_TIMEOUT_SECONDS);
   });
 
+  it('uses the immutable Docker template when the config volume hides the repository template', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-agent-timeout-template-'));
+    tempRoots.push(tempRoot);
+    const dockerTemplate = path.join(tempRoot, 'openclaw.example.json');
+    fs.copyFileSync(EXAMPLE_CONFIG, dockerTemplate);
+    const configPath = createProjectConfig({
+      agents: { defaults: { timeoutSeconds: LEGACY_AGENT_TIMEOUT_SECONDS } },
+    });
+
+    expect(migrate(configPath, {
+      ...process.env,
+      RC_CONFIG_TEMPLATE_PATH: dockerTemplate,
+    }).timeoutSeconds).toBe(EXPECTED_AGENT_TIMEOUT_SECONDS);
+  });
+
   it('keeps the global OpenClaw compatibility config aligned in an isolated HOME', () => {
     const { configPath, home } = createGlobalConfig({
       agents: { defaults: { timeoutSeconds: LEGACY_AGENT_TIMEOUT_SECONDS } },

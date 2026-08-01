@@ -1405,7 +1405,7 @@
     "tokensOut": "Out",
     "heartbeat": "Heartbeat",
     "version": "Research-Claw v{{version}}",
-    "versionFallback": "Research-Claw",
+    "versionFallback": "v0.8.2",
     "updateAvailable": "Update available v{{latest}}",
     "modelDefault": "(default)",
     "modelNA": "N/A"

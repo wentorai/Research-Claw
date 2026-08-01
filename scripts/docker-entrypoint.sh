@@ -5,6 +5,7 @@
 CONFIG_DIR=/app/config
 CONFIG_FILE=$CONFIG_DIR/openclaw.json
 CONFIG_VERSION_FILE=$CONFIG_DIR/.config-version
+export RC_CONFIG_TEMPLATE_PATH=/defaults/openclaw.example.json
 IMAGE_VERSION="$(node -p "require('/app/package.json').version" 2>/dev/null)"
 if [ -z "$IMAGE_VERSION" ]; then
   echo "[research-claw] ERROR: Cannot read the installed Research-Claw version"

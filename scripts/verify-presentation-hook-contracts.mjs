@@ -14,7 +14,7 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
-import { createWriteStream, realpathSync } from 'node:fs';
+import { createWriteStream, existsSync, realpathSync } from 'node:fs';
 import {
   appendFile,
   mkdir,
@@ -40,7 +40,16 @@ const requireFromOpenClaw = createRequire(realpathSync(entryPath));
 const WebSocket = requireFromOpenClaw('ws');
 const corePath = path.join(projectRoot, 'extensions', 'research-claw-core');
 const superpowerPath = path.join(projectRoot, 'extensions', 'research-superpower');
-const rpPath = path.resolve(projectRoot, '..', '..', 'research-plugins');
+const rpPath = [
+  process.env.RC_RESEARCH_PLUGINS_PATH,
+  path.resolve(projectRoot, '..', 'research-plugins'),
+  path.resolve(projectRoot, '..', '..', 'research-plugins'),
+].filter(Boolean).find(candidate => existsSync(candidate));
+if (!rpPath) {
+  throw new Error(
+    'research-plugins checkout not found; set RC_RESEARCH_PLUGINS_PATH',
+  );
+}
 const globalConfigPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
 const gatewayPort = Number(process.env.RC_PRESENTATION_GATEWAY_PORT ?? 28831);
 const providerPort = Number(process.env.RC_PRESENTATION_PROVIDER_PORT ?? 28832);

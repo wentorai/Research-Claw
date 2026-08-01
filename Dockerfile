@@ -125,7 +125,7 @@ RUN test -f ppt-master/skills/ppt-master/scripts/project_manager.py && \
 
 RUN pnpm build
 
-# ── research-plugins (skills + indexes + agent tools via OC plugin) ───
+# ── research-plugins (433 skills + 40 indexes + 34 tools in 18 modules) ───
 # Bake to /defaults/ so the rc-state volume (mounts at /root/.openclaw) does
 # not shadow it. Entrypoint copies /defaults/research-plugins → the volume on
 # first boot / version change (instant, no network needed at runtime).
