@@ -37,12 +37,49 @@
     "hint": "Long-running work continues here even when a chat turn ends.",
     "empty": "No background jobs",
     "waiting": "Waiting to start",
-    "refresh": "Refresh job",
+    "currentActivity": "Latest known activity: ",
+    "refreshAll": "Refresh all",
+    "refreshing": "Syncing job status…",
+    "refreshSuccess": "Background job status updated",
+    "refreshFailed": "Could not refresh background jobs. Check the Gateway connection.",
+    "lastUpdated": "Last updated: {{time}}",
+    "autoRefreshHint": "Job status syncs automatically; use Refresh all for an immediate check.",
     "cancel": "Stop job",
+    "cancelledSuccess": "The background job and its run were stopped",
+    "cancelledNoActiveBacking": "The background job was stopped; there is no active child session to stop",
+    "cancelledBackingUnconfirmed": "The job record was stopped, but the Research-Claw child-session stop is not confirmed. Refresh again shortly.",
     "resume": "Continue job",
     "retry": "Retry job",
     "actionFailed": "Job action failed",
     "backgroundActive": "{{count}} background job(s)",
+    "type": {
+      "researchAgent": "Research Agent job",
+      "stagedWriting": "Staged writing job",
+      "upload": "Upload job",
+      "export": "Export job",
+      "other": "Background job"
+    },
+    "researchTaskTitle": "Research-Claw task",
+    "error": {
+      "heartbeatExpired": "This background record needs your attention. Continue, retry, or stop it.",
+      "notStarted": "The job did not start successfully. Retry or stop it.",
+      "noActiveRun": "No active child session was found. Refresh status or start again.",
+      "generic": "The job encountered a problem. Refresh, retry, or stop it."
+    },
+    "step": {
+      "agentRunning": "Research Agent is working",
+      "needsCheck": "Run state needs checking",
+      "resumed": "Continued at your request",
+      "cancelled": "Stopped at your request.",
+      "completed": "The job completed. Expand its steps for the recorded activity; find outputs in the linked chat or workspace.",
+      "failed": "The job did not complete. Review the notice, then retry or stop it.",
+      "partial": "The job completed only part of the requested work."
+    },
+    "stepLabel": {
+      "scope": "Confirm scope and boundaries",
+      "execute": "Research Agent execution",
+      "review": "Self-check and return"
+    },
     "notify": {
       "completed": "Background job completed",
       "partial": "Background job partially completed",
@@ -54,7 +91,7 @@
       "completed": "Completed",
       "partial": "Partial",
       "failed": "Failed",
-      "stalled": "Stalled",
+      "stalled": "Needs attention",
       "cancelled": "Cancelled"
     },
     "steps": "Sub-steps",
@@ -93,22 +130,23 @@
   "chat": {
     "longTask": {
       "confirmTitle": "Run as a background job?",
-      "confirmBody": "This looks like a long task: \"{{title}}\". Run it in the background (spawns an OpenClaw subagent)? Choose \"Answer now\" to respond in this turn instead.",
+      "confirmBody": "Research-Claw can run this long task in the background or continue in the current session.",
       "confirmOk": "Run in background",
-      "confirmCancel": "Answer now"
+      "confirmForeground": "Run in foreground",
+      "confirmDismiss": "Cancel send"
     },
     "placeholder": "Ask your research assistant...",
     "composerHint": "Enter send · Shift+Enter newline",
     "send": "Send",
     "thinking": "Thinking...",
     "compacting": "Compacting conversation history...",
-    "compactingBanner": "The session history is large — OpenClaw is summarizing older messages before calling the model. This can take several minutes; it is not frozen.",
-    "runEndedNoOutput": "The run finished without a reply. The session may be too long for the model — try /new to start fresh, or switch to a larger-context model.",
-    "runStoppedAfterStaleStream": "The run stopped after a long pause and history was reloaded. A tool or model call may have failed without returning a clear error; check the configuration and retry.",
-    "runIssueTitle": "This run may have been interrupted",
-    "runIssueNotificationTitle": "Run interrupted",
-    "runTimedOut": "The run was stopped after reaching the time limit. The reply may be incomplete — click Continue to pick up where it left off.",
-    "runTimedOutNoOutput": "The run reached its time limit before producing a reply. Resend the original message to try again.",
+    "runEndedNoOutput": "Research-Claw reports that the run ended without a visible reply. Refresh session history; if it remains empty, inspect the reported failure or resend the request.",
+    "runIssueTitle": "This run needs attention",
+    "runIssueNotificationTitle": "Run status notice",
+    "runTimedOut": "Research-Claw explicitly reported that this run timed out and stopped. The reply may be incomplete — click Continue to pick up where it left off.",
+    "runTimedOutNoOutput": "Research-Claw explicitly reported that this run timed out and stopped before producing a reply. Resend the original message to try again.",
+    "runInterrupted": "The run was interrupted and the reply may be incomplete — you can keep waiting for reconciliation or click Continue to resume.",
+    "runInterruptedNoOutput": "The run ended before producing a reply, but Research-Claw did not report a timeout cause. Refresh the history or resend the original message.",
     "continueRun": "Continue",
     "continueInstruction": "Please continue the previous task from where it was interrupted.",
     "openSettings": "Open Settings",
@@ -128,7 +166,7 @@
     "abortWithShortcut": "Stop ({{shortcut}})",
     "connectionBanner": {
       "reconnecting": "Connection lost — reconnecting automatically...",
-      "disconnected": "Disconnected — unsent messages may be lost. Check if the gateway is running"
+      "disconnected": "Disconnected from Research-Claw — the current run outcome is unknown. Reconnect to check the session state"
     },
     "toolCallWarning": "Current model ({{model}}) may not support tool calls. Commands may not execute and plugins may be unavailable. Consider switching models.",
     "notConnected": "Not connected — check if the gateway is running",
@@ -191,6 +229,10 @@
     "attachNoVisionModel": "Image attached. The current model can't view images directly — it'll be saved to the workspace and the assistant will try to read it with its tools (e.g. OCR, code). For reliable image understanding, enable a separate vision model in Settings.",
     "bgWorking": "Working in background...",
     "activityHistory": "Activity history",
+    "activityToolStarted": "Tool call started: {{name}}",
+    "activityToolCompleted": "Tool call completed: {{name}}",
+    "activityDurationSeconds": "{{duration}} s",
+    "activityDurationMilliseconds": "{{duration}} ms",
     "noActivityYet": "No activity yet",
     "clear": "Clear",
     "refresh": "Refresh chat",
@@ -249,7 +291,7 @@
     },
     "skillSource": {
       "workspace": "Workspace",
-      "bundled": "OpenClaw bundled",
+      "bundled": "Research-Claw bundled",
       "unknown": "Other source",
       "research-plugins": "Research Plugins"
     },
@@ -297,13 +339,81 @@
   },
   "taskFlow": {
     "title": "Task progress",
-    "elapsed": "{{seconds}}s",
-    "stillWorking": "Still working — long steps are normal for complex tasks.",
     "compactingDetail": "Compacting conversation history before continuing",
-    "stages": {
-      "understand": "Understand request",
-      "execute": "Execute steps",
-      "respond": "Compose response"
+    "runStatus": {
+      "reconnecting": {
+        "title": "Reconnecting to Gateway",
+        "detail": "The connection is unavailable, so the task outcome is not being inferred. Reconnecting and checking the Research-Claw session state."
+      },
+      "stopping": {
+        "title": "Stopping run",
+        "detail": "Stop was requested. Waiting for Research-Claw to confirm the run is no longer active."
+      },
+      "submitting": {
+        "title": "Submitting request",
+        "detail": "Waiting for the Gateway to acknowledge this request."
+      },
+      "accepted": {
+        "title": "Request accepted",
+        "detail": "Research-Claw accepted this request and the run state is being checked. You can Stop."
+      },
+      "confirming-submit": {
+        "title": "Confirming request acceptance",
+        "detail": "The acknowledgement was uncertain. Checking Research-Claw session history without sending the request again automatically."
+      },
+      "compacting": {
+        "title": "Compacting conversation",
+        "detail": "Research-Claw confirms the run is active and is compacting conversation context. You can keep waiting or Stop."
+      },
+      "tool": {
+        "title": "Using {{tool}}",
+        "detail": "Research-Claw confirms the run is active. You can keep waiting or Stop.",
+        "fallback": "a research tool"
+      },
+      "fallback": {
+        "title": "Trying an available model route",
+        "detail": "Research-Claw reported a fallback attempt and still confirms the run is active. You can keep waiting or Stop."
+      },
+      "streaming": {
+        "title": "Receiving response",
+        "detail": "Research-Claw confirms the run is active and response content is arriving. You can keep waiting or Stop."
+      },
+      "continuing": {
+        "title": "Continuing the run",
+        "detail": "Research-Claw confirms the run is active. You can keep waiting or Stop."
+      },
+      "processing": {
+        "title": "Processing",
+        "detail": "Research-Claw confirms the run is active. No more specific activity is currently available; you can keep waiting or Stop."
+      },
+      "confirming-result": {
+        "title": "Confirming result",
+        "detail": "Research-Claw reports no active run while the persisted status still says running. Refreshing session history instead of calling this running or failed."
+      },
+      "result-unconfirmed": {
+        "title": "Run result not confirmed",
+        "detail": "Research-Claw confirms there is no active run but did not return a complete terminal result. Refresh the session record or start a new request."
+      },
+      "done": {
+        "title": "Run complete",
+        "detail": "Research-Claw reports that the run completed."
+      },
+      "killed": {
+        "title": "Run stopped",
+        "detail": "Research-Claw confirms that the run was stopped."
+      },
+      "timeout": {
+        "title": "Run timed out and stopped",
+        "detail": "Research-Claw explicitly reported a timeout."
+      },
+      "failed": {
+        "title": "Run failed",
+        "detail": "Research-Claw explicitly reported a failure."
+      },
+      "interrupted": {
+        "title": "Run interrupted",
+        "detail": "Research-Claw reports that the run ended without a more specific cause."
+      }
     }
   },
   "slashCmd": {
@@ -933,8 +1043,8 @@
           "hint": "Connect robotic arms, mobile platforms, humanoid robots and more — give the agent physical execution capability.",
           "modalTitle": "Embodied Research AI — Vision",
           "modalP1": "The Embodied Research AI module aims to give AI Agents physical execution capability. Target devices include robotic arms, wheeled mobile platforms, and humanoid robots, covering integrated scenarios of laboratory inspection, sample handling, and direct bench operation — closing the perception-to-execution loop within the same Agent cycle.",
-          "modalP2": "Technical approach: embodied devices will be integrated with the OpenClaw nodes system (role:node + node.invoke) via the oc-node driver. Each embodied device registers as an independent node in the OC node graph; the agent calls node.invoke to issue commands, and execution results are written back to the observation timeline. Pairing requires an approval process to prevent unauthorized physical operations.",
-          "modalP3": "On the evolution roadmap, Embodied Research AI and the camera bridge share the same evolution line: the camera bridge has already implemented the 'agent requests a frame → bridge → vision verification' closed loop. The embodied module will extend this to an 'agent issues a command → oc-node → physical execution → status feedback' chain. The kind is reserved as embodied, and the driver enum slot oc-node is already reserved in the schema."
+          "modalP2": "Technical approach: embodied devices will join the Research-Claw device-node system. Each device registers as an independent node; the agent issues commands through controlled calls, and execution results are written back to the observation timeline. Pairing requires approval to prevent unauthorized physical operations.",
+          "modalP3": "Embodied Research AI and the camera bridge share one evolution path. The camera bridge already supports the 'agent requests a frame → bridge → vision verification' loop; the embodied module will extend it to 'agent issues a command → device node → physical execution → status feedback'. The required type and driver extension points are reserved in the data layer."
         }
       },
       "monitors": {
@@ -1109,7 +1219,7 @@
     "visionBaseUrl": "Custom Vision API URL",
     "visionApiKey": "Vision API Key",
     "systemPromptAppend": "Additional system prompt",
-    "systemPromptAppendHint": "Saved to openclaw.json and synced to the agent before each message — no Save button needed.",
+    "systemPromptAppendHint": "Saved to Research-Claw configuration and synced to the agent before each message — no Save button needed.",
     "systemPromptAppendPlaceholder": "Optional instructions appended to the agent system prompt…",
     "proxyEnabled": "Proxy enabled",
     "proxyUrl": "Proxy URL",
@@ -1118,7 +1228,7 @@
     "notificationSound": "Notification sound",
     "notificationSoundHint": "Play a short chime when a new notification arrives",
     "aboutVersion": "Research-Claw v{{version}}",
-    "aboutOpenClaw": "Powered by OpenClaw v{{version}}",
+    "aboutOpenClaw": "Research-Claw service runtime v{{version}}",
     "aboutGateway": "Gateway endpoint",
     "aboutPlugins": "Plugins",
     "aboutBootstrap": "Bootstrap files",
@@ -1126,7 +1236,7 @@
     "aboutDiagnosticsCopied": "Diagnostics copied to clipboard",
     "noVisionModel": "Same as text model",
     "noVisionModelHint": "This provider has no preset vision model; type a model name manually",
-    "configSource": "Source: openclaw.json",
+    "configSource": "Source: Research-Claw configuration",
     "configLoading": "Loading config...",
     "refreshConfig": "Refresh",
     "restartHint": "Saving writes the config and restarts the gateway; the dashboard reconnects automatically.",
@@ -1230,7 +1340,7 @@
     "apiKeyPlaceholder": "Enter your API key",
     "apiKeyExisting": "Existing key preserved — enter new to replace",
     "openaiCodexOauthNoApiKey": "No API key required (OAuth provider)",
-    "openaiCodexOauthHint": "To use OpenAI ChatGPT OAuth, run: openclaw models auth login --provider openai. Then select provider openai and save.",
+    "openaiCodexOauthHint": "For OpenAI ChatGPT OAuth, complete sign-in in the model authentication screen, then select OpenAI and save.",
     "ollamaNoApiKey": "No API key required — Ollama runs locally",
     "ollamaDetecting": "Detecting…",
     "ollamaDetectModels": "Detect installed models",
@@ -1266,7 +1376,7 @@
     "connecting": "Connecting to gateway...",
     "gatewayUnreachable": "Gateway unreachable",
     "retryConnect": "Retry connection",
-    "gatewayHint": "Make sure the OpenClaw gateway is running: openclaw gateway --force",
+    "gatewayHint": "Make sure the Research-Claw service is running; restart Research-Claw if it has exited.",
     "needsToken": "Gateway Token Required",
     "needsTokenHint": "Enter the gateway token to connect. Find it in Docker logs or your .env file.",
     "tokenPlaceholder": "Gateway token",
@@ -1319,7 +1429,7 @@
     "step1Title": "Step 1: Authenticate with provider",
     "step1Desc": "Click the button to open the authentication page. Log in and authorize access.",
     "googleClientIdTitle": "Google OAuth Client ID",
-    "googleClientIdDesc": "Optional if Gemini CLI or OPENCLAW_GEMINI_OAUTH_CLIENT_ID is already configured. To avoid local CLI installation, paste your Google desktop-app OAuth Client ID here.",
+    "googleClientIdDesc": "Optional if Gemini CLI or a Gemini OAuth Client ID is already configured. To avoid local CLI installation, paste your Google desktop-app OAuth Client ID here.",
     "googleClientIdPlaceholder": "1234567890-xxxxx.apps.googleusercontent.com",
     "googleClientSecretTitle": "Google OAuth Client Secret",
     "googleClientSecretDesc": "Optional. Usually not needed for Google desktop-app OAuth clients, but you can paste it if your client configuration requires one.",
@@ -1447,7 +1557,7 @@
     "configFailureTitle": "{{name}} needs configuration",
     "configFailureBody": "{{error}} Check the model/provider settings. Retrying cannot recover this failure.",
     "transientFailureTitle": "{{name}} failed {{count}} times in a row",
-    "transientFailureBody": "{{error}} OpenClaw will keep the job scheduled; inspect the isolated run for details.",
+    "transientFailureBody": "{{error}} Research-Claw will keep the job scheduled; inspect the isolated run for details.",
     "skippedTitle": "{{name}} was skipped {{count}} times in a row",
     "skippedBody": "{{error}} The model provider was unreachable, so the run never started. Check that the provider endpoint is up.",
     "cronSessions": "Scheduled Tasks",
@@ -1511,7 +1621,7 @@
     },
     "workshop": {
       "openTab": "Skill Workshop — create & review proposals",
-      "hint": "Governed skill creation via OpenClaw Skill Workshop: propose, review, then apply. Applied skills land in workspace/skills and appear in the Skills tab. Agents can also use the skill_workshop tool in chat.",
+      "hint": "Governed skill creation via the Research-Claw Skill Workshop: propose, review, then apply. Applied skills land in workspace/skills and appear in the Skills tab. Agents can also use the skill_workshop tool in chat.",
       "filter": {
         "pending": "Pending ({{count}})",
         "today": "Today",
@@ -1625,7 +1735,7 @@
         "workspace": "Workspace Skills",
         "extra": "Plugins / Extra Directories",
         "managed": "Managed / Personal Skills",
-        "bundled": "OpenClaw Bundled",
+        "bundled": "Research-Claw Bundled",
         "other": "Other / Unknown Source"
       },
       "runtime": {
@@ -1653,12 +1763,12 @@
       "installNow": "Install now",
       "clawhub": {
         "tab": "ClawHub",
-        "native": "Native OpenClaw source",
+        "native": "Native Research-Claw source",
         "description": "Searches ClawHub, loads registry details, then installs through skills.install.",
         "searchPlaceholder": "Search ClawHub skills",
         "empty": "No matching Skills found.",
         "confirmTitle": "Confirm Skill installation",
-        "confirmDescription": "OpenClaw will download, verify, scan, and install this Skill into the current workspace.",
+        "confirmDescription": "Research-Claw will download, verify, scan, and install this Skill into the current workspace.",
         "installedFallback": "Installed {{slug}}"
       },
       "local": {
@@ -1675,7 +1785,7 @@
         "allFailed": "No Skills were installed",
         "complete": "{{count}} Skills installed",
         "disabled": "Local archive upload is disabled by the Gateway configuration.",
-        "disabledDescription": "Enable skills.install.allowUploadedArchives in openclaw.json, then reconnect. You can still inspect a ZIP while installation is blocked.",
+        "disabledDescription": "Enable local Skill archive uploads in Research-Claw configuration, then reconnect. You can still inspect a ZIP while installation is blocked.",
         "preflightTitle": "Local structure preflight",
         "preflightBoundary": "This browser check is not a security boundary. Every selected Skill is installed atomically and receives the Gateway security scan during installation.",
         "chooseZip": "Choose Skill ZIP",
@@ -1683,7 +1793,7 @@
         "multiSkillZip": "Multi-Skill ZIP",
         "singleSkillZip": "Single-Skill ZIP",
         "gatewayScan": "Gateway security scan runs during installation.",
-        "noPreview": "OpenClaw 2026.6.1 has no scan-only verdict RPC, so no pre-install security verdict is fabricated here.",
+        "noPreview": "The current Research-Claw service has no scan-only security verdict API, so no pre-install security verdict is fabricated here.",
         "review": "Review installation",
         "resolveConflict": "Confirm overwrite for every selected conflicting Skill.",
         "confirmTitle": "Confirm local Skill installation",
@@ -1736,7 +1846,7 @@
       "empty": "No plugins loaded.",
       "path": "Path",
       "config": "Config",
-      "copyConfigPath": "Copy openclaw.json Path",
+      "copyConfigPath": "Copy Research-Claw Config Path",
       "toggleFailed": "Plugin toggle failed — the gateway may be restarting. Try again shortly",
       "packages": "Installed Skill Packages",
       "installed": "Installed",

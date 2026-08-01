@@ -265,7 +265,7 @@ export function auditRuntimeMounts(input: {
       kind: 'skills-truncated',
       title: '技能预算发生截断',
       message:
-        `OpenClaw 索引到 ${sortedUnique(input.indexedSkillNames).length} 个可注入技能，` +
+        `科研龙虾服务索引到 ${sortedUnique(input.indexedSkillNames).length} 个可注入技能，` +
         `但运行时仅注入 ${actualSkills.size} 个；被截断 ${missingSkills.length} 个：` +
         `${missingSkills.join(', ')}。请调整 skills prompt budget 或精简技能集。`,
       missingNames: missingSkills,

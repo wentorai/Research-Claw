@@ -65,6 +65,31 @@ describe('LeftNav session action overlays', () => {
     document.querySelectorAll('.ant-modal-root, .ant-dropdown').forEach((node) => node.remove());
   });
 
+  it('shows the server label when the active key is bare but the session row is canonical', async () => {
+    const sessions = [{
+      key: 'agent:main:project-50af27a9',
+      label: '自动命名验证测试',
+      updatedAt: Date.now(),
+    }];
+    useGatewayStore.setState({
+      state: 'connected',
+      client: {
+        isConnected: true,
+        request: vi.fn().mockResolvedValue({ sessions }),
+      } as never,
+    });
+    useSessionsStore.setState({
+      sessions,
+      activeSessionKey: 'project-50af27a9',
+      loading: false,
+    });
+
+    render(<Wrapper><LeftNav /></Wrapper>);
+
+    expect(await screen.findByText('自动命名验证测试')).toBeInTheDocument();
+    expect(screen.queryByText('project-50af27a9')).not.toBeInTheDocument();
+  });
+
   it('closes the session dropdown before opening the rename modal', async () => {
     render(<Wrapper><LeftNav /></Wrapper>);
 

@@ -29,8 +29,11 @@ import SupervisorReviewListener from './components/SupervisorReviewListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
+import { useSessionRunsStore } from './stores/session-runs';
 import { useExecutionTraceStore } from './stores/execution-trace';
-import { normalizeSessionKey } from './utils/session-key';
+import { isInternalSessionNamingKey, normalizeSessionKey } from './utils/session-key';
+import { resolveObservedRunActivity } from './utils/run-status-presentation';
+import { autoNameSessionKeyForEvent } from './utils/session-auto-name-event';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -115,7 +118,6 @@ export default function App() {
   const connectError = useGatewayStore((s) => s.connectError);
   const handleChatEvent = useChatStore((s) => s.handleChatEvent);
   const loadHistory = useChatStore((s) => s.loadHistory);
-  const setAgentStatus = useUiStore((s) => s.setAgentStatus);
   const leftNavCollapsed = useUiStore((s) => s.leftNavCollapsed);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
   const rightPanelWidth = useUiStore((s) => s.rightPanelWidth);
@@ -176,11 +178,43 @@ export default function App() {
     if (!client) return;
 
     const unsubChat = client.subscribe('chat', (payload) => {
-      handleChatEvent(payload as ChatStreamEvent);
-      // Clear foreground tool stream when a run completes
       const event = payload as ChatStreamEvent;
+      const chatBeforeEvent = useChatStore.getState();
+      if (event.sessionKey && event.state === 'delta') {
+        useSessionRunsStore.getState().observeActivity({
+          sessionKey: event.sessionKey,
+          runId: event.runId,
+          kind: 'streaming',
+          label: 'streaming',
+          observedAt: Date.now(),
+          source: 'chat-event',
+        });
+      }
+      const autoNameSessionKey = autoNameSessionKeyForEvent(event);
+      if (autoNameSessionKey) {
+        // This listener sees every project session, including a session that
+        // finishes after the user switches elsewhere. Capture the event key;
+        // never read whichever session happens to be active 500ms later.
+        useSessionsStore.getState().scheduleAutoNameSession(autoNameSessionKey, 500);
+      }
+      handleChatEvent(event);
       if (event.state === 'final' || event.state === 'aborted' || event.state === 'error') {
-        useToolStreamStore.setState({ pendingTools: [] });
+        // Terminal events for another session or an older run must not erase
+        // the active session's foreground tools.
+        const sameSession = normalizeSessionKey(event.sessionKey)
+          === normalizeSessionKey(chatBeforeEvent.sessionKey);
+        const sameRun = !event.runId
+          || !chatBeforeEvent.runId
+          || event.runId === chatBeforeEvent.runId;
+        if (sameSession && sameRun) {
+          useToolStreamStore.getState().clearSession(
+            event.sessionKey ?? chatBeforeEvent.sessionKey,
+          );
+        }
+
+        // Card projections are read models. A matching terminal invalidates
+        // the presentation cache, while the lifecycle/session stores remain
+        // the authority for whether the run is active.
         const activeSessionKey = useChatStore.getState().sessionKey;
         if (
           typeof event.runId === 'string'
@@ -194,6 +228,8 @@ export default function App() {
 
     const handleAgentPayload = (payload: unknown, source: 'agent' | 'session.tool' = 'agent') => {
       const status = payload as {
+        runId?: string;
+        sessionKey?: string;
         state?: string;
         stream?: string;
         data?: {
@@ -206,9 +242,13 @@ export default function App() {
           toolName?: string;
           toolCallId?: string;
         };
-        runId?: string;
-        sessionKey?: string;
       };
+
+      // OC's embedded one-shot model runner emits normal global agent events.
+      // Session-title inference is internal plumbing: its lifecycle, including
+      // an error, must never alter a user's run state, presentation cache or
+      // visible tool timeline.
+      if (status.sessionKey && isInternalSessionNamingKey(status.sessionKey)) return;
 
       if (status.stream === 'research-claw-core.presentation_changed') {
         const data = status.data;
@@ -244,22 +284,29 @@ export default function App() {
         }
       } else if (status.stream === 'compaction' && status.data?.phase) {
         useChatStore.getState().handleCompactionAgentEvent(status);
-        if (status.data.phase === 'start') {
-          setAgentStatus('compacting');
-        } else if (status.data.phase === 'end' && useChatStore.getState().streaming) {
-          setAgentStatus('thinking');
-        }
       } else if (
         status.stream === 'lifecycle'
         && status.data?.phase === 'error'
       ) {
         useChatStore.getState().handleAgentFailureEvent(status);
-        setAgentStatus('error');
       } else if (status.stream === 'error') {
         useChatStore.getState().handleAgentFailureEvent(status);
-        setAgentStatus('error');
-      } else if (status.state) {
-        setAgentStatus(status.state as 'idle' | 'thinking' | 'compacting' | 'tool_running' | 'streaming' | 'error');
+      }
+      // session.tool result frames describe a completed observation and may
+      // contain sanitized output. They invalidate cards above, but must not
+      // overwrite the currently-known activity or failure state.
+      if (source === 'agent' && status.sessionKey) {
+        const activity = resolveObservedRunActivity(status);
+        if (activity) {
+          useSessionRunsStore.getState().observeActivity({
+            sessionKey: status.sessionKey,
+            runId: status.runId,
+            kind: activity.kind,
+            label: activity.label,
+            observedAt: Date.now(),
+            source: status.stream === 'tool' ? 'tool-event' : 'agent-event',
+          });
+        }
       }
       // session.tool result frames include the sanitized tool result. They are
       // invalidations only: never copy that payload into activity/execution
@@ -284,7 +331,7 @@ export default function App() {
       unsubAgent();
       unsubSessionTool();
     };
-  }, [client, handleChatEvent, setAgentStatus]);
+  }, [client, handleChatEvent]);
 
   // On connection: restore persisted session, load history + session list + check notifications
   useEffect(() => {
@@ -302,14 +349,11 @@ export default function App() {
       void Promise.all([historyPromise, sessionsPromise, onboardingPromise]).then(() => {
         useOnboardingStore.getState().markProbesReady();
       });
-      setAgentStatus('idle');
       // Initial notification check
       useUiStore.getState().checkNotifications();
       void useStagedWritingStore.getState().restoreJob();
-    } else if (connState === 'disconnected' || connState === 'reconnecting') {
-      setAgentStatus('disconnected');
     }
-  }, [connState, loadHistory, setAgentStatus]);
+  }, [connState, loadHistory]);
 
   // Load session usage once boot completes (after config.get finishes).
   // Deferred from connection effect to avoid competing with the critical config.get RPC.
@@ -354,6 +398,10 @@ export default function App() {
           lastVisibilitySyncAt = now;
           setTimeout(() => {
             useChatStore.getState().loadHistory();
+            void useSessionRunsStore.getState().requestReconcile(
+              useSessionsStore.getState().activeSessionKey,
+              'visibility',
+            );
           }, 300);
         }
       }

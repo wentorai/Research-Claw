@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react';
-import { App, Button, Empty, Progress, Spin, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, Empty, Spin, Tag, Tooltip, Typography } from 'antd';
 import { DownOutlined, PlayCircleOutlined, RedoOutlined, ReloadOutlined, RightOutlined, StopOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { useJobsStore, type Job, type JobStatus, type JobStepStatus } from '../../stores/jobs';
+import {
+  useJobsStore,
+  type Job,
+  type JobCancelResult,
+  type JobStatus,
+  type JobStepStatus,
+} from '../../stores/jobs';
 import { useGatewayStore } from '../../stores/gateway';
 import { relativeTime } from '../../utils/relativeTime';
 
@@ -16,6 +22,55 @@ function dbDateToIso(value: string | null | undefined): string | null {
   if (!trimmed) return null;
   if (trimmed.includes('T')) return trimmed;
   return `${trimmed.replace(' ', 'T')}Z`;
+}
+
+function friendlyJobType(type: string, t: (key: string) => string): string {
+  if (type === 'openclaw-subagent') return t('jobs.type.researchAgent');
+  if (type === 'staged-writing') return t('jobs.type.stagedWriting');
+  if (type.includes('upload')) return t('jobs.type.upload');
+  if (type.includes('export')) return t('jobs.type.export');
+  return t('jobs.type.other');
+}
+
+function friendlyJobError(error: string, t: (key: string) => string): string {
+  if (/worker heartbeat expired/i.test(error)) return t('jobs.error.heartbeatExpired');
+  if (/未能按时启动|never started|failed to start/i.test(error)) {
+    return t('jobs.error.notStarted');
+  }
+  if (/no active openclaw|no active .* run/i.test(error)) {
+    return t('jobs.error.noActiveRun');
+  }
+  return t('jobs.error.generic');
+}
+
+function friendlyJobTitle(job: Job, t: (key: string) => string): string {
+  // Only rewrite the generated fallback title on a framework-owned mirror row;
+  // user-authored titles/messages are left byte-for-byte unchanged.
+  if (job.id.startsWith('openclaw:') && /^(?:openclaw|oc)\s*子任务(?:\s+|$)/i.test(job.title)) {
+    const suffix = job.title.replace(/^(?:openclaw|oc)\s*子任务\s*/i, '').trim();
+    return suffix ? `${t('jobs.researchTaskTitle')} ${suffix}` : t('jobs.researchTaskTitle');
+  }
+  return job.title;
+}
+
+function friendlyCurrentStep(job: Job, t: (key: string) => string): string {
+  if (job.status === 'cancelled') return t('jobs.step.cancelled');
+  if (job.status === 'completed') return t('jobs.step.completed');
+  if (job.status === 'failed') return t('jobs.step.failed');
+  if (job.status === 'partial') return t('jobs.step.partial');
+  if (job.status === 'queued') return t('jobs.waiting');
+  if (job.status === 'stalled') return t('jobs.step.needsCheck');
+  if (job.type === 'openclaw-subagent' && job.status === 'running') return t('jobs.step.agentRunning');
+  if (!job.current_step) return t('jobs.waiting');
+  if (/resumed by user/i.test(job.current_step)) return t('jobs.step.resumed');
+  return job.current_step;
+}
+
+function friendlyStepLabel(step: NonNullable<Job['steps']>[number], t: (key: string) => string): string {
+  if (step.step_key === 'scope') return t('jobs.stepLabel.scope');
+  if (step.step_key === 'execute') return t('jobs.stepLabel.execute');
+  if (step.step_key === 'review') return t('jobs.stepLabel.review');
+  return step.label;
 }
 
 const STATUS_COLORS: Record<JobStatus, string> = {
@@ -36,7 +91,13 @@ const STEP_STATUS_COLORS: Record<JobStepStatus, string> = {
   skipped: 'default',
 };
 
-function JobSteps({ steps }: { steps: NonNullable<Job['steps']> }) {
+function JobSteps({
+  steps,
+  normalizeSystemLabels,
+}: {
+  steps: NonNullable<Job['steps']>;
+  normalizeSystemLabels: boolean;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (steps.length === 0) return null;
@@ -58,13 +119,18 @@ function JobSteps({ steps }: { steps: NonNullable<Job['steps']> }) {
                 <Tag color={STEP_STATUS_COLORS[step.status]} style={{ marginInlineEnd: 0 }}>
                   {t(`jobs.stepStatus.${step.status}`)}
                 </Tag>
-                <Text style={{ fontSize: 12, flex: 1 }}>{step.label}</Text>
-                {step.status === 'running' && <Text type="secondary" style={{ fontSize: 11 }}>{step.progress}%</Text>}
+                <Text style={{ fontSize: 12, flex: 1 }}>
+                  {normalizeSystemLabels ? friendlyStepLabel(step, t) : step.label}
+                </Text>
                 {step.attempt > 1 && (
                   <Text type="secondary" style={{ fontSize: 11 }}>{t('jobs.stepAttempt', { count: step.attempt })}</Text>
                 )}
               </div>
-              {step.error && <Text type="danger" style={{ fontSize: 11 }}>{step.error}</Text>}
+              {step.error && (
+                <Text type="danger" style={{ fontSize: 11 }}>
+                  {friendlyJobError(step.error, t)}
+                </Text>
+              )}
             </div>
           ))}
         </div>
@@ -82,12 +148,13 @@ function JobCard({ job }: { job: Job }) {
   const cancelJob = useJobsStore((s) => s.cancelJob);
   const resumeJob = useJobsStore((s) => s.resumeJob);
   const retryJob = useJobsStore((s) => s.retryJob);
-  const loadJob = useJobsStore((s) => s.loadJob);
   const action = useJobsStore((s) => s.actionById[job.id]);
   const active = job.status === 'queued' || job.status === 'running' || job.status === 'stalled';
   const controllableOpenClaw = job.type === 'openclaw-subagent' && Boolean(job.session_key);
   const cancellable = active;
-  const resumable = controllableOpenClaw && (job.status === 'stalled' || job.status === 'failed' || job.status === 'cancelled');
+  const resumable = controllableOpenClaw
+    && (job.status === 'stalled' || job.status === 'cancelled');
+  const retryable = controllableOpenClaw && job.status === 'failed';
 
   const runAction = (fn: () => Promise<void>) => {
     void fn().catch((err) => {
@@ -96,61 +163,85 @@ function JobCard({ job }: { job: Job }) {
     });
   };
 
+  const runCancel = () => {
+    void cancelJob(job.id).then((result: JobCancelResult) => {
+      if (result.backingStop === 'unconfirmed') {
+        message.warning(t('jobs.cancelledBackingUnconfirmed'));
+      } else if (result.backingStop === 'not-active') {
+        message.success(t('jobs.cancelledNoActiveBacking'));
+      } else {
+        message.success(t('jobs.cancelledSuccess'));
+      }
+    }).catch(() => {
+      message.error(t('jobs.actionFailed'));
+    });
+  };
+
   return (
     <div style={{ padding: 12, borderBottom: '1px solid var(--border)', display: 'grid', gap: 8 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <Text strong style={{ flex: 1 }}>{job.title}</Text>
+        <Text strong style={{ flex: 1 }}>{friendlyJobTitle(job, t)}</Text>
         <Tag color={STATUS_COLORS[job.status]}>{t(`jobs.status.${job.status}`)}</Tag>
       </div>
-      <Progress percent={job.progress} status={job.status === 'failed' ? 'exception' : undefined} size="small" />
       <Text type="secondary" style={{ fontSize: 12 }}>
-        {job.current_step || t('jobs.waiting')}
+        {t('jobs.currentActivity')}{friendlyCurrentStep(job, t)}
       </Text>
-      {job.error && <Text type="danger" style={{ fontSize: 12 }}>{job.error}</Text>}
-      {job.steps && job.steps.length > 0 && <JobSteps steps={job.steps} />}
+      {job.error && job.status !== 'cancelled' && job.status !== 'completed' && (
+        <Text type="danger" style={{ fontSize: 12 }}>
+          {friendlyJobError(job.error, t)}
+        </Text>
+      )}
+      {job.steps && job.steps.length > 0 && (
+        <JobSteps
+          steps={job.steps}
+          normalizeSystemLabels={job.type === 'openclaw-subagent'}
+        />
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
         <Tooltip title={updatedLocal}>
-          <Text type="secondary" style={{ fontSize: 11 }}>{job.type} · {updatedRel}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {friendlyJobType(job.type, t)} · {updatedRel}
+          </Text>
         </Tooltip>
         <span style={{ display: 'inline-flex', gap: 4 }}>
-          <Tooltip title={t('jobs.refresh')}>
-            <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => void loadJob(job.id)} />
-          </Tooltip>
           {resumable && (
             <Tooltip title={t('jobs.resume')}>
               <Button
                 size="small"
-                type="text"
                 icon={<PlayCircleOutlined />}
                 loading={action === 'resume'}
                 disabled={Boolean(action)}
                 onClick={() => runAction(() => resumeJob(job.id))}
-              />
+              >
+                {t('jobs.resume')}
+              </Button>
             </Tooltip>
           )}
-          {resumable && (
+          {retryable && (
             <Tooltip title={t('jobs.retry')}>
               <Button
                 size="small"
-                type="text"
                 icon={<RedoOutlined />}
                 loading={action === 'retry'}
                 disabled={Boolean(action)}
                 onClick={() => runAction(() => retryJob(job.id))}
-              />
+              >
+                {t('jobs.retry')}
+              </Button>
             </Tooltip>
           )}
           {cancellable && (
             <Tooltip title={t('jobs.cancel')}>
               <Button
                 size="small"
-                type="text"
                 danger
                 icon={<StopOutlined />}
                 loading={action === 'cancel'}
                 disabled={Boolean(action)}
-                onClick={() => runAction(() => cancelJob(job.id))}
-              />
+                onClick={runCancel}
+              >
+                {t('jobs.cancel')}
+              </Button>
             </Tooltip>
           )}
         </span>
@@ -160,11 +251,16 @@ function JobCard({ job }: { job: Job }) {
 }
 
 export default function JobsPanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { message } = App.useApp();
   const jobs = useJobsStore((s) => s.jobs);
   const loading = useJobsStore((s) => s.loading);
+  const lastLoadedAt = useJobsStore((s) => s.lastLoadedAt);
   const loadJobs = useJobsStore((s) => s.loadJobs);
   const connState = useGatewayStore((s) => s.state);
+  const lastLoadedLabel = lastLoadedAt
+    ? relativeTime(new Date(lastLoadedAt).toISOString(), i18n.language)
+    : null;
 
   // Refresh once when the panel opens; the global JobsActivityListener owns the
   // ongoing poll so jobs stay live (and notify) even when this panel is closed.
@@ -173,11 +269,35 @@ export default function JobsPanel() {
     void loadJobs();
   }, [connState, loadJobs]);
 
+  const refreshAll = () => {
+    void loadJobs().then((ok) => {
+      if (ok) message.success(t('jobs.refreshSuccess'));
+      else message.error(t('jobs.refreshFailed'));
+    });
+  };
+
   return (
     <div style={{ height: '100%', overflow: 'auto' }}>
-      <div style={{ padding: 12, display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
-        <Text type="secondary" style={{ flex: 1 }}>{t('jobs.hint')}</Text>
-        <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadJobs()} />
+      <div style={{ padding: 12, display: 'grid', gap: 8, borderBottom: '1px solid var(--border)' }}>
+        <Text type="secondary">{t('jobs.hint')}</Text>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Text type="secondary" style={{ fontSize: 11, flex: 1 }}>
+            {loading
+              ? t('jobs.refreshing')
+              : lastLoadedLabel
+                ? t('jobs.lastUpdated', { time: lastLoadedLabel })
+                : t('jobs.autoRefreshHint')}
+          </Text>
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={loading}
+            disabled={connState !== 'connected'}
+            onClick={refreshAll}
+          >
+            {t('jobs.refreshAll')}
+          </Button>
+        </div>
       </div>
       {loading && jobs.length === 0 ? (
         <div style={{ padding: 32, textAlign: 'center' }}><Spin /></div>

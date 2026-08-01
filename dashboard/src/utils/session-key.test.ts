@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   isHeartbeatSessionKey,
+  isInternalSessionNamingKey,
   isMainSessionKey,
   isSubagentSessionKey,
   normalizeSessionKey,
@@ -76,6 +77,19 @@ describe('isSubagentSessionKey', () => {
   it('does not match substrings that are not a subagent segment', () => {
     expect(isSubagentSessionKey('subagents')).toBe(false);
     expect(isSubagentSessionKey('agent:main:my-subagent-notes')).toBe(false);
+  });
+});
+
+describe('isInternalSessionNamingKey', () => {
+  it('matches the one-shot Research-Claw naming run and only that synthetic segment', () => {
+    expect(isInternalSessionNamingKey(
+      'agent:main:session-naming:session-name-5e8e783e-086f-4f5c-93b6-ba24cd42be93',
+    )).toBe(true);
+    expect(isInternalSessionNamingKey(
+      'session-naming:session-name-5e8e783e-086f-4f5c-93b6-ba24cd42be93',
+    )).toBe(true);
+    expect(isInternalSessionNamingKey('agent:main:project-session-naming-notes')).toBe(false);
+    expect(isInternalSessionNamingKey('agent:main:project-x')).toBe(false);
   });
 });
 

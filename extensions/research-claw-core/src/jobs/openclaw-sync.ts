@@ -81,6 +81,11 @@ export function syncOpenClawSubagentJobs(
     .slice(0, maxSessions);
 
   let synced = 0;
+  // Entries are newest-first. A Gateway-restart recovery can leave an older
+  // interrupted child and a newer replacement carrying the same durable Job
+  // ID. Let the newest child claim that Job once per sweep so the older session
+  // cannot overwrite the replacement later in this loop.
+  const claimedJobIds = new Set<string>();
   for (const [sessionKey, session] of entries) {
     try {
       const sessionId = session.sessionId;
@@ -89,17 +94,24 @@ export function syncOpenClawSubagentJobs(
       if (session.sessionFile) seenFiles.add(session.sessionFile);
       // Resolve the target job id in priority order:
       //   1. Job ID echoed in the child transcript (exact, preferred).
-      //   2. A still-pending long-task job spawned by this session's parent
+      //   2. An active long-task already checkpoint-bound to this exact child.
+      //   3. A still-pending long-task job spawned by this session's parent
       //      (heuristic rebind — avoids orphaning the tracked job when the model
       //      forgot to print the Job ID).
-      //   3. A fresh openclaw:<sessionId> row.
+      //   4. A fresh openclaw:<sessionId> row.
       let jobId = transcript.jobId;
       let existingJob = jobId ? getExistingJob(service, jobId) : null;
+      if (!jobId) {
+        const bound = service.findActiveLongTaskForSession(sessionKey);
+        if (bound) { jobId = bound.id; existingJob = bound; }
+      }
       if (!jobId && session.spawnedBy) {
         const bound = service.findBindableLongTask(session.spawnedBy);
         if (bound) { jobId = bound.id; existingJob = bound; }
       }
       if (!jobId) jobId = `openclaw:${sessionId}`;
+      if (claimedJobIds.has(jobId)) continue;
+      claimedJobIds.add(jobId);
       const mappedStatus = mapOpenClawStatus(session.status, session.updatedAt, now, staleAfterMs);
       const preserveResumeRequest = shouldPreserveResumeRequest(existingJob, mappedStatus, session.updatedAt, now);
       const status = preserveResumeRequest ? 'running' : mappedStatus;
@@ -107,9 +119,9 @@ export function syncOpenClawSubagentJobs(
       const updatedAt = formatDbDate(session.updatedAt ?? session.lastInteractionAt);
       const completedAt = isTerminal(status) ? updatedAt : null;
       const title = existingJob?.title
-        ?? formatJobTitleFromMessage(transcript.title || session.label || `子任务 ${sessionId.slice(0, 8)}`, 'OpenClaw 子任务');
+        ?? formatJobTitleFromMessage(transcript.title || session.label || `子任务 ${sessionId.slice(0, 8)}`, '科研龙虾子任务');
       const currentStep = preserveResumeRequest
-        ? existingJob?.current_step ?? '已请求 OpenClaw 子会话继续'
+        ? existingJob?.current_step ?? '已请求科研龙虾子会话继续'
         : currentStepFor(status, session.updatedAt, transcript.latestText);
       const message = transcript.title || existingJob?.input?.message;
       const references = Array.isArray(existingJob?.input?.references)
@@ -172,6 +184,7 @@ export function syncOpenClawSubagentJobs(
         updated_at: updatedAt,
         steps,
       });
+      service.removeProvisionalOpenClawMirror(sessionId, sessionKey, jobId);
       synced++;
     } catch (err) {
       options.logger?.warn?.(`[Jobs] Failed to sync OpenClaw subagent job: ${err instanceof Error ? err.message : String(err)}`);
@@ -231,13 +244,13 @@ function progressFor(status: JobStatus): number {
 }
 
 function currentStepFor(status: JobStatus, updatedAt: number | undefined, latestText: string | null): string {
-  if (status === 'completed') return latestText ? `已完成：${latestText.slice(0, 80)}` : 'OpenClaw 子会话已完成';
-  if (status === 'failed') return 'OpenClaw 子会话失败';
-  if (status === 'cancelled') return 'OpenClaw 子会话已取消';
-  if (status === 'stalled') return 'OpenClaw 子会话长时间未更新';
-  if (status === 'queued') return 'OpenClaw 子会话等待启动';
+  if (status === 'completed') return latestText ? `已完成：${latestText.slice(0, 80)}` : '科研龙虾子会话已完成';
+  if (status === 'failed') return '科研龙虾子会话失败';
+  if (status === 'cancelled') return '科研龙虾子会话已取消';
+  if (status === 'stalled') return '科研龙虾子会话状态需要核对';
+  if (status === 'queued') return '科研龙虾子会话等待启动';
   const suffix = updatedAt ? `，最后活动 ${formatDbDate(updatedAt)}` : '';
-  return `OpenClaw 子会话运行中${suffix}`;
+  return `科研龙虾子会话运行中${suffix}`;
 }
 
 function isTerminal(status: JobStatus): boolean {

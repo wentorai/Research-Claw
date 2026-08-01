@@ -31,6 +31,7 @@ import { normalizeSessionKey } from '../utils/session-key';
 import { removeScheduledJobForSession } from '../utils/remove-cron-for-session';
 import { isPaperReviewCronSessionRow } from '../utils/paper-review-run';
 import { isStagedWritingCronSessionRow } from '../utils/staged-writing-run';
+import { selectSessionRunView, useSessionRunsStore } from '../stores/session-runs';
 
 const { Text } = Typography;
 
@@ -96,6 +97,7 @@ export default function LeftNav() {
   const clearSession = useSessionsStore((s) => s.clearSession);
   const renameSession = useSessionsStore((s) => s.renameSession);
   const isMainSession = useSessionsStore((s) => s.isMainSession);
+  const sessionRunsState = useSessionRunsStore();
 
   const [renameTarget, setRenameTarget] = useState<{ key: string; current: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -271,9 +273,10 @@ export default function LeftNav() {
       {/* Scrollable session list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
         {filteredSessions.map((session) => {
-          const isActive = session.key === activeSessionKey;
+          const isActive = normalizeSessionKey(session.key) === normalizeSessionKey(activeSessionKey);
           const isMain = isMainSession(session.key);
           const name = getSessionName(session, t);
+          const sessionRun = selectSessionRunView(sessionRunsState, session.key);
 
           return (
             <div
@@ -297,7 +300,10 @@ export default function LeftNav() {
                   height: 6,
                   borderRadius: '50%',
                   flexShrink: 0,
-                  background: isActive ? 'var(--accent-primary)' : 'var(--text-tertiary)',
+                  background: sessionRun.isBusy
+                    ? '#f59e0b'
+                    : isActive ? 'var(--accent-primary)' : 'var(--text-tertiary)',
+                  animation: sessionRun.isBusy ? 'pulse 1.5s ease-in-out infinite' : undefined,
                 }}
               />
               <Tooltip
@@ -373,8 +379,9 @@ export default function LeftNav() {
               <span style={{ flex: 1 }}>{t('cron.cronSessions')} ({filteredCronSessions.length})</span>
             </div>
             {!cronFolded && filteredCronSessions.map((session) => {
-              const isActive = session.key === activeSessionKey;
+              const isActive = normalizeSessionKey(session.key) === normalizeSessionKey(activeSessionKey);
               const name = getSessionName(session, t);
+              const sessionRun = selectSessionRunView(sessionRunsState, session.key);
               return (
                 <div
                   key={session.key}
@@ -391,7 +398,14 @@ export default function LeftNav() {
                   onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--surface-hover)'; }}
                   onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
                 >
-                  <div style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: isActive ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
+                  <div style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    background: sessionRun.isBusy ? '#f59e0b' : isActive ? 'var(--accent-primary)' : 'var(--text-tertiary)',
+                    animation: sessionRun.isBusy ? 'pulse 1.5s ease-in-out infinite' : undefined,
+                  }} />
                   <span style={{ flex: 1, fontWeight: isActive ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-secondary)' }}>
                     {name}
                   </span>
@@ -432,10 +446,11 @@ export default function LeftNav() {
       </div>
     </div>
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, t, handleDeleteCronSession, handleClearSession, closeSessionDropdown]);
+  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, sessionRunsState, t, handleDeleteCronSession, handleClearSession, closeSessionDropdown]);
 
   const activeSessionLabel = useMemo(() => {
-    const session = sessions.find((s) => s.key === activeSessionKey);
+    const activeKey = normalizeSessionKey(activeSessionKey);
+    const session = sessions.find((s) => normalizeSessionKey(s.key) === activeKey);
     if (session) return getSessionName(session, t);
     // Active key not in list yet (e.g. just created, not yet on server)
     if (isMainSession(activeSessionKey)) return t('project.mainSession');

@@ -321,8 +321,8 @@ describe('cron failure episode invalidation — real gateway link', () => {
       ws.simulateMessage(cronFrame(CRON_AUTH_SECOND, 1));
     });
 
-    // lastSeq is not zeroed until the connect resolves, so seq 1 here is below
-    // the watermark and reads as ordinary: no gap, and no hello yet either.
+    // The old socket watermark is cleared on close, so seq 1 belongs to the new
+    // connection and is delivered without inventing a cross-socket gap.
     expect(sawGapWarning()).toBe(false);
     expect(useGatewayStore.getState().eventEpoch).toBeGreaterThan(epochBefore);
     expect(notification.error).toHaveBeenCalledTimes(2);

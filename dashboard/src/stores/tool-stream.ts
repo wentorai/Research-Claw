@@ -1,11 +1,14 @@
 import { create } from 'zustand';
 
 import { useTaskFlowStore } from './task-flow';
+import { recordRunTrace } from '../utils/run-trace';
 import { normalizeSessionKey } from '../utils/session-key';
 
 export interface PendingTool {
   toolCallId: string;
   name: string;
+  /** Normalized owner Session. Required for A/B isolation in the UI. */
+  sessionKey?: string;
   phase: 'start' | 'running' | 'result' | 'end';
   startedAt: number;
   /** Timestamp of the most recent event for this tool. Used by stale-stream
@@ -31,6 +34,7 @@ export interface ActivityLogEntry {
   scope: 'foreground' | 'background';
   status: string;
   text: string;
+  toolName?: string;
   durationMs?: number;
   detail?: unknown;
 }
@@ -46,6 +50,7 @@ interface ToolStreamState {
   runSessionMap: Record<string, string>;
 
   handleAgentEvent: (payload: unknown, chatRunId: string | null, activeSessionKey: string) => void;
+  clearSession: (sessionKey: string) => void;
   clearAll: () => void;
   clearActivityLog: () => void;
 }
@@ -60,6 +65,16 @@ const STALE_TOOL_MS = 120_000;
 const ACTIVITY_LOG_MAX = 200;
 /** Max entries in runSessionMap before oldest entries are evicted. */
 const RUN_SESSION_MAP_MAX = 100;
+
+export function selectPendingTools(
+  state: Pick<ToolStreamState, 'pendingTools'>,
+  sessionKey: string,
+): PendingTool[] {
+  const normalized = normalizeSessionKey(sessionKey);
+  return state.pendingTools.filter(
+    (tool) => Boolean(tool.sessionKey) && normalizeSessionKey(tool.sessionKey) === normalized,
+  );
+}
 
 function pushActivityLog(
   set: (partial: Partial<ToolStreamState>) => void,
@@ -115,23 +130,66 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
       }
     }
 
-    // Background = different runId from the user's active chat, or no active chat.
-    const isBackground = !!evt.runId && (!chatRunId || evt.runId !== chatRunId);
+    const mappedSessionKey = evt.runId ? get().runSessionMap[evt.runId] : undefined;
+    const explicitEventSessionKey = normalizeSessionKey(evt.sessionKey ?? mappedSessionKey);
+    const matchesActiveSession = Boolean(
+      explicitEventSessionKey && explicitEventSessionKey === normalizedActiveSessionKey,
+    );
+    const matchesLocalForegroundRun = Boolean(
+      evt.runId && chatRunId && evt.runId === chatRunId,
+    );
+    // F5 legitimately loses chat.runId. An authoritative event that still
+    // names the selected session remains foreground; calling it "background"
+    // would falsely claim the execution mode changed. A different run remains
+    // background only when a local foreground run is concurrently known.
+    const isBackground = Boolean(
+      evt.runId
+      && !matchesLocalForegroundRun
+      && !(!chatRunId && matchesActiveSession),
+    );
 
     // Resolve event session: explicit sessionKey -> remembered run mapping ->
     // current foreground run's active session. For background events, never
     // fall back to active session to avoid cross-session pollution.
-    const mappedSessionKey = evt.runId ? get().runSessionMap[evt.runId] : undefined;
     const eventSessionKey = normalizeSessionKey(
       evt.sessionKey
       ?? mappedSessionKey
-      ?? (!isBackground && evt.runId && chatRunId && evt.runId === chatRunId ? activeSessionKey : undefined),
+      ?? (matchesLocalForegroundRun ? activeSessionKey : undefined),
     );
 
     // Session isolation: if we can resolve session and it is not active, drop it.
     if (eventSessionKey && eventSessionKey !== normalizedActiveSessionKey) {
+      recordRunTrace({
+        source: 'tool-stream',
+        action: 'agent-event',
+        sessionKey: eventSessionKey,
+        runId: evt.runId,
+        status: evt.stream ?? evt.state,
+        decision: 'dropped-session-mismatch',
+        reason: evt.data?.phase,
+        fieldsPresent: [
+          ...Object.keys(evt),
+          ...Object.keys(evt.data ?? {}).map((field) => `data.${field}`),
+        ],
+        observedAt: Date.now(),
+      });
       return;
     }
+
+    recordRunTrace({
+      source: 'tool-stream',
+      action: 'agent-event',
+      sessionKey: eventSessionKey || evt.sessionKey,
+      runId: evt.runId,
+      status: evt.stream ?? evt.state,
+      decision: isBackground ? 'background' : 'foreground',
+      reason: evt.data?.phase,
+      fieldsPresent: [
+        ...Object.keys(evt),
+        ...Object.keys(evt.data ?? {}).map((field) => `data.${field}`),
+      ],
+      observedAt: Date.now(),
+    });
 
     // ── Path A: Status-only events (state field, no stream) ──
     // These are broadcast to ALL clients. The status dot uses them.
@@ -216,6 +274,10 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
         const now = Date.now();
         const evictStale = (tools: PendingTool[]) =>
           tools.filter((t) => now - t.lastEventAt < STALE_TOOL_MS);
+        const isSameTool = (tool: PendingTool) => (
+          tool.toolCallId === toolCallId
+          && normalizeSessionKey(tool.sessionKey) === eventSessionKey
+        );
 
         switch (phase) {
           case 'start':
@@ -227,25 +289,33 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
                 scope: 'foreground',
                 status: 'tool_start',
                 text: `Tool started: ${name ?? 'unknown'}`,
+                toolName: name ?? 'unknown',
                 detail: evt.data,
               });
             }
             set((s) => ({
               pendingTools: [
                 ...evictStale(s.pendingTools),
-                { toolCallId, name: name ?? 'unknown', phase: 'start', startedAt: now, lastEventAt: now },
+                {
+                  toolCallId,
+                  name: name ?? 'unknown',
+                  sessionKey: eventSessionKey,
+                  phase: 'start',
+                  startedAt: now,
+                  lastEventAt: now,
+                },
               ],
             }));
             break;
           case 'running':
             set((s) => ({
               pendingTools: evictStale(s.pendingTools).map((t) =>
-                t.toolCallId === toolCallId ? { ...t, phase: 'running', lastEventAt: now } : t,
+                isSameTool(t) ? { ...t, phase: 'running', lastEventAt: now } : t,
               ),
             }));
             break;
           case 'result': {
-              const matched = get().pendingTools.find((x) => x.toolCallId === toolCallId);
+              const matched = get().pendingTools.find(isSameTool);
               const durationMs = matched ? (now - matched.startedAt) : undefined;
               if (eventSessionKey) {
                 pushActivityLog(set, get, {
@@ -255,6 +325,7 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
                   scope: 'foreground',
                   status: 'tool_result',
                   text: `Tool returned: ${name ?? 'unknown'}`,
+                  toolName: name ?? matched?.name ?? 'unknown',
                   durationMs,
                   detail: evt.data,
                 });
@@ -262,12 +333,12 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
             }
             set((s) => ({
               pendingTools: evictStale(s.pendingTools).map((t) =>
-                t.toolCallId === toolCallId ? { ...t, phase: 'result', lastEventAt: now } : t,
+                isSameTool(t) ? { ...t, phase: 'result', lastEventAt: now } : t,
               ),
             }));
             break;
           case 'end': {
-              const matched = get().pendingTools.find((x) => x.toolCallId === toolCallId);
+              const matched = get().pendingTools.find(isSameTool);
               const durationMs = matched ? (now - matched.startedAt) : undefined;
               if (eventSessionKey) {
                 pushActivityLog(set, get, {
@@ -277,6 +348,7 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
                   scope: 'foreground',
                   status: 'tool_end',
                   text: `Tool finished: ${name ?? 'unknown'}`,
+                  toolName: name ?? matched?.name ?? 'unknown',
                   durationMs,
                   detail: evt.data,
                 });
@@ -284,12 +356,12 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
             }
             setTimeout(() => {
               set((s) => ({
-                pendingTools: s.pendingTools.filter((t) => t.toolCallId !== toolCallId),
+                pendingTools: s.pendingTools.filter((t) => !isSameTool(t)),
               }));
             }, 800);
             set((s) => ({
               pendingTools: evictStale(s.pendingTools).map((t) =>
-                t.toolCallId === toolCallId ? { ...t, phase: 'end', lastEventAt: now } : t,
+                isSameTool(t) ? { ...t, phase: 'end', lastEventAt: now } : t,
               ),
             }));
             break;
@@ -306,6 +378,7 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
                 scope: 'background',
                 status: 'tool_start',
                 text: `Background tool started: ${name ?? 'unknown'}`,
+                toolName: name ?? 'unknown',
                 detail: evt.data,
               });
             }
@@ -387,6 +460,15 @@ export const useToolStreamStore = create<ToolStreamState>()((set, get) => ({
         }
       }
     }
+  },
+
+  clearSession: (sessionKey) => {
+    const normalized = normalizeSessionKey(sessionKey);
+    set((state) => ({
+      pendingTools: state.pendingTools.filter(
+        (tool) => normalizeSessionKey(tool.sessionKey) !== normalized,
+      ),
+    }));
   },
 
   clearAll: () => {

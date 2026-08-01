@@ -733,12 +733,21 @@ html, body {
 }
 
 .task-flow-title {
+  display: inline-flex;
+  align-items: center;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
 
-.task-flow-elapsed {
-  font-family: 'Fira Code', 'JetBrains Mono', monospace;
+.task-flow-run-icon {
+  display: inline-flex;
+  margin-right: 8px;
+}
+
+.task-flow-run-detail {
+  margin: -2px 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--text-tertiary);
 }
 

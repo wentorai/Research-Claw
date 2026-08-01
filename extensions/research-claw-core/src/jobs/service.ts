@@ -117,6 +117,13 @@ export class JobService {
     updated_at?: string | null;
     steps?: JobStepInput[];
   }): Job {
+    const existing = this.db.prepare('SELECT status FROM rc_jobs WHERE id=?')
+      .get(input.id) as { status?: JobStatus } | undefined;
+    // A user cancellation is a durable terminal decision. External transcript
+    // sweeps may observe worker frames that were already in flight, but those
+    // frames cannot silently revive or complete the cancelled job. An explicit
+    // resume/retry first moves the row back to running via resume().
+    if (existing?.status === 'cancelled') return this.get(input.id);
     const progress = clampProgress(input.progress);
     const tx = this.db.transaction(() => {
       this.db.prepare(
@@ -282,6 +289,7 @@ export class JobService {
     error?: string | null;
   }): Job {
     const current = this.get(id);
+    if (current.status === 'cancelled') return current;
     const checkpoint = { ...current.checkpoint, ...(patch.checkpoint ?? {}) };
     const status = current.status === 'queued' || current.status === 'stalled' ? 'running' : current.status;
     const tx = this.db.transaction(() => {
@@ -324,6 +332,8 @@ export class JobService {
   }
 
   finish(id: string, status: Extract<JobStatus, 'completed' | 'partial' | 'failed' | 'cancelled'>, result?: unknown, error?: string): Job {
+    const current = this.get(id);
+    if (current.status === 'cancelled') return current;
     this.db.prepare(
       `UPDATE rc_jobs SET status=?, progress=CASE WHEN ?='completed' THEN 100 ELSE progress END,
        result_json=?, error=?, completed_at=datetime('now'), heartbeat_at=datetime('now'), updated_at=datetime('now')
@@ -393,6 +403,42 @@ export class JobService {
        ORDER BY created_at DESC LIMIT 1`,
     ).get(parentSessionKey) as JobRow | undefined;
     return row ? this.mapJob(row) : null;
+  }
+
+  /**
+   * Recover the ordering where job_checkpoint binds the pre-created long task
+   * to the child session before the OpenClaw session index is synchronized.
+   * Without this exact-session lookup the sync layer creates a duplicate
+   * openclaw:<sessionId> row for the same execution.
+   */
+  findActiveLongTaskForSession(sessionKey: string): Job | null {
+    if (!sessionKey) return null;
+    const row = this.db.prepare(
+      `SELECT * FROM rc_jobs
+       WHERE id LIKE 'longtask:%' AND session_key = ?
+       AND status IN ('queued','running','stalled')
+       ORDER BY created_at DESC LIMIT 1`,
+    ).get(sessionKey) as JobRow | undefined;
+    return row ? this.mapJob(row) : null;
+  }
+
+  /**
+   * Delete only the deterministic mirror created before a child transcript had
+   * enough bytes to reveal its durable Research-Claw Job ID. The exact id,
+   * type, and child session must all match so unrelated/historical jobs are
+   * never pruned by this recovery path.
+   */
+  removeProvisionalOpenClawMirror(
+    sessionId: string,
+    sessionKey: string,
+    targetJobId: string,
+  ): boolean {
+    const provisionalId = `openclaw:${sessionId}`;
+    if (!sessionId || !sessionKey || provisionalId === targetJobId) return false;
+    return this.db.prepare(
+      `DELETE FROM rc_jobs
+       WHERE id = ? AND type = 'openclaw-subagent' AND session_key = ?`,
+    ).run(provisionalId, sessionKey).changes > 0;
   }
 
   /** Delete terminal jobs older than maxAgeDays (steps cascade). Returns rows removed. */

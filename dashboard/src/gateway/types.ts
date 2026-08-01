@@ -88,6 +88,8 @@ export interface ChatStreamEvent {
   state: 'delta' | 'final' | 'aborted' | 'error';
   message?: ChatMessage;
   errorMessage?: string;
+  /** Explicit OC terminal cause. Absent means the client must not invent one. */
+  stopReason?: string;
   /** Gateway-side failure classification for state:'error' events.
    *  Source: openclaw/packages/gateway-protocol/src/schema/logs-chat.ts
    *  (ChatEventErrorKindSchema), populated at src/gateway/server-chat.ts:480. */

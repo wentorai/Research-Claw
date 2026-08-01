@@ -1430,7 +1430,7 @@ function PluginsTab({ tokens }: { tokens: ReturnType<typeof getThemeTokens> }) {
           onClick={handleCopyConfigPath}
           style={{ borderStyle: 'dashed', color: tokens.text.secondary }}
         >
-          {t('extensions.plugins.copyConfigPath', 'Copy openclaw.json Path')}
+          {t('extensions.plugins.copyConfigPath', 'Copy Research-Claw Config Path')}
         </Button>
       </div>
     </div>

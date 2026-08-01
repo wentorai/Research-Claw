@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { fmtTime, fmtActivityRow, safeStringifyDetail } from './activity-log';
+import {
+  collapseToolActivityEntries,
+  fmtTime,
+  fmtActivityRow,
+  safeStringifyDetail,
+} from './activity-log';
 
 // ── fmtTime ───────────────────────────────────────────────────────────
 
@@ -37,6 +42,90 @@ describe('fmtActivityRow', () => {
     expect(row).toContain('BG');
     expect(row).toContain('Tool returned: get_work');
     expect(row).toContain('1235ms');
+  });
+});
+
+describe('collapseToolActivityEntries', () => {
+  it('renders one latest row for one toolCallId instead of start + result noise', () => {
+    const entries = [
+      {
+        id: 'start',
+        ts: 100,
+        sessionKey: 'project-a',
+        runId: 'run-a',
+        toolCallId: 'tool-1',
+        scope: 'foreground' as const,
+        status: 'tool_start',
+        text: 'Tool started: process',
+        toolName: 'process',
+      },
+      {
+        id: 'result',
+        ts: 130,
+        sessionKey: 'project-a',
+        runId: 'run-a',
+        toolCallId: 'tool-1',
+        scope: 'foreground' as const,
+        status: 'tool_result',
+        text: 'Tool returned: process',
+        toolName: 'process',
+        durationMs: 30_000,
+      },
+    ];
+
+    expect(collapseToolActivityEntries(entries)).toEqual([entries[1]]);
+  });
+
+  it('keeps an unpaired start visible and does not merge different runs', () => {
+    const entries = [
+      {
+        id: 'run-a-start',
+        ts: 100,
+        sessionKey: 'project-a',
+        runId: 'run-a',
+        toolCallId: 'same-id',
+        scope: 'foreground' as const,
+        status: 'tool_start',
+        text: 'Tool started: exec',
+      },
+      {
+        id: 'run-b-start',
+        ts: 110,
+        sessionKey: 'project-a',
+        runId: 'run-b',
+        toolCallId: 'same-id',
+        scope: 'foreground' as const,
+        status: 'tool_start',
+        text: 'Tool started: exec',
+      },
+    ];
+
+    expect(collapseToolActivityEntries(entries)).toHaveLength(2);
+  });
+
+  it('orders collapsed rows by their latest lifecycle timestamp', () => {
+    const entries = [
+      {
+        id: 'a-start', ts: 100, sessionKey: 'project-a', runId: 'run-a',
+        toolCallId: 'tool-a', scope: 'foreground' as const,
+        status: 'tool_start', text: 'Tool started: exec',
+      },
+      {
+        id: 'b-start', ts: 110, sessionKey: 'project-a', runId: 'run-a',
+        toolCallId: 'tool-b', scope: 'foreground' as const,
+        status: 'tool_start', text: 'Tool started: process',
+      },
+      {
+        id: 'a-result', ts: 120, sessionKey: 'project-a', runId: 'run-a',
+        toolCallId: 'tool-a', scope: 'foreground' as const,
+        status: 'tool_result', text: 'Tool returned: exec',
+      },
+    ];
+
+    expect(collapseToolActivityEntries(entries).map((entry) => entry.id)).toEqual([
+      'b-start',
+      'a-result',
+    ]);
   });
 });
 

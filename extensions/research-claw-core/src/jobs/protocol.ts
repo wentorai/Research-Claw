@@ -108,7 +108,7 @@ export function createSubagentSyncSteps(input: {
     },
     {
       key: 'execute',
-      label: 'OpenClaw 子会话执行',
+      label: '科研智能体执行',
       status: executeStatus,
       progress: executeProgress,
       checkpoint: input.latestText ? { latest_text: input.latestText } : {},

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { App, Button, Dropdown, Tooltip, message, Image } from 'antd';
 import { SendOutlined, PaperClipOutlined, ReloadOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +17,7 @@ import { useInputHistory } from '../../hooks/useInputHistory';
 import { abortChatShortcutLabel } from '../../utils/keyboard-shortcut';
 import { useUiStore } from '../../stores/ui';
 import { useSessionsStore } from '../../stores/sessions';
+import { selectSessionRunView, useSessionRunsStore } from '../../stores/session-runs';
 import { resizeComposerInput } from '../../utils/composer-input';
 import { insertTextAtSelection, type TextSelection } from '../../utils/insert-text-at-selection';
 import { uploadFileToWorkspace } from '../../gateway/upload';
@@ -78,9 +80,8 @@ export default function MessageInput() {
   const clearInputRestore = useChatStore((s) => s.clearInputRestore);
   const sending = useChatStore((s) => s.sending);
   const client = useGatewayStore((s) => s.client);
-  const runId = useChatStore((s) => s.runId);
-  const streaming = useChatStore((s) => s.streaming);
-  const canStopGeneration = Boolean(runId) || sending || streaming;
+  const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, sessionKey)));
+  const canStopGeneration = sessionRun.canAbort;
   const loadHistory = useChatStore((s) => s.loadHistory);
   const connState = useGatewayStore((s) => s.state);
   const chatInputPrefill = useUiStore((s) => s.chatInputPrefill);
@@ -125,7 +126,7 @@ export default function MessageInput() {
     (text.trim().length > 0 || attachments.length > 0 || hasReadyReference)
     && !hasUploadingReference
     && isConnected
-    && !sending;
+    && !sessionRun.isBusy;
 
   // Persist draft to localStorage (session-isolated)
   useEffect(() => {
@@ -216,7 +217,7 @@ export default function MessageInput() {
   const handleRefresh = useCallback(async () => {
     const beforeCount = useChatStore.getState().messages.length;
     try {
-      useToolStreamStore.getState().clearAll();
+      useToolStreamStore.getState().clearSession(sessionKey);
       await loadHistory();
       const afterCount = useChatStore.getState().messages.length;
       const diff = afterCount - beforeCount;
@@ -646,7 +647,7 @@ export default function MessageInput() {
   const handleSend = useCallback(() => {
     const msg = text.trim();
     const readyRefs = references.filter((r) => r.status === 'ready');
-    if ((!msg && attachments.length === 0 && readyRefs.length === 0) || !isConnected || sending) return;
+    if ((!msg && attachments.length === 0 && readyRefs.length === 0) || !isConnected || sessionRun.isBusy) return;
     if (references.some((r) => r.status === 'uploading')) {
       message.warning(t('chat.refUploadingHint', { defaultValue: 'Some references are still uploading — please wait' }));
       return;
@@ -698,7 +699,7 @@ export default function MessageInput() {
     }
 
     doSend();
-  }, [text, attachments, references, isConnected, sending, send, sessionKey, inputHistory, t, modal]);
+  }, [text, attachments, references, isConnected, sessionRun.isBusy, send, sessionKey, inputHistory, t, modal]);
 
   const abortShortcut = abortChatShortcutLabel();
   const abortTooltip = t('chat.abortWithShortcut', {
@@ -1043,6 +1044,7 @@ export default function MessageInput() {
                   </svg>
                 }
                 onClick={abort}
+                aria-label={abortTooltip}
                 style={{ color: 'var(--accent-primary)' }}
               />
             </Tooltip>

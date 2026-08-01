@@ -164,24 +164,24 @@ describe('EmbodiedPlaceholderCard', () => {
     });
   });
 
-  it('Modal body contains "node.invoke" keyword', async () => {
+  it('Modal body describes commands as controlled calls', async () => {
     render(<Wrapper><EmbodiedPlaceholderCard /></Wrapper>);
     fireEvent.click(screen.getByTestId('periph-placeholder-embodied'));
 
     await waitFor(() => {
       const body = screen.getByTestId('periph-placeholder-embodied-modal-body');
-      expect(body.textContent).toContain('node.invoke');
+      expect(body.textContent).toContain('受控调用');
     });
   });
 
-  it('Modal body mentions OpenClaw nodes system', async () => {
+  it('Modal body describes the Research-Claw device-node system without exposing internals', async () => {
     render(<Wrapper><EmbodiedPlaceholderCard /></Wrapper>);
     fireEvent.click(screen.getByTestId('periph-placeholder-embodied'));
 
     await waitFor(() => {
       const body = screen.getByTestId('periph-placeholder-embodied-modal-body');
-      // Should mention OC nodes or role:node
-      expect(body.textContent).toMatch(/role:node|nodes 体系|OpenClaw nodes/);
+      expect(body.textContent).toMatch(/科研龙虾.*设备节点体系/);
+      expect(body.textContent).not.toMatch(/OpenClaw|\bOC\b|oc-node/i);
     });
   });
 

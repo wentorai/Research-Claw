@@ -227,7 +227,7 @@ function AboutSection() {
   const handleCopyDiagnostics = async () => {
     const diagnostics = [
       `Research-Claw v${RC_VERSION}`,
-      `Powered by OpenClaw ${serverVersion ?? 'unknown'}`,
+      `Research-Claw service runtime ${serverVersion ?? 'unknown'}`,
       `Gateway: ws://127.0.0.1:28789`,
       `Platform: ${navigator.platform}`,
       `User-Agent: ${navigator.userAgent}`,

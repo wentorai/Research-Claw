@@ -32,6 +32,13 @@ export interface Session {
    * Present when the session has an active model override; null/undefined otherwise.
    */
   model?: string | null;
+  /** OpenClaw Session lifecycle projection. These fields come from the
+   * sessions.list authority and must not be inferred from chat deltas. */
+  status?: 'running' | 'done' | 'failed' | 'killed' | 'timeout';
+  hasActiveRun?: boolean;
+  startedAt?: number;
+  endedAt?: number;
+  runtimeMs?: number;
 }
 
 /** Fields supported by OC sessions.patch RPC (aligned with OC controllers/sessions.ts). */
@@ -66,6 +73,8 @@ interface SessionsState {
   clearSession: (key: string) => Promise<void>;
   /** Auto-name a default-labelled session from its first exchange (at most once). */
   autoNameSession: (key: string) => Promise<void>;
+  /** Schedule naming for this exact session key; active-session changes cannot retarget it. */
+  scheduleAutoNameSession: (key: string, delayMs?: number) => void;
   renameSession: (key: string, label: string) => Promise<void>;
   /**
    * General-purpose session patch (aligned with OC sessions.patch — supports all fields).
@@ -107,6 +116,7 @@ import {
 import { isSessionRowStale } from '../utils/session-freshness';
 import { isAutoNameCandidate, extractFirstExchange, type HistoryMessage } from '../utils/auto-name';
 import { useConfigStore } from './config';
+import { useSessionRunsStore } from './session-runs';
 
 /**
  * Sessions already auto-named (or naming in-flight) this dashboard lifetime.
@@ -115,10 +125,15 @@ import { useConfigStore } from './config';
  * a session is named at most once (user rename then wins forever).
  */
 const autoNameGuard = new Set<string>();
+const autoNameTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let sessionsLoadGeneration = 0;
+let sessionsLoadInFlight: Promise<void> | null = null;
 
 /** Test-only: reset the auto-name guard between test cases. */
 export function _resetAutoNameGuard(): void {
   autoNameGuard.clear();
+  for (const timer of autoNameTimers.values()) clearTimeout(timer);
+  autoNameTimers.clear();
 }
 
 /** Check if a key refers to the main session (handles both bare and canonical forms). */
@@ -145,32 +160,51 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
   activeSessionStale: false,
   staleSendAcknowledgedKey: null,
 
-  loadSessions: async () => {
-    const client = useGatewayStore.getState().client;
-    if (!client?.isConnected) return;
-    set({ loading: true });
-    try {
-      const result = await client.request<{ sessions: Session[] }>('sessions.list', {
-        includeDerivedTitles: true,
-        limit: 1000,
-      });
-      // Drop synthetic sessions: heartbeat (isolatedSession runs in "<base>:heartbeat")
-      // and subagent runs ("agent:main:subagent:<uuid>").
-      const serverSessions = (result.sessions ?? []).filter(
-        (s) => !isHeartbeatSessionKey(s.key) && !isSubagentSessionKey(s.key),
-      );
-      // Ensure the main session is always present in the list
-      const sessions = serverSessions.some((s) => isMain(s.key))
-        ? serverSessions
-        : [{ key: MAIN_SESSION_KEY }, ...serverSessions];
-      set({
-        sessions,
-        loading: false,
-        activeSessionStale: computeActiveSessionStale(sessions, get().activeSessionKey),
-      });
-    } catch {
-      set({ loading: false });
-    }
+  loadSessions: () => {
+    if (sessionsLoadInFlight) return sessionsLoadInFlight;
+    const request = (async () => {
+      const client = useGatewayStore.getState().client;
+      if (!client?.isConnected) return;
+      const generation = ++sessionsLoadGeneration;
+      const eventEpoch = useGatewayStore.getState().eventEpoch;
+      set({ loading: true });
+      try {
+        const result = await client.request<{ sessions: Session[] }>('sessions.list', {
+          includeDerivedTitles: true,
+          limit: 1000,
+        });
+        // Drop synthetic sessions: heartbeat (isolatedSession runs in "<base>:heartbeat")
+        // and subagent runs ("agent:main:subagent:<uuid>").
+        const serverSessions = (result.sessions ?? []).filter(
+          (s) => !isHeartbeatSessionKey(s.key) && !isSubagentSessionKey(s.key),
+        );
+        if (generation !== sessionsLoadGeneration) return;
+        const observedAt = Date.now();
+        for (const session of serverSessions) {
+          useSessionRunsStore.getState().ingestSnapshot(session, { eventEpoch, observedAt });
+        }
+        // Ensure the main session is always present in the list
+        const sessions = serverSessions.some((s) => isMain(s.key))
+          ? serverSessions
+          : [{ key: MAIN_SESSION_KEY }, ...serverSessions];
+        set({
+          sessions,
+          loading: false,
+          activeSessionStale: computeActiveSessionStale(sessions, get().activeSessionKey),
+        });
+        // F5/reconnect recovery: only probe the persisted active session. This
+        // is intentionally bounded, rather than firing model calls for every
+        // historical default-labelled session in the list.
+        get().scheduleAutoNameSession(get().activeSessionKey, 750);
+      } catch {
+        if (generation === sessionsLoadGeneration) set({ loading: false });
+      }
+    })();
+    sessionsLoadInFlight = request;
+    void request.finally(() => {
+      if (sessionsLoadInFlight === request) sessionsLoadInFlight = null;
+    });
+    return request;
   },
 
   refreshActiveSessionStale: () => {
@@ -194,8 +228,14 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     persistKey(safeKey);
     // Switch chat store and reload history + usage for the new session
     useChatStore.getState().setSessionKey(safeKey);
-    useChatStore.getState().loadHistory();
+    const historyLoad = useChatStore.getState().loadHistory();
     useChatStore.getState().loadSessionUsage();
+    void useSessionRunsStore.getState().requestReconcile(safeKey, 'session-switch');
+    // A default-labelled session may have completed while another session was
+    // visible or while this dashboard was closed. Bind the retry to safeKey.
+    void Promise.resolve(historyLoad).then(() => {
+      get().scheduleAutoNameSession(safeKey, 0);
+    });
   },
 
   createSession: async () => {
@@ -322,15 +362,36 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
         autoNameGuard.delete(guardKey);
         return;
       }
+      // The model call is asynchronous. A user may have renamed (or deleted)
+      // the session while it was in flight; that newer explicit state wins.
+      const latestRow = findSessionRow(get().sessions, key);
+      if (!latestRow || !isAutoNameCandidate({ key, label: latestRow.label })) return;
       await client.request('sessions.patch', { key, label: title });
       set((s) => ({
         sessions: s.sessions.map((sess) =>
           normalizeSessionKey(sess.key) === guardKey ? { ...sess, label: title } : sess,
         ),
       }));
-    } catch {
+    } catch (error) {
       autoNameGuard.delete(guardKey); // naming failed — allow retry
+      console.warn('[Sessions] Auto-name failed', {
+        sessionKey: key,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
+  },
+
+  scheduleAutoNameSession: (key: string, delayMs = 500) => {
+    const row = findSessionRow(get().sessions, key);
+    if (!isAutoNameCandidate({ key, label: row?.label })) return;
+    const guardKey = normalizeSessionKey(key);
+    const pending = autoNameTimers.get(guardKey);
+    if (pending) clearTimeout(pending);
+    const timer = setTimeout(() => {
+      autoNameTimers.delete(guardKey);
+      void get().autoNameSession(key);
+    }, Math.max(0, delayMs));
+    autoNameTimers.set(guardKey, timer);
   },
 
   renameSession: async (key: string, label: string) => {

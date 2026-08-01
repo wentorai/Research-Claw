@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Typography, Spin, Alert, Button, Space } from 'antd';
 import {
   MessageOutlined,
@@ -10,14 +11,18 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
-import { useToolStreamStore } from '../../stores/tool-stream';
+import { selectPendingTools, useToolStreamStore } from '../../stores/tool-stream';
 import { useGatewayStore } from '../../stores/gateway';
 import { useConfigStore } from '../../stores/config';
 import { useSessionsStore } from '../../stores/sessions';
 import { useUiStore } from '../../stores/ui';
 import type { ChatMessage } from '../../gateway/types';
 import { normalizeSessionKey } from '../../utils/session-key';
-import { fmtActivityRow, safeStringifyDetail } from '../../utils/activity-log';
+import {
+  collapseToolActivityEntries,
+  fmtTime,
+  safeStringifyDetail,
+} from '../../utils/activity-log';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import WelcomeCard from './WelcomeCard';
@@ -25,12 +30,13 @@ import ToolActivityStream from './ToolActivityStream';
 import TaskFlowTimeline from './TaskFlowTimeline';
 import StagedWritingTimeline from './StagedWritingTimeline';
 import AgentActivityBar from './AgentActivityBar';
-import { useTaskFlowStore } from '../../stores/task-flow';
+import { selectTaskFlow, useTaskFlowStore } from '../../stores/task-flow';
 import { useStagedWritingStore } from '../../stores/staged-writing';
 import { isStagedWritingJobForSession } from '../../utils/staged-writing-run';
 import { isTaskFlowVisible } from '../../utils/task-flow';
 import { detectStagedWritingIntent } from '../../utils/staged-writing-detect';
 import { executionKey, useExecutionTraceStore } from '../../stores/execution-trace';
+import { selectSessionRunView, useSessionRunsStore } from '../../stores/session-runs';
 import { resolveRunPresentationOwners } from '../../utils/run-presentation-owner';
 import RunDetailsDock from './RunDetailsDock';
 import { collectPaperFenceAliases, suppressProjectedFileFences } from '../../utils/card-runtime';
@@ -175,7 +181,9 @@ export default function ChatView() {
   const createSession = useSessionsStore((s) => s.createSession);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
-  const pendingTools = useToolStreamStore((s) => s.pendingTools);
+  const pendingTools = useToolStreamStore(
+    useShallow((state) => selectPendingTools(state, sessionKey)),
+  );
   const activityLog = useToolStreamStore((s) => s.activityLog);
   const clearActivityLog = useToolStreamStore((s) => s.clearActivityLog);
   const connState = useGatewayStore((s) => s.state);
@@ -234,8 +242,12 @@ export default function ChatView() {
   // Matches OC pattern: openclaw/ui/src/ui/app-scroll.ts:19-21
   const scrollFrameRef = useRef<number | null>(null);
   const prevActivityActiveRef = useRef(false);
-  const activityActive = sending || streaming || compacting || pendingTools.length > 0;
-  const taskFlow = useTaskFlowStore((s) => s.flow);
+  const sessionRun = useSessionRunsStore(useShallow((s) => selectSessionRunView(s, sessionKey)));
+  const activityActive = sessionRun.isBusy
+    || sessionRun.needsResultConfirmation
+    || sessionRun.resultUnconfirmed
+    || pendingTools.length > 0;
+  const taskFlow = useTaskFlowStore((s) => selectTaskFlow(s, sessionKey));
   const taskFlowVisible = isTaskFlowVisible(taskFlow);
   const timelineAnchorIndex = useMemo(() => {
     if (showWritingTimeline) {
@@ -262,10 +274,10 @@ export default function ChatView() {
     writingJob?.startedAtMs,
     writingJob?.topic,
   ]);
-  /** Task progress already shows coarse steps + tool detail — hide redundant thinking UI. */
+  /** The run status region already shows authoritative state + activity. */
   const showThinkingPanel = activityActive && !taskFlowVisible && !showWritingTimeline;
-  const activityEntries = activityLog
-    .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey))
+  const activityEntries = collapseToolActivityEntries(activityLog
+    .filter((e) => normalizeSessionKey(e.sessionKey) === normalizeSessionKey(sessionKey)))
     .slice(-30)
     .reverse();
   const [openActivityId, setOpenActivityId] = useState<string | null>(null);
@@ -446,16 +458,6 @@ export default function ChatView() {
         </div>
       )}
 
-      {compacting && (
-        <Alert
-          type="info"
-          showIcon
-          message={t('chat.compacting')}
-          description={t('chat.compactingBanner')}
-          style={{ borderRadius: 0, margin: 0 }}
-        />
-      )}
-
       {/* Tool call capability warning — model cannot generate structured tool calls */}
       {toolCallProbe?.status === 'done' && toolCallProbe.supported === false && (
         <div
@@ -606,13 +608,30 @@ export default function ChatView() {
                   </Text>
                 </div>
               )}
-              <ToolActivityStream />
+              <ToolActivityStream sessionKey={sessionKey} />
               {activityEntries.length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   {activityEntries.map((e) => {
-                    const rowText = fmtActivityRow(e);
                     const expanded = openActivityId === e.id;
                     const status = e.status || '';
+                    const separator = e.text.lastIndexOf(':');
+                    const toolName = e.toolName
+                      ?? (separator >= 0 ? e.text.slice(separator + 1).trim() : e.text);
+                    const activityText = status === 'tool_start'
+                      ? t('chat.activityToolStarted', { name: toolName })
+                      : status === 'tool_result' || status === 'tool_end'
+                        ? t('chat.activityToolCompleted', { name: toolName })
+                        : e.text;
+                    const durationText = typeof e.durationMs === 'number'
+                      ? e.durationMs >= 1_000
+                        ? ` ${t('chat.activityDurationSeconds', {
+                            duration: (e.durationMs / 1_000).toFixed(1),
+                          })}`
+                        : ` ${t('chat.activityDurationMilliseconds', {
+                            duration: Math.round(e.durationMs),
+                          })}`
+                      : '';
+                    const rowText = `${fmtTime(e.ts)} ${e.scope === 'background' ? 'BG' : 'FG'}  ${activityText}${durationText}`;
                     const icon = status.includes('error')
                       ? <CloseCircleOutlined style={{ color: '#ef4444' }} />
                       : (status.includes('result') || status.includes('end'))

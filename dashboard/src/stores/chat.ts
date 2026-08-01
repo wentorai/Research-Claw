@@ -1,6 +1,8 @@
 import { create } from 'zustand';
-import { Modal } from 'antd';
+import { createElement } from 'react';
+import { Button, Modal } from 'antd';
 import type { ChatMessage, ChatStreamEvent, ChatAttachment } from '../gateway/types';
+import { GatewayRequestError } from '../gateway/client';
 import { useGatewayStore } from './gateway';
 import { useLibraryStore } from './library';
 import { useTasksStore } from './tasks';
@@ -28,10 +30,14 @@ import {
 } from '../utils/staged-writing-detect';
 import { isStagedWritingJobForSession } from '../utils/staged-writing-run';
 import { useStagedWritingStore } from './staged-writing';
+import { selectSessionRunView, useSessionRunsStore } from './session-runs';
+import type { SessionRunRowLike } from '../utils/session-run-reconciler';
+import { recordRunTrace } from '../utils/run-trace';
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 const EXECUTION_BINDINGS_PREFIX = 'rc-execution-bindings:';
 const MAX_EXECUTION_BINDINGS = 500;
+const PENDING_SEND_ACK_PREFIX = 'rc-pending-send-ack:';
 
 import { normalizeSessionKey, toGatewaySessionKey } from '../utils/session-key';
 
@@ -133,39 +139,25 @@ function restoreExecutionBindings(sessionKey: string, messages: ChatMessage[]): 
  */
 let _gapDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const GAP_DEBOUNCE_MS = 500;
+const historyGenerationBySession = new Map<string, number>();
 
 /**
  * Stale-streaming watchdog.
  * Periodically checks if no chat delta has arrived within STALE_STREAM_TIMEOUT_MS.
- * Recovers via loadHistory() when the stream appears dead.
+ * Requests an authoritative Session reconciliation when the stream appears
+ * quiet. Inactivity itself is never a terminal fact.
  *
- * Improvement over the original setTimeout approach: tracks _lastDeltaAt so it
- * can detect mid-stream connection deaths (where streamText is non-null but no
- * more deltas arrive), not just the "no first delta" case.
- *
- * Tool-aware recovery (Fix 1 — Plan B):
- * Instead of unconditionally skipping recovery when tools are pending, the
- * watchdog now checks each tool's `lastEventAt`. If ALL pending tools have
- * received no events for > STALE_TOOL_MS (120s), they are considered hung and
- * forcibly evicted, allowing recovery to proceed. This prevents a single hung
- * tool (e.g. SSH timeout) from blocking recovery indefinitely.
- *
- * Reconnect-aware timeout (Fix 3):
- * After a WS reconnect (_reconnectedAt is set), the watchdog uses a shorter
- * timeout (RECONNECT_STALE_MS = 15s) to speed up recovery when the run
- * completed during the disconnect window and no more deltas will arrive.
+ * Tracks _lastDeltaAt only to decide when another read-only Session comparison
+ * is useful. A quiet stream is not evidence of a dead run.
  *
  * Backup: the tick watchdog (client.ts) detects dead connections at the transport
- * layer and forces reconnect → loadHistory(), so this watchdog mainly covers the
- * "alive connection but stale model response" scenario.
+ * layer and forces reconnect. This watchdog only asks the OC Session authority
+ * whether the run is still active; it cannot clear chat/tool state or report a
+ * failure.
  */
 let _staleStreamWatchdog: ReturnType<typeof setInterval> | null = null;
 const STALE_STREAM_TIMEOUT_MS = 360_000;
 const STALE_WATCHDOG_CHECK_MS = 15_000;
-/** Shorter stale timeout used after WS reconnect (Fix 3). */
-const RECONNECT_STALE_MS = 15_000;
-/** Max age (ms) for a pending tool with no events before watchdog treats it as hung. */
-const WATCHDOG_TOOL_STALE_MS = 120_000;
 
 type AgentFailureData = {
   phase?: string;
@@ -203,15 +195,52 @@ function formatStructuredRunFailureForUser(data: AgentFailureData): string {
  * answering inline). Resolves false on cancel/dismiss, so the default is the
  * non-surprising "answer in this turn".
  */
-function confirmHeuristicLongTask(title: string): Promise<boolean> {
+type LongTaskDecision = 'background' | 'foreground' | 'cancel';
+
+function confirmHeuristicLongTask(): Promise<LongTaskDecision> {
   return new Promise((resolve) => {
-    Modal.confirm({
+    let settled = false;
+    let instance: ReturnType<typeof Modal.confirm> | undefined;
+    const finish = (decision: LongTaskDecision) => {
+      if (settled) return;
+      settled = true;
+      resolve(decision);
+      instance?.destroy();
+    };
+    instance = Modal.confirm({
       title: i18n.t('chat.longTask.confirmTitle'),
-      content: i18n.t('chat.longTask.confirmBody', { title }),
-      okText: i18n.t('chat.longTask.confirmOk'),
-      cancelText: i18n.t('chat.longTask.confirmCancel'),
-      onOk: () => resolve(true),
-      onCancel: () => resolve(false),
+      content: i18n.t('chat.longTask.confirmBody'),
+      closable: true,
+      footer: () => createElement(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 8,
+          },
+        },
+        createElement(
+          Button,
+          { key: 'cancel', onClick: () => finish('cancel') },
+          i18n.t('chat.longTask.confirmDismiss'),
+        ),
+        createElement(
+          Button,
+          { key: 'foreground', onClick: () => finish('foreground') },
+          i18n.t('chat.longTask.confirmForeground'),
+        ),
+        createElement(
+          Button,
+          {
+            key: 'background',
+            type: 'primary',
+            onClick: () => finish('background'),
+          },
+          i18n.t('chat.longTask.confirmOk'),
+        ),
+      ),
+      onCancel: () => finish('cancel'),
     });
   });
 }
@@ -257,51 +286,16 @@ function startStaleStreamWatchdog(get: () => ChatState) {
       stopStaleStreamWatchdog();
       return;
     }
-    // Context compaction can run for several minutes with no chat deltas.
-    if (s.compacting) return;
     const lastActivity = s._lastDeltaAt ?? s._streamStartedAt;
     if (!lastActivity) return;
 
-    // Fix 3: use shorter timeout after reconnect
-    const effectiveTimeout = s._reconnectedAt ? RECONNECT_STALE_MS : STALE_STREAM_TIMEOUT_MS;
     const gap = Date.now() - lastActivity;
-    if (gap > effectiveTimeout) {
-      // Fix 1 (Plan B): check tool staleness via lastEventAt
-      const pendingTools = useToolStreamStore.getState().pendingTools;
-      if (pendingTools.length > 0) {
-        const now = Date.now();
-        const allStale = pendingTools.every(t => now - t.lastEventAt >= WATCHDOG_TOOL_STALE_MS);
-        if (!allStale) return; // some tools still active — keep waiting
-        // All tools are hung — force-evict and proceed with recovery
-        useToolStreamStore.setState({ pendingTools: [] });
-      }
-
+    if (gap > STALE_STREAM_TIMEOUT_MS) {
       stopStaleStreamWatchdog();
-      const staleRunId = s.runId;
-      console.log(`[Chat] Stale streaming detected (${Math.round(gap / 1000)}s since last activity, reconnect=${!!s._reconnectedAt}) — recovering via loadHistory`);
-      useTaskFlowStore.getState().endRun(staleRunId, 'error');
-      useChatStore.setState(clearActiveRunState());
-      void useChatStore.getState().loadHistory().then(() => {
-        if (detectRunEndedWithoutReply(useChatStore.getState().messages)) {
-          useChatStore.setState({ lastError: i18n.t('chat.runEndedNoOutput'), lastErrorMeta: classifyRunFailure('') });
-        } else {
-          const message = i18n.t('chat.runStoppedAfterStaleStream');
-          useChatStore.setState({
-            lastError: message,
-            lastErrorMeta: {
-              ...classifyRunFailure(message),
-              message,
-            },
-          });
-          useUiStore.getState().addNotification({
-            type: 'error',
-            title: i18n.t('chat.runIssueNotificationTitle'),
-            body: message,
-            dedupKey: `chat-stale-stream:${s.sessionKey}:${staleRunId ?? 'unknown'}`,
-            targetSessionKey: s.sessionKey,
-          });
-        }
-      });
+      console.info(
+        `[Chat] No chat delta for ${Math.round(gap / 1000)}s — reconciling OC Session state`,
+      );
+      void useSessionRunsStore.getState().requestReconcile(s.sessionKey, 'stale-watchdog');
     }
   }, STALE_WATCHDOG_CHECK_MS);
 }
@@ -311,30 +305,51 @@ function startStaleStreamWatchdog(get: () => ChatState) {
  * Survives browser refresh (F5) within the same tab so optimistic messages
  * don't vanish when the gateway has queued them in-memory (collect mode).
  */
-const PENDING_MSGS_STORAGE_KEY = 'rc-pending-user-msgs';
+const PENDING_MSGS_STORAGE_KEY_PREFIX = 'rc-pending-user-msgs-v2:';
+const LEGACY_PENDING_MSGS_STORAGE_KEY = 'rc-pending-user-msgs';
+const ACTIVE_SESSION_STORAGE_KEY = 'rc_active_session';
 /** Dashboard-only messages (staged writing, etc.) — not in gateway transcript. */
 const LOCAL_MSGS_STORAGE_KEY = 'rc-local-chat-msgs-v2';
 const LEGACY_LOCAL_MSGS_STORAGE_KEY = 'rc-local-chat-msgs';
 const PENDING_EXPIRY_MS = 3 * 60 * 1000; // 3 min auto-expiry
 
-function savePendingMsgs(msgs: ChatMessage[]): void {
+function pendingMsgsStorageKey(sessionKey: string): string {
+  return `${PENDING_MSGS_STORAGE_KEY_PREFIX}${normalizeSessionKey(sessionKey) || 'main'}`;
+}
+
+function savePendingMsgs(sessionKey: string, msgs: ChatMessage[]): void {
   try {
     if (msgs.length === 0) {
-      sessionStorage.removeItem(PENDING_MSGS_STORAGE_KEY);
+      sessionStorage.removeItem(pendingMsgsStorageKey(sessionKey));
     } else {
-      sessionStorage.setItem(PENDING_MSGS_STORAGE_KEY, JSON.stringify(msgs));
+      sessionStorage.setItem(pendingMsgsStorageKey(sessionKey), JSON.stringify(msgs));
     }
   } catch { /* storage full — non-fatal */ }
 }
 
-function loadPendingMsgs(): ChatMessage[] {
+function loadPendingMsgs(sessionKey: string): ChatMessage[] {
   try {
-    const raw = sessionStorage.getItem(PENDING_MSGS_STORAGE_KEY);
+    let raw = sessionStorage.getItem(pendingMsgsStorageKey(sessionKey));
+    let migratedLegacy = false;
+    if (!raw) {
+      // Upgrade safety: the previous dashboard stored one global array. It can
+      // only belong to the persisted active session; never expose it elsewhere.
+      const persistedSessionKey = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) || 'main';
+      if (normalizeSessionKey(persistedSessionKey) === normalizeSessionKey(sessionKey)) {
+        raw = sessionStorage.getItem(LEGACY_PENDING_MSGS_STORAGE_KEY);
+        migratedLegacy = Boolean(raw);
+      }
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ChatMessage[];
     // Filter out expired entries
     const now = Date.now();
-    return parsed.filter((m) => m.timestamp && (now - m.timestamp) < PENDING_EXPIRY_MS);
+    const active = parsed.filter((m) => m.timestamp && (now - m.timestamp) < PENDING_EXPIRY_MS);
+    if (migratedLegacy) {
+      savePendingMsgs(sessionKey, active);
+      sessionStorage.removeItem(LEGACY_PENDING_MSGS_STORAGE_KEY);
+    }
+    return active;
   } catch { return []; }
 }
 
@@ -540,6 +555,71 @@ interface LastSentDraft extends ChatInputRestore {
   runId: string;
 }
 
+interface PendingSendAck {
+  sessionKey: string;
+  runId: string;
+  runtimeConnId: string | null;
+  createdAt: number;
+  params: {
+    message: string;
+    sessionKey: string;
+    idempotencyKey: string;
+    deliver: false;
+    attachments?: Array<{
+      type: string;
+      mimeType: string;
+      fileName: string;
+      content: string;
+      wsPath?: string;
+    }>;
+  };
+}
+
+function pendingSendAckStorageKey(sessionKey: string): string {
+  return `${PENDING_SEND_ACK_PREFIX}${normalizeSessionKey(sessionKey)}`;
+}
+
+function loadPendingSendAck(sessionKey: string): PendingSendAck | null {
+  if (typeof sessionStorage === 'undefined') return null;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(pendingSendAckStorageKey(sessionKey)) ?? 'null');
+    if (
+      !value
+      || typeof value !== 'object'
+      || typeof value.runId !== 'string'
+      || typeof value.sessionKey !== 'string'
+      || !value.params
+      || typeof value.params.message !== 'string'
+      || typeof value.params.idempotencyKey !== 'string'
+    ) return null;
+    return value as PendingSendAck;
+  } catch {
+    return null;
+  }
+}
+
+function persistPendingSendAck(value: PendingSendAck | null): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    if (value) {
+      sessionStorage.setItem(pendingSendAckStorageKey(value.sessionKey), JSON.stringify(value));
+    } else {
+      // The caller clears the currently selected session's key explicitly.
+    }
+  } catch {
+    // Large image payloads can exceed sessionStorage. The in-memory copy still
+    // preserves this runtime's exact request, and no automatic replay is allowed.
+  }
+}
+
+function clearPersistedPendingSendAck(sessionKey: string): void {
+  try {
+    sessionStorage.removeItem(pendingSendAckStorageKey(sessionKey));
+  } catch {
+    // unavailable/privacy mode
+  }
+}
+
 function cloneAttachments(attachments?: ChatAttachment[]): ChatAttachment[] {
   return attachments?.map((a) => ({ ...a })) ?? [];
 }
@@ -668,15 +748,18 @@ interface ChatState {
    * false-positive queue-drain detection from quick heartbeat/cron finals.
    */
   _streamStartedAt: number | null;
-  /** Timestamp of last received chat delta. Used by stale-stream watchdog to detect
-   *  mid-stream deaths (connection alive but no more deltas arriving). */
+  /** Timestamp of last received chat delta. Used only to schedule an additional
+   *  authoritative Session comparison after a quiet interval. */
   _lastDeltaAt: number | null;
   /** Timestamp of the most recent WS reconnect while a run was in-flight.
-   *  When set, the stale-stream watchdog uses a shorter timeout (RECONNECT_STALE_MS)
-   *  to speed up recovery. Cleared on first delta/final/aborted/error after reconnect. */
+   *  Preserved as a transport observation; cleared on the next run event. */
   _reconnectedAt: number | null;
   /** Last user send for the active run — cleared on final or after abort restore. */
   _lastSentDraft: LastSentDraft | null;
+  /** Exact chat.send generation whose RPC outcome is transport-uncertain.
+   * Persisted per session across F5; it is evidence for reconciliation only and
+   * is never replayed automatically. */
+  _pendingSendAck: PendingSendAck | null;
   /** Per-text suppress counts — aborted sends stay out after loadHistory(). */
   _abortedUserSuppressCounts: Record<string, number>;
   /** Set on abort; MessageInput consumes and clears via clearInputRestore(). */
@@ -710,8 +793,9 @@ interface ChatState {
 }
 
 // Restore pending messages from sessionStorage on module load (survives F5).
-const _restoredPendingMsgs = loadPendingMsgs();
+const _restoredPendingMsgs = loadPendingMsgs('main');
 const _restoredLocalMsgs = loadLocalMsgs('main');
+const _restoredPendingSendAck = loadPendingSendAck('main');
 
 export const useChatStore = create<ChatState>()((set, get) => ({
   // Initialize messages with restored pending so they're visible immediately
@@ -721,7 +805,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   streaming: false,
   compacting: false,
   streamText: null,
-  runId: null,
+  runId: _restoredPendingSendAck?.runId ?? null,
   sessionKey: 'main',
   lastError: null,
   lastErrorMeta: null,
@@ -735,6 +819,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   _localOnlyMsgs: _restoredLocalMsgs,
   _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
   _lastSentDraft: null,
+  _pendingSendAck: _restoredPendingSendAck,
   inputRestore: null,
   inputRestoreSeq: 0,
   _abortedUserSuppressCounts: {},
@@ -955,11 +1040,29 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // Explicit "后台/长任务/子会话" requests are promoted silently — the user
       // asked for it. Heuristic-only matches are the false-positive-prone case,
       // so confirm before changing behaviour from "answer now" to "spawn a
-      // background subagent". Declining falls through to a normal inline turn.
+      // background subagent". The modal has three explicit outcomes: detached,
+      // foreground, or cancel-without-sending.
       const promoteSilently = shouldPromoteLongTaskWithoutConfirmation(longTask);
-      const promote = longTask.shouldAutoTrack
-        && (promoteSilently || await confirmHeuristicLongTask(longTask.title));
-      if (promote) {
+      const decision: LongTaskDecision = !longTask.shouldAutoTrack
+        ? 'foreground'
+        : promoteSilently
+          ? 'background'
+          : await confirmHeuristicLongTask();
+      if (decision === 'cancel') {
+        // MessageInput clears optimistically before this async decision
+        // resolves. Restore the exact unsent draft so "cancel" is genuinely
+        // non-destructive as well as RPC-free.
+        set((state) => ({
+          inputRestore: {
+            text: displayText,
+            attachments: cloneAttachments(attachments),
+            references: [...fileRefPaths],
+          },
+          inputRestoreSeq: state.inputRestoreSeq + 1,
+        }));
+        return;
+      }
+      if (decision === 'background') {
         try {
           const submitted = await client.request<{ job: { id: string; title: string } }>('rc.longTask.submit', {
             message: trimmed,
@@ -992,6 +1095,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // can match immediately, with no timing gap between RPC send and response.
     // Source: openclaw/ui/src/ui/controllers/chat.ts:192-196
     const localRunId = crypto.randomUUID();
+    const sendSessionKey = get().sessionKey;
+    clearPersistedPendingSendAck(sendSessionKey);
 
     // Non-image references render as chips in the user bubble (images already
     // show as thumbnails). Persisted on the optimistic message; reconstructed
@@ -1032,7 +1137,26 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         runId: localRunId,
       },
       inputRestore: null,
+      _pendingSendAck: null,
     }));
+    useSessionRunsStore.getState().setLocalRunId(sendSessionKey, localRunId);
+    useSessionRunsStore.getState().setCommand(sendSessionKey, 'submitting');
+    recordRunTrace({
+      source: 'chat',
+      action: 'local-send',
+      sessionKey: sendSessionKey,
+      runId: localRunId,
+      command: 'submitting',
+      observedAt: Date.now(),
+    });
+    useSessionRunsStore.getState().observeActivity({
+      sessionKey: sendSessionKey,
+      runId: localRunId,
+      kind: 'submitting',
+      label: 'submitting',
+      observedAt: Date.now(),
+      source: 'local-ack',
+    });
     useTaskFlowStore.getState().startRun(localRunId, get().sessionKey, {
       userTimestamp: userMessage.timestamp,
       userText: displayText,
@@ -1143,56 +1267,168 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
       void syncSystemPromptAppendToGateway(useConfigStore.getState().systemPromptAppend);
 
-      await client.request('chat.send', {
+      const rpcParams: PendingSendAck['params'] = {
         message: finalMessage,
-        sessionKey: get().sessionKey,
+        sessionKey: sendSessionKey,
         idempotencyKey: localRunId,
         deliver: false, // Don't deliver response to external channels (Telegram/Discord etc.)
         ...(finalAttachments?.length ? { attachments: finalAttachments } : {}),
-      });
-      set({ sending: false, streaming: true, _streamStartedAt: Date.now(), _lastDeltaAt: null });
+      };
+      const pendingAck: PendingSendAck = {
+        sessionKey: sendSessionKey,
+        runId: localRunId,
+        runtimeConnId: useGatewayStore.getState().connId ?? null,
+        createdAt: Date.now(),
+        params: rpcParams,
+      };
+      persistPendingSendAck(pendingAck);
+      set({ _pendingSendAck: pendingAck });
 
-      // Start stale-streaming watchdog. Checks every 15s if no delta has arrived
-      // within 360s (covers both "no first delta" and "mid-stream death" scenarios).
-      startStaleStreamWatchdog(get);
+      const rawAck = await client.request<unknown>('chat.send', rpcParams);
+      const ackRecord = rawAck && typeof rawAck === 'object'
+        ? rawAck as Record<string, unknown>
+        : {};
+      const ackRunId = typeof ackRecord.runId === 'string' && ackRecord.runId.trim()
+        ? ackRecord.runId.trim()
+        : localRunId;
+      const ackStatus = ackRecord.status === 'in_flight' || ackRecord.status === 'ok'
+        ? ackRecord.status
+        : 'started';
+      recordRunTrace({
+        source: 'chat',
+        action: 'send-ack',
+        sessionKey: sendSessionKey,
+        runId: ackRunId,
+        status: ackStatus,
+        fieldsPresent: Object.keys(ackRecord),
+        observedAt: Date.now(),
+      });
+      clearPersistedPendingSendAck(sendSessionKey);
+      if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
+        set({ _pendingSendAck: null });
+      }
+
+      if (ackStatus === 'ok') {
+        stopStaleStreamWatchdog();
+        if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
+          set({ ...clearActiveRunState(), _pendingSendAck: null });
+        }
+        useTaskFlowStore.getState().endRun(localRunId, 'done');
+        useSessionRunsStore.getState().clearTransient(sendSessionKey, localRunId);
+        if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
+          await get().loadHistory();
+        }
+      } else {
+        if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
+          set({
+            sending: false,
+            streaming: true,
+            runId: ackRunId,
+            _streamStartedAt: Date.now(),
+            _lastDeltaAt: null,
+          });
+        }
+        const runs = useSessionRunsStore.getState();
+        runs.setLocalRunId(sendSessionKey, ackRunId);
+        runs.setCommand(sendSessionKey, 'accepted');
+        runs.observeActivity({
+          sessionKey: sendSessionKey,
+          runId: ackRunId,
+          kind: 'processing',
+          label: 'processing',
+          observedAt: Date.now(),
+          source: 'local-ack',
+        });
+        void runs.requestReconcile(sendSessionKey, 'chat.send-ack');
+        if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
+          startStaleStreamWatchdog(get);
+        }
+      }
     } catch (err) {
       stopStaleStreamWatchdog();
-      // Match OC chat.ts:226-230: clear runId + chatStream on failure.
-      // Keep _pendingUserMessages so loadHistory() preserves the optimistic message.
-      set({
-        sending: false,
-        streaming: false,
-        compacting: false,
-        streamText: null,
-        runId: null,
-        _streamStartedAt: null, _lastDeltaAt: null,
-        lastError: err instanceof Error ? err.message : i18n.t('chat.sendFailed'),
-        lastErrorMeta: classifyRunFailure(
-          err instanceof Error ? err.message : i18n.t('chat.sendFailed'),
-        ),
-      });
-      useTaskFlowStore.getState().endRun(localRunId, 'error');
+      if (err instanceof GatewayRequestError) {
+        const restore = buildAbortInputRestorePatch(get(), localRunId);
+        clearPersistedPendingSendAck(sendSessionKey);
+        if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
+          set({
+            ...clearActiveRunState(),
+            ...(restore ?? {}),
+            _pendingSendAck: null,
+            lastError: err.message,
+            lastErrorMeta: classifyRunFailure(err.message),
+          });
+        }
+        useTaskFlowStore.getState().endRun(localRunId, 'error');
+        useSessionRunsStore.getState().clearTransient(sendSessionKey, localRunId);
+      } else {
+        // A timeout/socket close after transmission cannot prove rejection. Keep
+        // the exact idempotency generation, reconcile read-only, and never replay.
+        const pendingAck: PendingSendAck = get()._pendingSendAck ?? {
+          sessionKey: sendSessionKey,
+          runId: localRunId,
+          runtimeConnId: useGatewayStore.getState().connId ?? null,
+          createdAt: Date.now(),
+          params: {
+            message: outboundText,
+            sessionKey: sendSessionKey,
+            idempotencyKey: localRunId,
+            deliver: false,
+          },
+        };
+        persistPendingSendAck(pendingAck);
+        if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
+          set({
+            sending: false,
+            streaming: false,
+            compacting: false,
+            streamText: null,
+            runId: localRunId,
+            _streamStartedAt: null,
+            _lastDeltaAt: null,
+            lastError: null,
+            lastErrorMeta: null,
+            _pendingSendAck: pendingAck,
+          });
+        }
+        useTaskFlowStore.getState().endRun(localRunId, 'clear');
+        const runs = useSessionRunsStore.getState();
+        runs.setLocalRunId(sendSessionKey, localRunId);
+        runs.setCommand(sendSessionKey, 'ack_unknown');
+        runs.observeActivity({
+          sessionKey: sendSessionKey,
+          runId: localRunId,
+          kind: 'unknown',
+          label: 'ack_unknown',
+          observedAt: Date.now(),
+          source: 'local-ack',
+        });
+        recordRunTrace({
+          source: 'chat',
+          action: 'send-ack-unknown',
+          sessionKey: sendSessionKey,
+          runId: localRunId,
+          command: 'ack_unknown',
+          reason: err instanceof Error ? err.name : 'non-error-throw',
+          observedAt: Date.now(),
+        });
+        void runs.requestReconcile(sendSessionKey, 'chat.send-ack-unknown');
+        if (normalizeSessionKey(get().sessionKey) === normalizeSessionKey(sendSessionKey)) {
+          void get().loadHistory();
+        }
+      }
     }
   },
 
   abort: () => {
     stopStaleStreamWatchdog();
-    const client = useGatewayStore.getState().client;
     const { runId, sessionKey } = get();
+    const sessionRun = useSessionRunsStore.getState();
+    if (runId) sessionRun.setLocalRunId(sessionKey, runId);
+    void sessionRun.requestAbort(sessionKey);
 
     // Restore input immediately on stop — do not wait for gateway 'aborted' event
     // (it may be delayed, missing, or carry a mismatched runId).
     const optimisticRestore = buildAbortInputRestorePatch(get(), runId ?? undefined);
-
-    // Send abort RPC — with runId if available, session-level fallback if not.
-    // Matches OC abortChatRun (chat.ts:250-253):
-    //   runId ? { sessionKey, runId } : { sessionKey }
-    if (client && client.isConnected) {
-      const params = runId ? { runId, sessionKey } : { sessionKey };
-      client.request('chat.abort', params).catch((err) => {
-        console.warn('[Chat] Abort failed:', err);
-      });
-    }
 
     // If no runId, this is an orphan streaming state (e.g. after session switch
     // or reconnect). Clean up immediately — no server event will come.
@@ -1221,34 +1457,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       ...(optimisticRestore ?? {}),
     }));
 
-    // Safety: if server doesn't send 'aborted' event within 3s, force-clear runId.
+    // A local timer cannot prove that abort succeeded. If the terminal event is
+    // delayed or lost, ask the Session authority and keep Stop state until it answers.
     const abortedRunId = runId;
-    useTaskFlowStore.getState().endRun(abortedRunId, 'clear');
     setTimeout(() => {
       if (get().runId === abortedRunId) {
-        console.warn('[Chat] Abort timeout — force-clearing streaming state');
-        const partialText = get().streamText;
-        if (partialText) {
-          set((s) => ({
-            messages: [
-              ...s.messages,
-              { role: 'assistant' as const, text: partialText, timestamp: Date.now() },
-            ],
-            streamText: null,
-            runId: null,
-            _streamStartedAt: null,
-            _lastDeltaAt: null,
-            _pendingUserMsgs: [],
-          }));
-        } else {
-          set({
-            streamText: null,
-            runId: null,
-            _streamStartedAt: null,
-            _lastDeltaAt: null,
-            _pendingUserMsgs: [],
-          });
-        }
+        console.info('[Chat] Abort still pending — reconciling OC Session state');
+        void useSessionRunsStore.getState().requestReconcile(sessionKey, 'abort-pending');
       }
     }, 3000);
   },
@@ -1258,13 +1473,137 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     if (!client || !client.isConnected) return;
 
     const requestedKey = get().sessionKey;
+    const normalizedRequestedKey = normalizeSessionKey(requestedKey);
+    const historyGeneration = (historyGenerationBySession.get(normalizedRequestedKey) ?? 0) + 1;
+    historyGenerationBySession.set(normalizedRequestedKey, historyGeneration);
+    recordRunTrace({
+      source: 'history',
+      action: 'request',
+      sessionKey: requestedKey,
+      requestGeneration: historyGeneration,
+      observedAt: Date.now(),
+    });
+    const isCurrentRequest = () => (
+      normalizeSessionKey(get().sessionKey) === normalizedRequestedKey
+      && historyGenerationBySession.get(normalizedRequestedKey) === historyGeneration
+    );
     try {
-      const result = await client.request<{ messages: ChatMessage[] }>('chat.history', {
+      const result = await client.request<{
+        messages: ChatMessage[];
+        sessionInfo?: SessionRunRowLike;
+        inFlightRun?: { runId?: string; text?: string };
+      }>('chat.history', {
         sessionKey: requestedKey,
         limit: 500,
       });
-      // Guard: discard stale response if session changed during the await
-      if (get().sessionKey !== requestedKey) return;
+      const responseEventEpoch = useGatewayStore.getState().eventEpoch ?? 0;
+      const responseIsCurrent = isCurrentRequest();
+      const responseInFlightRunId = result.inFlightRun?.runId?.trim();
+      recordRunTrace({
+        source: 'history',
+        action: 'response',
+        sessionKey: requestedKey,
+        sessionId: result.sessionInfo?.sessionId,
+        runId: responseInFlightRunId,
+        requestGeneration: historyGeneration,
+        eventEpoch: responseEventEpoch,
+        status: result.sessionInfo?.status,
+        hasActiveRun: result.sessionInfo?.hasActiveRun,
+        startedAt: result.sessionInfo?.startedAt,
+        endedAt: result.sessionInfo?.endedAt,
+        decision: responseIsCurrent ? 'accepted' : 'stale',
+        fieldsPresent: [
+          ...(result.sessionInfo ? Object.keys(result.sessionInfo) : []),
+          ...(result.inFlightRun ? ['inFlightRun'] : []),
+        ],
+        observedAt: Date.now(),
+      });
+      // Guard both session identity and request generation. A → B → A can make
+      // a key-only guard accept the first A response after the second A wins.
+      if (!responseIsCurrent) return;
+
+      const eventEpoch = responseEventEpoch;
+      const pendingAck = get()._pendingSendAck;
+      const rawMessages = result.messages ?? [];
+      const acceptedIndex = pendingAck
+        ? rawMessages.findIndex((message) => (
+            message.role === 'user'
+            && message.idempotencyKey === `${pendingAck.runId}:user`
+          ))
+        : -1;
+      const acceptedByHistory = acceptedIndex >= 0;
+      const completedByHistory = acceptedByHistory
+        && rawMessages.slice(acceptedIndex + 1).some((message) => message.role === 'assistant');
+      const inFlightRunId = responseInFlightRunId;
+      const acceptedByInFlight = Boolean(
+        pendingAck && inFlightRunId && inFlightRunId === pendingAck.runId,
+      );
+      if (pendingAck && (acceptedByHistory || acceptedByInFlight)) {
+        clearPersistedPendingSendAck(requestedKey);
+        set({ _pendingSendAck: null });
+        useSessionRunsStore.getState().setCommand(requestedKey, 'idle');
+      } else if (pendingAck) {
+        // Neither an empty history nor an unrelated server run proves that the
+        // exact idempotency generation was rejected. Preserve uncertainty.
+        const runs = useSessionRunsStore.getState();
+        runs.setLocalRunId(requestedKey, pendingAck.runId);
+        runs.setCommand(requestedKey, 'ack_unknown');
+      }
+      if (result.sessionInfo) {
+        useSessionRunsStore.getState().ingestSnapshot(result.sessionInfo, {
+          eventEpoch,
+          observedAt: Date.now(),
+        });
+      }
+      if (inFlightRunId) {
+        const text = result.inFlightRun?.text ?? '';
+        const runs = useSessionRunsStore.getState();
+        runs.ingestSessionEvent({
+          sessionKey: requestedKey,
+          runId: inFlightRunId,
+          phase: 'start',
+          status: 'running',
+          hasActiveRun: true,
+          ...(typeof result.sessionInfo?.startedAt === 'number'
+            ? { startedAt: result.sessionInfo.startedAt }
+            : {}),
+        }, { eventEpoch, observedAt: Date.now() });
+        runs.setLocalRunId(requestedKey, inFlightRunId);
+        runs.setCommand(requestedKey, get()._pendingSendAck ? 'ack_unknown' : 'idle');
+        runs.observeActivity({
+          sessionKey: requestedKey,
+          runId: inFlightRunId,
+          kind: text ? 'streaming' : 'processing',
+          label: text ? 'streaming' : 'processing',
+          observedAt: Date.now(),
+          source: 'chat-event',
+        });
+        set({
+          runId: inFlightRunId,
+          streaming: true,
+          streamText: text || null,
+          _streamStartedAt: result.sessionInfo?.startedAt ?? Date.now(),
+          _lastDeltaAt: text ? Date.now() : null,
+          _reconnectedAt: null,
+        });
+        startStaleStreamWatchdog(get);
+      } else if (
+        !get()._pendingSendAck
+        && !selectSessionRunView(useSessionRunsStore.getState(), requestedKey).serverActive
+      ) {
+        set({
+          streaming: false,
+          compacting: false,
+          streamText: null,
+          runId: null,
+          _streamStartedAt: null,
+          _lastDeltaAt: null,
+          _reconnectedAt: null,
+        });
+        if (completedByHistory) {
+          useSessionRunsStore.getState().clearTransient(requestedKey, pendingAck?.runId);
+        }
+      }
       // Filter out toolResult messages — they are tool internals, not user-visible.
       // This matches OpenClaw Lit UI behavior (chat.ts:566).
       let restored = restoreExecutionBindings(requestedKey, result.messages ?? []);
@@ -1299,7 +1638,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             sessionKey: toGatewaySessionKey(requestedKey),
             candidates,
           });
-          if (get().sessionKey !== requestedKey) return;
+          if (!isCurrentRequest()) return;
           const byIndex = new Map(
             (resolution?.bindings ?? []).map((binding) => [binding.index, binding.runId]),
           );
@@ -1437,12 +1776,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
     if (evt.data.phase === 'start') {
       set({ compacting: true });
-      useTaskFlowStore.getState().handleCompaction(true);
+      useTaskFlowStore.getState().handleCompaction(true, get().sessionKey);
       return;
     }
     if (evt.data.phase === 'end') {
       set({ compacting: false });
-      useTaskFlowStore.getState().handleCompaction(false);
+      useTaskFlowStore.getState().handleCompaction(false, get().sessionKey);
     }
   },
 
@@ -1522,6 +1861,26 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
 
     const { runId } = get();
+    recordRunTrace({
+      source: 'chat',
+      action: `event:${event.state}`,
+      sessionKey: event.sessionKey,
+      runId: event.runId,
+      status: event.state,
+      reason: event.stopReason ?? event.errorKind,
+      decision: runId && event.runId && event.runId !== runId ? 'run-mismatch' : 'candidate',
+      fieldsPresent: Object.keys(event),
+      observedAt: Date.now(),
+    });
+    const pendingAck = get()._pendingSendAck;
+    if (pendingAck && event.runId === pendingAck.runId) {
+      clearPersistedPendingSendAck(pendingAck.sessionKey);
+      set({ _pendingSendAck: null });
+      useSessionRunsStore.getState().setCommand(
+        pendingAck.sessionKey,
+        event.state === 'delta' ? 'accepted' : 'idle',
+      );
+    }
 
     // Accumulate token usage from any event that carries it
     if (event.usage) {
@@ -1533,8 +1892,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
 
     // Stop the stale-streaming watchdog on TERMINAL events (final/aborted/error)
-    // matching our current run. Delta events update _lastDeltaAt instead, so the
-    // watchdog can detect mid-stream deaths (connection alive but no more deltas).
+    // matching our current run. Delta events update _lastDeltaAt only to schedule
+    // a later read-only Session comparison if the stream becomes quiet.
     if (!event.runId || !runId || event.runId === runId) {
       if (event.state !== 'delta') {
         stopStaleStreamWatchdog();
@@ -1605,7 +1964,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               useUiStore.getState().triggerWorkspaceRefresh();
               useUiStore.getState().checkNotifications();
               get().loadSessionUsage();
-              void useSessionsStore.getState().autoNameSession(get().sessionKey);
             }, 500);
           }
           return;
@@ -1670,7 +2028,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             useUiStore.getState().checkNotifications();
             // Refresh token usage from gateway transcript
             get().loadSessionUsage();
-            void useSessionsStore.getState().autoNameSession(get().sessionKey);
           }, 500);
 
           // Channel B: extract notifications from card types in assistant message
@@ -1725,7 +2082,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               useUiStore.getState().triggerWorkspaceRefresh();
               useUiStore.getState().checkNotifications();
               get().loadSessionUsage();
-              void useSessionsStore.getState().autoNameSession(get().sessionKey);
             }, 500);
           }
 
@@ -1741,11 +2097,25 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // while queryB is streaming). Without this, queryA's abort destroys queryB's state.
         // Uses the same triple-AND pattern as the delta handler (line 575).
         if (event.runId && runId && event.runId !== runId) return;
+        // Without a current local identity, this frame cannot safely be
+        // attributed to the visible turn. The central Session reducer still
+        // consumes it and the read-only reconciliation will recover the
+        // authoritative terminal. Do not manufacture a chat error banner from
+        // a late, old-run, or field-incomplete aborted event.
+        if (!runId) {
+          void useSessionRunsStore.getState().requestReconcile(
+            get().sessionKey,
+            'unattributed-chat-aborted',
+          );
+          return;
+        }
 
         // Distinguish a USER-initiated stop (abort() tagged _userAbortedRunId) from a
-        // gateway timeout / system abort (same 'aborted' event, no tag). Only the latter
-        // surfaces an error + "continue" affordance; user stops stay silent.
-        const wasUserAbort = get()._userAbortedRunId !== null && get()._userAbortedRunId === runId;
+        // gateway/system abort (same 'aborted' event, no tag). Only the latter
+        // surfaces an interruption + recovery affordance; user stops stay silent.
+        const wasUserAbort =
+          (get()._userAbortedRunId !== null && get()._userAbortedRunId === runId)
+          || event.stopReason === 'rpc';
         const partialText = get().streamText?.trim() ? get().streamText : null;
         if (wasUserAbort) {
           // Match restore to client runId (idempotencyKey), not gateway event.runId.
@@ -1763,15 +2133,20 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             };
           });
         } else {
-          const timeoutMessage = partialText
-            ? i18n.t('chat.runTimedOut')
-            : i18n.t('chat.runTimedOutNoOutput');
+          const explicitTimeout = event.stopReason === 'timeout' || event.errorKind === 'timeout';
+          const interruptionMessage = explicitTimeout
+            ? partialText
+              ? i18n.t('chat.runTimedOut')
+              : i18n.t('chat.runTimedOutNoOutput')
+            : partialText
+              ? i18n.t('chat.runInterrupted')
+              : i18n.t('chat.runInterruptedNoOutput');
           const failureInfo = {
-            ...classifyRunFailure('request timed out', undefined, {
+            ...classifyRunFailure(explicitTimeout ? 'request timed out' : 'request aborted', undefined, {
               origin: 'foreground',
               hasPartialOutput: Boolean(partialText),
             }),
-            message: timeoutMessage,
+            message: interruptionMessage,
             retryable: !partialText,
           };
           set((s) => ({
@@ -1781,20 +2156,25 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               : s.messages,
             _pendingUserMsgs: [],
             _userAbortedRunId: null,
-            lastError: timeoutMessage,
+            lastError: interruptionMessage,
             lastErrorMeta: failureInfo,
             canContinue: Boolean(partialText),
           }));
         }
-        // Top-banner notification for timeout/system aborts (user stops stay silent).
+        // Top-banner notification for gateway/system aborts (user stops stay silent).
         if (!wasUserAbort) {
+          const explicitTimeout = event.stopReason === 'timeout' || event.errorKind === 'timeout';
           useUiStore.getState().addNotification({
             type: 'error',
             title: i18n.t('chat.runIssueNotificationTitle'),
-            body: partialText
-              ? i18n.t('chat.runTimedOut')
-              : i18n.t('chat.runTimedOutNoOutput'),
-            dedupKey: `chat-run-timeout:${get().sessionKey}:${runId ?? 'unknown'}`,
+            body: explicitTimeout
+              ? partialText
+                ? i18n.t('chat.runTimedOut')
+                : i18n.t('chat.runTimedOutNoOutput')
+              : partialText
+                ? i18n.t('chat.runInterrupted')
+                : i18n.t('chat.runInterruptedNoOutput'),
+            dedupKey: `chat-run-interrupted:${get().sessionKey}:${runId ?? 'unknown'}`,
             targetSessionKey: get().sessionKey,
           });
         }
@@ -1854,14 +2234,22 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // Matches OC resetChatStateForSessionSwitch: clears chatStream, chatStreamStartedAt,
     // chatRunId, chatMessage, resets tool stream + scroll.
     stopStaleStreamWatchdog();
-    useTaskFlowStore.getState().clear();
+    useTaskFlowStore.getState().clear(get().sessionKey);
+    const pendingAck = loadPendingSendAck(key);
+    if (pendingAck) {
+      const runs = useSessionRunsStore.getState();
+      runs.setLocalRunId(key, pendingAck.runId);
+      runs.setCommand(key, 'ack_unknown');
+    }
+    const pendingUserMsgs = loadPendingMsgs(key);
+    const localOnlyMsgs = loadLocalMsgs(key);
     set({
       sessionKey: key,
-      messages: loadLocalMsgs(key),
+      messages: mergeLocalMessages(pendingUserMsgs, localOnlyMsgs),
       streaming: false,
       compacting: false,
       streamText: null,
-      runId: null,
+      runId: pendingAck?.runId ?? null,
       sending: false,
       lastError: null,
       lastErrorMeta: null,
@@ -1869,10 +2257,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       tokensOut: 0,
       _pendingGapReload: false,
       _lastAgentFailureRunId: null,
-      _pendingUserMsgs: [],
-      _localOnlyMsgs: loadLocalMsgs(key),
+      _pendingUserMsgs: pendingUserMsgs,
+      _localOnlyMsgs: localOnlyMsgs,
       _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
       _lastSentDraft: null,
+      _pendingSendAck: pendingAck,
       inputRestore: null,
       inputRestoreSeq: 0,
       _abortedUserSuppressCounts: {},
@@ -1941,7 +2330,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 useChatStore.subscribe(
   (state, prev) => {
     if (state._pendingUserMsgs !== prev._pendingUserMsgs) {
-      savePendingMsgs(state._pendingUserMsgs);
+      savePendingMsgs(state.sessionKey, state._pendingUserMsgs);
     }
     if (state._localOnlyMsgs !== prev._localOnlyMsgs) {
       saveLocalMsgs(state.sessionKey, state._localOnlyMsgs);

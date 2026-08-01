@@ -26,6 +26,53 @@ export function safeStringifyDetail(value: unknown): string {
   }
 }
 
+type CollapsibleToolActivity = {
+  ts: number;
+  sessionKey: string;
+  runId: string | null;
+  toolCallId: string | null;
+  scope: 'foreground' | 'background';
+  status: string;
+};
+
+/**
+ * Collapse lifecycle frames for the same tool invocation into one visible row.
+ * The raw activity log remains untouched for diagnostics; only the projection
+ * replaces `start` with the latest `result`/`end` frame for that exact
+ * session + run + toolCallId tuple.
+ */
+export function collapseToolActivityEntries<T extends CollapsibleToolActivity>(entries: T[]): T[] {
+  const collapsed: T[] = [];
+  const toolIndex = new Map<string, number>();
+
+  for (const entry of entries) {
+    const isToolLifecycle = entry.toolCallId !== null
+      && (entry.status === 'tool_start'
+        || entry.status === 'tool_result'
+        || entry.status === 'tool_end');
+    if (!isToolLifecycle) {
+      collapsed.push(entry);
+      continue;
+    }
+
+    const key = [
+      entry.sessionKey,
+      entry.runId ?? '',
+      entry.scope,
+      entry.toolCallId,
+    ].join('\u0000');
+    const existingIndex = toolIndex.get(key);
+    if (existingIndex === undefined) {
+      toolIndex.set(key, collapsed.length);
+      collapsed.push(entry);
+    } else {
+      collapsed[existingIndex] = entry;
+    }
+  }
+
+  return collapsed.sort((left, right) => left.ts - right.ts);
+}
+
 /** Build a one-line summary for an activity log entry. */
 export function fmtActivityRow(entry: {
   ts: number;

@@ -3,6 +3,8 @@ import { GatewayClient, type CloseInfo, type GapInfo } from '../gateway/client';
 import { useConfigStore } from './config';
 import { RC_VERSION } from '../version';
 import type { ConnectionState, HelloOk, EventFrame, SessionDefaults } from '../gateway/types';
+import { classifyChatTerminalLifecycle } from '../utils/session-run-state';
+import { recordRunTrace } from '../utils/run-trace';
 
 /** Stable per-tab instance ID for gateway deduplication (aligned with OC clientInstanceId). */
 const _instanceId = crypto.randomUUID();
@@ -74,6 +76,12 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // to handlers registered on the previous connection. Leaving 'connected'
         // is the last moment guaranteed to precede every frame of the next one.
         if (state !== 'connected') bumpEventEpoch();
+        recordRunTrace({
+          source: 'gateway',
+          action: 'transport-state',
+          eventEpoch: get().eventEpoch,
+          decision: state,
+        });
         set({ state, ...(state === 'connected' ? { connectError: null } : {}) });
       },
       onHello: (hello: HelloOk) => {
@@ -81,31 +89,15 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // per-connection sequence numbering and the client zeroes lastSeq, so no
         // event on this connection can be sequenced against the previous one.
         bumpEventEpoch();
-        get().setServerInfo(hello);
-        // Fix 2 — Reconnection-safe streaming state reset.
-        // Old behavior: unconditionally clear streaming/runId on every reconnect.
-        // Problem: if the user sent a message that the gateway queued (collect mode),
-        // the WS reconnection destroys the pending run state. Combined with
-        // loadHistory() not finding the queued message in the transcript, the
-        // optimistic user message vanishes.
-        //
-        // New behavior: if we have a pending runId (user sent a message and is
-        // waiting for a response), keep the runId and streaming state alive.
-        // The stale-stream timer (360s) will recover if the run is truly dead.
-        // Only clear streamText (partial stream data was lost during reconnect).
-        void import('./chat').then(({ useChatStore }) => {
-          const { runId } = useChatStore.getState();
-          if (runId) {
-            // Pending user-initiated run — preserve state, clear partial stream.
-            // Fix 3: set _reconnectedAt so the stale-stream watchdog uses a shorter
-            // timeout (15s vs 360s) for faster recovery if the run completed during
-            // the disconnect window and no more deltas will arrive.
-            useChatStore.setState({ streamText: null, _reconnectedAt: Date.now() });
-          } else {
-            // No pending run — reset orphaned state (original behavior)
-            useChatStore.setState({ streaming: false, streamText: null, runId: null, _reconnectedAt: null });
-          }
+        recordRunTrace({
+          source: 'gateway',
+          action: 'hello',
+          eventEpoch: get().eventEpoch + 1,
+          decision: hello.server?.connId ? 'runtime-identified' : 'runtime-id-missing',
         });
+        get().setServerInfo(hello);
+        // Transport recovery is not a run terminal. Keep any local projection
+        // intact until sessions.list/chat.history supplies authoritative state.
         // Reset retry counter for fresh evaluation on (re)connection
         useConfigStore.setState({ _configRetryCount: 0 });
         // Auto-fetch config on every (re)connection
@@ -159,12 +151,88 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         void import('./sessions').then(({ useSessionsStore }) => {
           useSessionsStore.getState().loadSessions();
         });
+        void import('./session-runs').then(({ useSessionRunsStore }) => {
+          void useSessionRunsStore.getState().flushPendingAborts();
+        });
       },
       onEvent: (event: EventFrame) => {
+        if (event.event === 'chat') {
+          const payload = event.payload as {
+            state?: string;
+            sessionKey?: string;
+            runId?: string;
+            errorKind?: string;
+            stopReason?: string;
+            message?: { isError?: boolean };
+          } | undefined;
+          if (
+            payload?.sessionKey
+            && (payload.state === 'final' || payload.state === 'aborted' || payload.state === 'error')
+          ) {
+            const eventEpoch = get().eventEpoch;
+            recordRunTrace({
+              source: 'gateway',
+              action: 'chat-terminal',
+              sessionKey: payload.sessionKey,
+              runId: payload.runId,
+              eventEpoch,
+              seq: event.seq,
+              status: payload.state,
+              reason: payload.stopReason ?? payload.errorKind,
+              fieldsPresent: Object.keys(payload),
+            });
+            void import('./session-runs').then(({ selectSessionRunView, useSessionRunsStore }) => {
+              const store = useSessionRunsStore.getState();
+              const command = selectSessionRunView(store, payload.sessionKey!).command;
+              const status = classifyChatTerminalLifecycle(payload, command);
+              if (!status) return;
+              store.applyChatTerminal({
+                sessionKey: payload.sessionKey!,
+                runId: payload.runId,
+                status,
+                eventEpoch,
+                seq: event.seq,
+                observedAt: Date.now(),
+              });
+            });
+          }
+        }
         // Handle session change events (aligned with OC UI sessions.subscribe)
         if (event.event === 'sessions.changed') {
+          const eventEpoch = get().eventEpoch;
+          const payload = event.payload && typeof event.payload === 'object'
+            ? event.payload as Record<string, unknown>
+            : {};
+          const nested = payload.session && typeof payload.session === 'object'
+            ? payload.session as Record<string, unknown>
+            : {};
+          const source = Object.keys(nested).length > 0 ? nested : payload;
+          recordRunTrace({
+            source: 'gateway',
+            action: 'sessions.changed',
+            sessionKey: typeof source.sessionKey === 'string'
+              ? source.sessionKey
+              : typeof source.key === 'string'
+                ? source.key
+                : undefined,
+            sessionId: typeof source.sessionId === 'string' ? source.sessionId : undefined,
+            runId: typeof payload.runId === 'string' ? payload.runId : undefined,
+            eventEpoch,
+            seq: event.seq,
+            status: typeof source.status === 'string' ? source.status : undefined,
+            hasActiveRun: typeof source.hasActiveRun === 'boolean' ? source.hasActiveRun : undefined,
+            startedAt: typeof source.startedAt === 'number' ? source.startedAt : undefined,
+            endedAt: typeof source.endedAt === 'number' ? source.endedAt : undefined,
+            fieldsPresent: Object.keys(source),
+          });
+          void import('./session-runs').then(({ useSessionRunsStore }) => {
+            useSessionRunsStore.getState().ingestSessionEvent(event.payload, {
+              eventEpoch,
+              seq: event.seq,
+            });
+          });
           void import('./sessions').then(({ useSessionsStore }) => {
-            useSessionsStore.getState().loadSessions();
+            void useSessionsStore.getState().loadSessions();
           });
         }
         // Handle shutdown event (gateway restart notification)
@@ -175,6 +243,12 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       },
       onGap: ({ expected, received }: GapInfo) => {
         console.warn(`[Gateway] Event sequence gap: expected ${expected}, got ${received} — scheduling history sync`);
+        recordRunTrace({
+          source: 'gateway',
+          action: 'seq-gap',
+          eventEpoch: get().eventEpoch,
+          reason: `expected:${expected};received:${received}`,
+        });
         // First, and synchronously: the frame that revealed this gap has not
         // reached the event subscribers yet, and it may itself be the cron
         // completion whose place in a failure episode we can no longer establish.
@@ -183,6 +257,15 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // Safe: onGap fires only after connect, when both stores are initialized.
         void import('./chat').then(({ useChatStore }) => {
           useChatStore.getState().onGapDetected();
+        });
+        void Promise.all([import('./session-runs'), import('./sessions')]).then(([
+          { useSessionRunsStore },
+          { useSessionsStore },
+        ]) => {
+          void useSessionRunsStore.getState().requestReconcile(
+            useSessionsStore.getState().activeSessionKey,
+            'seq-gap',
+          );
         });
       },
       onConnectError: (code: string, message: string) => {

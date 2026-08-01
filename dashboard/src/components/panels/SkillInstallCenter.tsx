@@ -428,7 +428,7 @@ export default function SkillInstallCenter({
       <Alert
         type="info"
         showIcon
-        message={t('extensions.install.clawhub.native', 'Native OpenClaw source')}
+        message={t('extensions.install.clawhub.native', 'Native Research-Claw source')}
         description={t(
           'extensions.install.clawhub.description',
           'Searches ClawHub, loads registry details, then installs through skills.install.',
@@ -537,7 +537,7 @@ export default function SkillInstallCenter({
         <Paragraph>
           {t(
             'extensions.install.clawhub.confirmDescription',
-            'OpenClaw will download, verify, scan, and install this Skill into the current workspace.',
+            'Research-Claw will download, verify, scan, and install this Skill into the current workspace.',
           )}
         </Paragraph>
         <Text strong>{detail?.skill?.displayName}</Text>
@@ -560,7 +560,7 @@ export default function SkillInstallCenter({
           )}
           description={t(
             'extensions.install.local.disabledDescription',
-            'Enable skills.install.allowUploadedArchives in openclaw.json, then reconnect. You can still inspect a ZIP while installation is blocked.',
+            'Enable local Skill archive uploads in Research-Claw configuration, then reconnect. You can still inspect a ZIP while installation is blocked.',
           )}
         />
       )}
@@ -621,7 +621,7 @@ export default function SkillInstallCenter({
             )}
             description={t(
               'extensions.install.local.noPreview',
-              'OpenClaw 2026.6.1 has no scan-only verdict RPC, so no pre-install security verdict is fabricated here.',
+              'The current Research-Claw service has no scan-only security verdict API, so no pre-install security verdict is fabricated here.',
             )}
           />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

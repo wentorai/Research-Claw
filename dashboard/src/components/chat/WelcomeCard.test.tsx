@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import WelcomeCard, { WELCOME_INIT_PROMPT, WELCOME_INIT_DISPLAY_TEXT } from './WelcomeCard';
 import ChatView from './ChatView';
@@ -13,6 +13,7 @@ import {
 import { sanitizeUserMessage } from '../../utils/sanitize-message';
 import { FEISHU_TUTORIAL_URL } from '../../constants/links';
 import { RC_VERSION } from '../../version';
+import { useToolStreamStore } from '../../stores/tool-stream';
 
 // ── Mock react-i18next (same pattern as chatview-filter.parity.test.tsx) ──
 
@@ -34,11 +35,18 @@ const I18N_MAP: Record<string, string> = {
   'chat.suggestions.writeSurvey': '基于我的文献库写一段综述',
   'chat.suggestions.setupMonitor': '帮我设置一个领域监控',
   'chat.suggestions.whatCanYouDo': '你能做什么？',
+  'chat.activityToolStarted': '开始工具调用：{{name}}',
+  'chat.activityToolCompleted': '工具调用完成：{{name}}',
+  'chat.activityDurationSeconds': '{{duration}} 秒',
+  'chat.activityDurationMilliseconds': '{{duration}} 毫秒',
 };
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => I18N_MAP[key] ?? key,
+    t: (key: string, params?: Record<string, string>) => {
+      const value = I18N_MAP[key] ?? key;
+      return value.replace(/\{\{(\w+)\}\}/g, (_, name: string) => params?.[name] ?? '');
+    },
     i18n: { changeLanguage: vi.fn() },
   }),
   initReactI18next: { type: '3rdParty', init: vi.fn() },
@@ -91,6 +99,7 @@ beforeEach(() => {
     lastError: null,
   });
   useUiStore.setState({ chatInputPrefill: null });
+  useToolStreamStore.setState({ pendingTools: [], activityLog: [] });
   // CTA is server-gated: only rendered while rc.onboarding.status still says
   // first-run. fetchStatus is stubbed because the card re-validates the verdict
   // on mount and the real implementation reaches into the mocked gateway store.
@@ -261,5 +270,63 @@ describe('ChatView empty-state suggestion chips', () => {
     render(<ChatView />);
 
     expect(screen.queryByText('你能做什么？')).not.toBeInTheDocument();
+  });
+});
+
+describe('ChatView live tool activity history', () => {
+  it('collapses one tool lifecycle into one localized completion row', () => {
+    useChatStore.setState({
+      messages: [{ role: 'user', text: 'run a tool', timestamp: Date.now() }],
+      sessionKey: 'project-a',
+    });
+    useToolStreamStore.setState({
+      pendingTools: [{
+        toolCallId: 'tool-2',
+        name: 'another-tool',
+        sessionKey: 'project-a',
+        phase: 'running',
+        startedAt: 200,
+        lastEventAt: 200,
+      }],
+      activityLog: [],
+    });
+
+    render(<ChatView />);
+
+    act(() => useToolStreamStore.setState({
+      activityLog: [
+        {
+          id: 'start',
+          ts: 100,
+          sessionKey: 'project-a',
+          runId: 'run-a',
+          toolCallId: 'tool-1',
+          scope: 'foreground',
+          status: 'tool_start',
+          text: 'Tool started: process',
+          toolName: 'process',
+        },
+        {
+          id: 'result',
+          ts: 30_100,
+          sessionKey: 'project-a',
+          runId: 'run-a',
+          toolCallId: 'tool-1',
+          scope: 'foreground',
+          status: 'tool_result',
+          text: 'Tool returned: process',
+          toolName: 'process',
+          durationMs: 30_000,
+        },
+      ],
+    }));
+
+    const activityRows = [...document.querySelectorAll('.chat-activity-summary')]
+      .map((row) => row.textContent ?? '');
+    expect(activityRows).toHaveLength(1);
+    expect(activityRows[0]).toContain('工具调用完成：process');
+    expect(activityRows[0]).toContain('30.0 秒');
+    expect(screen.queryByText(/Tool started: process/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tool returned: process/)).not.toBeInTheDocument();
   });
 });

@@ -137,9 +137,6 @@ export default function StatusBar() {
         {t('status.heartbeat')}: {formatTime(heartbeatAge)}
       </span>
 
-      {/* Spacer */}
-      <div style={{ flex: 1 }} />
-
       {/* Background jobs activity indicator — only when something is running.
           Click opens the Jobs panel (it has no top-level nav entry). */}
       {activeJobs.length > 0 && (
@@ -158,6 +155,9 @@ export default function StatusBar() {
           <div style={{ width: 1, height: 12, background: 'var(--border)' }} />
         </>
       )}
+
+      {/* Spacer */}
+      <div style={{ flex: 1 }} />
 
       {/* Update available banner — center-right, prominent */}
       {hasUpdate && (

@@ -19,6 +19,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useChatStore } from '../../stores/chat';
+import { useSessionRunsStore } from '../../stores/session-runs';
 import {
   TINY_PNG_B64,
   TINY_PNG_DATA_URL,
@@ -75,6 +76,8 @@ function getChatSendParams() {
 describe('Chat send parity with OpenClaw native UI', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    sessionStorage.clear();
+    useSessionRunsStore.getState().resetForTests();
     mockGatewayClient.isConnected = true;
     mockGatewayClient.request.mockResolvedValue({ runId: 'server-run-1' });
     useChatStore.setState({
@@ -87,6 +90,7 @@ describe('Chat send parity with OpenClaw native UI', () => {
       lastError: null,
       tokensIn: 0,
       tokensOut: 0,
+      _pendingSendAck: null,
     });
   });
 
@@ -357,8 +361,8 @@ describe('Chat send parity with OpenClaw native UI', () => {
       // chat.ts:241: state.chatSending = false (finally block)
       // Our impl transitions to streaming=true after successful response
       let sendingDuringRpc: boolean | undefined;
-      mockGatewayClient.request.mockImplementation(() => {
-        sendingDuringRpc = useChatStore.getState().sending;
+      mockGatewayClient.request.mockImplementation((method: string) => {
+        if (method === 'chat.send') sendingDuringRpc = useChatStore.getState().sending;
         return Promise.resolve({ runId: 'r1' });
       });
 
@@ -405,13 +409,14 @@ describe('Chat send parity with OpenClaw native UI', () => {
       expect(useChatStore.getState().runId).toBe(runIdDuringRpc);
     });
 
-    it('uses idempotencyKey as local runId (matches OC pattern)', async () => {
+    it('uses a local idempotencyKey and then adopts the ACK runId', async () => {
       // OpenClaw chat.ts:194+221: const runId = generateUUID(); ... idempotencyKey: runId
       // The locally generated UUID is used as both chatRunId and idempotencyKey.
       await useChatStore.getState().send('hello');
 
       const params = getChatSendParams()!;
-      expect(params.idempotencyKey).toBe(useChatStore.getState().runId);
+      expect(params.idempotencyKey).toEqual(expect.any(String));
+      expect(useChatStore.getState().runId).toBe('server-run-1');
     });
   });
 
@@ -419,14 +424,13 @@ describe('Chat send parity with OpenClaw native UI', () => {
   // Error handling
   // ════════════════════════════════════════════════════════════════
 
-  describe('Error handling — openclaw/ui/src/ui/controllers/chat.ts:225-243', () => {
-    it('sets lastError from RPC failure message', async () => {
-      // OpenClaw chat.ts:226: const error = String(err)
-      // chat.ts:230: state.lastError = error
+  describe('Uncertain ACK handling layered over the OC request contract', () => {
+    it('does not misreport a transport failure as a definitive send failure', async () => {
       mockGatewayClient.request.mockRejectedValue(new Error('Connection timeout'));
       await useChatStore.getState().send('hello');
 
-      expect(useChatStore.getState().lastError).toBe('Connection timeout');
+      expect(useChatStore.getState().lastError).toBeNull();
+      expect(useSessionRunsStore.getState().commands.main).toBe('ack_unknown');
     });
 
     it('clears sending state on error', async () => {
@@ -437,15 +441,13 @@ describe('Chat send parity with OpenClaw native UI', () => {
       expect(useChatStore.getState().sending).toBe(false);
     });
 
-    it('clears runId and streaming on error (matches OC chat.ts:227-230)', async () => {
-      // OpenClaw chat.ts:227-230: chatRunId = null, chatStream = null
-      // runId was set before the RPC call, but must be cleared on failure.
+    it('keeps the local generation while transport acceptance is unknown', async () => {
       mockGatewayClient.request.mockRejectedValue(new Error('fail'));
       await useChatStore.getState().send('hello');
 
       expect(useChatStore.getState().streaming).toBe(false);
       expect(useChatStore.getState().streamText).toBeNull();
-      expect(useChatStore.getState().runId).toBeNull();
+      expect(useChatStore.getState().runId).toEqual(expect.any(String));
     });
 
     it('returns early with lastError when not connected', async () => {
@@ -457,13 +459,12 @@ describe('Chat send parity with OpenClaw native UI', () => {
       expect(mockGatewayClient.request).not.toHaveBeenCalled();
     });
 
-    it('uses generic error message for non-Error exceptions', async () => {
-      // OpenClaw chat.ts:226: const error = String(err)
-      // Our impl: err instanceof Error ? err.message : i18n.t('chat.sendFailed')
+    it('also treats a non-structured rejection as transport-uncertain', async () => {
       mockGatewayClient.request.mockRejectedValue('string error');
       await useChatStore.getState().send('hello');
 
-      expect(useChatStore.getState().lastError).toBe('发送失败 — 连接可能已中断，请尝试重新发送');
+      expect(useChatStore.getState().lastError).toBeNull();
+      expect(useSessionRunsStore.getState().commands.main).toBe('ack_unknown');
     });
   });
 

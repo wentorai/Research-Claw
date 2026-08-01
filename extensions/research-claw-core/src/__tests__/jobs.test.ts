@@ -113,6 +113,66 @@ describe('JobService', () => {
     expect(finished.result).toEqual({ url: 'https://example.test/doc' });
   });
 
+  it('keeps user-cancelled terminal absorbing against a late worker finish', () => {
+    const job = service.create({ type: 'openclaw-subagent', title: 'Cancelled child' });
+    service.start(job.id);
+    service.cancel(job.id, 'Cancelled from Research-Claw Jobs panel');
+
+    const late = service.finish(job.id, 'completed', { summary: 'late worker result' });
+
+    expect(late.status).toBe('cancelled');
+    expect(late.progress).not.toBe(100);
+    expect(late.result).toBeNull();
+    expect(late.error).toBe('Cancelled from Research-Claw Jobs panel');
+  });
+
+  it('ignores a late worker checkpoint after user cancellation', () => {
+    const job = service.create({ type: 'openclaw-subagent', title: 'Cancelled child' });
+    service.start(job.id);
+    service.checkpoint(job.id, { progress: 25, current_step: 'Running' });
+    service.cancel(job.id, 'Cancelled from Research-Claw Jobs panel');
+
+    const late = service.checkpoint(job.id, {
+      progress: 80,
+      current_step: 'Late worker checkpoint',
+      checkpoint: { should_not_persist: true },
+    });
+
+    expect(late.status).toBe('cancelled');
+    expect(late.progress).toBe(25);
+    expect(late.current_step).toBe('Running');
+    expect(late.checkpoint).not.toHaveProperty('should_not_persist');
+  });
+
+  it('keeps user-cancelled terminal absorbing against a late external completion sync', () => {
+    service.upsertExternal({
+      id: 'longtask:cancel-race',
+      type: 'openclaw-subagent',
+      title: 'Cancelled external child',
+      status: 'running',
+      progress: 25,
+      current_step: 'Running',
+      updated_at: '2026-08-01 00:00:00',
+    });
+    service.cancel('longtask:cancel-race', 'Cancelled from Research-Claw Jobs panel');
+
+    const late = service.upsertExternal({
+      id: 'longtask:cancel-race',
+      type: 'openclaw-subagent',
+      title: 'Cancelled external child',
+      status: 'completed',
+      progress: 100,
+      current_step: 'Completed late',
+      result: { summary: 'late worker result' },
+      completed_at: '2026-08-01 00:03:00',
+      updated_at: '2026-08-01 00:03:00',
+    });
+
+    expect(late.status).toBe('cancelled');
+    expect(late.result).toBeNull();
+    expect(late.error).toBe('Cancelled from Research-Claw Jobs panel');
+  });
+
   it('upserts external jobs with stable ids', () => {
     const first = service.upsertExternal({
       id: 'openclaw:session-1',
@@ -358,6 +418,153 @@ describe('OpenClaw subagent job sync', () => {
     // Original submission payload survives the rebind.
     expect(jobs[0].input.references).toEqual(['a.ts', 'b.ts']);
     expect((jobs[0].input.orchestration as { checkpoint_policy?: string }).checkpoint_policy).toBe('resume-from-latest');
+  });
+
+  it('reuses a running long task already checkpoint-bound to the child session', () => {
+    service.upsertExternal({
+      id: 'longtask:checkpoint-bound',
+      type: 'openclaw-subagent',
+      title: '批量整理论文',
+      session_key: 'agent:main:subagent:checkpoint-child',
+      status: 'running',
+      progress: 25,
+      current_step: 'OpenClaw 子会话已启动',
+      input: { source: 'auto-long-task', message: '批量整理论文' },
+      heartbeat_at: '2026-06-14 12:00:00',
+    });
+
+    const sessionFile = path.join(tmpDir, 'checkpoint-bound-child.jsonl');
+    fs.writeFileSync(sessionFile, JSON.stringify({
+      type: 'message',
+      message: { role: 'user', content: [{ type: 'text', text: '整理这些论文并生成报告' }] },
+    }));
+    const sessionsPath = path.join(tmpDir, 'checkpoint-bound-sessions.json');
+    fs.writeFileSync(sessionsPath, JSON.stringify({
+      'agent:main:subagent:checkpoint-child': {
+        subagentRole: 'leaf',
+        spawnedBy: 'agent:main:project-checkpoint-parent',
+        sessionId: 'checkpoint-child-session',
+        sessionFile,
+        status: 'running',
+        startedAt: Date.UTC(2026, 5, 14, 12, 0, 0),
+        updatedAt: Date.UTC(2026, 5, 14, 12, 1, 0),
+      },
+    }));
+
+    syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath, maxAgeDays: 365 });
+
+    const jobs = service.list();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].id).toBe('longtask:checkpoint-bound');
+    expect(jobs[0].session_key).toBe('agent:main:subagent:checkpoint-child');
+  });
+
+  it('removes a provisional mirror once the replacement child transcript exposes its Job ID', () => {
+    service.upsertExternal({
+      id: 'longtask:restart-recovery',
+      type: 'openclaw-subagent',
+      title: '批量整理论文',
+      session_key: 'agent:main:subagent:old-child',
+      status: 'running',
+      progress: 25,
+      current_step: '正在从 checkpoint 恢复',
+      input: {
+        source: 'openclaw-subagent',
+        message: '批量整理论文',
+        spawned_by: 'agent:main:project-restart-parent',
+      },
+      heartbeat_at: '2026-06-14 12:00:00',
+    });
+
+    const sessionFile = path.join(tmpDir, 'replacement-child.jsonl');
+    fs.writeFileSync(sessionFile, JSON.stringify({
+      type: 'session',
+      id: 'replacement-child-session',
+    }));
+    const sessionsPath = path.join(tmpDir, 'replacement-child-sessions.json');
+    fs.writeFileSync(sessionsPath, JSON.stringify({
+      'agent:main:subagent:replacement-child': {
+        subagentRole: 'leaf',
+        spawnedBy: 'agent:main:project-restart-parent',
+        sessionId: 'replacement-child-session',
+        sessionFile,
+        status: 'running',
+        startedAt: Date.UTC(2026, 5, 14, 12, 2, 0),
+        updatedAt: Date.UTC(2026, 5, 14, 12, 3, 0),
+      },
+    }));
+
+    syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath, maxAgeDays: 365 });
+    expect(service.list()).toHaveLength(2);
+
+    fs.appendFileSync(sessionFile, `\n${JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: 'Research-Claw Job ID: longtask:restart-recovery\n\n从 checkpoint 继续',
+        }],
+      },
+    })}`);
+    syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath, maxAgeDays: 365 });
+
+    const jobs = service.list();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].id).toBe('longtask:restart-recovery');
+    expect(jobs[0].session_key).toBe('agent:main:subagent:replacement-child');
+  });
+
+  it('keeps the newest replacement when two child sessions claim the same Job ID', () => {
+    service.upsertExternal({
+      id: 'longtask:same-job',
+      type: 'openclaw-subagent',
+      title: '恢复任务',
+      session_key: 'agent:main:project-parent',
+      status: 'queued',
+      progress: 0,
+      current_step: '等待启动',
+      input: { source: 'auto-long-task' },
+    });
+
+    const oldFile = path.join(tmpDir, 'same-job-old.jsonl');
+    const newFile = path.join(tmpDir, 'same-job-new.jsonl');
+    const jobMessage = (label: string) => JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: `Research-Claw Job ID: longtask:same-job\n\n${label}`,
+        }],
+      },
+    });
+    fs.writeFileSync(oldFile, jobMessage('旧 child'));
+    fs.writeFileSync(newFile, jobMessage('替代 child'));
+    const sessionsPath = path.join(tmpDir, 'same-job-sessions.json');
+    fs.writeFileSync(sessionsPath, JSON.stringify({
+      'agent:main:subagent:old-child': {
+        subagentRole: 'leaf',
+        spawnedBy: 'agent:main:project-parent',
+        sessionId: 'old-child-id',
+        sessionFile: oldFile,
+        status: 'running',
+        updatedAt: Date.UTC(2026, 5, 14, 12, 1, 0),
+      },
+      'agent:main:subagent:new-child': {
+        subagentRole: 'leaf',
+        spawnedBy: 'agent:main:project-parent',
+        sessionId: 'new-child-id',
+        sessionFile: newFile,
+        status: 'running',
+        updatedAt: Date.UTC(2026, 5, 14, 12, 2, 0),
+      },
+    }));
+
+    syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath, maxAgeDays: 365 });
+
+    expect(service.list()).toHaveLength(1);
+    expect(service.get('longtask:same-job').session_key).toBe('agent:main:subagent:new-child');
   });
 
   it('serves a cached transcript without re-reading when mtime and size are unchanged', () => {
