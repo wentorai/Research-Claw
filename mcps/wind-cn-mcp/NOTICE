@@ -1,0 +1,13 @@
+wind-cn-mcp
+Copyright 2026 Research-Claw Contributors
+
+Independently implemented from a clean-room multi-provider architecture design.
+General concept (unified Chinese financial data MCP with provider fallback)
+inspired by:
+  - zlinzzzz/finData-mcp-server (https://github.com/zlinzzzz/finData-mcp-server)
+  - guangxiangdebizi/FinanceMCP (https://github.com/guangxiangdebizi/FinanceMCP)
+  - guangxiangdebizi/FinanceMCP-DCTHS (https://github.com/guangxiangdebizi/FinanceMCP-DCTHS)
+
+No source code was copied. Wind / iFinD / Choice integrations are intentionally
+left as skeletons because they require commercial terminal licenses; users must
+follow respective vendor terms when implementing.

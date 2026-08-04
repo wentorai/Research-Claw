@@ -1,0 +1,136 @@
+"""Provider registry with priority ordering and graceful fallback."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable, Iterable
+from typing import TypeVar
+
+from wind_cn_mcp.exceptions import (
+    NoProviderAvailableError,
+    ProviderAPIError,
+    ProviderUnavailableError,
+)
+from wind_cn_mcp.models import ProviderStatus
+from wind_cn_mcp.providers.base import BaseProvider
+
+T = TypeVar("T")
+log = logging.getLogger(__name__)
+
+# Errors that are treated as "this provider can't satisfy the request, try the
+# next one" rather than as a hard failure of the whole call.
+_FALLBACK_ERRORS: tuple[type[BaseException], ...] = (
+    NotImplementedError,
+    ProviderUnavailableError,
+    ProviderAPIError,
+)
+
+
+class ProviderRegistry:
+    """Holds providers and routes calls in priority order."""
+
+    def __init__(self, providers: Iterable[BaseProvider] | None = None) -> None:
+        self._providers: list[BaseProvider] = []
+        if providers:
+            for p in providers:
+                self.register(p)
+
+    def register(self, provider: BaseProvider) -> None:
+        if any(p.name == provider.name for p in self._providers):
+            raise ValueError(f"provider {provider.name!r} already registered")
+        self._providers.append(provider)
+        self._providers.sort(key=lambda p: p.priority)
+
+    @property
+    def providers(self) -> list[BaseProvider]:
+        return list(self._providers)
+
+    def get(self, name: str) -> BaseProvider:
+        for p in self._providers:
+            if p.name == name:
+                return p
+        raise NoProviderAvailableError(f"no provider named {name!r}")
+
+    async def status(self) -> list[ProviderStatus]:
+        out: list[ProviderStatus] = []
+        for p in self._providers:
+            try:
+                avail = await p.is_available()
+                note = None
+            except Exception as exc:  # pragma: no cover - defensive
+                avail = False
+                note = f"is_available raised: {exc}"
+            out.append(
+                ProviderStatus(
+                    name=p.name,
+                    priority=p.priority,
+                    available=avail,
+                    note=note,
+                )
+            )
+        return out
+
+    async def call(
+        self,
+        op: Callable[[BaseProvider], Awaitable[T]],
+        *,
+        prefer: str | None = None,
+    ) -> T:
+        """Run ``op`` against the first provider that succeeds.
+
+        Order:
+          * if ``prefer`` is set, try that provider first (and only — no fallback,
+            so the caller sees the explicit provider's error);
+          * otherwise iterate by priority, skipping unavailable ones, and falling
+            back on any of ``_FALLBACK_ERRORS``.
+        """
+
+        if prefer is not None:
+            return await op(self.get(prefer))
+
+        last_err: BaseException | None = None
+        tried: list[str] = []
+        for provider in self._providers:
+            try:
+                if not await provider.is_available():
+                    tried.append(f"{provider.name}(unavailable)")
+                    continue
+            except Exception as exc:  # pragma: no cover - defensive
+                tried.append(f"{provider.name}(is_available-raised:{exc})")
+                continue
+            try:
+                return await op(provider)
+            except _FALLBACK_ERRORS as exc:
+                tried.append(f"{provider.name}({type(exc).__name__})")
+                last_err = exc
+                log.info("provider %s failed (%s); falling back", provider.name, exc)
+                continue
+
+        msg = f"no provider could satisfy the request; tried: {tried or 'none registered'}"
+        if last_err is not None:
+            raise NoProviderAvailableError(msg) from last_err
+        raise NoProviderAvailableError(msg)
+
+
+def default_registry() -> ProviderRegistry:
+    """Build the registry with the standard provider lineup.
+
+    Order is enforced by each provider's ``priority`` attribute:
+    wind (10) → ifind (20) → choice (30) → tushare (50) → mock (1000).
+    """
+
+    from wind_cn_mcp.providers.choice import ChoiceProvider
+    from wind_cn_mcp.providers.ifind import IFindProvider
+    from wind_cn_mcp.providers.mock import MockProvider
+    from wind_cn_mcp.providers.tushare import TushareProvider
+    from wind_cn_mcp.providers.wind import WindProvider
+
+    return ProviderRegistry(
+        [
+            WindProvider(),
+            IFindProvider(),
+            ChoiceProvider(),
+            TushareProvider(),
+            MockProvider(),
+        ]
+    )

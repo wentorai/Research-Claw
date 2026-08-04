@@ -1,0 +1,74 @@
+{
+  "search_page1": {
+    "code": 0,
+    "message": "ok",
+    "data": {
+      "total": 2,
+      "list": [
+        {
+          "projectId": "62076123",
+          "projectName": "面向小样本的图神经网络迁移学习研究",
+          "projectAdmin": "张三",
+          "dependUnit": "清华大学",
+          "projectType": "面上项目",
+          "subjectCode": "F0211",
+          "subjectName": "人工智能",
+          "approvalYear": 2020,
+          "approvalAmount": 64.0,
+          "keywords": "图神经网络；迁移学习；小样本；人工智能"
+        },
+        {
+          "projectId": "62106045",
+          "projectName": "可解释的图卷积模型在生物医学影像上的应用",
+          "projectAdmin": "李四",
+          "dependUnit": "北京大学",
+          "projectType": "青年科学基金项目",
+          "subjectCode": "F0211",
+          "subjectName": "人工智能",
+          "approvalYear": 2021,
+          "approvalAmount": 30.0,
+          "keywords": "图卷积；可解释性；医学影像"
+        }
+      ]
+    }
+  },
+  "detail": {
+    "code": 0,
+    "data": {
+      "projectId": "62076123",
+      "projectName": "面向小样本的图神经网络迁移学习研究",
+      "projectAdmin": "张三",
+      "dependUnit": "清华大学",
+      "projectType": "面上项目",
+      "subjectCode": "F0211",
+      "subjectName": "人工智能",
+      "approvalYear": 2020,
+      "approvalAmount": 64.0,
+      "keywords": "图神经网络；迁移学习；小样本",
+      "abstract": "本项目研究小样本场景下图神经网络的迁移学习方法……",
+      "abstractEn": "This project studies transfer learning for graph neural networks under few-shot regimes...",
+      "duration": "2021-01 至 2024-12"
+    }
+  },
+  "trends": {
+    "code": 0,
+    "data": {
+      "points": [
+        {"year": 2018, "count": 12, "fundingTotal": 720.0},
+        {"year": 2019, "count": 21, "fundingTotal": 1300.0},
+        {"year": 2020, "count": 35, "fundingTotal": 2100.0},
+        {"year": 2021, "count": 48, "fundingTotal": 2950.0}
+      ]
+    }
+  },
+  "disciplines": {
+    "code": 0,
+    "data": {
+      "nodes": [
+        {"code": "F", "name": "信息科学部", "level": 1},
+        {"code": "F02", "name": "计算机科学", "parentCode": "F", "level": 2},
+        {"code": "F0211", "name": "人工智能", "parentCode": "F02", "level": 3}
+      ]
+    }
+  }
+}

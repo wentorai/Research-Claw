@@ -1,0 +1,10 @@
+causal-inference-cn
+Copyright 2026 Research-Claw Contributors
+
+Independently developed. Conceptual inspiration drawn from:
+  - Jill0099/causal-inference-mixtape (https://github.com/Jill0099/causal-inference-mixtape, MIT)
+  - Scott Cunningham, "Causal Inference: The Mixtape" (https://mixtape.scunning.com/, public textbook)
+
+Method exposition follows standard treatments from Angrist & Pischke (2009),
+Wooldridge (2010), and the public documentation of cited statistical packages.
+No source code or prose was copied from the projects above.
