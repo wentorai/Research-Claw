@@ -1,0 +1,44 @@
+%% PRISMA 2020 流程图模板
+%% 替换 n=XX 数字为实际值
+flowchart TD
+    subgraph Identification ["识别 (Identification)"]
+        A1[PubMed<br/>n = 1234]
+        A2[Web of Science<br/>n = 987]
+        A3[Scopus<br/>n = 654]
+        A4[CNKI 中国知网<br/>n = 321]
+        AT[合计 n = 3196<br/>去重后 n = 2510]
+        A1 --> AT
+        A2 --> AT
+        A3 --> AT
+        A4 --> AT
+    end
+
+    subgraph Screening ["筛选 (Screening)"]
+        S1[标题/摘要筛选<br/>n = 2510]
+    end
+    AT --> S1
+    S1 -->|排除 n = 2150<br/>主题不相关| EX1[排除]
+
+    subgraph Eligibility ["合格性 (Eligibility)"]
+        E1[全文复核<br/>n = 360]
+    end
+    S1 --> E1
+    E1 -->|排除 n = 290| EX2[排除原因<br/>不符合人群 n=80<br/>不符合干预 n=70<br/>不符合结果 n=60<br/>研究设计不符 n=50<br/>重复发表 n=20<br/>全文不可得 n=10]
+
+    subgraph Included ["纳入 (Included)"]
+        I1[纳入定性综述<br/>n = 70]
+        I2[纳入 meta-analysis<br/>n = 45]
+    end
+    E1 --> I1
+    I1 --> I2
+
+    classDef ident fill:#cfe8fc,stroke:#1565c0;
+    classDef screen fill:#fff3c4,stroke:#f9a825;
+    classDef elig fill:#ffd9b3,stroke:#ef6c00;
+    classDef incl fill:#c8e6c9,stroke:#2e7d32;
+    classDef excl fill:#ffcdd2,stroke:#c62828;
+    class A1,A2,A3,A4,AT ident;
+    class S1 screen;
+    class E1 elig;
+    class I1,I2 incl;
+    class EX1,EX2 excl;
