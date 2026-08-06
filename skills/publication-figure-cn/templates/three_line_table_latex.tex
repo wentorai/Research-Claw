@@ -1,0 +1,99 @@
+% three_line_table_latex.tex
+% 中文期刊三线表完整 LaTeX 示例（booktabs + threeparttable）
+%
+% 编译要求：
+%   - LaTeX 引擎：XeLaTeX 或 LuaLaTeX（中文支持）
+%   - 包：booktabs, threeparttable, ctex（中文）, siunitx（数字对齐，可选）
+%
+% 编译命令：
+%   xelatex three_line_table_latex.tex
+
+\documentclass[11pt]{article}
+
+% ---- 中文支持 ----
+\usepackage[UTF8]{ctex}
+\setCJKmainfont{Songti SC}      % macOS；Windows 改 SimSun；Linux 改 Source Han Serif SC
+
+% ---- 表格相关 ----
+\usepackage{booktabs}            % \toprule \midrule \bottomrule \cmidrule
+\usepackage{threeparttable}      % 表注（tablenotes）
+\usepackage{siunitx}             % 数字对齐
+\sisetup{
+  detect-all,
+  table-format=2.3,
+  table-number-alignment=center,
+  group-digits=integer,
+  group-separator={,},
+}
+
+\usepackage{geometry}
+\geometry{a4paper, margin=2.5cm}
+
+\begin{document}
+
+% =========================================================
+% 表 1：基准回归（多列）
+% =========================================================
+\begin{table}[!htbp]
+  \centering
+  \caption{表1\ 政策冲击对企业 R\&D 投入的影响：基准回归}
+  \label{tab:main}
+  \begin{threeparttable}
+  \begin{tabular}{l*{4}{c}}
+    \toprule
+                        & (1)         & (2)         & (3)         & (4)         \\
+                        & R\&D/资产   & R\&D/资产   & 专利数(对数) & 专利数(对数) \\
+    \midrule
+    Post                & 0.012\sym{**}  & 0.011\sym{**}  & 0.045\sym{*}   & 0.044\sym{*}   \\
+                        & (0.005)     & (0.005)     & (0.024)     & (0.024)     \\
+    Treat               & 0.008       & 0.006       & 0.031       & 0.029       \\
+                        & (0.007)     & (0.007)     & (0.028)     & (0.028)     \\
+    Post$\times$Treat   & 0.156\sym{***} & 0.143\sym{***} & 0.231\sym{***} & 0.218\sym{***} \\
+                        & (0.045)     & (0.043)     & (0.072)     & (0.069)     \\
+    \midrule
+    控制变量            & 否          & 是          & 否          & 是          \\
+    企业固定效应        & 是          & 是          & 是          & 是          \\
+    年度固定效应        & 是          & 是          & 是          & 是          \\
+    样本量 $N$          & 38{,}420    & 38{,}420    & 38{,}420    & 38{,}420    \\
+    $R^{2}$             & 0.21        & 0.34        & 0.32        & 0.41        \\
+    \bottomrule
+  \end{tabular}
+  \begin{tablenotes}\footnotesize
+    \item 注：括号内为聚类到企业层面的标准误。$^{***}$、$^{**}$、$^{*}$ 分别表示在 1\%、5\%、10\% 水平下显著。
+    \item 数据来源：CSMAR 数据库 2010—2022 年沪深 A 股上市公司样本。
+  \end{tablenotes}
+  \end{threeparttable}
+\end{table}
+
+% =========================================================
+% 表 2：跨表头（multicolumn + cmidrule 分组）
+% =========================================================
+\begin{table}[!htbp]
+  \centering
+  \caption{表2\ 稳健性检验：基准、IV 与安慰剂}
+  \label{tab:robust}
+  \begin{threeparttable}
+  \begin{tabular}{lcccccc}
+    \toprule
+                       & \multicolumn{2}{c}{基准 OLS}
+                       & \multicolumn{2}{c}{IV-2SLS}
+                       & \multicolumn{2}{c}{安慰剂}                 \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+                       & (1)        & (2)        & (3)        & (4)        & (5)       & (6)        \\
+    \midrule
+    Post$\times$Treat  & 0.156\sym{***} & 0.143\sym{***} & 0.187\sym{***} & 0.171\sym{***} & 0.012     & 0.018      \\
+                       & (0.045)    & (0.043)    & (0.062)    & (0.059)    & (0.041)   & (0.040)    \\
+    \midrule
+    控制变量           & 否         & 是         & 否         & 是         & 否        & 是         \\
+    固定效应           & 企业+年    & 企业+年    & 企业+年    & 企业+年    & 企业+年   & 企业+年    \\
+    $N$                & 38{,}420   & 38{,}420   & 38{,}420   & 38{,}420   & 38{,}420  & 38{,}420   \\
+    \bottomrule
+  \end{tabular}
+  \begin{tablenotes}\footnotesize
+    \item 注：IV 使用×××作为工具变量；安慰剂检验把政策时点提前 3 年。$^{***}$、$^{**}$、$^{*}$ 分别表示 1\%、5\%、10\% 显著。
+    \item 数据来源：CSMAR 数据库。
+  \end{tablenotes}
+  \end{threeparttable}
+\end{table}
+
+\end{document}
