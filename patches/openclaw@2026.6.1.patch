@@ -943,6 +943,20 @@ index 150d97b2a270d1b3c97fdbe56feab98779a7c86d..64c8f849ec8b8f146eec95988624863f
  					onExecutionStarted: params.onExecutionStarted,
  					onExecutionPhase: params.onExecutionPhase,
  					bootstrapPromptWarningSignaturesSeen,
+diff --git a/dist/runtime-schema-CoGt090u.js b/dist/runtime-schema-CoGt090u.js
+index ef6be75b6cdd673adce169809afa33ced4b4b8c3..df7908b26fcf8a7b39f7ba4ab66041ffc19b5acc 100644
+--- a/dist/runtime-schema-CoGt090u.js
++++ b/dist/runtime-schema-CoGt090u.js
+@@ -2602,7 +2602,8 @@ function mapSensitivePaths(schema, path, hints) {
+ 		...next[path],
+ 		sensitive: true
+ 	};
+-	else if (isSensitiveConfigPath(path) && !next[path]?.sensitive) getLog().debug(`possibly sensitive key found: (${path})`);
++	// Research-Claw runs locally. Keep explicit sensitive hints for UI masking, but
++	// do not enumerate heuristic field-name matches into routine debug logs.
+ 	if (currentSchema instanceof ZodObject) {
+ 		const shape = currentSchema.shape;
+ 		for (const key in shape) {
 diff --git a/dist/scanner-CCQg3MsL.js b/dist/scanner-CCQg3MsL.js
 index 752450f49c5a2870c97aa4a2e5ec0fbd87545160..5b9771cbdca1204c01c09143ef9b8277d93bd41c 100644
 --- a/dist/scanner-CCQg3MsL.js
