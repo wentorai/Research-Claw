@@ -117,6 +117,10 @@ import { PresentationService } from './src/presentation/service.js';
 import { PresentationCoordinator } from './src/presentation/coordinator.js';
 import { registerPresentationRpc } from './src/presentation/rpc.js';
 import { loadOpenClawSessionRegistry } from './src/presentation/retention.js';
+import {
+  parseProductPolicy,
+  type ProductPolicy,
+} from './src/product-policy.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -126,6 +130,7 @@ interface PluginConfig {
   defaultCitationStyle?: string;
   heartbeatDeadlineWarningHours?: number;
   pptRoot?: string;
+  productPolicy?: ProductPolicy;
   workspace?: {
     root?: string;
     commitDebounceMs?: number;
@@ -1145,6 +1150,10 @@ const plugin: PluginDefinition = {
 
   register(api) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
+    // OpenClaw validates plugin config against the manifest before register.
+    // Keep a strict runtime parser as a second boundary for direct harnesses and
+    // future callers that bypass Gateway validation.
+    parseProductPolicy(cfg.productPolicy);
     const rawDbPath = typeof cfg.dbPath === 'string' && cfg.dbPath.trim()
       ? cfg.dbPath.trim()
       : DEFAULT_RC_DB_PATH;

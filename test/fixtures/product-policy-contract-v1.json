@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "defaultCase": {
+    "name": "absent-policy-is-all-enabled",
+    "expected": {
+      "capabilities": {
+        "settings": "enabled",
+        "extensions": "enabled",
+        "supervisor": "enabled",
+        "peripherals": "enabled"
+      }
+    }
+  },
+  "validCases": [
+    {
+      "name": "explicit-all-enabled",
+      "input": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "enabled",
+          "peripherals": "enabled"
+        }
+      },
+      "expected": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "enabled",
+          "peripherals": "enabled"
+        }
+      }
+    },
+    {
+      "name": "thermoelectric-custom-policy",
+      "input": {
+        "capabilities": {
+          "settings": "enabled-hidden",
+          "extensions": "enabled-hidden",
+          "supervisor": "enabled-hidden",
+          "peripherals": "disabled"
+        }
+      },
+      "expected": {
+        "capabilities": {
+          "settings": "enabled-hidden",
+          "extensions": "enabled-hidden",
+          "supervisor": "enabled-hidden",
+          "peripherals": "disabled"
+        }
+      }
+    },
+    {
+      "name": "peripherals-hidden-but-running",
+      "input": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "enabled",
+          "peripherals": "enabled-hidden"
+        }
+      },
+      "expected": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "enabled",
+          "peripherals": "enabled-hidden"
+        }
+      }
+    }
+  ],
+  "invalidCases": [
+    {
+      "name": "null",
+      "input": null
+    },
+    {
+      "name": "non-object",
+      "input": "enabled"
+    },
+    {
+      "name": "missing-capabilities",
+      "input": {}
+    },
+    {
+      "name": "unknown-policy-key",
+      "input": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "enabled",
+          "peripherals": "enabled"
+        },
+        "extra": true
+      }
+    },
+    {
+      "name": "missing-capability",
+      "input": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "enabled"
+        }
+      }
+    },
+    {
+      "name": "unknown-capability",
+      "input": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "enabled",
+          "peripherals": "enabled",
+          "browser": "disabled"
+        }
+      }
+    },
+    {
+      "name": "settings-disabled",
+      "input": {
+        "capabilities": {
+          "settings": "disabled",
+          "extensions": "enabled",
+          "supervisor": "enabled",
+          "peripherals": "enabled"
+        }
+      }
+    },
+    {
+      "name": "extensions-disabled",
+      "input": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "disabled",
+          "supervisor": "enabled",
+          "peripherals": "enabled"
+        }
+      }
+    },
+    {
+      "name": "supervisor-disabled",
+      "input": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "disabled",
+          "peripherals": "enabled"
+        }
+      }
+    },
+    {
+      "name": "invalid-peripheral-state",
+      "input": {
+        "capabilities": {
+          "settings": "enabled",
+          "extensions": "enabled",
+          "supervisor": "enabled",
+          "peripherals": "off"
+        }
+      }
+    },
+    {
+      "name": "capabilities-is-array",
+      "input": {
+        "capabilities": []
+      }
+    }
+  ]
+}

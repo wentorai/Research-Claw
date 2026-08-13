@@ -102,6 +102,43 @@
         "type": "string",
         "description": "Absolute or relative path to a local ppt-master repository root",
         "default": "ppt-master"
+      },
+      "productPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "settings",
+              "extensions",
+              "supervisor",
+              "peripherals"
+            ],
+            "properties": {
+              "settings": {
+                "type": "string",
+                "enum": ["enabled", "enabled-hidden"]
+              },
+              "extensions": {
+                "type": "string",
+                "enum": ["enabled", "enabled-hidden"]
+              },
+              "supervisor": {
+                "type": "string",
+                "enum": ["enabled", "enabled-hidden"]
+              },
+              "peripherals": {
+                "type": "string",
+                "enum": ["enabled", "enabled-hidden", "disabled"]
+              }
+            }
+          }
+        }
       }
     }
   }

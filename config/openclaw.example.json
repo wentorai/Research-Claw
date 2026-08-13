@@ -133,7 +133,15 @@
           "autoTrackGit": true,
           "defaultCitationStyle": "apa",
           "heartbeatDeadlineWarningHours": 48,
-          "pptRoot": "integrations/ppt-master"
+          "pptRoot": "integrations/ppt-master",
+          "productPolicy": {
+            "capabilities": {
+              "settings": "enabled",
+              "extensions": "enabled",
+              "supervisor": "enabled",
+              "peripherals": "enabled"
+            }
+          }
         }
       },
       "openclaw-weixin": {

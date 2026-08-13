@@ -1,0 +1,26 @@
+{
+  "fixtureMeta": {
+    "openClawVersion": "2026.6.1",
+    "source": "Real isolated Gateway response from: openclaw gateway call config.get --params {} --json",
+    "capturedAt": "2026-08-13",
+    "normalizedCaptureSha256": "1d70e6d8c78e36c08849d013eec75d6aada5ffd049e6cd17f7e6e5fbac5e01df",
+    "sanitization": [
+      "OpenClaw redacted all fake credential fields before capture",
+      "Temporary and repository absolute paths were replaced with fixed sentinels before hashing",
+      "This checked-in projection retains only response fields needed by product-policy parity"
+    ]
+  },
+  "response": {
+    "valid": true,
+    "issues": [],
+    "config": {
+      "plugins": {
+        "entries": {
+          "research-claw-core": {
+            "config": {}
+          }
+        }
+      }
+    }
+  }
+}
