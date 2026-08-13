@@ -7,6 +7,8 @@ BASE="http://127.0.0.1:${PORT}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG_PATH="$ROOT/config/openclaw.json"
 ENTRY_JS="$ROOT/node_modules/openclaw/dist/entry.js"
+RUNTIME_RESOLVER="$ROOT/scripts/node-runtime.cjs"
+READINESS="$ROOT/scripts/runtime-readiness.mjs"
 
 echo "=== Research-Claw Health Check ==="
 echo "Gateway: $BASE"
@@ -55,27 +57,24 @@ if command -v lsof &>/dev/null; then
   fi
 fi
 
-# Validate that the project config can load the RC plugin.
+# Runtime readiness: process liveness is insufficient. Core must have registered
+# and representative read-only RPCs must answer through this exact Gateway.
 if [ -f "$ENTRY_JS" ] && [ -f "$CONFIG_PATH" ]; then
-  if PLUGINS_OUT="$(OPENCLAW_CONFIG_PATH="$CONFIG_PATH" node "$ENTRY_JS" plugins list 2>/dev/null)"; then
-    if printf '%s\n' "$PLUGINS_OUT" | grep -Fq "research-claw-core/index.ts"; then
-      if printf '%s\n' "$PLUGINS_OUT" | grep "research-claw-core/index.ts" | grep -Fq "enabled"; then
-        echo "[OK] research-claw-core is enabled under project config"
-      else
-        echo "[FAIL] research-claw-core found but not enabled"
-        exit 1
-      fi
+  if _RC_NODE_SHELL=$(node "$RUNTIME_RESOLVER" resolve --shell); then
+    eval "$_RC_NODE_SHELL"
+    if "$RC_NODE_PATH" "$READINESS" --root "$ROOT" --config "$CONFIG_PATH" --port "$PORT"; then
+      echo "[OK] Research-Claw runtime readiness passed"
     else
-      echo "[FAIL] research-claw-core not discovered by plugins list"
-      echo "       Run: OPENCLAW_CONFIG_PATH=\"$CONFIG_PATH\" node \"$ENTRY_JS\" plugins list"
+      echo "[FAIL] OpenClaw is live, but Research-Claw Core capabilities are unavailable"
       exit 1
     fi
   else
-    echo "[FAIL] Could not run OpenClaw plugin loader sanity check"
+    echo "[FAIL] Could not resolve the Node 22 health-check runtime"
     exit 1
   fi
 else
-  echo "[WARN] Skipping plugin loader check (missing entry.js or config/openclaw.json)"
+  echo "[FAIL] Missing entry.js or config/openclaw.json"
+  exit 1
 fi
 
 echo ""
