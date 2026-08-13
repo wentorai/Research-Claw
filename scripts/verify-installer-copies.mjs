@@ -10,6 +10,7 @@
  */
 
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,6 +19,18 @@ const flagIndex = process.argv.indexOf('--wentor-root');
 const wentorRoot = flagIndex >= 0
   ? path.resolve(process.argv[flagIndex + 1] ?? '')
   : path.resolve(rcRoot, '..');
+const publicUrlIndex = process.argv.indexOf('--public-url');
+const publicUrl = publicUrlIndex >= 0
+  ? process.argv[publicUrlIndex + 1]
+  : null;
+
+if (publicUrlIndex >= 0 && !publicUrl) {
+  throw new Error('--public-url requires a URL');
+}
+
+function sha256(content) {
+  return crypto.createHash('sha256').update(content).digest('hex');
+}
 
 const copySets = [
   {
@@ -66,6 +79,34 @@ for (const set of copySets) {
       failed = true;
     } else {
       console.log(`MATCH ${set.label}: ${copy}`);
+    }
+  }
+}
+
+if (publicUrl) {
+  const canonicalPath = copySets[0].source;
+  const canonical = fs.readFileSync(canonicalPath);
+  let response;
+  try {
+    response = await fetch(publicUrl, { redirect: 'follow' });
+  } catch (error) {
+    console.error(`UNREACHABLE public native installer: ${publicUrl} (${error.message})`);
+    failed = true;
+  }
+  if (response && !response.ok) {
+    console.error(`HTTP ${response.status} public native installer: ${publicUrl}`);
+    failed = true;
+  } else if (response) {
+    const published = Buffer.from(await response.arrayBuffer());
+    if (!canonical.equals(published)) {
+      console.error(
+        `DRIFT public native installer: ${publicUrl}\n`
+        + `  canonical sha256=${sha256(canonical)}\n`
+        + `  public    sha256=${sha256(published)}`,
+      );
+      failed = true;
+    } else {
+      console.log(`MATCH public native installer: ${publicUrl} sha256=${sha256(canonical)}`);
     }
   }
 }

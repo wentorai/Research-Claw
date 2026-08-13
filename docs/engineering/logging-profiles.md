@@ -40,6 +40,13 @@ Dashboard Toast、铃铛、通知中心和声音属于产品通知，也不受�
 
 安装器首次安装写 marker 并应用 user 默认值；升级只接管旧版本曾写入的精确默认 tuple。用户自定义过 `logging` 时标记为 unmanaged,升级不覆盖。marker 必须位于仓库根部，不能放入会被 `migrate-rc-data-dir.cjs` 迁移的项目 `.research-claw/` 数据目录。不要依赖 TTY、安装目录名或是否存在 `.git`。
 
+`curl | bash` 实际执行的是下载时刻的公网脚本，而不是随后 clone 下来的
+`scripts/install.sh`。因此“安装目录里已经有 `mark-native`”不能证明本次安装执行过它。
+发布时必须运行 `pnpm verify:installers`，同时验证仓库副本与
+`https://wentor.ai/install.sh` 的 SHA-256；公网漂移会直接失败，不能继续宣称
+managed native 日志档位已上线。历史漏标安装只通过重新执行安装器补标，不在
+`run.sh` 中根据目录名或 `.git` 猜测，避免误判开发仓库。
+
 `OPENCLAW_LOG_LEVEL` 的优先级由 OpenClaw 本身处理，它会同时覆盖 console 与 file。`RC_VERBOSE=1` 只作为兼容入口：显示启动器细节；在 user profile 且没有显式 OpenClaw 环境覆盖时临时使用 info，绝不把 debug/trace 降为 info。
 
 ## 一次性支持流程

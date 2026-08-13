@@ -70,6 +70,26 @@ describe('release installation surfaces', () => {
     expect(read(scripts.ensureConfig)).toContain('Supervisor lifecycle cleanup');
   });
 
+  it('records and verifies the managed-native profile before an install can start', () => {
+    const native = read(scripts.native);
+    const markIndex = native.indexOf('log-profile.cjs mark-native');
+    const skipStartIndex = native.indexOf('if [ "${SKIP_START:-0}" = "1" ]');
+    const launchIndex = native.indexOf('exec bash "$INSTALL_DIR/scripts/run.sh"');
+
+    expect(markIndex).toBeGreaterThan(0);
+    expect(markIndex).toBeLessThan(skipStartIndex);
+    expect(markIndex).toBeLessThan(launchIndex);
+    expect(native).toContain('die "Could not record the native-install log profile.');
+  });
+
+  it('provides a public URL parity gate for the curl installer', () => {
+    const verifier = read(path.join(ROOT, 'scripts', 'verify-installer-copies.mjs'));
+
+    expect(verifier).toContain("process.argv.indexOf('--public-url')");
+    expect(verifier).toContain('DRIFT public native installer');
+    expect(verifier).toContain("createHash('sha256')");
+  });
+
   it('POSIX and PowerShell source updates complete the shared config migration before reporting success', () => {
     const posix = read(scripts.updatePosix);
     const windows = read(scripts.updateWindows);

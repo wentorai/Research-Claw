@@ -21,6 +21,7 @@
     "verify:e2e": "node scripts/verify-dashboard-version-gate.mjs && node scripts/verify-rpc-error-classification.mjs && node scripts/verify-runtime-self-check.mjs && node scripts/verify-cron-deadline-fallback.mjs",
     "verify:docker": "node scripts/verify-docker-config.mjs",
     "verify:logging": "node scripts/verify-log-levels.mjs",
+    "verify:installers": "node scripts/verify-installer-copies.mjs --public-url https://wentor.ai/install.sh",
     "setup": "bash scripts/setup.sh",
     "health": "bash scripts/health.sh",
     "backup": "bash scripts/backup.sh",
