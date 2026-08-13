@@ -13,6 +13,10 @@
 
 import { create } from 'zustand';
 import { useGatewayStore } from './gateway';
+import {
+  currentProductPolicy,
+  peripheralsRuntimeAvailableNow,
+} from './product-policy';
 
 export interface Monitor {
   id: string;
@@ -81,6 +85,38 @@ type CronJobSnapshot = {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Classify persisted monitor rows at the policy boundary. Historical rows can
+ * contain mixed case or surrounding Unicode whitespace (including NBSP), so a
+ * raw string equality check is not a safe capability gate.
+ */
+export function isDeviceMonitorSource(sourceType: unknown): boolean {
+  return typeof sourceType === 'string'
+    && sourceType.trim().toLowerCase() === 'device';
+}
+
+function deviceMonitorUnavailable(sourceType: string | undefined): boolean {
+  return isDeviceMonitorSource(sourceType) && !peripheralsRuntimeAvailableNow();
+}
+
+/**
+ * Mutation calls carry only an id. When peripherals are disabled, an id that
+ * is absent from the visible store could be a stale device row intentionally
+ * filtered during hydration. Fail closed instead of forwarding that unknown
+ * id to rc.monitor.*; known non-device monitors remain fully operable.
+ */
+function monitorMutationUnavailable(monitor: Monitor | undefined): boolean {
+  if (deviceMonitorUnavailable(monitor?.source_type)) return true;
+  const policy = currentProductPolicy();
+  return !monitor && policy?.capabilities.peripherals === 'disabled';
+}
+
+function visibleMonitorsForRuntime(monitors: Monitor[]): Monitor[] {
+  return peripheralsRuntimeAvailableNow()
+    ? monitors
+    : monitors.filter((monitor) => !isDeviceMonitorSource(monitor.source_type));
 }
 
 // Tracks in-flight toggle/delete operations to prevent race conditions
@@ -552,6 +588,9 @@ function formatCronRunError(job: CronJobSnapshot): string {
 }
 
 function buildMonitorCronMessage(monitor: Monitor): string {
+  if (deviceMonitorUnavailable(monitor.source_type)) {
+    throw new Error('peripherals-disabled');
+  }
   const header = [
     `[Research-Claw Monitor Scheduled Run]`,
     `MONITOR_ID: ${monitor.id}`,
@@ -561,7 +600,7 @@ function buildMonitorCronMessage(monitor: Monitor): string {
     '',
   ].join('\n');
 
-  if (monitor.source_type === 'device') {
+  if (isDeviceMonitorSource(monitor.source_type)) {
     // Device monitors: no EXECUTION PROTOCOL collector header.
     // The agent_prompt already contains the periph_camera_snap vision protocol
     // (stored via defaultAgentPrompt('device') in the plugin).
@@ -608,6 +647,9 @@ async function registerMonitorCronJob(
   monitor: Monitor,
   bound?: BoundDeliveryTarget | null,
 ): Promise<string> {
+  if (deviceMonitorUnavailable(monitor.source_type)) {
+    throw new Error('peripherals-disabled');
+  }
   const client = useGatewayStore.getState().client;
   if (!client?.isConnected) throw new Error('gateway-not-connected');
 
@@ -883,6 +925,8 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
   error: null,
 
   loadMonitors: async () => {
+    // config.get owns product policy. Pending/error is a hard hydration gate.
+    if (!currentProductPolicy()) return;
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
     if (get().loading) return;
@@ -890,20 +934,21 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
     set({ loading: true });
     try {
       const result = await client.request<{ items: Monitor[]; total: number }>('rc.monitor.list', { limit: 100 });
-      let items = result.items;
+      const runtimeItems = visibleMonitorsForRuntime(result.items);
+      let items = runtimeItems;
       const cronJobs = await loadCronJobs();
 
       // Reconcile once per gateway session, PLUS unconditionally whenever an
       // enabled monitor has no gateway job — agent-side monitor_update(enabled=true)
       // happens mid-session and would otherwise never get its cron registered
       // until a page refresh/reconnect (F1).
-      const hasOrphanEnabled = result.items.some((m) => m.enabled && !m.gateway_job_id);
+      const hasOrphanEnabled = runtimeItems.some((m) => m.enabled && !m.gateway_job_id);
 
       // A mid-session notify flip (agent-side monitor_update, another client)
       // rewrites delivery.mode but leaves the cron job untouched, so the alert
       // silently never sends — or keeps sending after the user turned it off.
       // Detect the disagreement directly from the stored job (F7).
-      const hasDeliveryDrift = result.items.some((m) => {
+      const hasDeliveryDrift = runtimeItems.some((m) => {
         if (!m.enabled || !m.gateway_job_id) return false;
         const job = cronJobs?.get(m.gateway_job_id);
         if (!job || Object.keys(job.delivery).length === 0) return false;
@@ -916,17 +961,17 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
       });
 
       if (!_reconciled || hasOrphanEnabled || hasDeliveryDrift) {
-        const outcome = await reconcileEnabledMonitors(result.items, cronJobs);
+        const outcome = await reconcileEnabledMonitors(runtimeItems, cronJobs);
         _reconciled = outcome.verified;
         if (outcome.repaired) {
           const refreshed = await client.request<{ items: Monitor[]; total: number }>('rc.monitor.list', { limit: 100 });
-          items = refreshed.items;
+          items = visibleMonitorsForRuntime(refreshed.items);
         }
       }
 
       if (await syncMonitorRunErrors(items, cronJobs)) {
         const refreshed = await client.request<{ items: Monitor[]; total: number }>('rc.monitor.list', { limit: 100 });
-        items = refreshed.items;
+        items = visibleMonitorsForRuntime(refreshed.items);
       }
 
       set({ monitors: items, loaded: true });
@@ -938,6 +983,10 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
   },
 
   createMonitor: async (input: MonitorCreateInput): Promise<Monitor | null> => {
+    if (deviceMonitorUnavailable(input.source_type)) {
+      set({ error: 'peripherals-disabled' });
+      return null;
+    }
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return null;
 
@@ -957,6 +1006,11 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
 
   toggleMonitor: async (id: string, enabled: boolean): Promise<MonitorActionResult> => {
     if (_inflightOps.has(id)) return { ok: false, error: 'operation-in-progress' };
+    const targetMonitor = get().monitors.find((monitor) => monitor.id === id);
+    if (monitorMutationUnavailable(targetMonitor)) {
+      set({ error: 'peripherals-disabled' });
+      return { ok: false, error: 'peripherals-disabled' };
+    }
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) {
       set({ error: 'gateway-not-connected' });
@@ -1027,10 +1081,13 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
   },
 
   deleteMonitor: async (id: string) => {
+    const monitor = get().monitors.find((item) => item.id === id);
+    if (monitorMutationUnavailable(monitor)) {
+      set({ error: 'peripherals-disabled' });
+      return;
+    }
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
-
-    const monitor = get().monitors.find((m) => m.id === id);
 
     try {
       // 1. Remove gateway cron job if exists
@@ -1056,6 +1113,14 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
   },
 
   updateMonitor: async (id: string, patch: Partial<Monitor>) => {
+    const current = get().monitors.find((monitor) => monitor.id === id);
+    if (
+      monitorMutationUnavailable(current)
+      || deviceMonitorUnavailable(patch.source_type)
+    ) {
+      set({ error: 'peripherals-disabled' });
+      return;
+    }
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
 
@@ -1084,11 +1149,15 @@ export const useMonitorStore = create<MonitorState>()((set, get) => ({
   },
 
   runMonitor: async (id: string) => {
+    const monitor = get().monitors.find((item) => item.id === id);
+    if (monitorMutationUnavailable(monitor)) {
+      set({ error: 'peripherals-disabled' });
+      return;
+    }
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
 
     try {
-      const monitor = get().monitors.find((m) => m.id === id);
       if (!monitor?.gateway_job_id) {
         console.warn('[MonitorStore] Cannot run monitor without gateway job. Enable it first.');
         return;

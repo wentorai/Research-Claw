@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
 import { useSupervisorStore } from '../../stores/supervisor';
+import { useProductPolicyStore } from '../../stores/product-policy';
 import { useUiStore } from '../../stores/ui';
 import { getThemeTokens } from '../../styles/theme';
 import { buildThemedModalStyles, confirmApplyAppUpdate } from '../../utils/app-update-ui';
@@ -54,6 +55,7 @@ import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset, inferApiFromUrl,
 import { isOAuthProvider } from '../../utils/oauth-providers';
 import { RC_VERSION } from '../../version';
 import type { CheckUpdatesPayload } from '@/types/app-updates';
+import { shouldMountSupervisorUiHydration } from '../../utils/profile-policy';
 
 const SUPERVISOR_REVIEWER_PROVIDER_IDS = [
   'zai',
@@ -476,6 +478,9 @@ export default function SettingsPanel() {
   const configTheme = useConfigStore((s) => s.theme);
   const tokens = useMemo(() => getThemeTokens(configTheme), [configTheme]);
   const state = useGatewayStore((s) => s.state);
+  const supervisorUiVisible = useProductPolicyStore((s) => Boolean(
+    s.status === 'ready' && s.policy && shouldMountSupervisorUiHydration(s.policy),
+  ));
 
   const gatewayConfig = useConfigStore((s) => s.gatewayConfig);
   const gatewayConfigLoading = useConfigStore((s) => s.gatewayConfigLoading);
@@ -556,6 +561,7 @@ export default function SettingsPanel() {
 
   // Sync supervisor state from plugin
   useEffect(() => {
+    if (!supervisorUiVisible) return;
     if (supervisorConfig?.enabled !== undefined) {
       setSupervisorEnabled(supervisorConfig.enabled);
     }
@@ -634,15 +640,15 @@ export default function SettingsPanel() {
         setBaselineTick((t) => t + 1);
       }
     }
-  }, [supervisorConfig, gatewayConfig]);
+  }, [supervisorConfig, gatewayConfig, supervisorUiVisible]);
 
   // Load supervisor status on connect
   useEffect(() => {
-    if (state === 'connected') {
+    if (state === 'connected' && supervisorUiVisible) {
       useSupervisorStore.getState().loadStatus();
       useSupervisorStore.getState().loadConfig();
     }
-  }, [state]);
+  }, [state, supervisorUiVisible]);
 
   const projectConfigCacheRef = useRef<Record<string, unknown> | null>(null);
 
@@ -829,9 +835,14 @@ export default function SettingsPanel() {
         proxyEnabled, proxyUrl,
         webSearchEnabled, webSearchProvider, webSearchApiKey,
         heartbeatEnabled, heartbeatInterval,
-        supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
-        reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, toolReviewGateMs,
-        textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
+        ...(supervisorUiVisible
+          ? [
+              supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
+              reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
+              toolReviewGateMs, supervisorApiKeyDeletePending,
+            ]
+          : ['supervisor-ui-hidden']),
+        textApiKeyDeletePending, visionApiKeyDeletePending,
         // Only custom profiles carry an editable label; presets have none, so the
         // label is normalized away for them — otherwise a stale label left over from
         // a previous provider would dirty the form when switching back to a preset.
@@ -844,6 +855,7 @@ export default function SettingsPanel() {
       proxyEnabled, proxyUrl,
       webSearchEnabled, webSearchProvider, webSearchApiKey,
       heartbeatEnabled, heartbeatInterval,
+      supervisorUiVisible,
       supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
       reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, toolReviewGateMs,
       textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
@@ -1446,9 +1458,11 @@ export default function SettingsPanel() {
         : (visionSeparateProvider ? (visionApiKey.trim() || cachedVisionKey || undefined) : undefined);
 
       // Supervisor provider API key (via auth profile)
-      const supervisorApiKeyToSend = deleteSupervisorApiKeyRef.current
-        ? undefined
-        : supervisorApiKey.trim() || supervisorApiKeyCacheRef.current[supervisorProvider]?.trim() || undefined;
+      const supervisorApiKeyToSend = supervisorUiVisible
+        ? (deleteSupervisorApiKeyRef.current
+            ? undefined
+            : supervisorApiKey.trim() || supervisorApiKeyCacheRef.current[supervisorProvider]?.trim() || undefined)
+        : undefined;
       const authActions: Array<{ provider: string; apiKey?: string; clear?: boolean }> = [];
       if (supportsAuthProfiles(provider) && (deleteTextApiKeyRef.current || apiKeyToSend)) {
         authActions.push(deleteTextApiKeyRef.current
@@ -1461,7 +1475,8 @@ export default function SettingsPanel() {
           : { provider: visionProvider, apiKey: visionApiKeyToSend });
       }
       if (
-        supervisorEnabled
+        supervisorUiVisible
+        && supervisorEnabled
         && supervisorProvider
         && supervisorProvider !== provider
         && supervisorProvider !== visionProvider
@@ -1506,7 +1521,7 @@ export default function SettingsPanel() {
         }
       }
       // Supervisor provider cache
-      if (supervisorEnabled && supervisorProvider && supervisorProvider !== provider) {
+      if (supervisorUiVisible && supervisorEnabled && supervisorProvider && supervisorProvider !== provider) {
         const supervisorKey = deleteSupervisorApiKeyRef.current
           ? ''
           : (supervisorApiKeyToSend || supervisorApiKeyCacheRef.current[supervisorProvider]?.trim() || '');
@@ -1570,15 +1585,15 @@ export default function SettingsPanel() {
             ? [...pendingDeleteProfileIdsRef.current]
             : undefined,
           // Dual-model supervisor config
-          supervisorEnabled,
-          supervisorModel: supervisorEnabled
+          supervisorEnabled: supervisorUiVisible ? supervisorEnabled : undefined,
+          supervisorModel: supervisorUiVisible && supervisorEnabled
             ? (supervisorUseMainModel ? '' : (supervisorProvider && supervisorModelId ? `${supervisorProvider}/${supervisorModelId}` : undefined))
             : undefined,
-          supervisorReviewMode: supervisorEnabled ? reviewMode : undefined,
-          supervisorDeviationThreshold: supervisorEnabled ? deviationThreshold : undefined,
-          supervisorForceRegenerate: supervisorEnabled ? forceRegenerate : undefined,
-          supervisorMaxRegenerateAttempts: supervisorEnabled ? maxRegenerateAttempts : undefined,
-          supervisorToolReviewGateMs: supervisorEnabled ? toolReviewGateMs : undefined,
+          supervisorReviewMode: supervisorUiVisible && supervisorEnabled ? reviewMode : undefined,
+          supervisorDeviationThreshold: supervisorUiVisible && supervisorEnabled ? deviationThreshold : undefined,
+          supervisorForceRegenerate: supervisorUiVisible && supervisorEnabled ? forceRegenerate : undefined,
+          supervisorMaxRegenerateAttempts: supervisorUiVisible && supervisorEnabled ? maxRegenerateAttempts : undefined,
+          supervisorToolReviewGateMs: supervisorUiVisible && supervisorEnabled ? toolReviewGateMs : undefined,
         },
       );
 
@@ -1607,7 +1622,11 @@ export default function SettingsPanel() {
       setTextApiKeyDeletePending(false);
       setVisionApiKeyDeletePending(false);
       setSupervisorApiKeyDeletePending(false);
-      void refreshAuthStatuses([provider, visionProvider, supervisorEnabled ? supervisorProvider : undefined].filter(Boolean) as string[]);
+      void refreshAuthStatuses([
+        provider,
+        visionProvider,
+        supervisorUiVisible && supervisorEnabled ? supervisorProvider : undefined,
+      ].filter(Boolean) as string[]);
 
       syncNeeded.current = true;
     } catch (error) {
@@ -1620,7 +1639,7 @@ export default function SettingsPanel() {
     } finally {
       setSaving(false);
     }
-  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, toolReviewGateMs, t, refreshAuthStatuses, supportsAuthProfiles]);
+  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorUiVisible, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, deviationThreshold, forceRegenerate, maxRegenerateAttempts, toolReviewGateMs, t, refreshAuthStatuses, supportsAuthProfiles]);
 
   const applyConfigFieldsToForm = useCallback((configForEditor: Record<string, unknown>) => {
     const fields = extractConfigFields(configForEditor);
@@ -2473,6 +2492,8 @@ export default function SettingsPanel() {
       )}
 
       {/* ── Supervisor (dual-model) section ── */}
+      {supervisorUiVisible && (
+        <>
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <SettingRow label={t('settings.supervisor')} description={t('settings.supervisorHint')}>
@@ -2890,6 +2911,8 @@ export default function SettingsPanel() {
               ))}
             </div>
           )}
+        </>
+      )}
         </>
       )}
 

@@ -35,6 +35,8 @@ import { useGatewayStore } from '../stores/gateway';
 import { usePeripheralsStore } from '../stores/peripherals';
 import { uploadFileToWorkspace } from '../gateway/upload';
 import { captureFrameFromCamera } from '../gateway/camera';
+import { useProductPolicyStore } from '../stores/product-policy';
+import { shouldMountPeripheralsListener } from '../utils/profile-policy';
 
 // Re-export so T14's "take photo" button can import it from either module.
 export { captureFrameFromCamera } from '../gateway/camera';
@@ -96,10 +98,15 @@ async function enumerateVideoInputs(): Promise<Array<{ deviceId: string; label: 
 export default function PeriphCaptureListener() {
   const client = useGatewayStore((s) => s.client);
   const state = useGatewayStore((s) => s.state);
+  const peripheralsRuntimeEnabled = useProductPolicyStore((s) => (
+    s.status === 'ready' && s.policy
+      ? shouldMountPeripheralsListener(s.policy)
+      : false
+  ));
 
   // ── (a) subscribe to capture requests ────────────────────────────────────
   useEffect(() => {
-    if (!client) return;
+    if (!client || !peripheralsRuntimeEnabled) return;
 
     // Dedup guard: gateway may redeliver the same event; process a requestId once.
     const seen = new Set<string>();
@@ -114,11 +121,11 @@ export default function PeriphCaptureListener() {
     });
 
     return unsub;
-  }, [client]);
+  }, [client, peripheralsRuntimeEnabled]);
 
   // ── (c) announce bridge on connect + 60s heartbeat ───────────────────────
   useEffect(() => {
-    if (!client || state !== 'connected') return;
+    if (!client || state !== 'connected' || !peripheralsRuntimeEnabled) return;
 
     let cancelled = false;
 
@@ -152,7 +159,7 @@ export default function PeriphCaptureListener() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, state]);
+  }, [client, peripheralsRuntimeEnabled, state]);
 
   return null;
 }

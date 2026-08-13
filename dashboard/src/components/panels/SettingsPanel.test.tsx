@@ -6,6 +6,7 @@ import { useConfigStore } from '../../stores/config';
 import { useGatewayStore } from '../../stores/gateway';
 import { useSupervisorStore, type SupervisorConfig } from '../../stores/supervisor';
 import { serializeConfigForGatewayApply } from '../../utils/config-patch';
+import { useProductPolicyStore } from '../../stores/product-policy';
 
 // Mock antd App.useApp (modal.confirm + message)
 const mockModalConfirm = vi.fn();
@@ -177,6 +178,73 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel />);
     // The primary model label should be visible
     expect(screen.getByText('settings.primaryModel')).toBeTruthy();
+  });
+
+  it('hides DMS controls and performs zero supervisor UI RPCs for enabled-hidden supervisor', async () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled', extensions: 'enabled',
+          supervisor: 'enabled-hidden', peripherals: 'enabled',
+        },
+      } } } } },
+    });
+    const request = vi.fn().mockResolvedValue({});
+    useGatewayStore.setState({ state: 'connected', client: createMockClient(request) });
+    useConfigStore.setState({ gatewayConfig: makeGatewayConfig() });
+
+    render(<SettingsPanel />);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.queryByText('settings.supervisor')).toBeNull();
+    expect(screen.queryByText('settings.supervisorModelSource')).toBeNull();
+    expect(request.mock.calls.filter(([method]) => String(method).startsWith('rc.supervisor.'))).toHaveLength(0);
+  });
+
+  it('preserves hidden DMS config during an unrelated settings save', async () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled', extensions: 'enabled',
+          supervisor: 'enabled-hidden', peripherals: 'enabled',
+        },
+      } } } } },
+    });
+    const dmsConfig = {
+      enabled: true,
+      supervisorModel: 'zai/glm-5',
+      reviewMode: 'correct',
+      toolReviewGateMs: 10000,
+      courseCorrection: {
+        enabled: true,
+        deviationThreshold: 0.8,
+        forceRegenerate: true,
+        maxRegenerateAttempts: 4,
+      },
+    };
+    const baseConfig = {
+      ...makeGatewayConfig('test-model'),
+      plugins: { entries: { 'dual-model-supervisor': { enabled: true, config: dmsConfig } } },
+    };
+    const request = vi.fn().mockImplementation((method: string) => {
+      if (method === 'config.get') return Promise.resolve({ config: baseConfig, hash: 'hidden-dms' });
+      if (method === 'rc.provider.validate') return Promise.resolve({ ok: true });
+      return Promise.resolve({});
+    });
+    useGatewayStore.setState({ state: 'connected', client: createMockClient(request) });
+    useConfigStore.setState({ gatewayConfig: { ...baseConfig, projectConfig: baseConfig } });
+    render(<SettingsPanel />);
+    fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
+    clickConfigSaveButton();
+    const confirmation = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+    await act(async () => { await confirmation.onOk(); });
+
+    const upsert = request.mock.calls.find(([method]) => method === 'rc.provider.upsert');
+    expect(upsert).toBeTruthy();
+    const payload = upsert?.[1] as { desiredConfig: typeof baseConfig; authActions: unknown[] };
+    expect(payload.desiredConfig.plugins.entries['dual-model-supervisor'].config).toEqual(dmsConfig);
+    expect(payload.authActions).toEqual([]);
+    expect(request.mock.calls.filter(([method]) => String(method).startsWith('rc.supervisor.'))).toHaveLength(0);
   });
 
   it('confirms and restores only the plugin-owned review defaults', async () => {

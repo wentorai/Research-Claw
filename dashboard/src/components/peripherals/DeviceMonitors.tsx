@@ -39,7 +39,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useConfigStore } from '../../stores/config';
-import { useMonitorStore } from '../../stores/monitor';
+import { isDeviceMonitorSource, useMonitorStore } from '../../stores/monitor';
 import { useUiStore } from '../../stores/ui';
 
 const { Text } = Typography;
@@ -100,7 +100,7 @@ export default function DeviceMonitors({ deviceId, checkPrompt, deviceName }: De
 
   // Filter to device monitors for this device
   const deviceMonitors = useMemo(
-    () => monitors.filter((m) => m.source_type === 'device' && m.target === deviceId),
+    () => monitors.filter((m) => isDeviceMonitorSource(m.source_type) && m.target === deviceId),
     [monitors, deviceId],
   );
 

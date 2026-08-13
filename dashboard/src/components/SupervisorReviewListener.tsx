@@ -1,12 +1,19 @@
 import { useEffect } from 'react';
 import { useGatewayStore } from '../stores/gateway';
 import { useSupervisorStore } from '../stores/supervisor';
+import { useProductPolicyStore } from '../stores/product-policy';
+import { shouldMountSupervisorUiHydration } from '../utils/profile-policy';
 
 export default function SupervisorReviewListener() {
   const client = useGatewayStore((state) => state.client);
+  const supervisorUiVisible = useProductPolicyStore((state) => (
+    state.status === 'ready' && state.policy
+      ? shouldMountSupervisorUiHydration(state.policy)
+      : false
+  ));
 
   useEffect(() => {
-    if (!client?.isConnected) return;
+    if (!client?.isConnected || !supervisorUiVisible) return;
     const hydrateFromDatabase = () => {
       const supervisor = useSupervisorStore.getState();
       void Promise.all([
@@ -28,7 +35,7 @@ export default function SupervisorReviewListener() {
       unsubscribeUpdated();
       unsubscribeCleared();
     };
-  }, [client]);
+  }, [client, supervisorUiVisible]);
 
   return null;
 }

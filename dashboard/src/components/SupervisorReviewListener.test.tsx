@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SupervisorReviewListener from './SupervisorReviewListener';
 import { useGatewayStore } from '../stores/gateway';
 import { useSupervisorStore } from '../stores/supervisor';
+import { useProductPolicyStore } from '../stores/product-policy';
 
 type EventHandler = (payload: unknown) => void;
 
@@ -123,5 +124,24 @@ describe('SupervisorReviewListener', () => {
       expect(h.request).toHaveBeenCalledWith('rc.supervisor.status', {});
       expect(h.request).toHaveBeenCalledWith('rc.supervisor.log', { limit: 200 });
     });
+  });
+
+  it('performs zero UI hydration RPCs/subscriptions when supervisor is enabled-hidden', () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled', extensions: 'enabled',
+          supervisor: 'enabled-hidden', peripherals: 'enabled',
+        },
+      } } } } },
+    });
+    const h = makeClient();
+    const subscribe = vi.spyOn(h.client, 'subscribe');
+    useGatewayStore.setState({ client: h.client as never, state: 'connected' });
+
+    render(<SupervisorReviewListener />);
+
+    expect(h.request).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
   });
 });

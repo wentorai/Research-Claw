@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { useGatewayStore } from './gateway';
 import { toGatewaySessionKey } from '../utils/session-key';
+import { currentProductPolicy } from './product-policy';
+import { shouldMountSupervisorUiHydration } from '../utils/profile-policy';
 
 export interface ExecutionSummary {
   toolCount: number;
@@ -291,19 +293,26 @@ export const useExecutionTraceStore = create<ExecutionTraceState>()((set, get) =
     const generation = get().generation;
     const client = useGatewayStore.getState().client;
     if (!client?.isConnected) return;
-    const [execution, reviewResult] = await Promise.all([
-      client.request<Omit<ExecutionDetail, 'reviews'>>(
-        'rc.execution.detail', { sessionKey: toGatewaySessionKey(sessionKey), runId },
-      ),
-      client.request<{ reviews: ExecutionDetail['reviews'] }>(
-        'rc.supervisor.reviews.list', { runId, limit: 20 },
-      ).catch(() => ({ reviews: [] })),
-    ]);
+    const policy = currentProductPolicy();
+    const supervisorUiVisible = Boolean(policy && shouldMountSupervisorUiHydration(policy));
+    const execution = await client.request<Omit<ExecutionDetail, 'reviews'>>(
+      'rc.execution.detail', { sessionKey: toGatewaySessionKey(sessionKey), runId },
+    );
+    const reviewResult = supervisorUiVisible
+      ? await client.request<{ reviews: ExecutionDetail['reviews'] }>(
+          'rc.supervisor.reviews.list', { runId, limit: 20 },
+        ).catch(() => ({ reviews: [] }))
+      : { reviews: [] };
+    // Defense against a newer/alternate rc.execution.detail payload that may
+    // itself include review data despite the historical split RPC contract.
+    const { reviews: _embeddedReviews, ...executionWithoutReviews } = execution as ExecutionDetail;
     if (!isCurrent(sessionKey, generation)) return;
     set((state) => ({
       details: {
         ...state.details,
-        [executionKey(sessionKey, runId)]: { ...execution, reviews: reviewResult.reviews ?? [] },
+        [executionKey(sessionKey, runId)]: supervisorUiVisible
+          ? { ...executionWithoutReviews, reviews: reviewResult.reviews ?? [] }
+          : executionWithoutReviews,
       },
     }));
   },

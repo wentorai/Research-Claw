@@ -23,6 +23,7 @@ import {
   classifyCronCompletion,
   type CronFailureEpisode,
 } from '../utils/cron-failure-notification';
+import { canOpenPanelNow } from '../stores/product-policy';
 
 export default function CronEventListener() {
   const { notification } = App.useApp();
@@ -97,6 +98,7 @@ export default function CronEventListener() {
         const targetSessionKey = decision.targetSessionKey
           ? normalizeSessionKey(decision.targetSessionKey)
           : undefined;
+        const settingsVisible = canOpenPanelNow('settings');
 
         notification.error({
           key: toastKey,
@@ -104,7 +106,7 @@ export default function CronEventListener() {
           description: body,
           duration: 0,
           placement: 'topRight',
-          btn: decision.targetPanel === 'settings' ? (
+          btn: decision.targetPanel === 'settings' && settingsVisible ? (
             <Button
               type="link"
               size="small"
@@ -136,7 +138,9 @@ export default function CronEventListener() {
           body,
           dedupKey: toastKey,
           targetSessionKey,
-          targetPanel: decision.targetPanel,
+          targetPanel: decision.targetPanel === 'settings' && !settingsVisible
+            ? undefined
+            : decision.targetPanel,
         });
         return;
       }

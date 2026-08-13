@@ -873,6 +873,7 @@
       "emptyHint": "让科研龙虾帮你设置 arXiv 论文、GitHub 仓库、RSS 订阅等监控。",
       "add": "添加监控",
       "addPrompt": "我想设置一个新的监控。帮我配置。可用的源类型：arXiv、GitHub、RSS、网页、OpenAlex、Twitter、摄像头/外设(device——对已注册摄像头做定时查证;先调 periph_list 取设备 id)、自定义。",
+      "addPromptWithoutPeripherals": "我想设置一个新的监控。帮我配置。可用的源类型：arXiv、GitHub、RSS、网页、OpenAlex、Twitter、自定义。",
       "target": "监控目标",
       "filters": "过滤条件",
       "findings": "条发现",
@@ -1389,7 +1390,10 @@
     "tokenFixNative": "pnpm serve 用户 (macOS / WSL2)：",
     "tokenFixNativeCmd": "cd ~/research-claw && pnpm serve",
     "tokenFixSystemd": "WSL2 systemd 服务用户：",
-    "tokenFixSystemdCmd": "systemctl --user restart research-claw"
+    "tokenFixSystemdCmd": "systemctl --user restart research-claw",
+    "loadingProductPolicy": "正在加载产品配置...",
+    "productPolicyInvalid": "产品配置无效",
+    "productPolicyInvalidHint": "已安装的产品配置格式错误或当前版本不支持。继续使用前请联系管理员。"
   },
   "modelCatalog": {
     "aligned": "已按权威模型目录校正 {{count}} 个模型的上下文窗口"

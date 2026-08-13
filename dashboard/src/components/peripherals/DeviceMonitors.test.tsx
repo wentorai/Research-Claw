@@ -139,6 +139,24 @@ describe('DeviceMonitors', () => {
       expect(screen.queryByTestId('periph-monitor-row-mon-3')).toBeNull(); // feed
     });
 
+    it.each(['\tDEVICE\n', '\u00a0DeViCe\u00a0'])(
+      'includes a legacy device monitor with source_type %j',
+      (sourceType) => {
+        useMonitorStore.setState({
+          monitors: [makeMonitor({
+            id: 'legacy-device-monitor',
+            source_type: sourceType,
+            target: 'dev-cam-001',
+            name: 'Legacy camera check',
+          })],
+        });
+
+        renderComponent();
+
+        expect(screen.getByText('Legacy camera check')).toBeDefined();
+      },
+    );
+
     it('shows empty state when no device monitors exist', () => {
       useMonitorStore.setState({ monitors: [FEED_MONITOR] });
       renderComponent();

@@ -42,6 +42,57 @@ function enabledPolicy(): ProductPolicy {
 
 export const DEFAULT_PRODUCT_POLICY = enabledPolicy();
 
+export type PolicyPanelTab =
+  | 'library'
+  | 'workspace'
+  | 'review'
+  | 'tasks'
+  | 'jobs'
+  | 'monitor'
+  | 'peripherals'
+  | 'supervisor'
+  | 'extensions'
+  | 'settings';
+
+const PANEL_CAPABILITY: Partial<Record<PolicyPanelTab, keyof ProductPolicy['capabilities']>> = {
+  peripherals: 'peripherals',
+  supervisor: 'supervisor',
+  extensions: 'extensions',
+  settings: 'settings',
+};
+
+/** A panel is visible only when its capability is explicitly `enabled`. */
+export function canOpenPanel(tab: PolicyPanelTab, policy: ProductPolicy): boolean {
+  const capability = PANEL_CAPABILITY[tab];
+  return capability === undefined || policy.capabilities[capability] === 'enabled';
+}
+
+export function visiblePanelTabs<T extends PolicyPanelTab>(
+  tabs: readonly T[],
+  policy: ProductPolicy,
+): T[] {
+  return tabs.filter((tab) => canOpenPanel(tab, policy));
+}
+
+export const visibleShortcutTabs = visiblePanelTabs;
+
+export function firstVisiblePanel(policy: ProductPolicy): PolicyPanelTab {
+  // Library is not profile-controlled in v1. Keeping the fallback explicit makes
+  // a future expansion fail loudly instead of persisting a restricted tab.
+  if (!canOpenPanel('library', policy)) {
+    throw new Error('No visible Dashboard panel is available');
+  }
+  return 'library';
+}
+
+export function shouldMountPeripheralsListener(policy: ProductPolicy): boolean {
+  return policy.capabilities.peripherals !== 'disabled';
+}
+
+export function shouldMountSupervisorUiHydration(policy: ProductPolicy): boolean {
+  return policy.capabilities.supervisor === 'enabled';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

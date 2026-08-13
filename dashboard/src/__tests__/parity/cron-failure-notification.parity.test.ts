@@ -16,6 +16,7 @@ import {
 } from '../../utils/cron-failure-notification';
 import { navigateNotificationTarget } from '../../components/NotificationDropdown';
 import { useUiStore } from '../../stores/ui';
+import { useProductPolicyStore } from '../../stores/product-policy';
 
 /**
  * Drives the classifier the way CronEventListener does: decide, then apply the
@@ -297,5 +298,18 @@ describe('background cron failure policy — OpenClaw 2026.6.1 payload parity', 
       rightPanelTab: 'settings',
       rightPanelOpen: true,
     });
+  });
+
+  it('cannot navigate a stale persisted Settings target after Settings becomes hidden', () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled-hidden', extensions: 'enabled', supervisor: 'enabled', peripherals: 'enabled',
+        },
+      } } } } },
+    });
+    useUiStore.setState({ rightPanelTab: 'library', rightPanelOpen: false });
+    navigateNotificationTarget({ targetPanel: 'settings' });
+    expect(useUiStore.getState()).toMatchObject({ rightPanelTab: 'library', rightPanelOpen: false });
   });
 });

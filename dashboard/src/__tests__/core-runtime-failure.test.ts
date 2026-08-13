@@ -34,6 +34,22 @@ describe('Core runtime capability failure', () => {
     })).toBeNull();
   });
 
+  it('suppresses only intentionally unavailable disabled peripheral methods', () => {
+    const error = {
+      code: 'INVALID_REQUEST',
+      message: 'unknown method: rc.periph.devices.list',
+    };
+    expect(classifyCoreMethodFailure(
+      'rc.periph.devices.list',
+      error,
+      123,
+      (method) => method.startsWith('rc.periph.'),
+    )).toBeNull();
+    expect(classifyCoreMethodFailure(
+      'rc.periph.devices.list', error, 123,
+    )).toMatchObject({ method: 'rc.periph.devices.list' });
+  });
+
   it('clears only after the Core sentinel RPC succeeds', () => {
     expect(isCoreRecoveryProbe('rc.onboarding.status')).toBe(true);
     expect(isCoreRecoveryProbe('sessions.list')).toBe(false);

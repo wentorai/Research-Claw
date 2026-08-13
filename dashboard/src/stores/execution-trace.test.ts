@@ -5,6 +5,7 @@ import {
   resetPresentationRetryCoordinatorForTests,
   useExecutionTraceStore,
 } from './execution-trace';
+import { useProductPolicyStore } from './product-policy';
 
 describe('shared execution-details coordinator', () => {
   const request = vi.fn();
@@ -129,6 +130,36 @@ describe('shared execution-details coordinator', () => {
     expect(useExecutionTraceStore.getState().details[executionKey('session-a', 'runA')]).toMatchObject({
       tools: [{ tool_name: 'read' }], skills: [{ skill_name: 'wentor-network' }], reviews: [{ reviewId: 'r1' }],
     });
+  });
+
+  it('loads execution details without any review RPC or review projection when supervisor UI is hidden', async () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: {
+        entries: {
+          'research-claw-core': {
+            config: {
+              productPolicy: {
+                capabilities: {
+                  settings: 'enabled',
+                  extensions: 'enabled',
+                  supervisor: 'enabled-hidden',
+                  peripherals: 'enabled',
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    request.mockResolvedValue({ runId: 'runA', tools: [], skills: [], reviews: [{ verdict: 'pass' }] });
+
+    await useExecutionTraceStore.getState().loadDetail('session-a', 'runA');
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith('rc.execution.detail', {
+      sessionKey: 'agent:main:session-a', runId: 'runA',
+    });
+    expect(useExecutionTraceStore.getState().details[executionKey('session-a', 'runA')]).not.toHaveProperty('reviews');
   });
 
   it('rechecks a terminal session.tool event until the delayed after-hook record appears', async () => {

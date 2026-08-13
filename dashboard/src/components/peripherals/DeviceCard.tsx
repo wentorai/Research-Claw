@@ -43,7 +43,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { getThemeTokens } from '../../styles/theme';
 import { useConfigStore } from '../../stores/config';
-import { useMonitorStore } from '../../stores/monitor';
+import { isDeviceMonitorSource, useMonitorStore } from '../../stores/monitor';
 import {
   usePeripheralsStore,
   type PeriphDeviceRow,
@@ -333,7 +333,7 @@ export default function DeviceCard({
 
   // Device-monitor count for THIS device (§14.2). Filter mirrors DeviceMonitors.
   const monitorCount = useMonitorStore(
-    (s) => s.monitors.filter((m) => m.source_type === 'device' && m.target === device.id).length,
+    (s) => s.monitors.filter((m) => isDeviceMonitorSource(m.source_type) && m.target === device.id).length,
   );
 
   const [expanded, setExpanded] = useState(false);

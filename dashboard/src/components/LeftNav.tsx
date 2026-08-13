@@ -32,6 +32,8 @@ import { removeScheduledJobForSession } from '../utils/remove-cron-for-session';
 import { isPaperReviewCronSessionRow } from '../utils/paper-review-run';
 import { isStagedWritingCronSessionRow } from '../utils/staged-writing-run';
 import { selectSessionRunView, useSessionRunsStore } from '../stores/session-runs';
+import { useProductPolicyStore } from '../stores/product-policy';
+import { visiblePanelTabs } from '../utils/profile-policy';
 
 const { Text } = Typography;
 
@@ -98,6 +100,13 @@ export default function LeftNav() {
   const renameSession = useSessionsStore((s) => s.renameSession);
   const isMainSession = useSessionsStore((s) => s.isMainSession);
   const sessionRunsState = useSessionRunsStore();
+  const productPolicy = useProductPolicyStore((s) => s.policy);
+  const visibleNavItems = useMemo(
+    () => productPolicy
+      ? visiblePanelTabs(NAV_ITEMS.map((item) => item.key), productPolicy)
+      : [],
+    [productPolicy],
+  );
 
   const [renameTarget, setRenameTarget] = useState<{ key: string; current: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -537,7 +546,7 @@ export default function LeftNav() {
 
       {/* Function rail */}
       <div style={{ flex: 1, padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter((item) => visibleNavItems.includes(item.key)).map((item) => {
           const isActive = rightPanelTab === item.key && rightPanelOpen;
           const btnStyle: React.CSSProperties = {
             width: '100%',

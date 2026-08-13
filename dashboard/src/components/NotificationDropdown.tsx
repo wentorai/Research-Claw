@@ -22,6 +22,8 @@ import { getThemeTokens } from '../styles/theme';
 import { relativeTime } from '../utils/relativeTime';
 import type { Notification as AppNotification } from '../stores/ui';
 import { confirmApplyAppUpdate } from '../utils/app-update-ui';
+import { useProductPolicyStore } from '../stores/product-policy';
+import { canOpenPanel } from '../utils/profile-policy';
 
 const { Text } = Typography;
 
@@ -117,22 +119,35 @@ function NotificationItem({
   onMarkRead: (id: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const productPolicy = useProductPolicyStore((s) => s.policy);
+  const targetPanelVisible = !item.targetPanel
+    || Boolean(productPolicy && canOpenPanel(item.targetPanel, productPolicy));
+  const actionable = Boolean((item.targetPanel && targetPanelVisible) || item.targetSessionKey);
+  const interactive = !item.read || actionable;
 
   return (
     <div
-      role="button"
-      tabIndex={0}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      data-notification-id={item.id}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={() => {
         if (!item.read) onMarkRead(item.id);
-        navigateNotificationTarget(item);
+        navigateNotificationTarget({
+          ...item,
+          targetPanel: targetPanelVisible ? item.targetPanel : undefined,
+        });
       }}
       onKeyDown={(e) => {
+        if (!interactive) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (!item.read) onMarkRead(item.id);
-          navigateNotificationTarget(item);
+          navigateNotificationTarget({
+            ...item,
+            targetPanel: targetPanelVisible ? item.targetPanel : undefined,
+          });
         }
       }}
       style={{
@@ -141,7 +156,7 @@ function NotificationItem({
         gap: 10,
         alignItems: 'flex-start',
         background: item.read ? 'transparent' : tokens.bg.surfaceHover,
-        cursor: item.read && !item.targetPanel && !item.targetSessionKey ? 'default' : 'pointer',
+        cursor: interactive ? 'pointer' : 'default',
         borderBottom: `1px solid ${tokens.border.default}`,
         transition: 'background 0.15s ease',
       }}

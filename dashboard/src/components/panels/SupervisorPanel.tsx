@@ -27,6 +27,8 @@ import { useSupervisorStore, type AuditLogEntry } from '../../stores/supervisor'
 import { getThemeTokens } from '../../styles/theme';
 import { useConfigStore } from '../../stores/config';
 import { useUiStore } from '../../stores/ui';
+import { useProductPolicyStore } from '../../stores/product-policy';
+import { canOpenPanel } from '../../utils/profile-policy';
 
 const { Text } = Typography;
 
@@ -259,6 +261,9 @@ export default function SupervisorPanel() {
   const tokens = getThemeTokens(theme);
   const locale = i18n.language ?? 'en';
   const isConnected = useGatewayStore((s) => s.state === 'connected');
+  const settingsVisible = useProductPolicyStore((s) => Boolean(
+    s.status === 'ready' && s.policy && canOpenPanel('settings', s.policy),
+  ));
 
   const {
     status,
@@ -416,12 +421,14 @@ export default function SupervisorPanel() {
             <span>
               {t('supervisor.disabledBanner', 'Response and action review is off.')}
               {' '}
-              <a
-                onClick={() => useUiStore.getState().setRightPanelTab('settings')}
-                style={{ cursor: 'pointer' }}
-              >
-                {t('supervisor.goToSettings', 'Go to Settings')}
-              </a>
+              {settingsVisible && (
+                <a
+                  onClick={() => useUiStore.getState().setRightPanelTab('settings')}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {t('supervisor.goToSettings', 'Go to Settings')}
+                </a>
+              )}
             </span>
           }
           style={{

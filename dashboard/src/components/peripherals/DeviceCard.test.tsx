@@ -199,6 +199,21 @@ describe('DeviceCard render (§14.2)', () => {
     expect(screen.getByTestId('periph-device-monitor-count-dev-cam-001').textContent).toContain('1 scheduled check');
   });
 
+  it.each(['\tDEVICE\n', '\u00a0DeViCe\u00a0'])(
+    'counts a legacy device monitor with source_type %j',
+    (sourceType) => {
+      useMonitorStore.setState({
+        monitors: [
+          { id: 'legacy-m1', name: 'legacy', source_type: sourceType, target: 'dev-cam-001', filters: {}, schedule: '*/5 * * * *', enabled: true, notify: false, agent_prompt: '', gateway_job_id: 'j', last_check_at: null, last_results: null, last_error: null, check_count: 0, finding_count: 0, created_at: '', updated_at: '' },
+        ],
+      });
+
+      renderCard();
+
+      expect(screen.getByTestId('periph-device-monitor-count-dev-cam-001').textContent).toContain('1');
+    },
+  );
+
   it('renders an error strip when the device has last_error', () => {
     renderCard({ device: makeDevice({ last_error: 'capture timed out' }) });
     expect(screen.getByTestId('periph-device-status-label-dev-cam-001').textContent).toContain('Error');

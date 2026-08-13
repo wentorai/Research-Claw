@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { useGatewayStore } from '../stores/gateway';
 import { usePeripheralsStore } from '../stores/peripherals';
+import { useProductPolicyStore } from '../stores/product-policy';
 
 /**
  * P2-F1 (dashboard side): the upload destination for an agent-requested capture
@@ -184,5 +185,62 @@ describe('PeriphCaptureListener — P2-S1 alert hydration', () => {
 
     await waitFor(() => expect(loadDevices).toHaveBeenCalled());
     await waitFor(() => expect(loadObservations).toHaveBeenCalledWith('registered-camera'));
+  });
+});
+
+describe('PeriphCaptureListener — disabled product policy', () => {
+  it('continues subscription, hydration, and enumeration when peripherals is enabled-hidden', async () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled', extensions: 'enabled', supervisor: 'enabled',
+          peripherals: 'enabled-hidden',
+        },
+      } } } } },
+    });
+    const enumerateDevices = vi.fn().mockResolvedValue([]);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn(), enumerateDevices },
+    });
+    const { client } = makeClient();
+    useGatewayStore.setState({ client: client as never, state: 'connected' });
+
+    render(<PeriphCaptureListener />);
+
+    await waitFor(() => expect(client.subscribe).toHaveBeenCalledWith(
+      'plugin.rc.periph.captureRequest', expect.any(Function),
+    ));
+    await waitFor(() => expect(enumerateDevices).toHaveBeenCalled());
+    await waitFor(() => expect(usePeripheralsStore.getState().loadDevices).toHaveBeenCalled());
+    await waitFor(() => expect(usePeripheralsStore.getState().announceBridge).toHaveBeenCalled());
+  });
+
+  it('has zero subscription, enumeration, RPC, hydration, or heartbeat timer', async () => {
+    vi.useFakeTimers();
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled', extensions: 'enabled', supervisor: 'enabled', peripherals: 'disabled',
+        },
+      } } } } },
+    });
+    const enumerateDevices = vi.fn().mockResolvedValue([]);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn(), enumerateDevices },
+    });
+    const { client, request } = makeClient();
+    useGatewayStore.setState({ client: client as never, state: 'connected' });
+
+    render(<PeriphCaptureListener />);
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(client.subscribe).not.toHaveBeenCalled();
+    expect(enumerateDevices).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(usePeripheralsStore.getState().loadDevices).not.toHaveBeenCalled();
+    expect(usePeripheralsStore.getState().announceBridge).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

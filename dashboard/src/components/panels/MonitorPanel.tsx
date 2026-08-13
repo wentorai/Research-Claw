@@ -33,11 +33,19 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
-import { useMonitorStore, type Monitor } from '../../stores/monitor';
+import {
+  isDeviceMonitorSource,
+  useMonitorStore,
+  type Monitor,
+} from '../../stores/monitor';
 import { getThemeTokens } from '../../styles/theme';
 import { useConfigStore } from '../../stores/config';
 import { cronToHuman } from '../../utils/cronToHuman';
 import { relativeTime } from '../../utils/relativeTime';
+import {
+  peripheralsRuntimeAvailableNow,
+  useProductPolicyStore,
+} from '../../stores/product-policy';
 
 const { Text } = Typography;
 
@@ -338,7 +346,18 @@ export default function MonitorPanel() {
   const theme = useConfigStore((s) => s.theme);
   const tokens = getThemeTokens(theme);
   const isConnected = useGatewayStore((s) => s.state === 'connected');
-  const { monitors, loading, loaded, loadMonitors } = useMonitorStore();
+  const { monitors: storedMonitors, loading, loaded, loadMonitors } = useMonitorStore();
+  const peripheralsAvailable = useProductPolicyStore((state) => (
+    state.status === 'ready' && state.policy?.capabilities.peripherals !== 'disabled'
+  ));
+  // Core normally omits device monitors when disabled. Keep the panel defensive
+  // against a stale local row or older backend response as well.
+  const monitors = useMemo(
+    () => peripheralsAvailable
+      ? storedMonitors
+      : storedMonitors.filter((monitor) => !isDeviceMonitorSource(monitor.source_type)),
+    [peripheralsAvailable, storedMonitors],
+  );
   const send = useChatStore((s) => s.send);
   const locale = i18n.language;
 
@@ -355,13 +374,16 @@ export default function MonitorPanel() {
   }, []);
 
   const handleAddMonitor = useCallback(() => {
+    const includePeripherals = peripheralsRuntimeAvailableNow();
     send(
-      t('monitor.addPrompt', {
+      t(includePeripherals ? 'monitor.addPrompt' : 'monitor.addPromptWithoutPeripherals', {
         // F3 (SPEC §13.1): expose the device/peripheral source so the agent knows
         // scheduled camera checks are available. For a device monitor it must call
         // periph_list first to get the device id, then monitor_create(
         // source_type='device', target=<that id>).
-        defaultValue: 'I want to set up a new monitor. Help me configure it. Available source types: arXiv, GitHub, RSS, Webpage, OpenAlex, Twitter, Camera/Peripheral (device — for scheduled checks of a registered camera; call periph_list first to get the device id), Custom.',
+        defaultValue: includePeripherals
+          ? 'I want to set up a new monitor. Help me configure it. Available source types: arXiv, GitHub, RSS, Webpage, OpenAlex, Twitter, Camera/Peripheral (device — for scheduled checks of a registered camera; call periph_list first to get the device id), Custom.'
+          : 'I want to set up a new monitor. Help me configure it. Available source types: arXiv, GitHub, RSS, Webpage, OpenAlex, Twitter, Custom.',
       }),
     );
   }, [send, t]);

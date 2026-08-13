@@ -14,6 +14,8 @@ import {
   type ConfigPanelPlacement,
 } from '../utils/config-panel-layout';
 import { playNotificationSound } from '../utils/notification-sound';
+import { currentProductPolicy, useProductPolicyStore } from './product-policy';
+import { canOpenPanel, firstVisiblePanel } from '../utils/profile-policy';
 
 export type { ConfigPanelPlacement };
 
@@ -210,7 +212,7 @@ interface UiState {
   /** One-shot attachment prefill for chat composer (e.g. peripherals photo → composer). */
   chatAttachmentPrefill: ChatAttachment[] | null;
 
-  setRightPanelTab: (tab: PanelTab) => void;
+  setRightPanelTab: (tab: PanelTab) => boolean;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
   setRightPanelWidth: (width: number) => void;
@@ -233,7 +235,7 @@ interface UiState {
   setAppUpdateInfo: (info: CheckUpdatesPayload | null) => void;
   setAppUpdateRunning: (running: boolean) => void;
   triggerWorkspaceRefresh: () => void;
-  requestWorkspacePreview: (path: string) => void;
+  requestWorkspacePreview: (path: string) => boolean;
   clearPendingPreview: () => void;
   setShowSystemFiles: (show: boolean) => void;
   setCronSessionsFolded: (folded: boolean) => void;
@@ -268,9 +270,22 @@ export const useUiStore = create<UiState>()((set, get) => ({
   setChatAttachmentPrefill: (atts) => set({ chatAttachmentPrefill: atts }),
 
   setRightPanelTab: (tab: PanelTab) => {
+    const policy = currentProductPolicy();
+    if (!policy || !canOpenPanel(tab, policy)) {
+      if (policy) {
+        const current = get().rightPanelTab;
+        const fallback = canOpenPanel(current, policy)
+          ? current
+          : firstVisiblePanel(policy) as PanelTab;
+        try { localStorage.setItem(PANEL_TAB_STORAGE, fallback); } catch { /* non-fatal */ }
+        if (fallback !== current) set({ rightPanelTab: fallback });
+      }
+      return false;
+    }
     try { localStorage.setItem(PANEL_TAB_STORAGE, tab); } catch { /* non-fatal */ }
     try { localStorage.setItem(PANEL_OPEN_STORAGE, 'true'); } catch { /* non-fatal */ }
     set({ rightPanelTab: tab, rightPanelOpen: true });
+    return true;
   },
 
   toggleRightPanel: () => {
@@ -386,7 +401,9 @@ export const useUiStore = create<UiState>()((set, get) => ({
   },
 
   requestWorkspacePreview: (path: string) => {
-    set({ pendingPreviewPath: path, rightPanelTab: 'workspace', rightPanelOpen: true });
+    if (!get().setRightPanelTab('workspace')) return false;
+    set({ pendingPreviewPath: path });
+    return true;
   },
 
   clearPendingPreview: () => {
@@ -521,6 +538,25 @@ export const useUiStore = create<UiState>()((set, get) => ({
     }
   },
 }));
+
+/** Normalize stale persisted/directly-injected panel state after policy loads. */
+export function normalizeRightPanelForPolicy(): void {
+  const policy = currentProductPolicy();
+  if (!policy) return;
+  const current = useUiStore.getState();
+  if (canOpenPanel(current.rightPanelTab, policy)) return;
+  const fallback = firstVisiblePanel(policy) as PanelTab;
+  try { localStorage.setItem(PANEL_TAB_STORAGE, fallback); } catch { /* non-fatal */ }
+  useUiStore.setState({ rightPanelTab: fallback });
+}
+
+// Repair a persisted/directly injected hidden tab at the same boundary where
+// config.get becomes a ready normalized policy. This keeps config.ts free of a
+// config -> ui -> gateway circular import and still performs one synchronous
+// normalization per policy response.
+useProductPolicyStore.subscribe((state) => {
+  if (state.status === 'ready') normalizeRightPanelForPolicy();
+});
 
 // Dev-only: expose store on window for console debugging
 if (import.meta.env.DEV) {

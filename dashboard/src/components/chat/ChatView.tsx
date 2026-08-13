@@ -40,6 +40,8 @@ import { selectSessionRunView, useSessionRunsStore } from '../../stores/session-
 import { resolveRunPresentationOwners } from '../../utils/run-presentation-owner';
 import RunDetailsDock from './RunDetailsDock';
 import { collectPaperFenceAliases, suppressProjectedFileFences } from '../../utils/card-runtime';
+import { useProductPolicyStore } from '../../stores/product-policy';
+import { canOpenPanel } from '../../utils/profile-policy';
 
 const { Text } = Typography;
 
@@ -180,6 +182,9 @@ export default function ChatView() {
   const loadSessionUsage = useChatStore((s) => s.loadSessionUsage);
   const createSession = useSessionsStore((s) => s.createSession);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
+  const settingsVisible = useProductPolicyStore((s) => Boolean(
+    s.status === 'ready' && s.policy && canOpenPanel('settings', s.policy),
+  ));
   const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);
   const pendingTools = useToolStreamStore(
     useShallow((state) => selectPendingTools(state, sessionKey)),
@@ -814,9 +819,11 @@ export default function ChatView() {
                   )}
                   {lastErrorMeta?.category === 'config-fixable' && (
                     <>
-                      <Button size="small" onClick={() => setRightPanelTab('settings')}>
-                        {t('chat.openSettings')}
-                      </Button>
+                      {settingsVisible && (
+                        <Button size="small" onClick={() => setRightPanelTab('settings')}>
+                          {t('chat.openSettings')}
+                        </Button>
+                      )}
                       <Button
                         size="small"
                         onClick={() => {

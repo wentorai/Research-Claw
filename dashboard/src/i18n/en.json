@@ -873,6 +873,7 @@
       "emptyHint": "Ask your Research-Claw to set up monitoring for arXiv papers, GitHub repos, RSS feeds, and more.",
       "add": "Add Monitor",
       "addPrompt": "I want to set up a new monitor. Help me configure it. Available source types: arXiv, GitHub, RSS, Webpage, OpenAlex, Twitter, Camera/Peripheral (device — for scheduled checks of a registered camera; call periph_list first to get the device id), Custom.",
+      "addPromptWithoutPeripherals": "I want to set up a new monitor. Help me configure it. Available source types: arXiv, GitHub, RSS, Webpage, OpenAlex, Twitter, Custom.",
       "target": "Target",
       "filters": "Filters",
       "findings": "findings",
@@ -1389,7 +1390,10 @@
     "tokenFixNative": "pnpm serve users (macOS / WSL2):",
     "tokenFixNativeCmd": "cd ~/research-claw && pnpm serve",
     "tokenFixSystemd": "WSL2 systemd service users:",
-    "tokenFixSystemdCmd": "systemctl --user restart research-claw"
+    "tokenFixSystemdCmd": "systemctl --user restart research-claw",
+    "loadingProductPolicy": "Loading product profile...",
+    "productPolicyInvalid": "Invalid product profile",
+    "productPolicyInvalidHint": "The installed product profile is malformed or unsupported. Contact your administrator before continuing."
   },
   "modelCatalog": {
     "aligned": "Aligned context window for {{count}} model(s) from the model catalog"

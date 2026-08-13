@@ -23,9 +23,8 @@ import PaperReviewRunListener from './components/PaperReviewRunListener';
 import ConfigRestartListener from './components/ConfigRestartListener';
 import ModelCatalogAligner from './components/ModelCatalogAligner';
 import JobsActivityListener from './components/JobsActivityListener';
-import PeriphCaptureListener from './components/PeriphCaptureListener';
+import ProductPolicyRuntime from './components/ProductPolicyRuntime';
 import PluginApprovalListener from './components/PluginApprovalListener';
-import SupervisorReviewListener from './components/SupervisorReviewListener';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
@@ -35,6 +34,9 @@ import { isInternalSessionNamingKey, normalizeSessionKey } from './utils/session
 import { resolveObservedRunActivity } from './utils/run-status-presentation';
 import { autoNameSessionKeyForEvent } from './utils/session-auto-name-event';
 import CoreRuntimeAlert from './components/CoreRuntimeAlert';
+import { useProductPolicyStore } from './stores/product-policy';
+import { visibleShortcutTabs } from './utils/profile-policy';
+import { resolvePanelShortcut } from './utils/panel-shortcut';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -106,7 +108,7 @@ function usePanelMode(): PanelMode {
 
 const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'review', 'tasks', 'monitor', 'supervisor', 'extensions', 'settings'];
 
-export default function App() {
+function DashboardApp() {
   const { t } = useTranslation();
   const theme = useConfigStore((s) => s.theme);
   const locale = useConfigStore((s) => s.locale);
@@ -127,6 +129,9 @@ export default function App() {
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
   const setLeftNavCollapsed = useUiStore((s) => s.setLeftNavCollapsed);
+  const productPolicyStatus = useProductPolicyStore((s) => s.status);
+  const productPolicy = useProductPolicyStore((s) => s.policy);
+  const productPolicyError = useProductPolicyStore((s) => s.error);
 
   const panelMode = usePanelMode();
 
@@ -437,26 +442,45 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, [handleResize]);
 
-  // Keyboard shortcut: Ctrl+1-6 to switch panel tabs
+  // Keyboard shortcut: Ctrl+1..9 indexes only policy-visible panel tabs.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-        const num = parseInt(e.key, 10);
-        if (num >= 1 && num <= 7) {
-          e.preventDefault();
-          const tab = PANEL_TAB_ORDER[num - 1];
-          setRightPanelTab(tab);
-        }
-      }
+      if (productPolicyStatus !== 'ready' || !productPolicy) return;
+      const tab = resolvePanelShortcut(
+        e,
+        visibleShortcutTabs(PANEL_TAB_ORDER, productPolicy),
+      );
+      if (!tab) return;
+      e.preventDefault();
+      setRightPanelTab(tab);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [setRightPanelTab]);
+  }, [productPolicy, productPolicyStatus, setRightPanelTab]);
 
   const antdTheme = getAntdThemeConfig(theme);
   const antdLocale = locale === 'zh-CN' ? zhCN : enUS;
 
   // --- Boot state guards ---
+
+  // A present malformed policy is a distinct configuration error. It must win
+  // over the generic pending/setup paths, otherwise retry exhaustion would turn
+  // an unsupported profile into a misleading first-run wizard.
+  if (productPolicyStatus === 'error') {
+    return (
+      <ConfigProvider theme={antdTheme} locale={antdLocale}>
+        <AntdApp>
+          <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+            <Result
+              status="error"
+              title={t('boot.productPolicyInvalid')}
+              subTitle={`${t('boot.productPolicyInvalidHint')}${productPolicyError ? ` (${productPolicyError})` : ''}`}
+            />
+          </div>
+        </AntdApp>
+      </ConfigProvider>
+    );
+  }
 
   if (bootState === 'pending') {
     return (
@@ -589,6 +613,22 @@ export default function App() {
     );
   }
 
+  // The gateway/model is ready but config.get policy normalization has not
+  // completed. Keep the entire shell (including restricted nav/lazy panels)
+  // unmounted to prevent a one-frame all-enabled flash.
+  if (productPolicyStatus !== 'ready' || !productPolicy) {
+    return (
+      <ConfigProvider theme={antdTheme} locale={antdLocale}>
+        <AntdApp>
+          <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', gap: 16 }}>
+            <Spin size="large" />
+            <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{t('boot.loadingProductPolicy')}</span>
+          </div>
+        </AntdApp>
+      </ConfigProvider>
+    );
+  }
+
   // bootState === 'ready'
   const leftNavWidth = leftNavCollapsed ? 56 : 240;
   const isInline = panelMode === 'inline';
@@ -621,9 +661,7 @@ export default function App() {
       <ConfigRestartListener />
       <ModelCatalogAligner />
       <JobsActivityListener />
-      <PeriphCaptureListener />
-      <PluginApprovalListener />
-      <SupervisorReviewListener />
+      <ProductPolicyRuntime />
       <div
         style={{
           height: '100vh',
@@ -751,5 +789,20 @@ export default function App() {
       )}
       </AntdApp>
     </ConfigProvider>
+  );
+}
+
+/**
+ * Native OC plugin approvals are a safety surface, not an Extensions or
+ * product-policy feature. Keep their gateway subscription alive while the
+ * ordinary shell is pending, invalid, disconnected, or in first-run setup so
+ * an approval event cannot be lost behind a policy/boot-state guard.
+ */
+export default function App() {
+  return (
+    <>
+      <PluginApprovalListener />
+      <DashboardApp />
+    </>
   );
 }

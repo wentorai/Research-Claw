@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useRef } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef } from 'react';
 import { Button, Spin, Typography } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -11,6 +11,8 @@ import { isHorizontalPlacement } from '../utils/config-panel-layout';
 import ConfigPanelDockPicker from './ConfigPanelDockPicker';
 import CoreRuntimeAlert from './CoreRuntimeAlert';
 import { useGatewayStore } from '../stores/gateway';
+import { useProductPolicyStore } from '../stores/product-policy';
+import { canOpenPanel, firstVisiblePanel } from '../utils/profile-policy';
 
 const { Text } = Typography;
 
@@ -178,6 +180,27 @@ export default function RightPanel() {
   const tab = useUiStore((s) => s.rightPanelTab);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const coreFailure = useGatewayStore((s) => s.coreFailure);
+  const policyStatus = useProductPolicyStore((s) => s.status);
+  const policy = useProductPolicyStore((s) => s.policy);
+  const effectiveTab = policy && canOpenPanel(tab, policy)
+    ? tab
+    : policy
+      ? firstVisiblePanel(policy) as PanelTab
+      : null;
+
+  useEffect(() => {
+    if (policyStatus === 'ready' && policy && !canOpenPanel(tab, policy)) {
+      // Repair the selected tab without turning a closed panel into an open one.
+      // setRightPanelTab intentionally opens on user navigation, while this is
+      // only defense against stale/directly injected state.
+      useUiStore.setState({ rightPanelTab: firstVisiblePanel(policy) as PanelTab });
+    }
+  }, [policyStatus, policy, tab]);
+
+  // App also gates ready-shell rendering; this local guard ensures a restricted
+  // lazy panel cannot mount if RightPanel is rendered or state is injected out
+  // of band while policy is pending/invalid.
+  if (!effectiveTab) return null;
 
   return (
     <div
@@ -204,7 +227,7 @@ export default function RightPanel() {
         }}
       >
         <Text strong style={{ fontSize: 14, flexShrink: 0 }}>
-          {t(TAB_TITLE_KEYS[tab])}
+          {t(TAB_TITLE_KEYS[effectiveTab])}
         </Text>
         <PlacementPicker />
         <div style={{ flex: 1, minWidth: 0 }} />
@@ -219,7 +242,7 @@ export default function RightPanel() {
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        {coreFailure && CORE_DEPENDENT_TABS.has(tab) ? (
+        {coreFailure && CORE_DEPENDENT_TABS.has(effectiveTab) ? (
           <CoreRuntimeAlert />
         ) : <Suspense
           fallback={
@@ -228,7 +251,7 @@ export default function RightPanel() {
             </div>
           }
         >
-          <PanelContent tab={tab} />
+          <PanelContent tab={effectiveTab} />
         </Suspense>}
       </div>
     </div>

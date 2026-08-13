@@ -10,6 +10,16 @@ import {
 } from '../utils/session-freshness';
 import i18n from '../i18n';
 import { useGatewayStore } from './gateway';
+import {
+  parseProductPolicyFromConfig,
+  useProductPolicyStore,
+} from './product-policy';
+import {
+  beginConfigRequest,
+  invalidateConfigRequests,
+  isCurrentConfigRequest,
+  onConfigRequestsInvalidated,
+} from './config-request-authority';
 import { isConfigValid, hasModelConfigured } from '../utils/config-patch';
 
 /** Model definition from openclaw.json providers */
@@ -88,6 +98,13 @@ interface ConfigState {
   /** Internal retry counter for config loading after reconnect */
   _configRetryCount: number;
 
+  /**
+   * Monotonic authority for config.get responses. A newer request or transport
+   * epoch invalidates every older response so a slow previous connection cannot
+   * restore its product policy after reconnect.
+   */
+  _configRequestGeneration: number;
+
   /** True when config.apply succeeded and we're waiting for gateway restart + reconnect.
    *  Persisted to sessionStorage so it survives page refresh. */
   pendingConfigRestart: boolean;
@@ -106,7 +123,8 @@ interface ConfigState {
   setSystemPromptAppend: (v: string) => void;
   loadConfig: () => void;
   loadGatewayConfig: () => Promise<void>;
-  evaluateConfig: () => void;
+  invalidateGatewayConfigRequest: () => void;
+  evaluateConfig: (requestGeneration?: number) => void;
   setBootState: (s: BootState) => void;
   setPendingConfigRestart: (v: boolean) => void;
   beginConfigOperation: (phase?: ConfigOperationPhase) => string;
@@ -138,6 +156,7 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
     gatewayConfig: null,
     gatewayConfigLoading: false,
     _configRetryCount: 0,
+    _configRequestGeneration: 0,
     toolCallProbe: null,
     pendingConfigRestart: (() => {
       try { return sessionStorage.getItem('rc:pending-config-restart') === '1'; }
@@ -197,7 +216,12 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
     loadGatewayConfig: async () => {
       const client = useGatewayStore.getState().client;
       if (!client?.isConnected) return;
-      set({ gatewayConfigLoading: true });
+      const requestGeneration = beginConfigRequest();
+      set({
+        gatewayConfigLoading: true,
+        _configRequestGeneration: requestGeneration,
+      });
+      let snapshotReceived = false;
       try {
         const snapshot = await client.request<{
           config?: Record<string, unknown>;
@@ -205,6 +229,11 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
           raw?: string | null;
           hash?: string | null;
         }>('config.get', {});
+        // A later config request or a transport departure owns the Dashboard
+        // now. Do not let a delayed response from the previous authority touch
+        // policy, persisted UI normalization, config, probes, or boot state.
+        if (!isCurrentConfigRequest(requestGeneration)) return;
+        snapshotReceived = true;
         // Gateway returns `hash` (not `baseHash`). We store it as `baseHash` for our interface.
         // Prefer `config` (fully processed with runtime defaults: agents, models, etc.)
         // over `resolved` (raw after include/env — missing runtime defaults like models.providers).
@@ -215,6 +244,15 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
         const resolved = snapshot.resolved as Record<string, unknown> | undefined;
         const hasConfig = config && Object.keys(config).length > 0;
         const configObj = (hasConfig ? config : resolved ?? {}) as Record<string, unknown>;
+        // Parse without publishing. The policy is the final commit marker for
+        // this snapshot, so the shell cannot open over a stale/partial config.
+        let productPolicy;
+        try {
+          productPolicy = parseProductPolicyFromConfig(configObj);
+        } catch (error) {
+          useProductPolicyStore.getState().fail(error);
+          throw error;
+        }
         const gc: GatewayConfig = {
           agents: configObj.agents as GatewayConfig['agents'],
           models: configObj.models as GatewayConfig['models'],
@@ -225,38 +263,95 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
           baseHash: snapshot.hash ?? null,
           projectConfig: (snapshot.config ?? null) as Record<string, unknown> | null,
         };
+        const sessionResetPolicy = readSessionResetPolicy(configObj);
+        const fromConfig = readSystemPromptAppendFromConfig(configObj);
+        const fromLocal = get().systemPromptAppend;
+        if (!isCurrentConfigRequest(requestGeneration)) return;
+
+        // Publish config first while policy remains pending; publish policy last
+        // as the synchronous ready marker consumed by App and all listeners.
         set({
           gatewayConfig: gc,
           gatewayConfigLoading: false,
-          sessionResetPolicy: readSessionResetPolicy(configObj),
+          sessionResetPolicy,
         });
+        useProductPolicyStore.getState().publish(productPolicy);
 
-        const fromConfig = readSystemPromptAppendFromConfig(configObj);
-        const fromLocal = get().systemPromptAppend;
-        if (fromConfig !== fromLocal) {
-          localStorage.setItem('rc-system-prompt-append', fromConfig);
-          set({ systemPromptAppend: fromConfig });
-          void syncSystemPromptAppendToGateway(fromConfig);
-        } else if (fromLocal.trim() && !fromConfig.trim()) {
-          schedulePersistSystemPromptAppend(fromLocal);
+        // Persistence/synchronization are non-authoritative follow-up work. A
+        // storage quota or helper failure must not roll back a valid snapshot or
+        // route the config loader through its retry/error path after publication.
+        try {
+          if (fromConfig !== fromLocal) {
+            localStorage.setItem('rc-system-prompt-append', fromConfig);
+            set({ systemPromptAppend: fromConfig });
+            void syncSystemPromptAppendToGateway(fromConfig);
+          } else if (fromLocal.trim() && !fromConfig.trim()) {
+            schedulePersistSystemPromptAppend(fromLocal);
+          }
+        } catch (error) {
+          console.warn('[config] post-load prompt sync failed:', error);
         }
 
+        if (!isCurrentConfigRequest(requestGeneration)) return;
         // Probe tool call support for the active model after config is loaded
-        get().probeToolCalling();
-        get().evaluateConfig();
+        void get().probeToolCalling();
+        try {
+          get().evaluateConfig(requestGeneration);
+        } catch (error) {
+          console.warn('[config] post-load evaluation failed:', error);
+        }
       } catch (err) {
+        if (!isCurrentConfigRequest(requestGeneration)) return;
         console.warn('[config] loadGatewayConfig failed:', err);
         set({ gatewayConfigLoading: false });
-        // On error, still trigger evaluation so retries can continue
-        get().evaluateConfig();
+        // Once config.get produced a snapshot, every synchronous projection of
+        // that snapshot is part of the same atomic validation boundary. A
+        // malformed non-policy field must therefore fail closed just like a
+        // malformed productPolicy; otherwise the policy could remain pending
+        // forever with no actionable error. Transport failures before a
+        // snapshot arrives remain retryable.
+        if (snapshotReceived && useProductPolicyStore.getState().status !== 'error') {
+          useProductPolicyStore.getState().fail(err);
+        }
+        // A transport failure has no snapshot to evaluate. Retry config.get
+        // directly, bound to the request generation that observed the failure.
+        // In particular, do not call evaluateConfig() here: a reconnect keeps
+        // the already-proven bootState=ready, whose downgrade guard correctly
+        // ignores config validation but would otherwise suppress this retry and
+        // strand the reset product policy in pending forever.
+        if (!snapshotReceived && useProductPolicyStore.getState().status !== 'error') {
+          const retryCount = get()._configRetryCount;
+          if (retryCount < CONFIG_RETRY_MAX) {
+            set({ _configRetryCount: retryCount + 1 });
+            setTimeout(() => {
+              // A newer manual load or any transport epoch departure owns the
+              // Dashboard now. Its request/policy must not be superseded by a
+              // retry timer scheduled by this older authority.
+              if (!isCurrentConfigRequest(requestGeneration)) return;
+              void get().loadGatewayConfig();
+            }, CONFIG_RETRY_DELAY_MS);
+          } else if (useProductPolicyStore.getState().status === 'pending') {
+            useProductPolicyStore.getState().fail(
+              new Error('Unable to load product policy after config.get retries'),
+            );
+          }
+        }
       }
     },
 
-    evaluateConfig: () => {
+    invalidateGatewayConfigRequest: () => {
+      invalidateConfigRequests();
+    },
+
+    evaluateConfig: (requestGeneration) => {
+      if (requestGeneration !== undefined && !isCurrentConfigRequest(requestGeneration)) return;
       const { gatewayConfig, bootState: currentBoot, _configRetryCount } = get();
 
       // Guard: never downgrade from 'ready' to 'needs_setup'
-      if (currentBoot === 'ready') return;
+      if (currentBoot === 'ready') {
+        if (_configRetryCount !== 0) set({ _configRetryCount: 0 });
+        return;
+      }
 
       const configRecord = gatewayConfig as Record<string, unknown> | null;
       const gwConnected = useGatewayStore.getState().state === 'connected';
@@ -336,7 +431,8 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
           { gwConnected, hasConfig: !!gatewayConfig, agents: !!gatewayConfig?.agents, models: !!gatewayConfig?.models });
         set({ _configRetryCount: _configRetryCount + 1 });
         setTimeout(() => {
-          get().loadGatewayConfig();
+          if (requestGeneration !== undefined && !isCurrentConfigRequest(requestGeneration)) return;
+          void get().loadGatewayConfig();
         }, CONFIG_RETRY_DELAY_MS);
         return;
       }
@@ -387,6 +483,16 @@ export const useConfigStore = create<ConfigState>()((set, get) => {
       }
     },
   };
+});
+
+// A transport departure invalidates request ownership in a store-independent
+// module. Mirror it here synchronously when this store is loaded, without making
+// gateway.ts statically import config.ts and recreating a module cycle.
+onConfigRequestsInvalidated((nextGeneration) => {
+  useConfigStore.setState({
+    _configRequestGeneration: nextGeneration,
+    gatewayConfigLoading: false,
+  });
 });
 
 // Debug helper: re-enter SetupWizard from browser console.

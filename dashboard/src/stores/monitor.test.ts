@@ -8,8 +8,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resetMonitorReconciled, useMonitorStore } from './monitor';
+import {
+  isDeviceMonitorSource,
+  resetMonitorReconciled,
+  useMonitorStore,
+} from './monitor';
 import { useGatewayStore } from './gateway';
+import { useProductPolicyStore } from './product-policy';
 import {
   RC_MONITOR_LIST_RESPONSE,
   RC_MONITOR_TOGGLE_ENABLED,
@@ -64,6 +69,168 @@ beforeEach(() => {
   useMonitorStore.setState({ monitors: [], loading: false, loaded: false, error: null });
   installMethodRouter();
   setConnected(true);
+});
+
+function disablePeripherals() {
+  useProductPolicyStore.getState().loadFromConfig({
+    plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+      capabilities: {
+        settings: 'enabled', extensions: 'enabled', supervisor: 'enabled', peripherals: 'disabled',
+      },
+    } } } } },
+  });
+}
+
+describe('disabled peripheral monitor fail-closed gates', () => {
+  const staleDevice = {
+    ...RC_MONITOR_LIST_RESPONSE.items[0],
+    id: 'stale-device-monitor',
+    source_type: 'device',
+    target: 'dev-camera-stale',
+    enabled: true,
+    gateway_job_id: null,
+  };
+
+  beforeEach(() => {
+    disablePeripherals();
+    useMonitorStore.setState({ monitors: [staleDevice], loaded: true });
+  });
+
+  it.each([
+    ['canonical', 'device'],
+    ['legacy whitespace/case', '\tDEVICE\n'],
+    ['legacy non-breaking spaces', '\u00a0DeViCe\u00a0'],
+  ])('classifies %s source_type as a device monitor', (_label, sourceType) => {
+    expect(isDeviceMonitorSource(sourceType)).toBe(true);
+  });
+
+  it.each(['\tDEVICE\n', '\u00a0DeViCe\u00a0'])(
+    'rejects legacy device source_type %j at every mutation boundary before RPC',
+    async (sourceType) => {
+      const legacyDevice = { ...staleDevice, source_type: sourceType };
+      useMonitorStore.setState({ monitors: [legacyDevice], loaded: true });
+
+      expect(await useMonitorStore.getState().createMonitor({
+        name: 'legacy hidden camera', source_type: sourceType, target: legacyDevice.target,
+      })).toBeNull();
+      expect(await useMonitorStore.getState().toggleMonitor(legacyDevice.id, true)).toEqual({
+        ok: false,
+        error: 'peripherals-disabled',
+      });
+      await useMonitorStore.getState().updateMonitor(legacyDevice.id, { schedule: '*/5 * * * *' });
+      await useMonitorStore.getState().runMonitor(legacyDevice.id);
+      await useMonitorStore.getState().deleteMonitor(legacyDevice.id);
+
+      expect(mockRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects create/update/enable/run device entry points before any RPC', async () => {
+    expect(await useMonitorStore.getState().createMonitor({
+      name: 'hidden camera', source_type: 'device', target: 'dev-camera-stale',
+    })).toBeNull();
+    expect(await useMonitorStore.getState().toggleMonitor(staleDevice.id, true)).toEqual({
+      ok: false,
+      error: 'peripherals-disabled',
+    });
+    await useMonitorStore.getState().updateMonitor(staleDevice.id, { schedule: '*/5 * * * *' });
+    await useMonitorStore.getState().runMonitor(staleDevice.id);
+
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it('rejects unknown mutation ids while disabled but preserves known ordinary monitors', async () => {
+    for (const unknownId of ['unknown-toggle', 'unknown-update', 'unknown-run', 'unknown-delete']) {
+      if (unknownId.endsWith('toggle')) {
+        expect(await useMonitorStore.getState().toggleMonitor(unknownId, true)).toEqual({
+          ok: false,
+          error: 'peripherals-disabled',
+        });
+      } else if (unknownId.endsWith('update')) {
+        await useMonitorStore.getState().updateMonitor(unknownId, { schedule: '*/5 * * * *' });
+      } else if (unknownId.endsWith('run')) {
+        await useMonitorStore.getState().runMonitor(unknownId);
+      } else {
+        await useMonitorStore.getState().deleteMonitor(unknownId);
+      }
+    }
+    expect(mockRequest).not.toHaveBeenCalled();
+
+    const ordinary = { ...RC_MONITOR_LIST_RESPONSE.items[1], enabled: false };
+    useMonitorStore.setState({ monitors: [ordinary], loaded: true });
+    queueResponse('rc.monitor.toggle', { ...ordinary, enabled: true });
+    queueResponse('cron.add', CRON_ADD_RESPONSE);
+    queueResponse('rc.monitor.setJobId', { ok: true });
+    queueResponse('rc.monitor.list', { items: [{ ...ordinary, enabled: true }], total: 1 });
+    queueResponse('cron.list', {});
+
+    expect((await useMonitorStore.getState().toggleMonitor(ordinary.id, true)).ok).toBe(true);
+    expect(mockRequest).toHaveBeenCalledWith('rc.monitor.toggle', { id: ordinary.id, enabled: true });
+  });
+
+  it('does not reconcile or expose a stale enabled device row returned by the backend', async () => {
+    queueResponse('rc.monitor.list', { items: [staleDevice], total: 1 });
+    queueResponse('cron.list', { jobs: [] });
+    useMonitorStore.setState({ monitors: [], loaded: false });
+
+    await useMonitorStore.getState().loadMonitors();
+
+    expect(useMonitorStore.getState().monitors).toEqual([]);
+    expect(mockRequest).not.toHaveBeenCalledWith('cron.add', expect.anything());
+    expect(mockRequest).not.toHaveBeenCalledWith('rc.monitor.toggle', expect.anything());
+  });
+
+  it.each(['\tDEVICE\n', '\u00a0DeViCe\u00a0'])(
+    'does not reconcile or expose legacy source_type %j returned by the backend',
+    async (sourceType) => {
+      const legacyDevice = { ...staleDevice, source_type: sourceType };
+      queueResponse('rc.monitor.list', { items: [legacyDevice], total: 1 });
+      queueResponse('cron.list', { jobs: [] });
+      useMonitorStore.setState({ monitors: [], loaded: false });
+
+      await useMonitorStore.getState().loadMonitors();
+
+      expect(useMonitorStore.getState().monitors).toEqual([]);
+      expect(mockRequest).not.toHaveBeenCalledWith('cron.add', expect.anything());
+      expect(mockRequest).not.toHaveBeenCalledWith('rc.monitor.toggle', expect.anything());
+    },
+  );
+
+  it('does not issue ordinary monitor hydration RPCs while policy is pending', async () => {
+    useProductPolicyStore.getState().resetPending();
+    useMonitorStore.setState({ monitors: [], loaded: false });
+
+    await useMonitorStore.getState().loadMonitors();
+
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(useMonitorStore.getState().loaded).toBe(false);
+  });
+
+  it('keeps device reconciliation active for enabled-hidden peripherals', async () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled', extensions: 'enabled', supervisor: 'enabled',
+          peripherals: 'enabled-hidden',
+        },
+      } } } } },
+    });
+    const repaired = { ...staleDevice, gateway_job_id: CRON_ADD_RESPONSE.id };
+    queueResponse('rc.monitor.list',
+      { items: [staleDevice], total: 1 },
+      { items: [repaired], total: 1 });
+    queueResponse('cron.list', { jobs: [] });
+    queueResponse('cron.add', CRON_ADD_RESPONSE);
+    queueResponse('rc.monitor.setJobId', { ok: true });
+    useMonitorStore.setState({ monitors: [], loaded: false });
+
+    await useMonitorStore.getState().loadMonitors();
+
+    expect(mockRequest).toHaveBeenCalledWith('cron.add', expect.objectContaining({
+      sessionKey: `cron:rc-monitor:${staleDevice.id}`,
+    }));
+    expect(useMonitorStore.getState().monitors).toEqual([repaired]);
+  });
 });
 
 // ── loadMonitors ─────────────────────────────────────────────────────────

@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { GatewayClient, type CloseInfo, type GapInfo } from '../gateway/client';
-import { useConfigStore } from './config';
 import { RC_VERSION } from '../version';
 import type { ConnectionState, HelloOk, EventFrame, SessionDefaults } from '../gateway/types';
 import { classifyChatTerminalLifecycle } from '../utils/session-run-state';
@@ -10,6 +9,8 @@ import {
   isCoreRecoveryProbe,
   type CoreRuntimeFailure,
 } from '../utils/core-capability';
+import { currentProductPolicy, useProductPolicyStore } from './product-policy';
+import { invalidateConfigRequests } from './config-request-authority';
 
 /** Stable per-tab instance ID for gateway deduplication (aligned with OC clientInstanceId). */
 const _instanceId = crypto.randomUUID();
@@ -82,7 +83,15 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // arrives on the new socket before hello-ok resolves is still delivered
         // to handlers registered on the previous connection. Leaving 'connected'
         // is the last moment guaranteed to precede every frame of the next one.
-        if (state !== 'connected') bumpEventEpoch();
+        if (state !== 'connected') {
+          bumpEventEpoch();
+          // The policy belongs to this transport's config.get snapshot. Close
+          // the shell synchronously at the connection-epoch boundary, before a
+          // new socket can expose the previous profile or an old request can
+          // resolve out of order.
+          useProductPolicyStore.getState().resetPending();
+          invalidateConfigRequests();
+        }
         recordRunTrace({
           source: 'gateway',
           action: 'transport-state',
@@ -93,7 +102,11 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
       },
       onRequestResult: (method, error) => {
         if (error) {
-          const failure = classifyCoreMethodFailure(method, error);
+          const policy = currentProductPolicy();
+          const failure = classifyCoreMethodFailure(method, error, Date.now(), (candidate) => (
+            candidate.startsWith('rc.periph.')
+            && policy?.capabilities.peripherals === 'disabled'
+          ));
           if (failure) set({ coreFailure: failure });
         } else if (isCoreRecoveryProbe(method)) {
           set({ coreFailure: null });
@@ -116,12 +129,14 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         void client.request('rc.onboarding.status', {}).catch(() => {});
         // Transport recovery is not a run terminal. Keep any local projection
         // intact until sessions.list/chat.history supplies authoritative state.
-        // Reset retry counter for fresh evaluation on (re)connection
-        useConfigStore.setState({ _configRetryCount: 0 });
-        // Auto-fetch config on every (re)connection
-        useConfigStore.getState().loadGatewayConfig();
-        void import('../utils/sync-system-prompt-append').then(({ syncSystemPromptAppendToGateway }) => {
-          void syncSystemPromptAppendToGateway(useConfigStore.getState().systemPromptAppend);
+        // Dynamic import intentionally keeps gateway.ts out of a gateway ↔ config
+        // module cycle; policy/request invalidation above remains synchronous.
+        void import('./config').then(({ useConfigStore }) => {
+          useConfigStore.setState({ _configRetryCount: 0 });
+          void useConfigStore.getState().loadGatewayConfig();
+          void import('../utils/sync-system-prompt-append').then(({ syncSystemPromptAppendToGateway }) => {
+            void syncSystemPromptAppendToGateway(useConfigStore.getState().systemPromptAppend);
+          });
         });
         // GitHub version check -> notification bell when a newer release exists
         // + sync server-side update-in-progress state (survives page refresh)
@@ -294,7 +309,9 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         // guided recovery (try default, Docker restart, etc.), not gateway_unreachable
         // which only offers a blind retry button.
         if (code === 'NOT_PAIRED' || code === 'UNAUTHORIZED' || code === 'INVALID_REQUEST') {
-          useConfigStore.getState().setBootState('needs_token');
+          void import('./config').then(({ useConfigStore }) => {
+            useConfigStore.getState().setBootState('needs_token');
+          });
         }
       },
     });

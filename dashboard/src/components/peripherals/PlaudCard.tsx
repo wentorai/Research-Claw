@@ -32,7 +32,7 @@ import { useTranslation } from 'react-i18next';
 import { getThemeTokens } from '../../styles/theme';
 import { useConfigStore } from '../../stores/config';
 import { usePeripheralsStore } from '../../stores/peripherals';
-import { useMonitorStore } from '../../stores/monitor';
+import { isDeviceMonitorSource, useMonitorStore } from '../../stores/monitor';
 import { useGatewayStore } from '../../stores/gateway';
 import { useUiStore } from '../../stores/ui';
 import DeviceMonitors from './DeviceMonitors';
@@ -122,7 +122,7 @@ export default function PlaudCard() {
   // Count of device monitors already bound to the plaud device — drives whether
   // the DeviceMonitors panel shows even before the user creates one this session.
   const plaudMonitorCount = useMonitorStore(
-    (s) => s.monitors.filter((m) => m.source_type === 'device' && m.target === PLAUD_DEVICE_ID).length,
+    (s) => s.monitors.filter((m) => isDeviceMonitorSource(m.source_type) && m.target === PLAUD_DEVICE_ID).length,
   );
   const client = useGatewayStore((s) => s.client);
   const setChatInputPrefill = useUiStore((s) => s.setChatInputPrefill);

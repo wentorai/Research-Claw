@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import QuickCommands from './QuickCommands';
 import { usePromptPresetStore, type PromptPreset } from '../../stores/prompt-presets';
+import i18n from '../../i18n';
 
 const preset: PromptPreset = {
   id: 'p1',
@@ -19,7 +20,8 @@ const preset: PromptPreset = {
 };
 
 describe('QuickCommands composition safety', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('zh-CN');
     usePromptPresetStore.setState({
       presets: [preset],
       loaded: true,

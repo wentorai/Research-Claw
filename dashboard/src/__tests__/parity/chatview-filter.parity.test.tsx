@@ -19,6 +19,7 @@ import ChatView from '../../components/chat/ChatView';
 import { useChatStore } from '../../stores/chat';
 import { useStagedWritingStore } from '../../stores/staged-writing';
 import { buildInitialStageStates } from '../../utils/staged-writing-stages';
+import { useProductPolicyStore } from '../../stores/product-policy';
 import {
   USER_MSG,
   ASSISTANT_MSG,
@@ -485,6 +486,28 @@ describe('ChatView error banner', () => {
     expect(screen.getByRole('button', { name: 'chat.openSettings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'chat.refreshHistory' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'chat.resend' })).not.toBeInTheDocument();
+  });
+
+  it('removes the dead Settings action but retains refresh when Settings is hidden', () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled-hidden', extensions: 'enabled', supervisor: 'enabled', peripherals: 'enabled',
+        },
+      } } } } },
+    });
+    useChatStore.setState({
+      lastError: 'Authentication failed',
+      lastErrorMeta: {
+        kind: 'auth', category: 'config-fixable', message: 'Authentication failed',
+        suggestion: 'Fix the API key', retryable: false, raw: 'HTTP 401',
+      },
+    });
+
+    render(<ChatView />);
+
+    expect(screen.queryByRole('button', { name: 'chat.openSettings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'chat.refreshHistory' })).toBeInTheDocument();
   });
 
   it('shows New session for context overflow instead of settings or resend', () => {

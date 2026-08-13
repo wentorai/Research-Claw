@@ -33,6 +33,7 @@ describe('Config store', () => {
       gatewayConfig: null,
       gatewayConfigLoading: false,
       _configRetryCount: 0,
+      _configRequestGeneration: 0,
     });
     vi.useFakeTimers();
   });

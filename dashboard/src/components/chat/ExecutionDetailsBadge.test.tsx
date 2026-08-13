@@ -2,8 +2,10 @@ import React from 'react';
 import { App as AntdApp } from 'antd';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../i18n';
 import ExecutionDetailsBadge from './ExecutionDetailsBadge';
 import { executionKey, useExecutionTraceStore } from '../../stores/execution-trace';
+import { useProductPolicyStore } from '../../stores/product-policy';
 
 describe('ExecutionDetailsBadge', () => {
   const loadDetail = vi.fn();
@@ -100,5 +102,39 @@ describe('ExecutionDetailsBadge', () => {
     expect(screen.getByText(/读取启用/)).toBeInTheDocument();
     expect(screen.getByText(/工作区/)).toBeInTheDocument();
     expect(screen.getByText('pass')).toBeInTheDocument();
+  });
+
+  it('hides every supervisor review label and verdict for an enabled-hidden supervisor', async () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: {
+        entries: {
+          'research-claw-core': {
+            config: {
+              productPolicy: {
+                capabilities: {
+                  settings: 'enabled', extensions: 'enabled',
+                  supervisor: 'enabled-hidden', peripherals: 'enabled',
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    useExecutionTraceStore.setState({
+      details: {
+        [executionKey('session-a', 'runA')]: {
+          runId: 'runA', tools: [], skills: [],
+          reviews: [{ reviewId: 'hidden-r', state: 'completed', verdict: 'hidden-pass', findings: [] }],
+        },
+      },
+    });
+
+    render(<AntdApp><ExecutionDetailsBadge sessionKey="session-a" runId="runA" /></AntdApp>);
+    fireEvent.click(screen.getByRole('button', { name: '调用 2 个工具，检测到 1 个 Skill' }));
+
+    expect(await screen.findByText('使用的工具')).toBeInTheDocument();
+    expect(screen.queryByText('可信审查')).not.toBeInTheDocument();
+    expect(screen.queryByText('hidden-pass')).not.toBeInTheDocument();
   });
 });

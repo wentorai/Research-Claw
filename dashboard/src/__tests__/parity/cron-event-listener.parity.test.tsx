@@ -40,6 +40,7 @@ import { useCronStore } from '../../stores/cron';
 import { useGatewayStore } from '../../stores/gateway';
 import { useMonitorStore } from '../../stores/monitor';
 import { useUiStore } from '../../stores/ui';
+import { useProductPolicyStore } from '../../stores/product-policy';
 
 type CronListener = (payload: unknown) => void;
 let cronListener: CronListener | null = null;
@@ -122,6 +123,23 @@ describe('CronEventListener — background policy delivery', () => {
       targetSessionKey: undefined,
     });
     expect(useChatStore.getState().lastErrorMeta).toBeNull();
+  });
+
+  it('keeps the failure message but strips dead Settings actions when Settings is hidden', () => {
+    useProductPolicyStore.getState().loadFromConfig({
+      plugins: { entries: { 'research-claw-core': { config: { productPolicy: {
+        capabilities: {
+          settings: 'enabled-hidden', extensions: 'enabled', supervisor: 'enabled', peripherals: 'enabled',
+        },
+      } } } } },
+    });
+    render(<CronEventListener />);
+    emit(CRON_AUTH_FIRST);
+
+    const toast = notification.error.mock.calls[0]?.[0] as { btn?: unknown };
+    expect(toast.btn).toBeUndefined();
+    expect(useUiStore.getState().notifications[0]).toMatchObject({ type: 'error' });
+    expect(useUiStore.getState().notifications[0]?.targetPanel).toBeUndefined();
   });
 
   // The run never started, so there is no session to open and nothing "failed

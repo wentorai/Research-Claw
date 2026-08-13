@@ -32,8 +32,10 @@ export function classifyCoreMethodFailure(
   method: string,
   error: GatewayErrorInfo,
   now = Date.now(),
+  intentionallyUnavailable: (method: string) => boolean = () => false,
 ): CoreRuntimeFailure | null {
   if (!isCoreMethod(method)) return null;
+  if (intentionallyUnavailable(method)) return null;
   if (error.code !== 'INVALID_REQUEST' || !/unknown method:\s*rc\./i.test(error.message)) return null;
   return { method, message: error.message, detectedAt: now };
 }

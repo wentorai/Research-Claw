@@ -3,6 +3,8 @@ import { Popover, Spin, Tag, Tooltip, Typography } from 'antd';
 import { SafetyCertificateOutlined, ToolOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { executionKey, useExecutionTraceStore } from '../../stores/execution-trace';
+import { useProductPolicyStore } from '../../stores/product-policy';
+import { shouldMountSupervisorUiHydration } from '../../utils/profile-policy';
 
 const { Text } = Typography;
 
@@ -13,6 +15,11 @@ export default function ExecutionDetailsBadge({ sessionKey, runId }: { sessionKe
   const detail = useExecutionTraceStore((state) => state.details[key]);
   const loadDetail = useExecutionTraceStore((state) => state.loadDetail);
   const [loading, setLoading] = useState(false);
+  const supervisorUiVisible = useProductPolicyStore((state) => (
+    state.status === 'ready' && state.policy
+      ? shouldMountSupervisorUiHydration(state.policy)
+      : false
+  ));
   if (!summary || (summary.toolCount === 0 && summary.skillCount === 0)) return null;
 
   const skillEvents = detail?.skillEvents ?? [];
@@ -75,16 +82,20 @@ export default function ExecutionDetailsBadge({ sessionKey, runId }: { sessionKe
           </div>
         </>
       )}
-      <Text strong>{t('executionDetails.review')}</Text>
-      <div style={{ marginTop: 6 }}>
-        {(detail.reviews?.length ?? 0) > 0
-          ? detail.reviews!.map((review) => (
-            <Tag key={review.reviewId} icon={<SafetyCertificateOutlined />}>
-              {review.verdict || review.state}
-            </Tag>
-          ))
-          : <Text type="secondary">{t('executionDetails.noLinkedReview')}</Text>}
-      </div>
+      {supervisorUiVisible && (
+        <>
+          <Text strong>{t('executionDetails.review')}</Text>
+          <div style={{ marginTop: 6 }}>
+            {(detail.reviews?.length ?? 0) > 0
+              ? detail.reviews!.map((review) => (
+                <Tag key={review.reviewId} icon={<SafetyCertificateOutlined />}>
+                  {review.verdict || review.state}
+                </Tag>
+              ))
+              : <Text type="secondary">{t('executionDetails.noLinkedReview')}</Text>}
+          </div>
+        </>
+      )}
     </div>
   ) : <div style={{ width: 180, textAlign: 'center', padding: 12 }}><Spin size="small" /></div>;
 
