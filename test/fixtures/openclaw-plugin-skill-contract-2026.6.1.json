@@ -1,0 +1,23 @@
+{
+  "source": "scripts/probe-openclaw-plugin-skill-contract.mjs against installed openclaw@2026.6.1",
+  "runtime": "real isolated Gateway, real plugin loader, real skills CLI, deterministic loopback-only configured provider",
+  "conditionalPlugin": {
+    "manifestDeclaredTools": [
+      "rc_contract_registered",
+      "rc_contract_omitted"
+    ],
+    "runtimeModelInventory": [
+      "rc_contract_registered"
+    ],
+    "registeredRpcPresent": true,
+    "omittedRpcAbsent": true,
+    "pluginStatus": "loaded"
+  },
+  "skillDiscovery": {
+    "oneLevelProfileSource": "openclaw-workspace",
+    "collisionWinner": "openclaw-workspace",
+    "groupedRecursiveObserved": true,
+    "promptSnapshotSource": "run",
+    "stableCapsuleContract": "<workspace>/skills/<one-level-managed-dir>/SKILL.md"
+  }
+}
