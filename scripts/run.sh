@@ -198,6 +198,16 @@ dbg "Using Node: $GW_NODE (v$RC_NODE_VERSION, ABI $RC_NODE_ABI)"
 dbg "Config: $OPENCLAW_CONFIG_PATH"
 export RESEARCH_CLAW_UI_VERSION="$("$GW_NODE" -p "require('./package.json').version" 2>/dev/null)"
 
+# Fail before any migration or port binding when the final Gateway runtime
+# cannot load Core's native dependency or read the user's existing database.
+if ! "$GW_NODE" ./scripts/runtime-preflight.cjs \
+    --root "$(pwd)" --config "$OPENCLAW_CONFIG_PATH" >>"$RC_RUN_LOG" 2>&1; then
+  say "✗ Research-Claw Core runtime preflight failed. Nothing was started or modified."
+  say "  Details: $RC_RUN_LOG"
+  say "  Common fix: fnm use 22 && pnpm rebuild better-sqlite3"
+  exit 78
+fi
+
 # Refuse to launch on a configuration that the exact bundled OpenClaw runtime
 # rejects. In particular, a missing or partial optional research plugin must be
 # removed by the migration above instead of becoming a fatal load path.
@@ -287,8 +297,18 @@ if command -v pnpm >/dev/null 2>&1; then
     say "✗ Extension build failed — last 20 lines (full log: $RC_RUN_LOG):"
     cat "$_BUILD_LOG" >>"$RC_RUN_LOG" 2>/dev/null || true
     tail -20 "$_BUILD_LOG"
+    rm -f "$_BUILD_LOG" 2>/dev/null || true
+    exit 78
   fi
   rm -f "$_BUILD_LOG" 2>/dev/null || true
+fi
+
+if ! "$GW_NODE" ./scripts/runtime-preflight.cjs \
+    --root "$(pwd)" --config "$OPENCLAW_CONFIG_PATH" --require-build \
+    >>"$RC_RUN_LOG" 2>&1; then
+  say "✗ Research-Claw Core build is not startable. Gateway was not launched."
+  say "  Details: $RC_RUN_LOG"
+  exit 78
 fi
 
 STOP=false
