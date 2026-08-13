@@ -5,6 +5,11 @@ import { RC_VERSION } from '../version';
 import type { ConnectionState, HelloOk, EventFrame, SessionDefaults } from '../gateway/types';
 import { classifyChatTerminalLifecycle } from '../utils/session-run-state';
 import { recordRunTrace } from '../utils/run-trace';
+import {
+  classifyCoreMethodFailure,
+  isCoreRecoveryProbe,
+  type CoreRuntimeFailure,
+} from '../utils/core-capability';
 
 /** Stable per-tab instance ID for gateway deduplication (aligned with OC clientInstanceId). */
 const _instanceId = crypto.randomUUID();
@@ -19,6 +24,7 @@ interface GatewayState {
   sessionDefaults: SessionDefaults | null;
   /** Last connection error details for UI display */
   connectError: { code: string; message: string } | null;
+  coreFailure: CoreRuntimeFailure | null;
   /**
    * Monotonic count of event-stream discontinuities: a detected sequence gap,
    * a (re)connection, or any departure from 'connected'.
@@ -44,6 +50,7 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
   connId: null,
   sessionDefaults: null,
   connectError: null,
+  coreFailure: null,
   eventEpoch: 0,
 
   connect: (url: string, token?: string) => {
@@ -84,6 +91,14 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
         });
         set({ state, ...(state === 'connected' ? { connectError: null } : {}) });
       },
+      onRequestResult: (method, error) => {
+        if (error) {
+          const failure = classifyCoreMethodFailure(method, error);
+          if (failure) set({ coreFailure: failure });
+        } else if (isCoreRecoveryProbe(method)) {
+          set({ coreFailure: null });
+        }
+      },
       onHello: (hello: HelloOk) => {
         // Belt and braces over the departure bump above: the server restarts its
         // per-connection sequence numbering and the client zeroes lastSeq, so no
@@ -96,6 +111,9 @@ export const useGatewayStore = create<GatewayState>()((set, get) => ({
           decision: hello.server?.connId ? 'runtime-identified' : 'runtime-id-missing',
         });
         get().setServerInfo(hello);
+        // Capability sentinel: transport success alone does not prove that the
+        // Research-Claw Core plugin registered its RPC surface.
+        void client.request('rc.onboarding.status', {}).catch(() => {});
         // Transport recovery is not a run terminal. Keep any local projection
         // intact until sessions.list/chat.history supplies authoritative state.
         // Reset retry counter for fresh evaluation on (re)connection

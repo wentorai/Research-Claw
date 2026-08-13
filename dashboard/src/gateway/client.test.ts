@@ -174,6 +174,34 @@ describe('GatewayClient', () => {
   });
 
   describe('Request/response correlation', () => {
+    it('reports both successful and failed method capability results', async () => {
+      const onRequestResult = vi.fn();
+      const client = new GatewayClient({
+        url: 'ws://test:28789',
+        onStateChange: () => {},
+        onRequestResult,
+      });
+      await completeHandshake(client);
+      onRequestResult.mockClear();
+
+      const okPromise = client.request('rc.onboarding.status');
+      const okFrame = JSON.parse(mockWsInstance.send.mock.calls.at(-1)?.[0]);
+      serverSend({ type: 'res', id: okFrame.id, ok: true, payload: { initialized: true } });
+      await okPromise;
+
+      const failedPromise = client.request('rc.review.candidates');
+      const failedFrame = JSON.parse(mockWsInstance.send.mock.calls.at(-1)?.[0]);
+      const failure = {
+        code: 'INVALID_REQUEST',
+        message: 'unknown method: rc.review.candidates',
+      };
+      serverSend({ type: 'res', id: failedFrame.id, ok: false, error: failure });
+      await expect(failedPromise).rejects.toThrow('unknown method');
+
+      expect(onRequestResult).toHaveBeenNthCalledWith(1, 'rc.onboarding.status');
+      expect(onRequestResult).toHaveBeenNthCalledWith(2, 'rc.review.candidates', failure);
+    });
+
     it('request resolves when server responds with matching id and ok=true', async () => {
       const client = new GatewayClient({
         url: 'ws://test:28789',

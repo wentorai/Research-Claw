@@ -1607,6 +1607,12 @@
     "downloadFailed": "Download failed — check your network connection to the gateway",
     "bindMountHint": "Tip: change your docker-compose.yml to a bind mount so you can browse workspace files from the host:"
   },
+  "coreRuntime": {
+    "title": "Research-Claw Core did not start",
+    "description": "The Gateway is connected, but Research-Claw Core failed to register. Your library, tasks, and workspace remain on this device. Stop the Gateway, run pnpm serve in the project directory, then retry.",
+    "compact": "Core capabilities are unavailable; this is not empty data. Restart the Gateway with pnpm serve in the project directory.",
+    "retry": "Retry"
+  },
   "extensions": {
     "title": "Extensions",
     "loading": "Loading extensions...",

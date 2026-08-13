@@ -1607,6 +1607,12 @@
     "downloadFailed": "下载失败 — 请检查与网关的网络连接",
     "bindMountHint": "提示：在 docker-compose.yml 中改为 bind mount，即可直接用文件管理器浏览工作区："
   },
+  "coreRuntime": {
+    "title": "科研龙虾核心服务未启动",
+    "description": "当前 Gateway 可以连接，但 Research-Claw Core 没有注册成功。文献、任务和工作区数据仍保存在本机；请停止 Gateway，在项目目录运行 pnpm serve，然后重试。",
+    "compact": "核心能力不可用；这里不是空数据。请在项目目录运行 pnpm serve 重启 Gateway。",
+    "retry": "重试"
+  },
   "extensions": {
     "title": "扩展",
     "loading": "加载扩展中...",

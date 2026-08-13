@@ -34,6 +34,7 @@ import { useExecutionTraceStore } from './stores/execution-trace';
 import { isInternalSessionNamingKey, normalizeSessionKey } from './utils/session-key';
 import { resolveObservedRunActivity } from './utils/run-status-presentation';
 import { autoNameSessionKeyForEvent } from './utils/session-auto-name-event';
+import CoreRuntimeAlert from './components/CoreRuntimeAlert';
 
 /** Derive WebSocket URL from page origin so Docker port mapping always works.
  *  When served by the gateway (port 28789), origin already points to gateway.
@@ -663,6 +664,7 @@ export default function App() {
             flexDirection: 'column',
           }}
         >
+          <CoreRuntimeAlert compact />
           <ErrorBoundary>
             <Suspense fallback={<Spin style={{ margin: 'auto', display: 'block', paddingTop: '40vh' }} />}>
               <div className="chat-view-host">

@@ -55,6 +55,7 @@ export interface GatewayClientOptions {
   onStateChange?: (state: ConnectionState) => void;
   onGap?: (info: GapInfo) => void;
   onConnectError?: (code: string, message: string) => void;
+  onRequestResult?: (method: string, error?: GatewayErrorInfo) => void;
 }
 
 interface PendingRequest {
@@ -600,10 +601,13 @@ export class GatewayClient {
 
     if (frame.ok) {
       console.debug(`[GatewayClient] ← ${entry.method} OK`);
+      this.opts.onRequestResult?.(entry.method);
       entry.resolve(frame.payload);
     } else {
       console.warn(`[GatewayClient] ← ${frame.id.slice(0, 8)} ERR`, frame.error);
-      entry.reject(new GatewayRequestError(frame.error ?? { code: 'UNKNOWN', message: 'Unknown error' }));
+      const error = frame.error ?? { code: 'UNKNOWN', message: 'Unknown error' };
+      this.opts.onRequestResult?.(entry.method, error);
+      entry.reject(new GatewayRequestError(error));
     }
   }
 

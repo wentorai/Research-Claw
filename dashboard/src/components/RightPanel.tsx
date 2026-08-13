@@ -9,6 +9,8 @@ import {
 } from '../stores/ui';
 import { isHorizontalPlacement } from '../utils/config-panel-layout';
 import ConfigPanelDockPicker from './ConfigPanelDockPicker';
+import CoreRuntimeAlert from './CoreRuntimeAlert';
+import { useGatewayStore } from '../stores/gateway';
 
 const { Text } = Typography;
 
@@ -60,6 +62,10 @@ function PanelContent({ tab }: { tab: PanelTab }) {
       return <SettingsPanel />;
   }
 }
+
+const CORE_DEPENDENT_TABS = new Set<PanelTab>([
+  'library', 'workspace', 'review', 'tasks', 'jobs', 'monitor', 'peripherals', 'supervisor',
+]);
 
 function PlacementPicker() {
   const { t } = useTranslation();
@@ -171,6 +177,7 @@ export default function RightPanel() {
   const { t } = useTranslation();
   const tab = useUiStore((s) => s.rightPanelTab);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const coreFailure = useGatewayStore((s) => s.coreFailure);
 
   return (
     <div
@@ -212,7 +219,9 @@ export default function RightPanel() {
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <Suspense
+        {coreFailure && CORE_DEPENDENT_TABS.has(tab) ? (
+          <CoreRuntimeAlert />
+        ) : <Suspense
           fallback={
             <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 40 }}>
               <Spin />
@@ -220,7 +229,7 @@ export default function RightPanel() {
           }
         >
           <PanelContent tab={tab} />
-        </Suspense>
+        </Suspense>}
       </div>
     </div>
   );
