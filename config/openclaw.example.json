@@ -34,6 +34,7 @@
     "defaults": {
       "workspace": "./workspace",
       "skipBootstrap": true,
+      "bootstrapMaxChars": 30000,
       "timeoutSeconds": 3600,
       "compaction": {
         "mode": "safeguard",

@@ -18,6 +18,7 @@
  *   6. channels.discord.botToken → token (fix stale example config key)
  *  10. agents.defaults.sandbox.mode = "off" (RC has no Docker sandbox)
  * 10b. agents.defaults.timeoutSeconds — migrate legacy 300s cap to template value
+ * 10c. agents.defaults.bootstrapMaxChars — migrate OC's 20K default to RC's 30K
  *  14. plugins.installs — provenance records for loaded plugins
  *  15. dangerouslyDisableDeviceAuth — remove (unnecessary on loopback)
  *  16. OC 2026.6.1 — legacy model APIs, bundledDiscovery, telegram streaming, DMS hooks
@@ -568,6 +569,18 @@ function ensureConfig(filePath) {
     || configuredTimeoutSeconds > RC_AGENT_RUN_TIMEOUT_SECONDS
   ) {
     c.agents.defaults.timeoutSeconds = RC_AGENT_RUN_TIMEOUT_SECONDS;
+    changed = true;
+  }
+
+  // 10c. RC's canonical AGENTS contract is intentionally richer than vanilla
+  //      OpenClaw's 20K per-file default. Migrate only absence/the exact legacy
+  //      value so an operator's explicit smaller or larger budget is preserved.
+  const configuredBootstrapMaxChars = c.agents.defaults.bootstrapMaxChars;
+  if (
+    configuredBootstrapMaxChars === undefined
+    || configuredBootstrapMaxChars === 20_000
+  ) {
+    c.agents.defaults.bootstrapMaxChars = 30_000;
     changed = true;
   }
 
