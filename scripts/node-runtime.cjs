@@ -5,9 +5,7 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-
-const REQUIRED_MAJOR = 22;
-const REQUIRED_MINOR = 16;
+const { evaluateRuntime } = require('./runtime-contract.cjs');
 
 function inspectNode(candidate) {
   if (!candidate || !fs.existsSync(candidate)) return null;
@@ -17,12 +15,12 @@ function inspectNode(candidate) {
       'JSON.stringify({version:process.versions.node,modules:process.versions.modules})',
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     const parsed = JSON.parse(raw);
-    const [major, minor] = String(parsed.version).split('.').map(Number);
+    const contract = evaluateRuntime({ node: parsed.version, modules: parsed.modules });
     return {
       path: fs.realpathSync(candidate),
       version: String(parsed.version),
       modules: String(parsed.modules),
-      compatible: major === REQUIRED_MAJOR && minor >= REQUIRED_MINOR,
+      compatible: contract.compatible,
     };
   } catch {
     return null;
@@ -86,7 +84,7 @@ function shellQuote(value) {
 
 function failNoRuntime() {
   process.stderr.write(
-    '[runtime] Research-Claw requires Node 22.16+ within the Node 22 line.\n'
+    '[runtime] Research-Claw requires Node 22.16+ within the Node 22 line (ABI 127).\n'
     + '[runtime] Install it with: fnm install 22 && fnm use 22 && fnm default 22\n',
   );
   process.exit(78);

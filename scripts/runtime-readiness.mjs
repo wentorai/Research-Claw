@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 export const CORE_PROBES = Object.freeze([
@@ -13,7 +13,7 @@ export const CORE_PROBES = Object.freeze([
   ['rc.review.candidates', { root: 'sources' }],
   ['rc.periph.devices.list', {}],
   ['rc.job.list', { limit: 1 }],
-  ['rc.supervisor.reviews.list', { limit: 1 }],
+  ['rc.supervisor.reviews.list', { limit: 1 }, 'dual-model-supervisor'],
 ]);
 
 export function extractJson(raw) {
@@ -23,13 +23,13 @@ export function extractJson(raw) {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-export function evaluateGatewayHealth(health) {
+export function evaluateGatewayHealth(health, requiredPluginIds = ['research-claw-core']) {
   if (!health?.ok) return { ok: false, reason: 'OpenClaw health response is not ok' };
-  const coreError = health?.plugins?.errors?.find?.((entry) => entry?.id === 'research-claw-core');
+  const coreError = health?.plugins?.errors?.find?.((entry) => requiredPluginIds.includes(entry?.id));
   if (coreError) {
     return {
       ok: false,
-      reason: `research-claw-core ${coreError.failurePhase || 'activation'} failed: ${coreError.error || 'unknown error'}`,
+      reason: `${coreError.id} ${coreError.failurePhase || 'activation'} failed: ${coreError.error || 'unknown error'}`,
     };
   }
   return { ok: true };
@@ -43,36 +43,38 @@ function flag(args, name, fallback = '') {
 export async function runReadiness(options) {
   const { root, configPath, port, token, timeout } = options;
   const entry = path.join(root, 'node_modules', 'openclaw', 'dist', 'entry.js');
-  const call = (method, params = {}) => {
-    const raw = execFileSync(process.execPath, [
-      entry, 'gateway', 'call', method,
-      '--url', `ws://127.0.0.1:${port}`,
-      '--token', token,
-      '--params', JSON.stringify(params),
-      '--timeout', String(timeout),
-      '--json',
-    ], {
-      cwd: root,
-      env: { ...process.env, OPENCLAW_CONFIG_PATH: configPath },
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return extractJson(raw);
-  };
-
   const report = { ok: false, port, core: null, probes: [] };
+  let socket;
+  let config = {};
+  try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+  const pluginEnabled = (id) => config?.plugins?.entries?.[id]?.enabled === true;
+  const requiredPluginIds = [
+    'research-claw-core',
+    ...CORE_PROBES.flatMap(([, , plugin]) => plugin && pluginEnabled(plugin) ? [plugin] : []),
+  ];
   try {
-    const health = call('health');
-    report.core = evaluateGatewayHealth(health);
-    if (!report.core.ok) return report;
+    const requireFromOpenClaw = createRequire(fs.realpathSync(entry));
+    const WebSocket = requireFromOpenClaw('ws');
+    socket = await openReadinessSocket({ WebSocket, port, token, timeout });
+    const health = await socket.call('health');
+    report.core = evaluateGatewayHealth(health, requiredPluginIds);
+    if (!report.core.ok) {
+      socket.close();
+      return report;
+    }
   } catch (error) {
+    socket?.close();
     report.core = { ok: false, reason: error instanceof Error ? error.message : String(error) };
     return report;
   }
 
-  for (const [method, params] of CORE_PROBES) {
+  for (const [method, params, plugin] of CORE_PROBES) {
+    if (plugin && !pluginEnabled(plugin)) {
+      report.probes.push({ method, ok: true, skipped: true, reason: `${plugin} is disabled` });
+      continue;
+    }
     try {
-      call(method, params);
+      await socket.call(method, params);
       report.probes.push({ method, ok: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -80,7 +82,82 @@ export async function runReadiness(options) {
     }
   }
   report.ok = report.core.ok && report.probes.every((probe) => probe.ok);
+  socket.close();
   return report;
+}
+
+async function openReadinessSocket({ WebSocket, port, token, timeout }) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const queued = [];
+  const waiters = [];
+  let sequence = 0;
+
+  const dispatch = (frame) => {
+    const index = waiters.findIndex((waiter) => waiter.predicate(frame));
+    if (index >= 0) {
+      const [waiter] = waiters.splice(index, 1);
+      clearTimeout(waiter.timer);
+      waiter.resolve(frame);
+    } else queued.push(frame);
+  };
+  ws.on('message', (data) => {
+    try { dispatch(JSON.parse(data.toString('utf8'))); } catch {}
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Gateway WebSocket open timed out')), timeout);
+    ws.once('open', () => { clearTimeout(timer); resolve(); });
+    ws.once('error', (error) => { clearTimeout(timer); reject(error); });
+  });
+
+  const waitFor = (predicate) => {
+    const queuedIndex = queued.findIndex(predicate);
+    if (queuedIndex >= 0) return Promise.resolve(queued.splice(queuedIndex, 1)[0]);
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        predicate,
+        resolve,
+        timer: setTimeout(() => {
+          const index = waiters.indexOf(waiter);
+          if (index >= 0) waiters.splice(index, 1);
+          reject(new Error('Gateway response timed out'));
+        }, timeout),
+      };
+      waiters.push(waiter);
+    });
+  };
+  await waitFor((frame) => frame.type === 'event' && frame.event === 'connect.challenge');
+
+  const request = async (method, params = {}) => {
+    const id = `readiness-${++sequence}`;
+    ws.send(JSON.stringify({ type: 'req', id, method, params }));
+    const response = await waitFor((frame) => frame.type === 'res' && frame.id === id);
+    if (!response.ok) {
+      throw new Error(`${method}: ${response.error?.message || JSON.stringify(response.error)}`);
+    }
+    return response.payload;
+  };
+  await request('connect', {
+    minProtocol: 4,
+    maxProtocol: 4,
+    client: {
+      id: 'gateway-client',
+      version: 'research-claw-readiness',
+      platform: 'node',
+      mode: 'backend',
+      displayName: 'Research-Claw readiness',
+    },
+    caps: [],
+    role: 'operator',
+    // Plugin RPCs are currently classified by OpenClaw as custom admin
+    // methods even when the individual probe is read-only.
+    scopes: ['operator.admin'],
+    auth: token ? { token } : {},
+  });
+
+  return {
+    call: request,
+    close: () => ws.close(1000, 'readiness complete'),
+  };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

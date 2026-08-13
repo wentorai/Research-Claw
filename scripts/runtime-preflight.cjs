@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { evaluateRuntime } = require('./runtime-contract.cjs');
 
 function expandHome(value) {
   if (typeof value !== 'string') return '';
@@ -31,6 +32,14 @@ function parseArgs(argv) {
 }
 
 const options = parseArgs(process.argv.slice(2));
+const runtime = evaluateRuntime(process.versions);
+if (!runtime.compatible) {
+  fail(
+    'NODE_RUNTIME_UNSUPPORTED',
+    `running Node ${runtime.version || 'unknown'} (ABI ${runtime.modules || 'unknown'}); expected ${runtime.expected}`,
+    'Start Research-Claw with pnpm serve so the pinned runtime resolver is applied.',
+  );
+}
 const coreRoot = path.join(options.root, 'extensions', 'research-claw-core');
 const sourceEntry = path.join(coreRoot, 'index.ts');
 const buildEntry = path.join(coreRoot, 'dist', 'index.js');

@@ -25,6 +25,17 @@ describe('Research-Claw runtime readiness', () => {
     });
   });
 
+  it('also rejects an enabled optional service that failed registration', () => {
+    const health = {
+      ok: true,
+      plugins: { errors: [{ id: 'dual-model-supervisor', error: 'register failed' }] },
+    };
+    expect(evaluateGatewayHealth(health).ok).toBe(true);
+    expect(evaluateGatewayHealth(health, [
+      'research-claw-core', 'dual-model-supervisor',
+    ]).ok).toBe(false);
+  });
+
   it('probes every product surface affected by the incident using read-only methods', () => {
     expect(CORE_PROBES.map(([method]) => method)).toEqual(expect.arrayContaining([
       'rc.lit.list', 'rc.ws.tree', 'rc.task.list', 'rc.monitor.list',

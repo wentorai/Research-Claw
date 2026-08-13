@@ -4,10 +4,25 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+const { evaluateRuntime } = require('../scripts/runtime-contract.cjs') as {
+  evaluateRuntime: (versions: { node: string; modules: string }) => {
+    compatible: boolean;
+    expected: string;
+  };
+};
+
 const ROOT = path.resolve(__dirname, '..');
 const RESOLVER = path.join(ROOT, 'scripts', 'node-runtime.cjs');
 
 describe('Research-Claw Node runtime contract', () => {
+  it('rejects runtime drift even when a native module happens to load there', () => {
+    expect(evaluateRuntime({ node: '22.22.2', modules: '127' }).compatible).toBe(true);
+    expect(evaluateRuntime({ node: '22.15.1', modules: '127' }).compatible).toBe(false);
+    expect(evaluateRuntime({ node: '24.5.0', modules: '137' }).compatible).toBe(false);
+    expect(evaluateRuntime({ node: '22.22.2', modules: '137' }).compatible).toBe(false);
+    expect(evaluateRuntime({ node: '24.5.0', modules: '137' }).expected).toContain('ABI 127');
+  });
+
   it('resolves one Node 22 runtime with a stable native-module ABI', () => {
     const runtime = JSON.parse(execFileSync(process.execPath, [RESOLVER, 'resolve'], {
       encoding: 'utf8',

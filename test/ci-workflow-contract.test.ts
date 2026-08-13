@@ -85,6 +85,10 @@ describe('GitHub Actions release gate contract', () => {
           run: 'pnpm build',
         },
         {
+          name: 'Verify runtime contract',
+          run: 'pnpm verify:runtime',
+        },
+        {
           name: 'Test',
           run: 'pnpm test',
         },
@@ -193,6 +197,12 @@ describe('GitHub Actions release gate contract', () => {
     expect(
       unitSteps.some((step) => step.run?.trim() === 'pnpm build'),
     ).toBe(true);
+    const runtimeGate = unitSteps.filter(
+      (step) => step.run?.trim() === 'pnpm verify:runtime',
+    );
+    expect(runtimeGate).toHaveLength(1);
+    expect(runtimeGate[0]?.if).toBeUndefined();
+    expect(runtimeGate[0]?.['continue-on-error']).toBeUndefined();
     for (const steps of [unitSteps, e2eSteps]) {
       const setupNodeSteps = steps.filter((step) =>
         step.uses?.startsWith('actions/setup-node@'),

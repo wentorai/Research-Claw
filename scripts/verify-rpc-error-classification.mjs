@@ -8,6 +8,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { runReadiness } from './runtime-readiness.mjs';
 
 const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const entryPath = path.join(projectRoot, 'node_modules', 'openclaw', 'dist', 'entry.js');
@@ -111,6 +112,7 @@ async function writeConfig() {
         entries: {
           'research-claw-core': {
             enabled: true,
+            hooks: { allowConversationAccess: true },
             config: {
               dbPath: databasePath,
               autoTrackGit: false,
@@ -329,6 +331,16 @@ async function main() {
   tempRoot = await mkdtemp(path.join(os.tmpdir(), 'rc-rpc-error-'));
   await writeConfig();
   await startGateway();
+  const readiness = await runReadiness({
+    root: projectRoot,
+    configPath: path.join(tempRoot, 'state', 'openclaw.json'),
+    port: gatewayPort,
+    token: gatewayToken,
+    timeout: 5_000,
+  });
+  if (!readiness.ok) {
+    throw new Error(`Core capability readiness failed: ${JSON.stringify(readiness)}`);
+  }
   await connectRpcSocket();
 
   const domainResponse = await gatewayCallExpectError('rc.lit.get', {
@@ -366,6 +378,10 @@ async function main() {
   }
 
   console.log(JSON.stringify({
+    readiness: {
+      core: readiness.core,
+      probes: readiness.probes.map(({ method, ok }) => ({ method, ok })),
+    },
     domain: { code: '-32001', level: 'warn' },
     codedError: { code: '-32002', level: 'debug', secretLeaked: false },
     unexpected: { code: 'PLUGIN_ERROR', level: 'error', stack: true },
