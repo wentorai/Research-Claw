@@ -41,15 +41,18 @@ else
   echo "[WARN] Dashboard UI not responding (gateway may still be starting)"
 fi
 
-# Listener process cwd should be within the project root.
-# Note: config files are read at startup and closed, so they won't appear as
-# open file descriptors in lsof -p output.  Check cwd instead.
+# Listener process ownership. macOS `lsof -p PID -d cwd` still emits rows for
+# every process unless `-a` intersects the selectors, so omitting `-a` can pick
+# an unrelated `/` cwd and falsely accuse the healthy listener. Prefer the
+# exact cwd, then accept the exact RC config file as corroborating evidence.
 if command -v lsof &>/dev/null; then
   PID="$(lsof -tiTCP:${PORT} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
   if [ -n "${PID:-}" ]; then
-    PROC_CWD="$(lsof -p "$PID" -d cwd -Fn 2>/dev/null | grep '^n' | head -n 1 | cut -c2- || true)"
+    PROC_CWD="$(lsof -a -p "$PID" -d cwd -Fn 2>/dev/null | grep '^n' | head -n 1 | cut -c2- || true)"
     if [ -n "$PROC_CWD" ] && [[ "$PROC_CWD" == "$ROOT"* ]]; then
       echo "[OK] Listener pid $PID cwd is within project root"
+    elif lsof -a -p "$PID" -Fn 2>/dev/null | grep -Fxq "n$CONFIG_PATH"; then
+      echo "[OK] Listener pid $PID has the Research-Claw config open"
     else
       echo "[WARN] Listener pid $PID cwd \"$PROC_CWD\" is outside project root $ROOT"
       echo "       This often means the wrong gateway process is bound to $PORT."

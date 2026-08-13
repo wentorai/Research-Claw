@@ -1,12 +1,66 @@
 ---
 doc: engineering/troubleshooting.md
 audience: RC 开发者、支持人员与排障 agent
-status: 现行 · 2026-07-31
+status: 现行 · 2026-08-13
 source-of-truth: 运行时实测、浏览器原生控件 A/B 与供应商公开资料
-baseline: Research-Claw v0.8.1 · OpenClaw 2026.6.1
+baseline: Research-Claw v0.8.2 · OpenClaw 2026.6.1
 ---
 
 # Research-Claw 故障排查
+
+## Dashboard 可连接，但文献/工作区/任务等同时为空或一直加载
+
+### 先判定，不先迁移或清空数据
+
+这组症状通常不是多套业务数据同时消失，而是 Gateway 进程存活、Dashboard 也能建立
+WebSocket，但 `research-claw-core` 没有注册成功。典型伴随错误是
+`unknown method: rc.review.candidates`。若文献、工作区、任务、监控、外设、作业同时
+异常，必须先把它作为一个 **Core runtime 故障** 排查，不能逐个模块修复，更不能删除
+SQLite、工作区或所谓“悬空数据”。
+
+标准判定顺序：
+
+1. 在实际项目目录运行 `pnpm health`。只有 HTTP、监听进程归属、Core 注册和全部启用
+   服务的能力探针都通过，才算 healthy；`/healthz` 单独成功不构成验收。
+2. 查看启动首屏。运行时必须为 Node 22.16+ 且 ABI 127；通过 `pnpm serve` 启动，
+   不直接调用 `node ...openclaw...`。
+3. 查看 `~/.research-claw/logs/run-latest.log`。`NODE_RUNTIME_UNSUPPORTED`、
+   `NATIVE_ABI_MISMATCH`、`CORE_BUILD_MISSING` 会在业务服务启动前以退出码 78
+   fail closed。
+4. 在备份后只读核对 `~/.research-claw/library.db` 和配置中的 workspace 路径；记录
+   关键表数量和工作区文件数，修复后使用相同口径复核。
+
+### v0.8.1 / v0.8.2 同时出现的判读
+
+一个打开很久的 Chrome 标签页可以继续运行旧 Dashboard bundle；与此同时端口上的
+Gateway 已经来自新 checkout。于是浏览器角标、启动日志、Git HEAD 会给出不同版本。
+这不是三个可互换的“本地版本”，而是三个不同身份层：
+
+- **源码身份**：当前 checkout 的 `package.json` 与 Git commit；
+- **服务身份**：真正占用 28789 的进程、cwd/打开的 config、Node/ABI、Core readiness；
+- **页面身份**：当前标签页加载 bundle 时嵌入的 `RC_VERSION`。
+
+Gateway 会拒绝版本不匹配的 Dashboard。看到提示后刷新该标签页，底部版本与连接状态
+应恢复一致。不要用另一个目录中的 `git status` 或一个未刷新的页面角标推断当前服务
+来源。`pnpm health` 会核对端口监听进程是否属于当前项目目录。
+
+### 恢复、验收与回滚 SOP
+
+1. 停止旧 Gateway，并确认 28789 没有其他监听者。
+2. 对 SQLite 使用一致性备份（`sqlite3 DB ".backup 'BACKUP'"`），复制实际
+   `config/openclaw.json`；记录 SQLite `PRAGMA integrity_check`、关键业务数量、workspace
+   路径/文件数/Git HEAD。备份放在工作区之外。
+3. 在目标 checkout 运行 `pnpm build && pnpm serve`。不要在 Node 24 下直接启动。
+4. 运行 `pnpm health`；八个代表性 RPC 中，未启用的可选服务会明确 skipped，已启用
+   服务缺 RPC 或有注册错误则失败。
+5. 刷新现有 Dashboard 标签页，确认页脚版本、已连接状态，以及文献、工作区、论文
+   评审、任务、监控、外设和可信审查均不是伪空状态；聊天向上滚动后应保持位置。
+6. 用与第 2 步相同口径复核数据。若 DB 完整性或数量异常，先停止 Gateway，再从备份
+   恢复；不要在服务打开 WAL 时直接覆盖数据库主文件。
+
+风险控制：启动会运行 schema migration、作业协调和插件 sidecar，因此真实验收前必须
+备份；能力探针仅使用 read-only RPC，不提交任务、不修改文献、不清理悬空引用。若只
+想验证构建/native 契约而不启动服务，运行 `pnpm verify:runtime`。
 
 ## ToDesk 远控时，Chrome 中的搜狗拼音候选异常
 
