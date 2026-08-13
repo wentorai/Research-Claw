@@ -72,7 +72,12 @@ const RC_TOOL_SEARCH_DEFAULT = false;
 // shorten this ceiling as a failover optimisation. The real-script regression
 // contract lives in test/ensure-config-agent-timeout.test.ts.
 const RC_AGENT_RUN_TIMEOUT_SECONDS = (() => {
-  const templatePath = path.join(__dirname, '../config/openclaw.example.json');
+  // Docker mounts /app/config as a persistent volume, which hides the copy
+  // shipped in that directory. The entrypoint therefore points this migration
+  // at the immutable template under /defaults; native installs keep using the
+  // repository template by default.
+  const templatePath = process.env.RC_CONFIG_TEMPLATE_PATH
+    || path.join(__dirname, '../config/openclaw.example.json');
   const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
   const value = template?.agents?.defaults?.timeoutSeconds;
   if (!Number.isFinite(value) || value <= 0) {
