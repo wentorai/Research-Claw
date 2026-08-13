@@ -515,6 +515,13 @@ export default function ChatView() {
         aria-live="polite"
         className="chat-view-messages"
       >
+        {/* Overlay sibling: mounting this must never change chat-scroll's
+            scrollHeight or trigger browser scroll anchoring. */}
+        {!isNearBottom && stickyUserMessage && (
+          <div className="chat-context-sticky">
+            <MessageBubble message={stickyUserMessage} />
+          </div>
+        )}
         <div
           ref={scrollRef}
           className="chat-scroll"
@@ -567,13 +574,6 @@ export default function ChatView() {
                   );
                 })}
               </div>
-            </div>
-          )}
-
-          {/* Only one sticky copy: the last user input shown as a context anchor. */}
-          {!isNearBottom && stickyUserMessage && (
-            <div className="chat-context-sticky">
-              <MessageBubble message={stickyUserMessage} />
             </div>
           )}
 

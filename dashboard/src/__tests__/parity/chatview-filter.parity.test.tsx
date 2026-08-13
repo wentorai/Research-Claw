@@ -568,4 +568,24 @@ describe('ChatView follow-tail interaction parity', () => {
     expect(programmaticWrites).toBe(0);
     expect(scrollTop).toBe(760);
   });
+
+  it('renders sticky context outside the scroll content tree', async () => {
+    useChatStore.setState({ messages: [USER_MSG], streaming: false });
+    const { container } = render(<ChatView />);
+    const scroll = container.querySelector('.chat-scroll') as HTMLDivElement;
+    Object.defineProperties(scroll, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: 200, writable: true },
+    });
+
+    fireEvent.scroll(scroll);
+
+    await waitFor(() => {
+      expect(container.querySelector('.chat-context-sticky')).not.toBeNull();
+    });
+    const sticky = container.querySelector('.chat-context-sticky')!;
+    expect(scroll.contains(sticky)).toBe(false);
+    expect(sticky.parentElement).toBe(scroll.parentElement);
+  });
 });
