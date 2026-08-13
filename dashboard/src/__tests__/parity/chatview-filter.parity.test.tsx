@@ -13,7 +13,7 @@
  * not hand-crafted mock data.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import ChatView from '../../components/chat/ChatView';
 import { useChatStore } from '../../stores/chat';
@@ -525,5 +525,47 @@ describe('ChatView error banner', () => {
 
     expect(screen.getByRole('button', { name: 'chat.continueRun' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'chat.resend' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ChatView follow-tail interaction parity', () => {
+  it('honors a small upward wheel gesture before the near-bottom threshold is crossed', async () => {
+    useChatStore.setState({
+      messages: MIXED_HISTORY,
+      streaming: true,
+      streamText: 'first streaming delta',
+    });
+    const { container } = render(<ChatView />);
+    const scroll = container.querySelector('.chat-scroll') as HTMLDivElement;
+    let scrollTop = 800;
+    let programmaticWrites = 0;
+    Object.defineProperties(scroll, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+          programmaticWrites += 1;
+        },
+      },
+    });
+
+    // Let the initial follow-tail frame settle, then measure only writes caused
+    // by later real gateway deltas.
+    await waitFor(() => expect(programmaticWrites).toBeGreaterThan(0));
+    programmaticWrites = 0;
+    scrollTop = 760; // only 40 px from the old bottom: still inside threshold
+    fireEvent.wheel(scroll, { deltaY: -40 });
+    fireEvent.scroll(scroll);
+
+    await act(async () => {
+      useChatStore.setState({ streamText: 'second real gateway delta' });
+    });
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(programmaticWrites).toBe(0);
+    expect(scrollTop).toBe(760);
   });
 });

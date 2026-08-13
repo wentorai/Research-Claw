@@ -153,12 +153,12 @@ export default function ChatView() {
   // Filter messages for display:
   // 1. Only show 'user' and 'assistant' roles (skip toolResult, etc.)
   // 2. Skip assistant messages with no visible text (tool-call-only turns)
-  const messages = rawMessages.filter((m) => {
+  const messages = useMemo(() => rawMessages.filter((m) => {
     if (m.role === 'user') return true;
     if (m.role === 'system') return true; // Slash command results
     if (m.role !== 'assistant') return false;
     return extractVisibleText(m).trim().length > 0 || hasImageContent(m);
-  });
+  }), [rawMessages]);
   const streaming = useChatStore((s) => s.streaming);
   const compacting = useChatStore((s) => s.compacting);
   const streamText = useChatStore((s) => s.streamText);
@@ -237,6 +237,10 @@ export default function ChatView() {
 
   // Smart scroll state — refs to avoid re-renders on every scroll event
   const userNearBottomRef = useRef(true);
+  // Follow-tail is user intent, not a derived synonym for "near bottom".
+  // A small upward wheel/touch gesture must stop auto-scroll immediately,
+  // before the scroll event has crossed NEAR_BOTTOM_THRESHOLD.
+  const followTailRef = useRef(true);
   const [newMessagesBelow, setNewMessagesBelow] = useState(false);
   // rAF deduplication: batch rapid streaming deltas into one scroll per frame.
   // Matches OC pattern: openclaw/ui/src/ui/app-scroll.ts:19-21
@@ -282,6 +286,32 @@ export default function ChatView() {
     .reverse();
   const [openActivityId, setOpenActivityId] = useState<string | null>(null);
 
+  const stopFollowingTail = useCallback(() => {
+    followTailRef.current = false;
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+  }, []);
+
+  const handleWheelCapture = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < 0) stopFollowingTail();
+  }, [stopFollowingTail]);
+
+  const touchYRef = useRef<number | null>(null);
+  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    touchYRef.current = e.touches[0]?.clientY ?? null;
+  }, []);
+  const handleTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    const nextY = e.touches[0]?.clientY ?? null;
+    const previousY = touchYRef.current;
+    touchYRef.current = nextY;
+    // Finger moving down means the scroll container is moving upward.
+    if (nextY !== null && previousY !== null && nextY > previousY) {
+      stopFollowingTail();
+    }
+  }, [stopFollowingTail]);
+
   // Scroll event handler — tracks whether user is near bottom
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -291,6 +321,7 @@ export default function ChatView() {
     userNearBottomRef.current = nextNearBottom;
     if (prevNearBottom !== nextNearBottom) setIsNearBottom(nextNearBottom);
     if (nextNearBottom) setNewMessagesBelow(false);
+    if (!nextNearBottom) followTailRef.current = false;
 
     // Update sticky context when user scrolls away from the bottom.
     if (nextNearBottom) {
@@ -375,6 +406,7 @@ export default function ChatView() {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
     userNearBottomRef.current = true;
+    followTailRef.current = true;
     setIsNearBottom(true);
     stickyUserIndexRef.current = null;
     setStickyUserMessage(null);
@@ -392,7 +424,7 @@ export default function ChatView() {
     }
     scrollFrameRef.current = requestAnimationFrame(() => {
       scrollFrameRef.current = null;
-      if (scrollRef.current && userNearBottomRef.current) {
+      if (scrollRef.current && followTailRef.current && userNearBottomRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       } else if (streaming) {
         setNewMessagesBelow(true);
@@ -414,6 +446,7 @@ export default function ChatView() {
     if (messages.length === 0) {
       userElRefs.current = {};
       userNearBottomRef.current = true;
+      followTailRef.current = true;
       setIsNearBottom(true);
       stickyUserIndexRef.current = null;
       setStickyUserMessage(null);
@@ -486,6 +519,9 @@ export default function ChatView() {
           ref={scrollRef}
           className="chat-scroll"
           onScroll={handleScroll}
+          onWheelCapture={handleWheelCapture}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
           onMouseDown={handleContainerMouseDown}
           onClick={handleContainerClick}
         >
