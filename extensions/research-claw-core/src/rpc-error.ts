@@ -22,8 +22,8 @@ export interface RpcErrorOutcome {
   code: string;
   /** Human-readable message, with sensitive credential text redacted. */
   message: string;
-  /** Log severity: 'error' for unexpected bugs (with stack), 'warn' for classified domain errors. */
-  level: 'warn' | 'error';
+  /** Log severity: debug for recoverable control flow, warn for other domain errors, error for bugs. */
+  level: 'debug' | 'warn' | 'error';
   /** Fully-formatted log line — includes stack for unexpected errors, never param values. */
   line: string;
 }
@@ -99,6 +99,20 @@ export function buildRpcErrorOutcome(
   const domainCode = extractCode(err);
   const message = redactSensitiveText(extractMessage(err));
   const keysLabel = paramKeys.length > 0 ? paramKeys.join(', ') : '(none)';
+
+  // A workspace image/reference can be temporarily unavailable while a device
+  // remounts, a network volume reconnects, or an agent is still producing it.
+  // The caller keeps the reference and may retry, so this is routine control
+  // flow rather than an operator-facing warning. Scope the exception to read:
+  // -32002 has unrelated meanings in other RPC domains.
+  if (method === 'rc.ws.read' && domainCode === '-32002') {
+    return {
+      code: domainCode,
+      message,
+      level: 'debug',
+      line: `RPC ${method} deferred [${domainCode}]: ${message} (params: [${keysLabel}])`,
+    };
+  }
 
   // A classified domain error (carries a code) is expected control flow — a
   // terse warn is enough. An uncoded plain Error is an unexpected bug — log at

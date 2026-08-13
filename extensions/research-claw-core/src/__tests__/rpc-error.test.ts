@@ -38,6 +38,22 @@ describe('buildRpcErrorOutcome', () => {
     expect(out.line).not.toContain('\n');
   });
 
+  it('treats a missing workspace read as recoverable debug control flow', () => {
+    const err = Object.assign(new Error('File not found: sources/camera/latest.jpg'), { code: -32002 });
+    const out = buildRpcErrorOutcome('rc.ws.read', err, ['path']);
+    expect(out.code).toBe('-32002');
+    expect(out.level).toBe('debug');
+    expect(out.line).toContain('deferred [-32002]');
+    expect(out.line).not.toContain('\n');
+  });
+
+  it('does not globally demote -32002 errors from unrelated domains', () => {
+    const err = Object.assign(new Error('Invalid parent_task_id'), { code: -32002 });
+    const out = buildRpcErrorOutcome('rc.task.create', err, ['task']);
+    expect(out.level).toBe('warn');
+    expect(out.line).toContain('failed [-32002]');
+  });
+
   it('falls back to an errorCode carried alongside the message', () => {
     const err = Object.assign(new Error('title is required'), {
       name: 'RpcValidationError',

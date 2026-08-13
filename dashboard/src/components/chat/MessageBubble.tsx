@@ -163,6 +163,7 @@ function useWorkspaceImages(text: string): ImageBlock[] {
     let cancelled = false;
     (async () => {
       const loaded: ImageBlock[] = [];
+      const definitivelyInvalid = new Set<string>();
       for (const m of matches) {
         const wsPath = m[1];
         try {
@@ -175,12 +176,29 @@ function useWorkspaceImages(text: string): ImageBlock[] {
           if (result?.encoding === 'base64') {
             const mime = result.mime_type || 'image/png';
             loaded.push({ url: `data:${mime};base64,${result.content}`, alt: wsPath });
+          } else if (result) {
+            // A successful read proving this marker targets non-binary content
+            // is a definitive mismatch, not a recoverable dangling reference.
+            definitivelyInvalid.add(wsPath);
           }
         } catch {
-          // Image may have been deleted — skip silently
+          // Keep the last successful rendering. A missing read can recover after
+          // a network volume/device remount or while an agent finishes writing.
         }
       }
-      if (!cancelled) setWsImages(loaded);
+      if (!cancelled) {
+        const markerPaths = new Set(matches.map((m) => m[1]));
+        setWsImages((previous) => {
+          const loadedPaths = new Set(loaded.map((image) => image.alt).filter(Boolean));
+          const retained = previous.filter((image) => (
+            image.alt
+            && markerPaths.has(image.alt)
+            && !loadedPaths.has(image.alt)
+            && !definitivelyInvalid.has(image.alt)
+          ));
+          return [...loaded, ...retained];
+        });
+      }
     })();
 
     return () => { cancelled = true; };

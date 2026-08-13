@@ -1476,7 +1476,8 @@ const plugin: PluginDefinition = {
             opts.params && typeof opts.params === 'object' ? Object.keys(opts.params) : [];
           const outcome = buildRpcErrorOutcome(method, err, paramKeys);
           if (outcome.level === 'error') api.logger.error(outcome.line);
-          else api.logger.warn(outcome.line);
+          else if (outcome.level === 'warn') api.logger.warn(outcome.line);
+          else api.logger.debug?.(outcome.line);
           opts.respond(false, undefined, { code: outcome.code, message: outcome.message });
         }
       });

@@ -380,4 +380,14 @@ export const DELTA_NORMAL_USER: ChatStreamEvent = {
   },
 };
 
+/**
+ * History payload emitted after chat.send persisted a workspace image marker.
+ * The binary bytes are resolved lazily through rc.ws.read after a reload.
+ */
+export const HISTORY_ASSISTANT_WITH_WORKSPACE_IMAGE: ChatMessage = {
+  role: 'assistant',
+  content: [{ type: 'text', text: 'Generated chart\n[rc-image:artifacts/figures/result.png]' }],
+  timestamp: 1710400021000,
+};
+
 export { TINY_PNG_B64 };

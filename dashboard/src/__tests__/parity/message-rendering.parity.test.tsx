@@ -9,8 +9,8 @@
  * CRITICAL: These tests use REAL gateway message formats (fixtures),
  * not hand-crafted mock data.
  */
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import MessageBubble from '../../components/chat/MessageBubble';
 import {
@@ -20,7 +20,9 @@ import {
   USER_MESSAGE_IMAGE_ONLY,
   HISTORY_MESSAGES,
   TINY_PNG_B64,
+  HISTORY_ASSISTANT_WITH_WORKSPACE_IMAGE,
 } from '../../__fixtures__/gateway-payloads/chat-events';
+import { useGatewayStore } from '../../stores/gateway';
 
 // Mock i18n (must include initReactI18next for i18n/index.ts import)
 vi.mock('react-i18next', () => ({
@@ -38,6 +40,11 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('Message rendering parity with OpenClaw native UI', () => {
+  afterEach(() => {
+    cleanup();
+    useGatewayStore.setState({ client: null, state: 'disconnected' });
+  });
+
   describe('Image extraction — openclaw/ui/src/ui/chat/grouped-render.ts:22-57', () => {
     it('renders base64 image from source object (sendChatMessage format)', () => {
       // OpenClaw behavior (grouped-render.ts:34-42):
@@ -106,6 +113,57 @@ describe('Message rendering parity with OpenClaw native UI', () => {
 
       expect(screen.getByText('Hello world')).toBeInTheDocument();
       expect(screen.queryByAltText('Attached image')).toBeNull();
+    });
+  });
+
+  describe('Recoverable workspace-image references', () => {
+    it('retains the last successful image across a temporary missing read after reconnect', async () => {
+      const firstRequest = vi.fn().mockResolvedValue({
+        content: TINY_PNG_B64,
+        encoding: 'base64',
+        mime_type: 'image/png',
+      });
+      useGatewayStore.setState({ client: { request: firstRequest } as never, state: 'connected' });
+      render(<MessageBubble message={HISTORY_ASSISTANT_WITH_WORKSPACE_IMAGE} />);
+
+      const image = await screen.findByAltText('artifacts/figures/result.png');
+      expect(image).toHaveAttribute('src', `data:image/png;base64,${TINY_PNG_B64}`);
+
+      const missingRequest = vi.fn().mockRejectedValue(
+        Object.assign(new Error('File not found: artifacts/figures/result.png'), { code: '-32002' }),
+      );
+      useGatewayStore.setState({ client: { request: missingRequest } as never });
+      await waitFor(() => expect(missingRequest).toHaveBeenCalledWith(
+        'rc.ws.read',
+        { path: 'artifacts/figures/result.png' },
+      ));
+
+      expect(screen.getByAltText('artifacts/figures/result.png')).toHaveAttribute(
+        'src',
+        `data:image/png;base64,${TINY_PNG_B64}`,
+      );
+    });
+
+    it('clears a cached image only after a successful read proves the marker is malformed', async () => {
+      const binaryRequest = vi.fn().mockResolvedValue({
+        content: TINY_PNG_B64,
+        encoding: 'base64',
+        mime_type: 'image/png',
+      });
+      useGatewayStore.setState({ client: { request: binaryRequest } as never, state: 'connected' });
+      render(<MessageBubble message={HISTORY_ASSISTANT_WITH_WORKSPACE_IMAGE} />);
+      await screen.findByAltText('artifacts/figures/result.png');
+
+      const malformedRequest = vi.fn().mockResolvedValue({
+        content: 'this is text, not an image',
+        encoding: 'utf-8',
+        mime_type: 'text/plain',
+      });
+      useGatewayStore.setState({ client: { request: malformedRequest } as never });
+
+      await waitFor(() => {
+        expect(screen.queryByAltText('artifacts/figures/result.png')).toBeNull();
+      });
     });
   });
 

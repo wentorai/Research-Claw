@@ -292,8 +292,9 @@ function assertLogLevel(record, expected) {
     record.severity ??
     record._meta?.logLevelName ??
     record._meta?.logLevelId;
-  const accepted =
-    expected === 'warn'
+  const accepted = expected === 'debug'
+    ? [2, 20, 'debug', 'DEBUG']
+    : expected === 'warn'
       ? [4, 40, 'warn', 'WARN', 'WARNING']
       : [5, 50, 'error', 'ERROR'];
   if (!accepted.includes(actual)) {
@@ -345,8 +346,8 @@ async function main() {
   if (String(secretResponse.error?.code) !== '-32002') {
     throw new Error(`coded WorkspaceError was not transmitted: ${JSON.stringify(secretResponse)}`);
   }
-  const secretLog = await waitForLog('RPC rc.ws.read failed [-32002]');
-  assertLogLevel(secretLog, 'warn');
+  const secretLog = await waitForLog('RPC rc.ws.read deferred [-32002]');
+  assertLogLevel(secretLog, 'debug');
 
   const unexpectedResponse = await gatewayCallExpectError('rc.session.autoName', {});
   if (unexpectedResponse.error?.code !== 'PLUGIN_ERROR') {
@@ -366,7 +367,7 @@ async function main() {
 
   console.log(JSON.stringify({
     domain: { code: '-32001', level: 'warn' },
-    codedError: { code: '-32002', level: 'warn', secretLeaked: false },
+    codedError: { code: '-32002', level: 'debug', secretLeaked: false },
     unexpected: { code: 'PLUGIN_ERROR', level: 'error', stack: true },
     gatewayPort,
   }, null, 2));
