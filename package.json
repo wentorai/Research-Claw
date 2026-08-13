@@ -5,14 +5,15 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=22.16.0 <23"
   },
   "packageManager": "pnpm@10.34.4",
   "scripts": {
     "prepare": "node scripts/prepare-package-manager.cjs",
     "start": "bash scripts/run.sh",
     "dev": "RC_LOG_PROFILE=developer concurrently \"pnpm --filter dashboard dev\" \"bash scripts/run.sh\"",
-    "build": "pnpm build:extensions && pnpm build:dashboard",
+    "build": "node scripts/node-runtime.cjs exec -- pnpm build:runtime",
+    "build:runtime": "pnpm build:extensions && pnpm build:dashboard",
     "build:dashboard": "pnpm --filter dashboard build",
     "build:extensions": "pnpm --filter './extensions/*' build",
     "test": "vitest run && pnpm --filter dashboard test",

@@ -15,7 +15,7 @@ baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
 RC 把 OpenClaw 当 **npm 依赖**消费,**不是 fork**。全部定制走 config overlay + Plugin SDK + 极小 pnpm patch(~20 行/7 文件)。这决定了安装的几条特性:
 
 - **目标平台**:macOS(darwin arm64/x64)、Linux(x64/arm64)、WSL2,以及通过 Docker Desktop 运行的 Windows(x64/arm64)。原生 Windows 不直接运行 POSIX 安装器,使用 `scripts/install-docker.ps1`。
-- **运行时**:`package.json` 要求 Node.js ≥ 22.16。安装器优先复用 conda `openclaw` 环境中的 Node(若真实存在),其次检查已安装 `openclaw` CLI 相邻的 Node,否则使用当前 PATH 中的 Node 22；`run.sh` 当前只在 conda `openclaw` 环境真实存在时选择它,否则使用当前 Node。安装器用最终选中的 Gateway Node 安装/校验 `better-sqlite3`,不要把“必须 conda”或“必须 fnm”当成不变事实。
+- **运行时**:`package.json` 固定 Node.js 22.16+ 且 `<23`。`scripts/node-runtime.cjs` 是安装、`pnpm build` 与 `pnpm serve` 的共同解析器:优先使用显式 `RC_NODE_PATH`,再检查合格的 conda/fnm/nvm/Homebrew Node 22。所有原生模块都必须由这一个 Gateway Node 安装和加载；不再接受“安装时 Node 22、启动时 PATH 漂到 Node 24”的双 ABI 状态。
 - **脚本幂等**:POSIX 脚本使用严格错误处理,PowerShell 脚本使用 `$ErrorActionPreference = "Stop"`;安装、更新和重新启动均通过同一份 `scripts/ensure-config.cjs` 做版本迁移,重复运行不覆盖用户的有效配置。
 
 ## 2. pnpm patch 生命周期(核心 why)

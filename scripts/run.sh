@@ -181,17 +181,20 @@ if (cfg.agents?.defaults?.workspace) {
 if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); console.error('[run] Config paths resolved to absolute'); }
 " 2>>"$RC_RUN_LOG"
 
-# --- Detect the correct Node for the gateway ---
-# Priority: conda openclaw env (has matching ABI for better-sqlite3) → system node
-GW_NODE="node"
-if command -v conda &>/dev/null; then
-  CONDA_OC_PREFIX="$(conda env list 2>/dev/null | grep "^openclaw " | awk '{print $NF}')"
-  if [ -n "$CONDA_OC_PREFIX" ] && [ -x "$CONDA_OC_PREFIX/bin/node" ]; then
-    GW_NODE="$CONDA_OC_PREFIX/bin/node"
-  fi
+# --- Resolve the one supported gateway/build runtime (Node 22) ---
+# The same resolver is used by `pnpm build`; this prevents a native dependency
+# installed under one Node ABI from being loaded by a different Gateway ABI.
+if ! _RC_NODE_SHELL=$(node ./scripts/node-runtime.cjs resolve --shell); then
+  say "✗ Node.js 22.16+ is required. Research-Claw was not started."
+  say "  Fix: fnm install 22 && fnm use 22 && fnm default 22"
+  exit 78
 fi
+eval "$_RC_NODE_SHELL"
+unset _RC_NODE_SHELL
+GW_NODE="$RC_NODE_PATH"
+export PATH="$RC_NODE_DIR:$PATH"
 
-dbg "Using Node: $GW_NODE ($("$GW_NODE" -v))"
+dbg "Using Node: $GW_NODE (v$RC_NODE_VERSION, ABI $RC_NODE_ABI)"
 dbg "Config: $OPENCLAW_CONFIG_PATH"
 export RESEARCH_CLAW_UI_VERSION="$("$GW_NODE" -p "require('./package.json').version" 2>/dev/null)"
 

@@ -41,6 +41,7 @@ PPT_MASTER_ATOMGIT="https://atomgit.com/hugohe3/ppt-master.git"
 REPO_OVERRIDE="${REPO:-}"
 REPO="${REPO:-$GITEE_REPO}"
 NODE_MIN=22
+NODE_MAX=22
 PNPM_VERSION=10.34.4
 ISSUES_URL="https://github.com/wentorai/Research-Claw/issues"
 RC_PNPM_PREFIX="${RC_PNPM_PREFIX:-$INSTALL_DIR/.tools/pnpm}"
@@ -439,7 +440,7 @@ rc_install_profile_block() {
   rc_append_block "$primary" "$block_id" "$body"
 }
 
-# --- [4/8] Node.js 22+ ---
+# --- [4/8] Node.js 22 LTS ---
 step 4 "Node.js runtime"
 # Supports nvm, fnm, and system Node. Prefers existing version manager.
 install_node_fnm() {
@@ -515,8 +516,6 @@ install_node_nvm() {
   nvm install "$NODE_MIN" </dev/null && nvm use "$NODE_MIN" </dev/null && nvm alias default "$NODE_MIN" </dev/null
 }
 
-NODE_MAX=24  # better-sqlite3 12.x ships prebuilds up to Node 24; Node 25+ must compile from source (needs local C++ toolchain)
-
 ensure_node() {
   # Activate fnm/nvm if installed but not in PATH (curl|bash doesn't source .zshrc)
   if ! command -v node &>/dev/null; then
@@ -536,12 +535,7 @@ ensure_node() {
   # Check current Node version
   if command -v node &>/dev/null; then
     NODE_V="$(node -v | sed 's/^v//' | cut -d. -f1)"
-    if [ "$NODE_V" -ge "$NODE_MIN" ] 2>/dev/null; then
-      if [ "$NODE_V" -gt "$NODE_MAX" ] 2>/dev/null; then
-        warn "Node.js $(node -v) detected — native modules may not compile on Node $((NODE_MAX + 1))+."
-        warn "If the gateway fails to start, downgrade to Node 22 LTS:"
-        warn "  fnm install 22 && fnm use 22 && fnm default 22"
-      fi
+    if [ "$NODE_V" -eq "$NODE_MIN" ] 2>/dev/null; then
       ok "Node.js $(node -v)"
       return 0
     fi
@@ -569,11 +563,11 @@ ensure_node() {
       warn "  sudo apt-get install -y nodejs"
     fi
     warn "Or set a proxy:  export HTTPS_PROXY=http://127.0.0.1:7890"
-    die "Node.js $NODE_MIN+ is required but not found."
+    die "Node.js 22 LTS is required but not found."
   fi
   NODE_V="$(node -v | sed 's/^v//' | cut -d. -f1)"
-  if [ "$NODE_V" -lt "$NODE_MIN" ] 2>/dev/null; then
-    die "Node.js $(node -v) installed but $NODE_MIN+ required. Please upgrade manually."
+  if [ "$NODE_V" -ne "$NODE_MIN" ] 2>/dev/null; then
+    die "Node.js $(node -v) installed but Research-Claw requires Node 22.x."
   fi
   ok "Node.js $(node -v)"
 }
@@ -859,37 +853,17 @@ if ! $UPDATE_FAILED; then
   ensure_pnpm
 fi
 
-# --- Detect gateway Node (early — needed for ABI rebuild, plugin install, gateway launch) ---
-# OpenClaw re-execs under conda "openclaw" env's Node at runtime, regardless of which
-# node launches entry.js. So we MUST compile native modules for that Node, not system node.
-# Priority: 1) conda openclaw env Node  2) node next to openclaw binary  3) system node
-GW_NODE="node"
-if command -v conda &>/dev/null; then
-  CONDA_OC_PREFIX="$(conda env list 2>/dev/null | grep "^openclaw " | awk '{print $NF}' || true)"
-  if [ -n "$CONDA_OC_PREFIX" ] && [ -x "$CONDA_OC_PREFIX/bin/node" ]; then
-    GW_NODE="$CONDA_OC_PREFIX/bin/node"
-  fi
+# Resolve the exact runtime from the checked-out repository. Installation,
+# native compilation, build, and Gateway launch must share this executable.
+if ! _RC_NODE_SHELL=$(node "$INSTALL_DIR/scripts/node-runtime.cjs" resolve --shell); then
+  die "Could not resolve the required Node 22 runtime."
 fi
-if [ "$GW_NODE" = "node" ] && command -v openclaw &>/dev/null; then
-  OC_PATH="$(command -v openclaw)"
-  while [ -L "$OC_PATH" ]; do
-    LINK_DIR="$(dirname "$OC_PATH")"
-    OC_PATH="$(readlink "$OC_PATH")"
-    case "$OC_PATH" in /*) ;; *) OC_PATH="$LINK_DIR/$OC_PATH" ;; esac
-  done
-  OC_DIR="$(dirname "$OC_PATH")"
-  if [ -x "$OC_DIR/node" ]; then
-    GW_NODE="$OC_DIR/node"
-  fi
-fi
-# Resolve to absolute path so dirname works correctly for PATH injection
-if [ "$GW_NODE" = "node" ]; then
-  GW_NODE="$(command -v node)"
-fi
-GW_NODE_DIR="$(dirname "$GW_NODE")"
-if [ "$GW_NODE" != "$(command -v node)" ]; then
-  info "Gateway Node: $("$GW_NODE" -v) (conda openclaw)"
-fi
+eval "$_RC_NODE_SHELL"
+unset _RC_NODE_SHELL
+GW_NODE="$RC_NODE_PATH"
+GW_NODE_DIR="$RC_NODE_DIR"
+export PATH="$GW_NODE_DIR:$PATH"
+info "Gateway Node: v$RC_NODE_VERSION (ABI $RC_NODE_ABI)"
 
 step 6 "Install dependencies + build (the longest step)"
 # --- [6/8] Install + build ---
