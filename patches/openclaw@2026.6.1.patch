@@ -14,6 +14,62 @@ index b632c3e3e89d08765fa791a950bbadbe627079b2..4f3abcac3972abb416409723533cdec7
  		else items.push(await copyMigrationFileItem(item, reportDir, { overwrite: params.ctx.overwrite }));
  	}
  	const result = {
+diff --git a/dist/bot-deps-Nw3VjzKb.js b/dist/bot-deps-Nw3VjzKb.js
+index 044c5257b93460569480fc713bd485012b6be94e..82d0d167516463a9b4d2205e85cc09298886a785 100644
+--- a/dist/bot-deps-Nw3VjzKb.js
++++ b/dist/bot-deps-Nw3VjzKb.js
+@@ -1,6 +1,8 @@
+ import { c as normalizeOptionalString, p as readStringValue } from "./string-coerce-mnp54Vah.js";
+ import { i as formatErrorMessage } from "./errors-DJFNHUbg.js";
+ import { r as logVerbose } from "./globals-DiwHZb7D.js";
++import { n as sleepWithAbort, t as computeBackoff } from "./backoff-DsLoRHnE.js";
++import { t as createSubsystemLogger } from "./subsystem-DM7CD-js.js";
+ import { i as getRuntimeConfig } from "./io-AmXZn-TT.js";
+ import { u as resolveStorePath } from "./paths-Bz9nEaho.js";
+ import { o as readSessionUpdatedAt } from "./store-D2vwNFZF.js";
+@@ -14,7 +16,7 @@ import "./runtime-config-snapshot-CVhXA30s.js";
+ import "./runtime-env-54yMMWma.js";
+ import "./security-runtime-BUp8ocO7.js";
+ import "./string-coerce-runtime-DzE-BRXv.js";
+-import { o as isSafeToRetrySendError, s as isTelegramClientRejection } from "./request-timeouts-CkwrJHqw.js";
++import { a as isRecoverableTelegramNetworkError, o as isSafeToRetrySendError, s as isTelegramClientRejection } from "./request-timeouts-CkwrJHqw.js";
+ import "./routing-DgmMc1xB.js";
+ import { y as buildChannelInboundEventContext } from "./kernel-CRhpTSO8.js";
+ import { t as recordInboundSession } from "./session-Dr9JqhwH.js";
+@@ -46,6 +48,9 @@ const TELEGRAM_COMMAND_RETRY_RATIO = .8;
+ const TELEGRAM_MIN_COMMAND_DESCRIPTION_LENGTH = 1;
+ const TELEGRAM_MAX_COMMAND_DESCRIPTION_LENGTH = 256;
+ const TELEGRAM_MENU_RESULT_CACHE_MAX = 128;
++const TELEGRAM_COMMAND_SYNC_RETRY_POLICY = { initialMs: 2e3, maxMs: 3e4, factor: 2, jitter: .1 };
++const TELEGRAM_COMMAND_SYNC_MAX_ATTEMPTS = 3;
++const telegramCommandSyncLog = createSubsystemLogger("telegram/command-sync");
+ const TELEGRAM_COMMAND_MENU_SCOPES = [{ label: "default" }, {
+ 	label: "all_group_chats",
+ 	options: { scope: { type: "all_group_chats" } }
+@@ -380,9 +385,20 @@ function syncTelegramMenuCommands(params) {
+ 		});
+ 		writeCachedCommandHash(accountId, botIdentity, currentHash);
+ 	};
+-	sync().catch((err) => {
+-		runtime.error?.(`Telegram command sync failed: ${String(err)}`);
+-	});
++	(async () => {
++		for (let attempt = 1; attempt <= TELEGRAM_COMMAND_SYNC_MAX_ATTEMPTS; attempt += 1) try {
++			await sync();
++			return;
++		} catch (err) {
++			if (!isRecoverableTelegramNetworkError(err, { context: "unknown" }) || attempt === TELEGRAM_COMMAND_SYNC_MAX_ATTEMPTS) {
++				runtime.error?.(`Telegram command sync failed: ${String(err)}`);
++				return;
++			}
++			const delayMs = computeBackoff(TELEGRAM_COMMAND_SYNC_RETRY_POLICY, attempt);
++			telegramCommandSyncLog.debug(`Telegram command sync deferred; retry ${attempt}/${TELEGRAM_COMMAND_SYNC_MAX_ATTEMPTS - 1} in ${delayMs}ms: ${String(err)}`);
++			await sleepWithAbort(delayMs);
++		}
++	})();
+ }
+ //#endregion
+ //#region extensions/telegram/src/draft-stream.ts
 diff --git a/dist/chat-display-projection-CMTVNdR4.js b/dist/chat-display-projection-CMTVNdR4.js
 index d19aba1a5e8a9fb58fa09789dc5c41884e44a0b5..c41419637a5016b77bb4126a640581e8cae41629 100644
 --- a/dist/chat-display-projection-CMTVNdR4.js
@@ -760,6 +816,18 @@ index 8a9aa6e82c82546be7863b3218aff4812f723ec7..05a8b4dec91fbcbbc8dd0efe9c4117db
  		const backupPath = opts.overwrite ? await backupExistingMigrationTarget(item.target, reportDir) : void 0;
  		await fs.mkdir(path.dirname(item.target), { recursive: true });
  		await fs.cp(item.source, item.target, {
+diff --git a/dist/monitor-polling.runtime-C_Buepuh.js b/dist/monitor-polling.runtime-C_Buepuh.js
+index 8ccfe146570eefcf8961c9a91a5bbd59408c4be0..fcb3ee36b7a0ba9f97056232fc37e5de8d66f34f 100644
+--- a/dist/monitor-polling.runtime-C_Buepuh.js
++++ b/dist/monitor-polling.runtime-C_Buepuh.js
+@@ -635,7 +635,6 @@ var TelegramPollingSession = class {
+ 			return "ready";
+ 		} catch (err) {
+ 			if (isRecoverableTelegramNetworkError(err, { context: "unknown" })) {
+-				this.opts.log(`[telegram] deleteWebhook failed with a recoverable network error; continuing to polling so getUpdates can confirm webhook state: ${formatErrorMessage(err)}`);
+ 				return "ready";
+ 			}
+ 			return await this.#waitBeforeRetryOnRecoverableSetupError(err, "Telegram webhook cleanup failed") ? "retry" : "exit";
 diff --git a/dist/openai-transport-stream-BN2CKZjs.js b/dist/openai-transport-stream-BN2CKZjs.js
 index ead7d378ce86c31f483e84fff2dbb9dd40380ffc..779ec4ec59a6c05dfbe5e62ff5d3d8853d2d1e35 100644
 --- a/dist/openai-transport-stream-BN2CKZjs.js
@@ -772,18 +840,6 @@ index ead7d378ce86c31f483e84fff2dbb9dd40380ffc..779ec4ec59a6c05dfbe5e62ff5d3d885
  	const body = await readResponseTextLimited(params.response).catch(() => "");
  	await params.release().catch(() => void 0);
  	params.localServiceLease?.release();
-diff --git a/dist/redact-B8nIzFk3.js b/dist/redact-B8nIzFk3.js
---- a/dist/redact-B8nIzFk3.js
-+++ b/dist/redact-B8nIzFk3.js
-@@ -413,7 +413,7 @@ function resolvePatterns(value) {
- 		defaultResolvedPatterns ??= DEFAULT_REDACT_PATTERNS.map(parsePattern).filter((re) => Boolean(re));
- 		return defaultResolvedPatterns;
- 	}
--	return value.map(parsePattern).filter((re) => Boolean(re));
-+	return [...value, ...DEFAULT_REDACT_PATTERNS].map(parsePattern).filter((re) => Boolean(re));
- }
- function maskToken(token) {
- 	if (token.length < DEFAULT_REDACT_MIN_LENGTH) return "***";
 diff --git a/dist/program-GRZ2W39w.js b/dist/program-GRZ2W39w.js
 index e1614c5e7b2b096795e880128dc836f93b31c066..2e36c6f6f3aecdfd7b13867c23f56c582cbe5496 100644
 --- a/dist/program-GRZ2W39w.js
@@ -805,6 +861,19 @@ index e1614c5e7b2b096795e880128dc836f93b31c066..2e36c6f6f3aecdfd7b13867c23f56c58
  		});
  	});
  }
+diff --git a/dist/redact-B8nIzFk3.js b/dist/redact-B8nIzFk3.js
+index ccb466b8d668eb7a905e79568019b342e30e1299..afe64c94f11c44a22b9c5d06b2f84b5100702882 100644
+--- a/dist/redact-B8nIzFk3.js
++++ b/dist/redact-B8nIzFk3.js
+@@ -413,7 +413,7 @@ function resolvePatterns(value) {
+ 		defaultResolvedPatterns ??= DEFAULT_REDACT_PATTERNS.map(parsePattern).filter((re) => Boolean(re));
+ 		return defaultResolvedPatterns;
+ 	}
+-	return value.map(parsePattern).filter((re) => Boolean(re));
++	return [...value, ...DEFAULT_REDACT_PATTERNS].map(parsePattern).filter((re) => Boolean(re));
+ }
+ function maskToken(token) {
+ 	if (token.length < DEFAULT_REDACT_MIN_LENGTH) return "***";
 diff --git a/dist/register.subclis-core-D0EOSNz5.js b/dist/register.subclis-core-D0EOSNz5.js
 index 6d1813dbb4409d7c76d38b0989c1d4d5f8843019..003620c1c79c7f3d82fb266e18ae1625a04cd9aa 100644
 --- a/dist/register.subclis-core-D0EOSNz5.js
@@ -888,6 +957,52 @@ index 752450f49c5a2870c97aa4a2e5ec0fbd87545160..5b9771cbdca1204c01c09143ef9b8277
  	},
  	{
  		ruleId: "shell-pipe-to-shell",
+diff --git a/dist/send-BTL0AC25.js b/dist/send-BTL0AC25.js
+index b2e22e06a2f358bc4f69946aeec57b96a0aca2fd..68b9f4a9ea40ae892bccc2f30593daa1a7f4d93d 100644
+--- a/dist/send-BTL0AC25.js
++++ b/dist/send-BTL0AC25.js
+@@ -167,7 +167,8 @@ async function withTelegramApiErrorLogging({ operation, fn, runtime, logger, sho
+ 	} catch (err) {
+ 		if (!shouldLog || shouldLog(err)) {
+ 			const errText = formatErrorMessage(err);
+-			resolveTelegramApiLogger(runtime, logger)(`telegram ${operation} failed: ${errText}`);
++			if (isRecoverableTelegramNetworkError(err, { context: "unknown" })) fallbackLogger.debug(`telegram ${operation} deferred: ${errText}`);
++			else resolveTelegramApiLogger(runtime, logger)(`telegram ${operation} failed: ${errText}`);
+ 		}
+ 		throw err;
+ 	}
+diff --git a/dist/server-channels-CwkKMJj5.js b/dist/server-channels-CwkKMJj5.js
+index e32e2e66fa4d64933c274c46675f74b4358cec65..c6bff6c48bb41dcb52776cb7026855338aa157de 100644
+--- a/dist/server-channels-CwkKMJj5.js
++++ b/dist/server-channels-CwkKMJj5.js
+@@ -457,7 +457,8 @@ function createChannelManager(opts) {
+ 							accountId: id,
+ 							lastError: message
+ 						});
+-						log.error?.(`[${id}] channel exited: ${message}`);
++						if (/fetch failed|network (?:request )?failed|network error|econn(?:reset|refused|aborted)|enet(?:unreach|reset)|ehostunreach|enotfound|eai_again|etimedout|timeout|socket hang up/i.test(message)) log.debug?.(`[${id}] channel disconnected; recovery pending: ${message}`);
++						else log.error?.(`[${id}] channel exited: ${message}`);
+ 					}).then(async () => {
+ 						await cleanupTaskScopedApprovalRuntime("channel cleanup failed");
+ 						setRuntime(channelId, id, {
+@@ -509,7 +510,7 @@ function createChannelManager(opts) {
+ 							return;
+ 						}
+ 						const delayMs = computeBackoff(CHANNEL_RESTART_POLICY, attempt);
+-						log.info?.(`[${id}] auto-restart attempt ${attempt}/${MAX_RESTART_ATTEMPTS} in ${Math.round(delayMs / 1e3)}s`);
++						log.debug?.(`[${id}] auto-restart attempt ${attempt}/${MAX_RESTART_ATTEMPTS} in ${Math.round(delayMs / 1e3)}s`);
+ 						setRuntime(channelId, id, {
+ 							accountId: id,
+ 							restartPending: true,
+@@ -592,7 +593,7 @@ function createChannelManager(opts) {
+ 				});
+ 			}
+ 			if (!await waitForChannelStopGracefully(task, CHANNEL_STOP_ABORT_TIMEOUT_MS)) {
+-				log.warn?.(`[${id}] channel stop exceeded ${CHANNEL_STOP_ABORT_TIMEOUT_MS}ms after abort; continuing shutdown`);
++				(manual ? log.warn : log.debug)?.(`[${id}] channel stop exceeded ${CHANNEL_STOP_ABORT_TIMEOUT_MS}ms after abort; continuing shutdown`);
+ 				setRuntime(channelId, id, {
+ 					accountId: id,
+ 					running: manual,
 diff --git a/dist/server-cron-CJwAiILI.js b/dist/server-cron-CJwAiILI.js
 index 1a515ff1ef454274e7046d51bc29f561d843d004..b752bc58dc9b34df8cf8473e3d937f3bc46374ce 100644
 --- a/dist/server-cron-CJwAiILI.js
@@ -917,6 +1032,19 @@ index 1a515ff1ef454274e7046d51bc29f561d843d004..b752bc58dc9b34df8cf8473e3d937f3b
  		const error = abortErrorMessage(abortSignal);
  		return {
  			status: "error",
+diff --git a/dist/server-runtime-startup-services-DCG2gFoz.js b/dist/server-runtime-startup-services-DCG2gFoz.js
+index 42d2c65098f2196f3ae557fb5bba93c3b127f59e..619819d734fbbae69cec6bc98f8939c2352f8dbe 100644
+--- a/dist/server-runtime-startup-services-DCG2gFoz.js
++++ b/dist/server-runtime-startup-services-DCG2gFoz.js
+@@ -70,7 +70,7 @@ function startChannelHealthMonitor(deps) {
+ 						continue;
+ 					}
+ 					const reason = resolveChannelRestartReason(status, health);
+-					log.info?.(`[${channelId}:${accountId}] health-monitor: restarting (reason: ${reason})`);
++					log.debug?.(`[${channelId}:${accountId}] health-monitor: restarting (reason: ${reason})`);
+ 					record.lastRestartAt = now;
+ 					record.restartsThisHour.push({ at: now });
+ 					restartRecords.set(key, record);
 diff --git a/dist/service-yYn6i75I.js b/dist/service-yYn6i75I.js
 index fab20d49454b27369355b247f5f7875d9f6b2b73..88164e34564e4af32b7020716225c8c5ef7c5485 100644
 --- a/dist/service-yYn6i75I.js
