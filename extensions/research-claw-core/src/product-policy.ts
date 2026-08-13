@@ -42,6 +42,27 @@ function enabledPolicy(): ProductPolicy {
 
 export const DEFAULT_PRODUCT_POLICY = enabledPolicy();
 
+/** `enabled-hidden` changes Dashboard presentation, not the Core runtime. */
+export function arePeripheralsEnabled(policy: ProductPolicy): boolean {
+  return policy.capabilities.peripherals !== 'disabled';
+}
+
+/**
+ * Remove the canonical peripherals section from an in-memory AGENTS payload.
+ * The L1 workspace file stays untouched so a later cold restart can restore it.
+ */
+export function filterPeripheralsBootstrapSection(content: string): string {
+  const newline = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^##\s+§11(?:\s|$)/i.test(line));
+  if (start === -1) return content;
+
+  let end = start + 1;
+  while (end < lines.length && !/^##\s+§\d+(?:\s|$)/i.test(lines[end])) end += 1;
+  lines.splice(start, end - start);
+  return lines.join(newline);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

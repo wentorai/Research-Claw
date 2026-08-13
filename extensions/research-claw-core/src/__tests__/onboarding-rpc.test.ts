@@ -238,9 +238,14 @@ describe('agent:bootstrap hook .done defense', () => {
 
   async function runHook(workspaceDir: string, entries: BootstrapEntry[]): Promise<BootstrapEntry[]> {
     expect(hookHandler).toBeTruthy();
-    const context: Record<string, unknown> = { workspaceDir, bootstrapFiles: entries };
-    await hookHandler!({ type: 'agent', action: 'bootstrap', context });
-    return context.bootstrapFiles as BootstrapEntry[];
+    const upstreamContext: Record<string, unknown> = { workspaceDir, bootstrapFiles: entries };
+    // OpenClaw 2026.6.1's plugin registry adds pluginConfig by shallow-copying
+    // event.context before it invokes a legacy hook. The bootstrap resolver
+    // later reads the original context, so handlers must mutate the shared
+    // bootstrapFiles array instead of replacing the copied context property.
+    const pluginContext = { ...upstreamContext, pluginConfig: {} };
+    await hookHandler!({ type: 'agent', action: 'bootstrap', context: pluginContext });
+    return upstreamContext.bootstrapFiles as BootstrapEntry[];
   }
 
   it('injects .ResearchClaw/BOOTSTRAP.md content when no .done sentinel exists', async () => {

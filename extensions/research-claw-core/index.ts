@@ -6,7 +6,7 @@
  *
  * Registration totals:
  *   - 57 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 2 Skill Registry + 4 job + 3 periph)
- *   - 140 WS RPC methods + 3 HTTP routes = 143 interface methods
+ *   - 151 WS RPC methods + 3 HTTP routes = 154 interface methods
  *     (including rc.execution.summary/detail/resolve; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
  *   - 16 typed hook handlers (9 hook names; agent_end ×3, after_tool_call ×5)
  *     + 1 legacy agent:bootstrap hook
@@ -118,6 +118,8 @@ import { PresentationCoordinator } from './src/presentation/coordinator.js';
 import { registerPresentationRpc } from './src/presentation/rpc.js';
 import { loadOpenClawSessionRegistry } from './src/presentation/retention.js';
 import {
+  arePeripheralsEnabled,
+  filterPeripheralsBootstrapSection,
   parseProductPolicy,
   type ProductPolicy,
 } from './src/product-policy.js';
@@ -227,6 +229,7 @@ interface PluginDefinition {
 // initialized once and reused — creating duplicates wastes file handles
 // and causes git lock races.
 let _initialized = false;
+let _initializedPeripheralsEnabled: boolean | null = null;
 const _hookApis = new WeakSet<object>();
 let _dbManager: DatabaseManager | null = null;
 let _litService: InstanceType<typeof LiteratureService> | null = null;
@@ -391,6 +394,13 @@ const _runtimeReconciledAgents = new Set<string>();
  * are deliberate — otherwise it reports our own decision as a mount failure.
  */
 const _unregisteredDeclaredTools = new Map<string, string>();
+const PERIPHERAL_AGENT_TOOLS = [
+  'periph_list',
+  'periph_camera_snap',
+  'periph_observe',
+] as const;
+const PERIPHERALS_DISABLED_REASON =
+  'peripherals disabled by productPolicy; full restart required to re-enable';
 
 // ── Tool call probe state ─────────────────────────────────────────────
 // Caches Ollama tool-calling probe results per model string (30-min TTL).
@@ -1153,7 +1163,16 @@ const plugin: PluginDefinition = {
     // OpenClaw validates plugin config against the manifest before register.
     // Keep a strict runtime parser as a second boundary for direct harnesses and
     // future callers that bypass Gateway validation.
-    parseProductPolicy(cfg.productPolicy);
+    const productPolicy = parseProductPolicy(cfg.productPolicy);
+    const peripheralsEnabled = arePeripheralsEnabled(productPolicy);
+    if (
+      _initializedPeripheralsEnabled !== null
+      && _initializedPeripheralsEnabled !== peripheralsEnabled
+    ) {
+      throw new Error(
+        'productPolicy.capabilities.peripherals changed within one process; perform a full Gateway restart',
+      );
+    }
     const rawDbPath = typeof cfg.dbPath === 'string' && cfg.dbPath.trim()
       ? cfg.dbPath.trim()
       : DEFAULT_RC_DB_PATH;
@@ -1178,7 +1197,7 @@ const plugin: PluginDefinition = {
       _litService = new LiteratureService(_dbManager.db);
       _taskService = new TaskService(_dbManager.db);
       _heartbeatService = new HeartbeatService(_dbManager.db);
-      _monitorService = new MonitorService(_dbManager.db);
+      _monitorService = new MonitorService(_dbManager.db, { peripheralsEnabled });
       _jobService = new JobService(_dbManager.db);
       _promptPresetService = new PromptPresetService(_dbManager.db);
       _executionTraceService = new ExecutionTraceService(_dbManager.db);
@@ -1214,13 +1233,15 @@ const plugin: PluginDefinition = {
         gitAuthorName: cfg.workspace?.gitAuthorName ?? 'Research-Claw',
         gitAuthorEmail: cfg.workspace?.gitAuthorEmail ?? 'research-claw@wentor.ai',
       };
-      _periphService = new PeriphService(_dbManager.db, { workspaceRoot: _wsConfig.root });
-      _plaudManager = new PlaudManager();
-      _rtspPreviewManager = new RtspPreviewManager();
-      try {
-        _periphService.ensurePeriphGitignore();
-      } catch (err) {
-        console.warn('[periph] ensurePeriphGitignore failed (non-fatal):', err instanceof Error ? err.message : String(err));
+      if (peripheralsEnabled) {
+        _periphService = new PeriphService(_dbManager.db, { workspaceRoot: _wsConfig.root });
+        _plaudManager = new PlaudManager();
+        _rtspPreviewManager = new RtspPreviewManager();
+        try {
+          _periphService.ensurePeriphGitignore();
+        } catch (err) {
+          console.warn('[periph] ensurePeriphGitignore failed (non-fatal):', err instanceof Error ? err.message : String(err));
+        }
       }
       _wsService = new WorkspaceService(_wsConfig);
       _reviewService = new PaperReviewService(_dbManager.db, _wsService);
@@ -1269,6 +1290,7 @@ const plugin: PluginDefinition = {
         } catch { /* best-effort on exit */ }
       });
 
+      _initializedPeripheralsEnabled = peripheralsEnabled;
       _initialized = true;
     }
 
@@ -1408,8 +1430,14 @@ const plugin: PluginDefinition = {
     for (const tool of createJobTools(jobService)) {
       api.registerTool(tool);
     }
-    for (const tool of createPeriphTools(_periphService!, periphBridge, { workspaceRoot: wsConfig.root })) {
-      api.registerTool(tool);
+    for (const name of PERIPHERAL_AGENT_TOOLS) {
+      if (peripheralsEnabled) _unregisteredDeclaredTools.delete(name);
+      else _unregisteredDeclaredTools.set(name, PERIPHERALS_DISABLED_REASON);
+    }
+    if (peripheralsEnabled) {
+      for (const tool of createPeriphTools(_periphService!, periphBridge, { workspaceRoot: wsConfig.root })) {
+        api.registerTool(tool);
+      }
     }
 
     // ── 4b. Unified Skill Registry tools ──────────────────────────────
@@ -1470,7 +1498,7 @@ const plugin: PluginDefinition = {
         params: Record<string, unknown>;
         respond: (ok: boolean, payload?: unknown, error?: { code: string; message: string }) => void;
       }) => {
-        if ((opts as any)?.context) {
+        if (peripheralsEnabled && (opts as any)?.context) {
           periphBridge.adoptContext((opts as any).context);
         }
         try {
@@ -1525,7 +1553,9 @@ const plugin: PluginDefinition = {
       getLitService: () => _litService,
       getTaskService: () => _taskService,
     }); // 1 method
-    registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!, _rtspPreviewManager!); // 14 methods
+    if (peripheralsEnabled) {
+      registerPeriphRpc(registerMethod, _periphService!, periphBridge, _plaudManager!, _rtspPreviewManager!); // 14 methods
+    }
     registerPromptPresetRpc(registerMethod, promptPresetService); // 6 methods
     registerPresentationRpc(registerMethod, presentationService, executionTraceService); // 5 methods
 
@@ -2087,15 +2117,17 @@ const plugin: PluginDefinition = {
     // or a symlink escape is rejected. Only .m3u8 / .ts extensions are served.
     // Credentials (H4): the URL carries only the random sessionToken; the RTSP
     // user:pass never appears in the path/playlist/segment names.
-    api.registerHttpRoute({
-      path: RTSP_PREVIEW_ROUTE,
-      auth: 'gateway',
-      match: 'prefix',
-      handler: createRtspPreviewRouteHandler({
-        getByToken: (token) => _rtspPreviewManager?.getByToken(token) ?? null,
-        touch: (token) => _rtspPreviewManager?.touch(token) ?? false,
-      }),
-    });
+    if (peripheralsEnabled) {
+      api.registerHttpRoute({
+        path: RTSP_PREVIEW_ROUTE,
+        auth: 'gateway',
+        match: 'prefix',
+        handler: createRtspPreviewRouteHandler({
+          getByToken: (token) => _rtspPreviewManager?.getByToken(token) ?? null,
+          touch: (token) => _rtspPreviewManager?.touch(token) ?? false,
+        }),
+      });
+    }
 
     // ── 7. Register hooks ─────────────────────────────────────────────
     // Register once per concrete OC PluginApi/runtime. A process-global boolean
@@ -3196,15 +3228,27 @@ const plugin: PluginDefinition = {
         if (!ctx?.workspaceDir || !Array.isArray(ctx.bootstrapFiles)) return;
 
         const rcDir = path.join(ctx.workspaceDir, '.ResearchClaw');
-        if (!fs.existsSync(rcDir)) return;
+        // Preserve the pre-policy fast path for ordinary/enabled users. A
+        // disabled policy must still inspect OC's already-loaded root AGENTS
+        // entry so a missing relocation directory cannot bypass §11 removal.
+        if (peripheralsEnabled && !fs.existsSync(rcDir)) return;
 
         // .done sentinel defense: the loading layer historically never checked
         // BOOTSTRAP.md.done, so residual BOOTSTRAP.md (or its root symlink)
         // re-ran onboarding for users who had already completed it.
         const bootstrapDone = bootstrapDoneExists(ctx.workspaceDir);
 
-        ctx.bootstrapFiles = ctx.bootstrapFiles.map((file) => {
-          if (!RELOCATABLE_FILES.has(file.name)) return file;
+        const applyProductPolicy = (file: {
+          name: string;
+          path: string;
+          content?: string;
+          missing?: boolean;
+        }) => !peripheralsEnabled && file.name === 'AGENTS.md' && typeof file.content === 'string'
+          ? { ...file, content: filterPeripheralsBootstrapSection(file.content) }
+          : file;
+
+        const updatedFiles = ctx.bootstrapFiles.map((file) => {
+          if (!RELOCATABLE_FILES.has(file.name)) return applyProductPolicy(file);
 
           // With the sentinel present, never inject BOOTSTRAP content — blank
           // the entry using OC's missing-file shape ({name, path, missing:true},
@@ -3215,18 +3259,30 @@ const plugin: PluginDefinition = {
 
           const rcPath = path.join(rcDir, file.name);
           try {
-            const content = fs.readFileSync(rcPath, 'utf-8');
-            return { ...file, path: rcPath, content, missing: false };
+            const rawContent = fs.readFileSync(rcPath, 'utf-8');
+            return applyProductPolicy({ ...file, path: rcPath, content: rawContent, missing: false });
           } catch {
-            return file;
+            // The relocated file may be absent while OC already loaded a root
+            // AGENTS.md entry. Policy must still filter that in-memory content;
+            // never fall back to exposing §11 merely because redirect failed.
+            return applyProductPolicy(file);
           }
         });
+        // OpenClaw 2026.6.1 invokes legacy plugin hooks with a shallow copy of
+        // event.context, then reads bootstrapFiles from the original context.
+        // Preserve the shared array identity so redirects and policy filtering
+        // reach the bootstrap resolver instead of only changing the copy.
+        ctx.bootstrapFiles.splice(0, ctx.bootstrapFiles.length, ...updatedFiles);
       }, { name: 'research-claw.bootstrap-redirect', description: 'Load prompt files from .ResearchClaw/ subdirectory' });
     } else {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (56 tools, 140 WS RPC + 3 HTTP = 143 interfaces, 16 typed hook handlers + 1 legacy hook, 1 session monitoring service)');
+    api.logger.info(
+      `Research-Claw Core registered (${peripheralsEnabled ? 57 : 54} tools, ` +
+      `${peripheralsEnabled ? 151 : 137} WS RPC + ${peripheralsEnabled ? 3 : 2} HTTP, ` +
+      '16 typed hook handlers + 1 legacy hook, 1 session monitoring service)',
+    );
     }
   },
 };

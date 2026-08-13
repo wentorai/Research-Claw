@@ -1,0 +1,51 @@
+{
+  "provenance": {
+    "researchClawVersion": "0.8.2",
+    "openClawVersion": "2026.6.1",
+    "source": "real Core register harness and isolated OpenClaw Gateway hello/systemPromptReport",
+    "capturedAt": "2026-08-13"
+  },
+  "agentTools": {
+    "coreTotal": 57,
+    "peripherals": [
+      "periph_list",
+      "periph_camera_snap",
+      "periph_observe"
+    ]
+  },
+  "gatewayRpc": {
+    "coreTotal": 151,
+    "peripherals": [
+      "rc.periph.devices.list",
+      "rc.periph.devices.create",
+      "rc.periph.devices.update",
+      "rc.periph.devices.delete",
+      "rc.periph.observations.list",
+      "rc.periph.observations.create",
+      "rc.periph.captureResult",
+      "rc.periph.bridge.announce",
+      "rc.periph.localCameras.list",
+      "rc.periph.rtspPreview.start",
+      "rc.periph.rtspPreview.stop",
+      "rc.periph.plaud.status",
+      "rc.periph.plaud.login",
+      "rc.periph.plaud.cancelLogin"
+    ]
+  },
+  "httpRoutes": {
+    "coreTotal": 3,
+    "all": [
+      "/rc/download",
+      "/rc/rtsp-preview",
+      "/rc/upload"
+    ],
+    "peripherals": [
+      "/rc/rtsp-preview"
+    ]
+  },
+  "activeManagers": [
+    "PeriphService",
+    "PlaudManager",
+    "RtspPreviewManager"
+  ]
+}

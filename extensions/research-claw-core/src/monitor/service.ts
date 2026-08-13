@@ -75,6 +75,21 @@ export interface MonitorPatch {
   agent_prompt?: string;
 }
 
+export interface MonitorServiceOptions {
+  /** Defaults true for ordinary and pre-policy callers. */
+  peripheralsEnabled?: boolean;
+}
+
+/** Expected policy rejection; the RPC bridge preserves this domain code. */
+export class PeripheralFeatureUnavailableError extends Error {
+  readonly errorCode = 'FEATURE_UNAVAILABLE';
+
+  constructor() {
+    super('Peripheral monitoring is unavailable under the active product policy');
+    this.name = 'PeripheralFeatureUnavailableError';
+  }
+}
+
 // ── DB row shape ──────────────────────────────────────────────────────
 
 interface MonitorRow {
@@ -281,6 +296,26 @@ function validateCron(expr: string): boolean {
   return fields.length === 5;
 }
 
+function isDeviceSourceType(sourceType: string | null | undefined): boolean {
+  return sourceType?.trim().toLowerCase() === 'device';
+}
+
+/**
+ * SQLite's one-argument TRIM() removes U+0020 only, while the runtime boundary
+ * above intentionally follows JavaScript trim semantics. Register the same
+ * predicate as a deterministic connection-local SQL function so historical
+ * rows containing HT/LF/NBSP cannot escape disabled list/repair queries.
+ */
+const SQL_IS_DEVICE_SOURCE_TYPE = 'rc_monitor_is_device_source_type';
+
+function registerSourceTypeSqlPredicate(db: Database): void {
+  db.function(
+    SQL_IS_DEVICE_SOURCE_TYPE,
+    { deterministic: true },
+    (value: unknown) => (typeof value === 'string' && isDeviceSourceType(value) ? 1 : 0),
+  );
+}
+
 // ── Default agent prompt for a category ───────────────────────────────
 
 /**
@@ -452,7 +487,34 @@ function isLegacyDefaultAgentPrompt(prompt: string): boolean {
 // ── Service class ─────────────────────────────────────────────────────
 
 export class MonitorService {
-  constructor(private readonly db: Database) {}
+  readonly peripheralsEnabled: boolean;
+
+  constructor(
+    private readonly db: Database,
+    opts: MonitorServiceOptions = {},
+  ) {
+    this.peripheralsEnabled = opts.peripheralsEnabled ?? true;
+    registerSourceTypeSqlPredicate(db);
+  }
+
+  private assertSourceTypeAvailable(sourceType: string | null | undefined): void {
+    if (!this.peripheralsEnabled && isDeviceSourceType(sourceType)) {
+      throw new PeripheralFeatureUnavailableError();
+    }
+  }
+
+  /**
+   * Preserve the historical no-op behavior of write-only helpers for an
+   * unknown id, while still blocking a stale device cron/job from mutating a
+   * retained row. Full get() is intentionally not used here because it throws
+   * for an unknown id and would make disabled policy change ordinary semantics.
+   */
+  private assertExistingMonitorAvailable(id: string): void {
+    if (this.peripheralsEnabled) return;
+    const row = this.db.prepare('SELECT source_type FROM rc_monitors WHERE id = ?').get(id) as
+      { source_type: string } | undefined;
+    if (row) this.assertSourceTypeAvailable(row.source_type);
+  }
 
   /**
    * Seed default monitors on first init (empty table only).
@@ -493,7 +555,11 @@ export class MonitorService {
    * protocol signature exactly enough to be unsafe for collector-first runs.
    */
   repairLegacyDefaultPrompts(): number {
-    const rows = this.db.prepare('SELECT id, source_type, target, filters, agent_prompt FROM rc_monitors').all() as Array<{
+    const rows = this.db.prepare(
+      `SELECT id, source_type, target, filters, agent_prompt FROM rc_monitors${
+        this.peripheralsEnabled ? '' : ` WHERE ${SQL_IS_DEVICE_SOURCE_TYPE}(source_type) = 0`
+      }`,
+    ).all() as Array<{
       id: string;
       source_type: string;
       target: string;
@@ -541,6 +607,10 @@ export class MonitorService {
     const clauses: string[] = [];
     const params: unknown[] = [];
 
+    if (!this.peripheralsEnabled) {
+      clauses.push(`${SQL_IS_DEVICE_SOURCE_TYPE}(source_type) = 0`);
+    }
+
     if (opts?.enabled !== undefined) {
       clauses.push('enabled = ?');
       params.push(opts.enabled ? 1 : 0);
@@ -565,12 +635,15 @@ export class MonitorService {
   get(id: string): Monitor {
     const row = this.db.prepare('SELECT * FROM rc_monitors WHERE id = ?').get(id) as MonitorRow | undefined;
     if (!row) throw new Error(`Monitor not found: ${id}`);
+    this.assertSourceTypeAvailable(row.source_type);
     return rowToMonitor(row);
   }
 
   create(input: MonitorInput): Monitor {
     if (!input.name?.trim()) throw new Error('name is required');
     if (!input.source_type?.trim()) throw new Error('source_type is required and must be a non-empty string');
+    const sourceType = input.source_type.trim();
+    this.assertSourceTypeAvailable(sourceType);
 
     const schedule = input.schedule ?? '0 8 * * *';
     if (!validateCron(schedule)) throw new Error(`Invalid cron expression: ${schedule} (expected 5 fields)`);
@@ -579,9 +652,9 @@ export class MonitorService {
     const filters = input.filters ?? {};
     // F4: device 监控的默认模板按设备 kind 分支 — 建立时按 target 查 periph 设备。
     const deviceKind =
-      input.source_type.trim() === 'device' ? this.periphDeviceKind(input.target) : undefined;
+      isDeviceSourceType(sourceType) ? this.periphDeviceKind(input.target) : undefined;
     const prompt =
-      input.agent_prompt?.trim() || defaultAgentPrompt(input.source_type, filters, deviceKind);
+      input.agent_prompt?.trim() || defaultAgentPrompt(sourceType, filters, deviceKind);
     // Creating a monitor only persists its RC definition. The dashboard
     // registers the backing gateway cron job when the user enables it.
     // Defaulting to enabled here creates a false "running" state with no
@@ -594,7 +667,7 @@ export class MonitorService {
     `).run(
       id,
       input.name.trim(),
-      input.source_type.trim(),
+      sourceType,
       input.target ?? '',
       JSON.stringify(filters),
       schedule,
@@ -623,6 +696,8 @@ export class MonitorService {
   update(id: string, patch: MonitorPatch): Monitor {
     const current = this.get(id); // throws if not found
 
+    this.assertSourceTypeAvailable(patch.source_type);
+
     if (patch.schedule && !validateCron(patch.schedule)) {
       throw new Error(`Invalid cron expression: ${patch.schedule} (expected 5 fields)`);
     }
@@ -631,7 +706,7 @@ export class MonitorService {
     const params: unknown[] = [];
 
     if (patch.name !== undefined) { sets.push('name = ?'); params.push(patch.name.trim()); }
-    if (patch.source_type !== undefined) { sets.push('source_type = ?'); params.push(patch.source_type); }
+    if (patch.source_type !== undefined) { sets.push('source_type = ?'); params.push(patch.source_type.trim()); }
     if (patch.target !== undefined) { sets.push('target = ?'); params.push(patch.target); }
     if (patch.filters !== undefined) { sets.push('filters = ?'); params.push(JSON.stringify(patch.filters)); }
     if (patch.schedule !== undefined) { sets.push('schedule = ?'); params.push(patch.schedule); }
@@ -649,9 +724,11 @@ export class MonitorService {
   }
 
   delete(id: string): { ok: true; deleted: string; gateway_job_id: string | null } {
-    const row = this.db.prepare('SELECT id, gateway_job_id FROM rc_monitors WHERE id = ?').get(id) as
-      { id: string; gateway_job_id: string | null } | undefined;
+    const row = this.db.prepare(
+      'SELECT id, source_type, gateway_job_id FROM rc_monitors WHERE id = ?',
+    ).get(id) as { id: string; source_type: string; gateway_job_id: string | null } | undefined;
     if (!row) throw new Error(`Monitor not found: ${id}`);
+    this.assertSourceTypeAvailable(row.source_type);
 
     this.db.prepare('DELETE FROM rc_monitors WHERE id = ?').run(id);
     return { ok: true, deleted: id, gateway_job_id: row.gateway_job_id };
@@ -666,6 +743,8 @@ export class MonitorService {
   // ── Gateway job ID binding ──────────────────────────────────────
 
   setGatewayJobId(id: string, jobId: string | null): void {
+    // T04 owns pre-start suspension. Runtime code never mutates a hidden row.
+    this.assertExistingMonitorAvailable(id);
     this.db.prepare('UPDATE rc_monitors SET gateway_job_id = ? WHERE id = ?').run(jobId, id);
   }
 
@@ -727,6 +806,8 @@ export class MonitorService {
   }
 
   reportError(id: string, error: string): void {
+    // Guard before UPDATE so a stale cron/run cannot mutate historical rows.
+    this.assertExistingMonitorAvailable(id);
     this.db.prepare(`
       UPDATE rc_monitors SET
         last_check_at = datetime('now'),
@@ -790,7 +871,9 @@ export class MonitorService {
 
   listEnabled(): Monitor[] {
     const rows = this.db.prepare(
-      'SELECT * FROM rc_monitors WHERE enabled = 1 ORDER BY created_at ASC',
+      `SELECT * FROM rc_monitors WHERE enabled = 1${
+        this.peripheralsEnabled ? '' : ` AND ${SQL_IS_DEVICE_SOURCE_TYPE}(source_type) = 0`
+      } ORDER BY created_at ASC`,
     ).all() as MonitorRow[];
     return rows.map(rowToMonitor);
   }

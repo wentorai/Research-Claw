@@ -24,6 +24,20 @@ function fail(message: string): unknown {
 
 export function createMonitorTools(service: MonitorService): ToolDefinition[] {
   const tools: ToolDefinition[] = [];
+  const categoryExamples = service.peripheralsEnabled
+    ? '"academic", "code", "feed", "web", "social", "report", "reminder", "device"'
+    : '"academic", "code", "feed", "web", "social", "report", "reminder"';
+  const deviceCreateGuidance = service.peripheralsEnabled
+    ? 'For source_type "device" the target MUST be a peripheral device id returned by periph_list ' +
+      '(the registered uuid — NOT a browser mediaDeviceId, NOT a URL); call periph_list first to get the id. '
+    : '';
+  const deviceTargetGuidance = service.peripheralsEnabled
+    ? ', peripheral device id from periph_list for device monitors'
+    : '';
+  const deviceUpdateGuidance = service.peripheralsEnabled
+    ? 'For source_type "device" the target MUST be a peripheral device id returned by periph_list ' +
+      '(the registered uuid — NOT a browser mediaDeviceId, NOT a URL). '
+    : '';
 
   // ── 1. monitor_create ────────────────────────────────────────────
 
@@ -31,10 +45,9 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
     name: 'monitor_create',
     description:
       'Create a new monitoring target. The source_type is a free-form category string ' +
-      '(e.g. "academic", "code", "feed", "web", "social", "report", "reminder", "device", or any custom string). ' +
+      `(e.g. ${categoryExamples}, or any custom string). ` +
       'Well-known categories get rich default agent prompts with the Read\u2192Execute\u2192Write protocol. ' +
-      'For source_type "device" the target MUST be a peripheral device id returned by periph_list ' +
-      '(the registered uuid \u2014 NOT a browser mediaDeviceId, NOT a URL); call periph_list first to get the id. ' +
+      deviceCreateGuidance +
       'The monitor is created disabled. Enable it with monitor_update(enabled=true) \u2014 while the dashboard ' +
       'is online it automatically registers the backing cron job, and the monitor then runs on the specified ' +
       'schedule and sends notifications to the dashboard bell when new content is found.',
@@ -47,11 +60,11 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
         },
         source_type: {
           type: 'string',
-          description: 'Category of the data source (e.g. "academic", "code", "feed", "web", "social", "report", "reminder", "device")',
+          description: `Category of the data source (e.g. ${categoryExamples})`,
         },
         target: {
           type: 'string',
-          description: 'Target identifier: URL for feeds/webpages, "org/repo" for code, peripheral device id from periph_list for device monitors, or empty for keyword-based sources',
+          description: `Target identifier: URL for feeds/webpages, "org/repo" for code${deviceTargetGuidance}, or empty for keyword-based sources`,
         },
         filters: {
           type: 'object',
@@ -164,8 +177,7 @@ export function createMonitorTools(service: MonitorService): ToolDefinition[] {
       'change its schedule, target, filters, notification preference, or enable/disable state. ' +
       'Setting enabled=true activates the monitor: while the dashboard is online it automatically ' +
       'registers the backing Gateway cron job (no manual dashboard toggle needed). ' +
-      'For source_type "device" the target MUST be a peripheral device id returned by periph_list ' +
-      '(the registered uuid — NOT a browser mediaDeviceId, NOT a URL). ' +
+      deviceUpdateGuidance +
       'Schedule must be a 5-field cron expression.',
     parameters: {
       type: 'object',
