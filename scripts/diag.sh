@@ -100,6 +100,31 @@ grab_tail() { # <source> <destination> <lines>
   fi
 }
 
+grab_jsonl_tail() { # <source> <destination> <lines>
+  local source="$1" destination="$2" lines="${3:-2000}" stats malformed
+  if [ ! -f "$source" ]; then
+    note "$(basename "$destination"): MISSING ($source)"
+    return 0
+  fi
+  stats="$STAGE/.jsonl-stats-$$"
+  if tail -n "$lines" -- "$source" 2>/dev/null | \
+      "$NODE_BIN" "$REDACTOR" jsonl - "$destination" 2>"$stats"; then
+    malformed="$(sed -n 's/^rc-diag-jsonl malformed_count=//p' "$stats" | tail -1)"
+    case "$malformed" in ''|*[!0-9]*) malformed="unknown" ;; esac
+    local lineCount
+    lineCount="$(wc -l <"$destination" 2>/dev/null | tr -d '[:space:]')"
+    note "$(basename "$destination"): ok ($lineCount lines; malformed_count=$malformed)"
+    if [ "$malformed" != "0" ]; then
+      log "$(basename "$destination"): malformed JSONL lines=$malformed (retained as redacted diagnostic records)"
+    fi
+    rm -f -- "$stats"
+  else
+    rm -f -- "$destination" "$stats"
+    note "$(basename "$destination"): REDACTION FAILED"
+    return 1
+  fi
+}
+
 # 1. Versions
 if ! {
   "$NODE_BIN" -e '
@@ -121,7 +146,7 @@ note "versions.txt: ok"
 
 # 2. Gateway + Research-Claw run logs
 mkdir -p "$STAGE/logs"
-grab_tail "$HOME/.research-claw/logs/openclaw.log" "$STAGE/logs/openclaw.log" 2000 || \
+grab_jsonl_tail "$HOME/.research-claw/logs/openclaw.log" "$STAGE/logs/openclaw.log" 2000 || \
   fail "openclaw.log 脱敏失败。"
 for fileName in run-latest.log run-prev.log; do
   grab_tail "$HOME/.research-claw/logs/$fileName" "$STAGE/logs/$fileName" 5000 || \
@@ -132,7 +157,7 @@ done
 if [ -d /tmp/openclaw ]; then
   while IFS= read -r legacyLog; do
     [ -f "$legacyLog" ] || continue
-    grab_tail "$legacyLog" "$STAGE/logs/$(basename "$legacyLog")" 2000 || \
+    grab_jsonl_tail "$legacyLog" "$STAGE/logs/$(basename "$legacyLog")" 2000 || \
       fail "$(basename "$legacyLog") 脱敏失败。"
   done < <(find /tmp/openclaw -maxdepth 1 -type f -name 'openclaw-*.log' -print 2>/dev/null | sort -r | head -2)
 fi
@@ -153,7 +178,7 @@ if [ -d "$OPENCLAW_STATE/logs/stability" ]; then
   done < <(find "$OPENCLAW_STATE/logs/stability" -maxdepth 1 -type f -name '*startup_failed*.json' -print 2>/dev/null | sort -r | head -10)
 fi
 note "stability snapshots: $(find "$STAGE/stability" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')"
-grab_tail "$OPENCLAW_STATE/logs/config-audit.jsonl" "$STAGE/config-audit.jsonl" 500 || \
+grab_jsonl_tail "$OPENCLAW_STATE/logs/config-audit.jsonl" "$STAGE/config-audit.jsonl" 500 || \
   fail "config-audit.jsonl 脱敏失败。"
 
 # 4. Configs: sensitive keys replace the whole value; every remaining string

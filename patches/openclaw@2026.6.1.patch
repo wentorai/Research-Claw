@@ -733,6 +733,19 @@ index b3cc0ca9032b3a93c42a28bf217082e204328538..03a41513a62b7f8238fc852d65898244
  		});
  		if (finalized.status === "error") {
  			outcome = "error";
+diff --git a/dist/logger-XNVR48Hn.js b/dist/logger-XNVR48Hn.js
+index b5f70698527dd1ae0985e95a7c2a2f81107f8618..f051134ae58b8eddf5fec9ee9fb8d98b6db3fcc0 100644
+--- a/dist/logger-XNVR48Hn.js
++++ b/dist/logger-XNVR48Hn.js
+@@ -472,7 +472,7 @@ function buildLogger(settings) {
+ 				...structuredFields,
+ 				...traceFields
+ 			};
+-			const payload = `${redactSensitiveText(JSON.stringify(redactLogRecordForTransport(record)))}\n`;
++			const payload = `${JSON.stringify(redactLogRecordForTransport(record))}\n`;
+ 			const payloadBytes = Buffer.byteLength(payload, "utf8");
+ 			const nextBytes = currentFileBytes + payloadBytes;
+ 			if (currentFileBytes > 0 && nextBytes > settings.maxFileBytes) {
 diff --git a/dist/message-handler-Du1uvc4A.js b/dist/message-handler-Du1uvc4A.js
 index f1fbb70c63eab7881589bb99fb503b549bf4e7bf..19c0a9de751397e9fd623fea99b08145a5cc4e70 100644
 --- a/dist/message-handler-Du1uvc4A.js

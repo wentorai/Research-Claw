@@ -84,7 +84,12 @@ describe('diag.sh security boundary', () => {
     );
     fs.writeFileSync(
       path.join(homeDir, '.research-claw', 'logs', 'openclaw.log'),
-      `keep-openclaw-context\nCookie: session=${secrets.cookie}\n`,
+      [
+        JSON.stringify({ message: 'keep-openclaw-context', Cookie: `session=${secrets.cookie}` }),
+        '{"message":"malformed-openclaw-context","token":"broken-json-secret"',
+        JSON.stringify({ message: 'keep-openclaw-after-malformed' }),
+        '',
+      ].join('\n'),
     );
     fs.writeFileSync(
       path.join(homeDir, '.research-claw', 'logs', 'run-latest.log'),
@@ -146,11 +151,19 @@ describe('diag.sh security boundary', () => {
     for (const useful of [
       'keep-config-context',
       'keep-openclaw-context',
+      'keep-openclaw-after-malformed',
       'keep-run-context',
       'keep-audit-context',
       'keep-crash-context',
     ]) {
       expect(bundleText).toContain(useful);
+    }
+    expect(result.stdout).toContain('openclaw.log: malformed JSONL lines=1');
+    expect(bundleText).toContain('"malformed":true');
+    const manifest = fs.readFileSync(path.join(extracted, 'MANIFEST.txt'), 'utf8');
+    expect(manifest).toContain('openclaw.log: ok (3 lines; malformed_count=1)');
+    for (const line of fs.readFileSync(path.join(extracted, 'logs', 'openclaw.log'), 'utf8').split('\n')) {
+      if (line) expect(() => JSON.parse(line)).not.toThrow();
     }
   }, DIAG_TEST_TIMEOUT_MS);
 

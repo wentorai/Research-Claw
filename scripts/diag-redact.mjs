@@ -5,8 +5,8 @@ import process from 'node:process';
 
 const REDACTED = '***REDACTED***';
 const [mode, source, destination] = process.argv.slice(2);
-if (!['json', 'proxy', 'text'].includes(mode) || !source || !destination) {
-  process.stderr.write('Usage: diag-redact.mjs <json|proxy|text> <source|-> <destination|->\n');
+if (!['json', 'jsonl', 'proxy', 'text'].includes(mode) || !source || !destination) {
+  process.stderr.write('Usage: diag-redact.mjs <json|jsonl|proxy|text> <source|-> <destination|->\n');
   process.exit(2);
 }
 if (mode === 'proxy') {
@@ -196,6 +196,25 @@ function redactTextWithJsonLines(input) {
     .join('\n');
 }
 
+function redactJsonLines(input) {
+  let malformedCount = 0;
+  const output = input.split('\n').map((line, index) => {
+    if (!line.trim()) return '';
+    try {
+      return JSON.stringify(redactStructured(JSON.parse(line)));
+    } catch {
+      malformedCount += 1;
+      // Preserve useful, redacted evidence without emitting another malformed
+      // JSONL record. This keeps all later records available to diagnostics.
+      return JSON.stringify({
+        _rc_diag: { malformed: true, line: index + 1 },
+        raw: redactText(line),
+      });
+    }
+  }).join('\n');
+  return { output, malformedCount };
+}
+
 async function readInput(source) {
   if (source !== '-') return await fs.readFile(source, 'utf8');
   const chunks = [];
@@ -229,6 +248,10 @@ try {
     } catch {
       output = `${JSON.stringify({ error: 'unreadable JSON omitted from diagnostic bundle' }, null, 2)}\n`;
     }
+  } else if (mode === 'jsonl') {
+    const result = redactJsonLines(input);
+    output = result.output;
+    process.stderr.write(`rc-diag-jsonl malformed_count=${result.malformedCount}\n`);
   } else {
     output = redactTextWithJsonLines(input);
   }
