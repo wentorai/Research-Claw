@@ -200,6 +200,69 @@ test -z "$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -print -quit)"
   );
 
   it.skipIf(process.platform === 'win32')(
+    'creates the missing native Profile data root privately and rejects unsafe existing paths',
+    () => {
+      const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-profile-data-root-'));
+      roots.push(sandbox);
+      const runner = path.join(sandbox, 'profile-data-root-runner.sh');
+      const installer = fs.readFileSync(INSTALLER, 'utf8');
+      const lifecycle = extractBetween(
+        installer,
+        'RC_BOOTSTRAP_REDEEM_URL=',
+        '\nrc_profile_parse_args "$@"',
+      );
+      fs.writeFileSync(runner, `#!/usr/bin/env bash
+set -euo pipefail
+R='' G='' C='' Y='' B='' D='' N=''
+ISSUES_URL=https://invalid.example/issues
+die() { printf 'fixture-die: %s\\n' "$1" >&2; exit 1; }
+${lifecycle}
+rc_profile_prepare_native_data_root
+`, { mode: 0o700 });
+
+      const run = (home: string) => spawnSync('/bin/bash', [runner], {
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin', HOME: home },
+      });
+
+      const freshHome = path.join(sandbox, 'fresh-home');
+      fs.mkdirSync(freshHome, { mode: 0o700 });
+      const fresh = run(freshHome);
+      expect(fresh.status, `${fresh.stdout}\n${fresh.stderr}`).toBe(0);
+      const freshDataRoot = path.join(freshHome, '.research-claw');
+      expect(fs.statSync(freshDataRoot).mode & 0o777).toBe(0o700);
+
+      const existingHome = path.join(sandbox, 'existing-home');
+      const existingDataRoot = path.join(existingHome, '.research-claw');
+      fs.mkdirSync(existingDataRoot, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(path.join(existingDataRoot, 'user-owned.txt'), 'preserve\n');
+      const existing = run(existingHome);
+      expect(existing.status, `${existing.stdout}\n${existing.stderr}`).toBe(0);
+      expect(fs.readFileSync(path.join(existingDataRoot, 'user-owned.txt'), 'utf8')).toBe(
+        'preserve\n',
+      );
+
+      const symlinkHome = path.join(sandbox, 'symlink-home');
+      const symlinkTarget = path.join(sandbox, 'symlink-target');
+      fs.mkdirSync(symlinkHome, { mode: 0o700 });
+      fs.mkdirSync(symlinkTarget, { mode: 0o700 });
+      fs.symlinkSync(symlinkTarget, path.join(symlinkHome, '.research-claw'));
+      const symlink = run(symlinkHome);
+      expect(symlink.status).not.toBe(0);
+      expect(fs.readdirSync(symlinkTarget)).toEqual([]);
+
+      const fileHome = path.join(sandbox, 'file-home');
+      fs.mkdirSync(fileHome, { mode: 0o700 });
+      fs.writeFileSync(path.join(fileHome, '.research-claw'), 'not-a-directory\n');
+      const file = run(fileHome);
+      expect(file.status).not.toBe(0);
+      expect(fs.readFileSync(path.join(fileHome, '.research-claw'), 'utf8')).toBe(
+        'not-a-directory\n',
+      );
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'roots the generated openclaw wrapper at the installation from any caller directory',
     () => {
       const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-openclaw-wrapper-'));

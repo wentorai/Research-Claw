@@ -624,6 +624,34 @@ rc_profile_assert_gateway_stopped() {
   fi
 }
 
+rc_profile_prepare_native_data_root() {
+  local _data_root _created=false _owner _mode
+  case "${HOME:-}" in
+    /*) _data_root="$HOME/.research-claw" ;;
+    *) die "The home directory is unavailable; refusing to prepare the Research-Claw data directory." ;;
+  esac
+
+  [ ! -L "$_data_root" ] \
+    || die "The Research-Claw data path is a symbolic link; refusing to apply a Bootstrap Profile."
+  if [ ! -e "$_data_root" ]; then
+    (umask 077; mkdir -- "$_data_root") \
+      || die "Could not create the Research-Claw data directory."
+    _created=true
+  fi
+  [ -d "$_data_root" ] && [ ! -L "$_data_root" ] \
+    || die "The Research-Claw data path is not a concrete directory."
+  _owner="$(rc_install_path_owner "$_data_root")" \
+    || die "Could not verify the Research-Claw data directory owner."
+  [ "$_owner" = "$(id -u)" ] \
+    || die "The Research-Claw data directory is not owned by the current user."
+  if $_created; then
+    _mode="$(rc_install_path_mode "$_data_root")" \
+      || die "Could not verify the Research-Claw data directory permissions."
+    [ "$_mode" = 700 ] \
+      || die "The new Research-Claw data directory is not private."
+  fi
+}
+
 rc_profile_recover_native() {
   rc_profile_native_cli initialize-locks >/dev/null
   rc_profile_native_cli recover >/dev/null
@@ -2030,6 +2058,7 @@ fi  # end: if ! $UPDATE_FAILED (skip build/install/plugins)
 if [ -n "$RC_PROFILE_CAPSULE" ]; then
   $UPDATE_FAILED && die "The 0.8.3 candidate was not installed; refusing to apply a new Bootstrap Profile."
   rc_profile_assert_gateway_stopped
+  rc_profile_prepare_native_data_root
   rc_profile_recover_native
   rc_profile_stage_native
   rc_profile_apply_native

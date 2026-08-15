@@ -138,6 +138,7 @@ describe('Bootstrap Profile installer transaction ordering', () => {
       'rc_profile_redeem',
       'git clone',
       'rc_profile_assert_gateway_stopped',
+      'rc_profile_prepare_native_data_root',
       'rc_profile_recover_native',
       'rc_profile_stage_native',
       'rc_profile_apply_native',
