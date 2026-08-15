@@ -62,4 +62,48 @@ describe('Docker build context excludes local runtime data by default', () => {
       'test -f ppt-master/skills/ppt-master/scripts/svg_to_pptx.py',
     );
   });
+
+  it('keeps the Bootstrap same-instance test harness out of release images', () => {
+    const rules = dockerIgnoreRules();
+    expect(rules).toContain('scripts/probe-bootstrap-profile-e2e.mjs');
+    expect(rules).toContain('scripts/verify-installer-powershell.ps1');
+    expect(rules).toContain('scripts/verify-updater-powershell.ps1');
+    expect(rules).toContain('scripts/verify-log-levels.mjs');
+    expect(rules).toContain('scripts/build-profile-capsule.mjs');
+    expect(rules).toContain('scripts/validate-profile-pack.mjs');
+    expect(rules).toContain('scripts/acceptance/');
+    expect(rules).toContain('.github/');
+  });
+
+  it('keeps every private Capsule fixture out of the Docker build context', () => {
+    const rules = dockerIgnoreRules();
+    expect(rules).toContain('profiles/');
+  });
+
+  it('keeps nested test sources and fixtures out of release images', () => {
+    const rules = dockerIgnoreRules();
+    expect(rules).toContain('test/');
+    expect(rules).toContain('tests/');
+    expect(rules).toContain('**/__tests__/');
+    expect(rules).toContain('**/__fixtures__/');
+    expect(rules).toContain('**/*.test.*');
+    expect(rules).toContain('**/*.spec.*');
+  });
+
+  it('keeps generated evaluation runs and artifacts out of release images', () => {
+    const rules = dockerIgnoreRules();
+    expect(rules).toContain('eval/artifacts/');
+    expect(rules).toContain('eval/.run/');
+  });
+
+  it('keeps ignored TypeScript incremental build metadata out of release images', () => {
+    const rules = dockerIgnoreRules();
+    expect(rules).toContain('**/*.tsbuildinfo');
+    expect(rules).toContain('**/*.d.ts.map');
+
+    const dockerfile = readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+    expect(dockerfile).toMatch(
+      /RUN pnpm build && \\\n\s+find dashboard extensions -type f \\\( -name '\*\.tsbuildinfo' -o -name '\*\.d\.ts\.map' \\\) -delete/,
+    );
+  });
 });

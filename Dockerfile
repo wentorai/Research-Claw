@@ -25,7 +25,8 @@ RUN npm config set registry ${NPM_REGISTRY}
 # pandoc: workspace_export 二进制文档转换 (md→docx/pdf, Issue #38)
 # texlive-xetex/texlive-latex-recommended: pandoc PDF 引擎 (xelatex)
 # fonts-noto-cjk: 中日韩字体，确保 docx/pdf 中文渲染正确
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update && \
+    apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
       python3 make g++ git curl ca-certificates psmisc procps wget xdg-utils \
       ffmpeg \
       pandoc texlive-xetex texlive-latex-recommended lmodern \
@@ -123,7 +124,8 @@ COPY . .
 RUN test -f ppt-master/skills/ppt-master/scripts/project_manager.py && \
     test -f ppt-master/skills/ppt-master/scripts/svg_to_pptx.py
 
-RUN pnpm build
+RUN pnpm build && \
+    find dashboard extensions -type f \( -name '*.tsbuildinfo' -o -name '*.d.ts.map' \) -delete
 
 # ── research-plugins (433 skills + 40 indexes + 34 tools in 18 modules) ───
 # Bake to /defaults/ so the rc-state volume (mounts at /root/.openclaw) does
@@ -176,8 +178,11 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 # Keep release metadata after dependency/build layers. Changing only the Git
 # revision must not invalidate the multi-gigabyte scientific runtime cache.
 ARG RC_BUILD_COMMIT=unknown
+ARG RC_BUILD_VERSION=0.8.3
 ENV RC_BUILD_COMMIT=${RC_BUILD_COMMIT}
-LABEL org.opencontainers.image.revision=${RC_BUILD_COMMIT}
+ENV RC_BUILD_VERSION=${RC_BUILD_VERSION}
+LABEL org.opencontainers.image.revision=${RC_BUILD_COMMIT} \
+      org.opencontainers.image.version=${RC_BUILD_VERSION}
 
 EXPOSE 28789
 

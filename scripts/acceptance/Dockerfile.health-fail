@@ -1,0 +1,7 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+COPY --chmod=0755 entrypoint-health-fail.sh /entrypoint-health-fail.sh
+
+LABEL ai.wentor.acceptance.failure-mode="health-fail"
+ENTRYPOINT ["/entrypoint-health-fail.sh"]

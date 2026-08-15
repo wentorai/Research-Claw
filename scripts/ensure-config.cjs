@@ -33,9 +33,18 @@
  */
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const {
+  readPrivateFileRecord,
+  reconcileStagedJsonAuthority,
+  sha256,
+  unlinkPrivateFileRecord,
+  writeBytesAtomic,
+  writeJsonStagedNoReplace,
+} = require('./bootstrap-profile/storage.cjs');
 const {
   isManagedResearchPluginsPath,
   isUsableResearchPluginsInstall,
@@ -60,6 +69,119 @@ const RESEARCH_PLUGINS_PATH = path.join(os.homedir(), '.openclaw', 'extensions',
 const RC_SKILLS_PROMPT_MAX = 100;
 const RC_SKILLS_PROMPT_CHARS = 26000;
 const RC_TOOL_SEARCH_DEFAULT = false;
+const ENSURE_CONFIG_MAX_BYTES = 64 * 1024 * 1024;
+const UUID_V4 = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+
+function ensureConfigAtomicSpec(file) {
+  const target = path.basename(file);
+  if (!target || target === '.' || target === path.sep || target.includes('\0')) {
+    throw new Error('Invalid ensure-config target');
+  }
+  const prefix = `.${target}`;
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return {
+    target,
+    prefix,
+    parent: path.dirname(file),
+    intentFile: path.join(path.dirname(file), `.${target}.ensure-config-intent.json`),
+    intentStagingFile: path.join(path.dirname(file), `.${target}.ensure-config-intent.staging`),
+    tempPattern: new RegExp(`^${escaped}\\.${UUID_V4}\\.tmp$`),
+  };
+}
+
+function readEnsureConfigIntent(file, record) {
+  const spec = ensureConfigAtomicSpec(file);
+  let intent;
+  try {
+    intent = JSON.parse(record.bytes.toString('utf8'));
+  } catch {
+    throw new Error('Invalid ensure-config atomic intent');
+  }
+  const keys = 'payloadBytes,payloadSha256,target,tempName,version';
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)
+      || Object.keys(intent).sort().join(',') !== keys
+      || intent.version !== 1 || intent.target !== spec.target
+      || typeof intent.tempName !== 'string' || !spec.tempPattern.test(intent.tempName)
+      || !Number.isSafeInteger(intent.payloadBytes) || intent.payloadBytes < 1
+      || intent.payloadBytes > ENSURE_CONFIG_MAX_BYTES
+      || typeof intent.payloadSha256 !== 'string'
+      || !/^[0-9a-f]{64}$/.test(intent.payloadSha256)) {
+    throw new Error('Invalid ensure-config atomic intent');
+  }
+  return { intent, record, spec };
+}
+
+function reconcileEnsureConfigAtomicWrite(file) {
+  const spec = ensureConfigAtomicSpec(file);
+  let names;
+  try {
+    names = fs.readdirSync(spec.parent);
+  } catch {
+    throw new Error('Invalid ensure-config atomic parent');
+  }
+  const intentPrefix = `.${spec.target}.ensure-config-intent`;
+  const allowed = new Set([
+    path.basename(spec.intentFile), path.basename(spec.intentStagingFile),
+  ]);
+  if (names.some((name) => name.startsWith(intentPrefix) && !allowed.has(name))) {
+    throw new Error('Invalid ensure-config atomic intent');
+  }
+  let authority;
+  try {
+    authority = reconcileStagedJsonAuthority(spec.intentFile, spec.intentStagingFile, {
+      maxBytes: 4096,
+      mode: 0o600,
+    });
+  } catch {
+    throw new Error('Invalid ensure-config atomic intent');
+  }
+  if (!authority) return;
+  const authenticated = readEnsureConfigIntent(file, authority);
+  const temporary = path.join(spec.parent, authenticated.intent.tempName);
+  let candidate = null;
+  try {
+    candidate = readPrivateFileRecord(temporary, {
+      allowAbsent: true,
+      maxBytes: authenticated.intent.payloadBytes,
+      exactMode: 0o600,
+    });
+  } catch {
+    throw new Error('Invalid ensure-config atomic temp');
+  }
+  if (candidate) {
+    if (candidate.bytes.length === authenticated.intent.payloadBytes
+        && sha256(candidate.bytes) !== authenticated.intent.payloadSha256) {
+      throw new Error('Invalid ensure-config atomic temp');
+    }
+    unlinkPrivateFileRecord(temporary, candidate.identity);
+  }
+  unlinkPrivateFileRecord(spec.intentFile, authenticated.record.identity);
+}
+
+function writeEnsureConfigAtomic(file, bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 1 || bytes.length > ENSURE_CONFIG_MAX_BYTES) {
+    throw new Error('Invalid ensure-config payload');
+  }
+  reconcileEnsureConfigAtomicWrite(file);
+  const spec = ensureConfigAtomicSpec(file);
+  const tempName = `${spec.prefix}.${crypto.randomUUID()}.tmp`;
+  writeJsonStagedNoReplace(spec.intentFile, spec.intentStagingFile, {
+    version: 1,
+    target: spec.target,
+    tempName,
+    payloadBytes: bytes.length,
+    payloadSha256: sha256(bytes),
+  }, 0o600);
+  try {
+    writeBytesAtomic(file, bytes, 0o600, {
+      ensureParent: false,
+      temporaryPrefix: spec.prefix,
+      temporaryName: tempName,
+    });
+  } finally {
+    reconcileEnsureConfigAtomicWrite(file);
+  }
+}
 
 // Canonical ceiling for one complete foreground agent turn. Read it from the
 // fresh-install template instead of duplicating the value here: commit 83a02c6
@@ -1010,9 +1132,7 @@ function ensureConfig(filePath) {
   // Write atomically (temp + rename) to prevent corruption on disk-full
   if (changed) {
     const out = JSON.stringify(c, null, 2) + '\n';
-    const tmp = filePath + '.tmp.' + process.pid;
-    fs.writeFileSync(tmp, out);
-    fs.renameSync(tmp, filePath);
+    writeEnsureConfigAtomic(filePath, Buffer.from(out));
   }
 
   return changed;
@@ -1056,9 +1176,7 @@ function inheritGlobalCompaction(projectPath, globalPath) {
     globalInstructions;
 
   const out = JSON.stringify(projectConfig, null, 2) + '\n';
-  const tmp = projectPath + '.tmp.' + process.pid;
-  fs.writeFileSync(tmp, out);
-  fs.renameSync(tmp, projectPath);
+  writeEnsureConfigAtomic(projectPath, Buffer.from(out));
   return true;
 }
 

@@ -11,10 +11,31 @@ export const CORE_PROBES = Object.freeze([
   ['rc.task.list', { limit: 1 }],
   ['rc.monitor.list', { limit: 1 }],
   ['rc.review.candidates', { root: 'sources' }],
-  ['rc.periph.devices.list', {}],
+  ['rc.periph.devices.list', {}, undefined, 'peripherals'],
   ['rc.job.list', { limit: 1 }],
   ['rc.supervisor.reviews.list', { limit: 1 }, 'dual-model-supervisor'],
 ]);
+
+export function planReadinessProbes(config = {}) {
+  const peripheralsPolicy = config?.plugins?.entries?.['research-claw-core']
+    ?.config?.productPolicy?.capabilities?.peripherals;
+  return CORE_PROBES.map(([method, params, plugin, capability]) => {
+    if (capability === 'peripherals' && peripheralsPolicy === 'disabled') {
+      return {
+        method,
+        params,
+        plugin,
+        expectation: 'unavailable',
+        reason: 'peripherals policy is disabled',
+      };
+    }
+    return { method, params, plugin, expectation: 'available' };
+  });
+}
+
+export function isExpectedUnavailableError(message) {
+  return /unknown method|method not found|invalid_request|feature unavailable/i.test(message);
+}
 
 export function extractJson(raw) {
   const start = raw.indexOf('{');
@@ -68,17 +89,35 @@ export async function runReadiness(options) {
     return report;
   }
 
-  for (const [method, params, plugin] of CORE_PROBES) {
+  for (const probe of planReadinessProbes(config)) {
+    const { method, params, plugin, expectation } = probe;
     if (plugin && !pluginEnabled(plugin)) {
       report.probes.push({ method, ok: true, skipped: true, reason: `${plugin} is disabled` });
       continue;
     }
     try {
       await socket.call(method, params);
-      report.probes.push({ method, ok: true });
+      if (expectation === 'unavailable') {
+        report.probes.push({
+          method,
+          ok: false,
+          reason: `${probe.reason}, but the RPC is still registered`,
+        });
+      } else {
+        report.probes.push({ method, ok: true });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      report.probes.push({ method, ok: false, reason: message });
+      if (expectation === 'unavailable' && isExpectedUnavailableError(message)) {
+        report.probes.push({
+          method,
+          ok: true,
+          expectedUnavailable: true,
+          reason: probe.reason,
+        });
+      } else {
+        report.probes.push({ method, ok: false, reason: message });
+      }
     }
   }
   report.ok = report.core.ok && report.probes.every((probe) => probe.ok);

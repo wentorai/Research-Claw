@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "gateId": "replace-with-a-unique-t10-fixture-id",
+  "redeemEndpoint": "https://wentor.ai/api/v1/rc/bootstrap/redeem",
+  "fixtureAuthority": {
+    "id": "replace-with-the-staging-fixture-authority-id",
+    "expiresAtUtc": "2099-01-01T00:00:00Z",
+    "notForProduction": true,
+    "cases": {
+      "network": true,
+      "unknown": true,
+      "revoked": true,
+      "badCapsule": true,
+      "valid": true,
+      "rotate": true,
+      "healthFail": true
+    }
+  },
+  "acceptanceHarness": {
+    "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+  },
+  "installer": {
+    "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+  },
+  "evidenceHelper": {
+    "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+  },
+  "images": {
+    "candidate": {
+      "repository": "registry.example.invalid/wentorai/research-claw-t10-candidate",
+      "tag": "latest",
+      "registryDigest": "sha256:REPLACE_WITH_64_LOWERCASE_HEX",
+      "criticalRuntimeSha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+      "labels": {
+        "org.opencontainers.image.version": "0.8.3",
+        "org.opencontainers.image.revision": "REPLACE_WITH_40_LOWERCASE_HEX"
+      }
+    },
+    "healthFail": {
+      "repository": "registry.example.invalid/wentorai/research-claw-t10-health-fail",
+      "tag": "latest",
+      "registryDigest": "sha256:REPLACE_WITH_64_LOWERCASE_HEX",
+      "failureEntrypoint": "/entrypoint-health-fail.sh",
+      "failureEntrypointSha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+      "labels": {
+        "org.opencontainers.image.version": "0.8.3",
+        "org.opencontainers.image.revision": "REPLACE_WITH_40_LOWERCASE_HEX",
+        "ai.wentor.acceptance.failure-mode": "health-fail"
+      }
+    }
+  },
+  "expectedProfiles": {
+    "valid": {
+      "id": "replace-with-profile-id",
+      "revision": 1,
+      "digest": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "rotate": {
+      "id": "replace-with-profile-id",
+      "revision": 2,
+      "digest": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "healthFail": {
+      "id": "replace-with-profile-id",
+      "revision": 3,
+      "digest": "REPLACE_WITH_64_LOWERCASE_HEX"
+    }
+  },
+  "expectedFailures": {
+    "badCapsule": {
+      "capsuleDigest": "REPLACE_WITH_64_LOWERCASE_HEX"
+    }
+  }
+}

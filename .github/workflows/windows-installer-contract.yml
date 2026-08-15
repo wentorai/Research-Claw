@@ -1,0 +1,27 @@
+name: Windows Installer Contract
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell:
+    name: Windows x64 / PowerShell 5.1 and 7
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Windows PowerShell 5.1 parser and error behavior
+        shell: powershell
+        run: .\scripts\verify-installer-powershell.ps1 -ExpectedEdition Desktop -ExpectedMajorVersion 5 -AcceptanceHarnessPath .\scripts\acceptance\windows-bootstrap-docker.ps1
+
+      - name: PowerShell 7 parser and error behavior
+        shell: pwsh
+        run: .\scripts\verify-installer-powershell.ps1 -ExpectedEdition Core -ExpectedMajorVersion 7 -AcceptanceHarnessPath .\scripts\acceptance\windows-bootstrap-docker.ps1

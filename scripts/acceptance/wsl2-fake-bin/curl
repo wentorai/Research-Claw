@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+: "${RC_ACCEPTANCE_LOG_DIR:?}"
+printf '%s\n' "$*" >>"$RC_ACCEPTANCE_LOG_DIR/curl.calls"
+# A connection-level failure shortens each registry retry sequence to one pull.
+exit 22

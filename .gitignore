@@ -13,10 +13,19 @@ dashboard/dist/
 # Catch-all covers .bak, .bak.N, .last-good, .prefix-<timestamp>, etc.; example template is unaffected.
 config/openclaw.json
 config/openclaw.json.*
+config/.openclaw.json.*.tmp
+config/.openclaw.json.ensure-config-intent.json
+config/.openclaw.json.ensure-config-intent.staging
+config/.rc-bootstrap-live-config-*.tmp
 config/*.bak
 config/*.bak.*
 config/*.prefix-*
 config/openclaw.json.last-good
+# Bootstrap lock authority and multi-volume transaction journals are durable
+# private runtime state. They can contain credential preimages and must survive
+# installer `git clean -fd` across upgrades.
+config/.rc-bootstrap/
+config/.rc-bootstrap-lock-authority/
 
 # Browser/runtime data written under config/ at runtime — never commit.
 # These can contain cookies, login data and other private/credential material.
@@ -29,6 +38,15 @@ config/plugin-skills/
 .env
 .env.local
 .env.production
+
+# Windows acceptance material. Concrete manifests can contain deployment
+# provenance and the secret bundle contains live staging credentials. Keep only
+# the checked-in example/schema; every operator-created instance stays local.
+/scripts/acceptance/windows-bootstrap-docker.manifest*.json
+!/scripts/acceptance/windows-bootstrap-docker.manifest.example.json
+/scripts/acceptance/windows-bootstrap-docker.secret-bundle*.json
+!/scripts/acceptance/windows-bootstrap-docker.secret-bundle.schema.json
+/scripts/acceptance/windows-bootstrap-docker.evidence*/
 
 # SQLite databases (both .sqlite and .db patterns)
 *.sqlite

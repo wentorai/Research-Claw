@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+: "${RC_ACCEPTANCE_LOG_DIR:?}"
+printf '%s\n' "$*" >>"$RC_ACCEPTANCE_LOG_DIR/docker.calls"
+
+case "${1:-}" in
+  info) exit 0 ;;
+  --version)
+    printf 'Docker version 29.0.0, build wsl2-acceptance\n'
+    ;;
+  pull)
+    printf 'acceptance fixture: forced pull failure\n' >&2
+    exit 41
+    ;;
+  images) exit 0 ;;
+  *)
+    : >"$RC_ACCEPTANCE_LOG_DIR/unexpected-docker-call"
+    exit 90
+    ;;
+esac

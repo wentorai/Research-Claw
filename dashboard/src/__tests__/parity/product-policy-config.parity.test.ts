@@ -59,13 +59,12 @@ describe('OpenClaw 2026.6.1 config.get product-policy parity', () => {
   });
 
   it('preserves the customized policy exactly', () => {
-    expect(parseProductPolicy(policyFrom(customPolicyCapture))).toEqual({
-      capabilities: {
-        settings: 'enabled-hidden',
-        extensions: 'enabled-hidden',
-        supervisor: 'enabled-hidden',
-        peripherals: 'disabled',
-      },
+    const parsed = parseProductPolicy(policyFrom(customPolicyCapture));
+    expect(parsed.capabilities).toEqual({
+      settings: 'enabled-hidden',
+      extensions: 'enabled-hidden',
+      supervisor: 'enabled-hidden',
+      peripherals: 'disabled',
     });
   });
 });

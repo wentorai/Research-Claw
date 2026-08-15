@@ -5,6 +5,8 @@ node_modules
 # Build outputs — rebuilt in image
 dashboard/dist
 extensions/*/dist
+**/*.tsbuildinfo
+**/*.d.ts.map
 
 # ppt-master is a populated git submodule in release checkouts. Ship only its
 # runtime skill, never its nested .git history, docs, examples, or local projects.
@@ -35,10 +37,33 @@ workspace/.ResearchClaw/**
 # Git
 .git
 .gitignore
+.github/
 
 # Secrets / env
 .env
 
+# Bootstrap Capsules are private issuer inputs and never runtime image assets.
+profiles/
+
+# Generated evaluation runs are development evidence, not runtime image assets.
+eval/artifacts/
+eval/.run/
+
 # Misc
 *.log
 test/
+tests/
+**/__tests__/
+**/__fixtures__/
+**/*.test.*
+**/*.spec.*
+
+# Local integration harness: depends on test-only provider fixtures and must
+# never be shipped as an incomplete runtime script.
+scripts/probe-bootstrap-profile-e2e.mjs
+scripts/verify-installer-powershell.ps1
+scripts/verify-updater-powershell.ps1
+scripts/verify-log-levels.mjs
+scripts/build-profile-capsule.mjs
+scripts/validate-profile-pack.mjs
+scripts/acceptance/

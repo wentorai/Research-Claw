@@ -75,6 +75,13 @@ describe('thermoelectric-user-a Profile Pack', () => {
       },
       supervisor: { reviewMode: 'correct', inheritPrimaryModel: true },
     });
+
+    const productPolicyCapture = JSON.parse(fs.readFileSync(path.join(
+      ROOT,
+      'dashboard/src/__fixtures__/gateway-payloads/product-policy-custom.config-get-2026.6.1.json',
+    ), 'utf8')) as Record<string, any>;
+    expect(productPolicyCapture.response.config.plugins.entries['research-claw-core']
+      .config.productPolicy.capabilities).toEqual(capsule.policy.capabilities);
   });
 
   it('contains no default-scan copy of the three Profile Skills', () => {

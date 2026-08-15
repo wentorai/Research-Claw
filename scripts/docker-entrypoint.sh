@@ -67,6 +67,28 @@ elif [ "$CURRENT_VERSION" != "$IMAGE_VERSION" ]; then
   echo "[research-claw] Upgraded to v$IMAGE_VERSION (config preserved)"
 fi
 
+# A container must never run ensure/migrations or start Gateway on top of an
+# installer-owned pending Profile transaction. Ordinary installs without lock
+# authority skip this branch byte-for-byte; recovery remains installer-owned
+# and never fetches a Capsule from the entrypoint.
+if [ -d /app/config/.rc-bootstrap/locks ]; then
+  PROFILE_STATUS=$(node /app/scripts/apply-bootstrap-profile.cjs status \
+    --rc-root /app \
+    --config /app/config/openclaw.json \
+    --workspace /app/workspace \
+    --state-dir /root/.openclaw \
+    --db /app/.research-claw/library.db \
+    --global-config /root/.openclaw/openclaw.json 2>/dev/null) || {
+      echo "[research-claw] ERROR: Bootstrap Profile state is invalid; re-run the installer"
+      exit 1
+    }
+  if ! printf '%s' "$PROFILE_STATUS" \
+      | node /app/scripts/bootstrap-profile/entrypoint-admission.cjs; then
+    echo "[research-claw] ERROR: A Bootstrap Profile transaction is pending; re-run the installer"
+    exit 1
+  fi
+fi
+
 # --- Migrate user settings from existing global OpenClaw config ---
 # Docker mounts rc-state:/root/.openclaw which may contain a global
 # openclaw.json from a previous vanilla OC Docker deployment.

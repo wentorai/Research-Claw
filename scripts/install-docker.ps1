@@ -26,9 +26,33 @@
 #            Default: ACR (China), fallback: GHCR
 # ============================================================================
 
+param([string]$AuthToken)
+if ($args.Count -ne 0) {
+    throw 'Unknown or extra installer arguments are not supported.'
+}
+$RcBootstrapAuthTokenSupplied = $PSBoundParameters.ContainsKey('AuthToken')
+
 & {
 # Wrap in scriptblock so $ErrorActionPreference doesn't leak into caller session
 $ErrorActionPreference = "Stop"
+$RcBootstrapRedeemUrl = 'https://wentor.ai/api/v1/rc/bootstrap/redeem'
+$RcBootstrapMaxCapsuleBytes = 2 * 1024 * 1024
+$RcProfileRequested = $RcBootstrapAuthTokenSupplied
+if ($RcProfileRequested -and [string]::IsNullOrWhiteSpace($AuthToken)) {
+    throw '-AuthToken requires a non-empty value.'
+}
+if ($RcProfileRequested -and $AuthToken -notmatch '^rca_[A-Za-z0-9_-]{43,}$') {
+    throw '-AuthToken has an invalid format.'
+}
+$script:RcProfileTempRoot = $null
+$script:RcProfileCapsule = $null
+$script:RcProfileEmptyInput = $null
+$script:RcProfileTxId = $null
+$script:RcProfilePendingState = $null
+$script:RcProfileCommitted = $false
+$script:RcProfileCommitAttempted = $false
+$script:OldContainerStopped = $false
+$script:ReplacementAttempted = $false
 
 # -- Mirror / image configuration -------------------------------------------
 # Default: Alibaba Cloud ACR (China mainland accessible, no proxy needed).
@@ -43,6 +67,267 @@ $RollbackContainer = "${Container}-rollback"
 $Port           = 28789
 $HealthTimeout  = 60
 
+function Remove-RcBootstrapSecretState {
+    if (-not $script:RcProfileTempRoot) { return }
+    $tempParent = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
+    $candidate = [System.IO.Path]::GetFullPath($script:RcProfileTempRoot)
+    if ((Split-Path -Parent $candidate).TrimEnd('\') -ne $tempParent -or
+        (Split-Path -Leaf $candidate) -notlike 'rc-bootstrap-installer.*') {
+        throw 'Refusing to remove an invalid Bootstrap Profile private path.'
+    }
+    Remove-Item -LiteralPath $candidate -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $candidate) {
+        throw 'Could not remove the Bootstrap Profile private files.'
+    }
+    $script:RcProfileTempRoot = $null
+    $script:RcProfileCapsule = $null
+    $script:RcProfileEmptyInput = $null
+}
+
+function Redeem-RcBootstrapProfile {
+    if (-not $RcProfileRequested) { return }
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) (
+        'rc-bootstrap-installer.' + [guid]::NewGuid().ToString('N')
+    )
+    [System.IO.Directory]::CreateDirectory($root) | Out-Null
+    $script:RcProfileTempRoot = $root
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $security = New-Object System.Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $security.SetOwner($identity.User)
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $identity.User,
+        [System.Security.AccessControl.FileSystemRights]::FullControl,
+        [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+        [System.Security.AccessControl.PropagationFlags]::None,
+        [System.Security.AccessControl.AccessControlType]::Allow
+    )
+    $security.AddAccessRule($rule)
+    Set-Acl -LiteralPath $root -AclObject $security
+    $script:RcProfileCapsule = Join-Path $root 'capsule.json'
+    $script:RcProfileEmptyInput = Join-Path $root 'empty.stdin'
+    [System.IO.File]::WriteAllBytes($script:RcProfileEmptyInput, [byte[]]@())
+
+    Add-Type -AssemblyName System.Net.Http
+    $handler = [System.Net.Http.HttpClientHandler]::new()
+    $handler.AllowAutoRedirect = $false
+    $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::None
+    $client = [System.Net.Http.HttpClient]::new($handler)
+    $request = [System.Net.Http.HttpRequestMessage]::new(
+        [System.Net.Http.HttpMethod]::Post,
+        $RcBootstrapRedeemUrl
+    )
+    [void]$request.Headers.TryAddWithoutValidation('Authorization', "Bearer $AuthToken")
+    [void]$request.Headers.TryAddWithoutValidation('Accept-Encoding', 'identity')
+    $response = $null
+    try {
+        $response = $client.SendAsync($request).GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) {
+            throw "Bootstrap Profile redemption returned HTTP $([int]$response.StatusCode)."
+        }
+        $contentType = $response.Content.Headers.ContentType
+        $contentEncoding = @($response.Content.Headers.ContentEncoding)
+        $declaredLength = $response.Content.Headers.ContentLength
+        if (-not $contentType -or $contentType.MediaType -ine 'application/json' -or
+            $contentType.CharSet -ine 'utf-8' -or $contentType.Parameters.Count -ne 1 -or
+            $contentEncoding.Count -ne 1 -or $contentEncoding[0] -ine 'identity' -or
+            $null -eq $declaredLength -or $declaredLength -le 0 -or
+            $declaredLength -gt $RcBootstrapMaxCapsuleBytes) {
+            throw 'Bootstrap Profile redemption returned invalid response metadata.'
+        }
+        $response.Content.LoadIntoBufferAsync($RcBootstrapMaxCapsuleBytes).GetAwaiter().GetResult()
+        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        if (-not $bytes -or $bytes.Length -eq 0 -or
+            $bytes.Length -gt $RcBootstrapMaxCapsuleBytes -or
+            $bytes.Length -ne $declaredLength) {
+            throw 'Bootstrap Profile redemption returned invalid Capsule bytes.'
+        }
+        [System.IO.File]::WriteAllBytes($script:RcProfileCapsule, $bytes)
+    } finally {
+        if ($response) { $response.Dispose() }
+        $request.Dispose()
+        $client.Dispose()
+        $handler.Dispose()
+    }
+}
+
+function Invoke-RcBootstrapDockerCli {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string[]]$ExtraArguments = @(),
+        [string]$InputPath = $script:RcProfileEmptyInput
+    )
+    $arguments = @(
+        'run', '--rm', '-i', '--entrypoint', 'node',
+        '-v', 'rc-config:/app/config',
+        '-v', 'rc-data:/app/.research-claw',
+        '-v', 'rc-workspace:/app/workspace',
+        '-v', 'rc-state:/root/.openclaw',
+        $Image, '/app/scripts/apply-bootstrap-profile.cjs', $Command,
+        '--rc-root', '/app',
+        '--config', '/app/config/openclaw.json',
+        '--workspace', '/app/workspace',
+        '--state-dir', '/root/.openclaw',
+        '--db', '/app/.research-claw/library.db',
+        '--global-config', '/root/.openclaw/openclaw.json'
+    ) + $ExtraArguments
+    if (-not $script:RcProfileTempRoot) {
+        if ($InputPath) { throw "Bootstrap Profile operation '$Command' has no private input root." }
+        $output = & {
+            $ErrorActionPreference = 'Continue'
+            & docker @arguments 2>&1 | Out-String
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Bootstrap Profile operation '$Command' failed." }
+        return $output
+    }
+    $stdout = Join-Path $script:RcProfileTempRoot ('stdout-' + [guid]::NewGuid().ToString('N'))
+    $stderr = Join-Path $script:RcProfileTempRoot ('stderr-' + [guid]::NewGuid().ToString('N'))
+    $process = Start-Process -FilePath 'docker' -ArgumentList $arguments `
+        -RedirectStandardInput $InputPath -RedirectStandardOutput $stdout `
+        -RedirectStandardError $stderr -NoNewWindow -Wait -PassThru
+    $output = if (Test-Path $stdout) { [System.IO.File]::ReadAllText($stdout) } else { '' }
+    Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+    if ($process.ExitCode -ne 0) { throw "Bootstrap Profile operation '$Command' failed." }
+    return $output
+}
+
+function Initialize-RcBootstrapDockerBaseline {
+    $scriptText = @'
+set -eu
+umask 077
+mkdir -p /app/config /app/.research-claw /app/workspace /root/.openclaw
+if [ ! -f /app/config/openclaw.json ]; then
+  cp /defaults/openclaw.example.json /app/config/openclaw.json
+  chmod 600 /app/config/openclaw.json
+fi
+if [ ! -f /root/.openclaw/openclaw.json ]; then
+  printf '{}\n' > /root/.openclaw/openclaw.json
+  chmod 600 /root/.openclaw/openclaw.json
+fi
+'@
+    & docker run --rm --entrypoint sh `
+        -v rc-config:/app/config -v 'rc-data:/app/.research-claw' `
+        -v rc-workspace:/app/workspace -v 'rc-state:/root/.openclaw' `
+        $Image -c $scriptText | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the Docker Profile baseline.' }
+}
+
+function Test-RcBootstrapLockAuthority {
+    & {
+        $ErrorActionPreference = 'Continue'
+        docker run --rm --entrypoint sh -v 'rc-config:/app/config:ro' `
+            $Image -c 'test -d /app/config/.rc-bootstrap/locks' 2>&1 | Out-Null
+    }
+    return $LASTEXITCODE -eq 0
+}
+
+function Recover-RcBootstrapProfile {
+    Invoke-RcBootstrapDockerCli -Command 'recover' | Out-Null
+    $script:RcProfileTxId = $null
+    $script:RcProfilePendingState = $null
+}
+
+function Initialize-RcBootstrapLocks {
+    Invoke-RcBootstrapDockerCli -Command 'initialize-locks' | Out-Null
+}
+
+function Read-RcBootstrapPendingTransaction {
+    $status = Invoke-RcBootstrapDockerCli -Command 'status' | ConvertFrom-Json
+    if ($status.pendingTransaction) {
+        if ($status.pendingTransaction.txId -notmatch '^tx-[0-9a-f-]{36}$' -or
+            $status.pendingTransaction.state -notmatch '^[a-z]+$') {
+            throw 'Bootstrap Profile status returned an invalid pending transaction.'
+        }
+        $script:RcProfileTxId = $status.pendingTransaction.txId
+        $script:RcProfilePendingState = $status.pendingTransaction.state
+    } else {
+        $script:RcProfileTxId = $null
+        $script:RcProfilePendingState = $null
+    }
+}
+
+function Stage-RcBootstrapProfile {
+    try {
+        $result = Invoke-RcBootstrapDockerCli -Command 'stage' -InputPath $script:RcProfileCapsule |
+            ConvertFrom-Json
+    } catch {
+        try { Read-RcBootstrapPendingTransaction } catch {}
+        throw
+    }
+    if (-not $result.txId -or $result.txId -notmatch '^tx-[0-9a-f-]{36}$') {
+        throw 'Bootstrap Profile staging returned an invalid transaction.'
+    }
+    $script:RcProfileTxId = $result.txId
+}
+
+function Apply-RcBootstrapProfile {
+    Invoke-RcBootstrapDockerCli -Command 'apply' `
+        -ExtraArguments @('--tx-id', $script:RcProfileTxId) | Out-Null
+}
+
+function Verify-RcBootstrapProfile {
+    Invoke-RcBootstrapDockerCli -Command 'verify' `
+        -ExtraArguments @('--tx-id', $script:RcProfileTxId) | Out-Null
+}
+
+function Probe-RcBootstrapProfile {
+    $probe = @'
+set -eu
+pair=$(node -e '
+  const fs=require("fs"), c=JSON.parse(fs.readFileSync("/app/config/openclaw.json","utf8"));
+  const primary=typeof c.agents?.defaults?.model === "string" ? c.agents.defaults.model : c.agents?.defaults?.model?.primary;
+  const provider=typeof primary === "string" ? primary.split("/")[0] : "";
+  const profile=c.auth?.order?.[provider]?.[0] || "";
+  if (!provider || !profile) process.exit(1);
+  process.stdout.write(provider+" "+profile);
+')
+set -- $pair
+node /app/scripts/bootstrap-profile/model-probe.cjs \
+  --root /app --config /app/config/openclaw.json \
+  --state /root/.openclaw --provider "$1" --profile "$2" \
+  --scratch-root /tmp >/dev/null
+'@
+    & docker run --rm --entrypoint sh `
+        -v 'rc-config:/app/config:ro' -v 'rc-state:/root/.openclaw:ro' `
+        $Image -c $probe | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Bootstrap Profile credential/model probe failed.' }
+}
+
+function Rollback-RcBootstrapProfile {
+    if (-not $script:RcProfileTxId) { return }
+    $result = Invoke-RcBootstrapDockerCli -Command 'rollback' `
+        -ExtraArguments @('--tx-id', $script:RcProfileTxId) | ConvertFrom-Json
+    if ($result.state -eq 'committed') {
+        $script:RcProfileCommitted = $true
+    } elseif ($result.state -ne 'rolled-back') {
+        throw 'Bootstrap Profile rollback returned an invalid state.'
+    }
+    $script:RcProfileTxId = $null
+    $script:RcProfilePendingState = $null
+}
+
+function Commit-RcBootstrapProfile {
+    $script:RcProfileCommitAttempted = $true
+    try {
+        Invoke-RcBootstrapDockerCli -Command 'commit' `
+            -ExtraArguments @('--tx-id', $script:RcProfileTxId) | Out-Null
+        $script:RcProfileCommitted = $true
+        $script:RcProfileTxId = $null
+        $script:RcProfilePendingState = $null
+    } catch {
+        $commitError = $_
+        try { Read-RcBootstrapPendingTransaction } catch { throw $commitError }
+        if ($script:RcProfilePendingState -ne 'committed') { throw $commitError }
+        Rollback-RcBootstrapProfile
+    }
+    $status = Invoke-RcBootstrapDockerCli -Command 'status' | ConvertFrom-Json
+    if ($status.profile) {
+        Write-Host "  + Bootstrap Profile $($status.profile.id) revision $($status.profile.revision)" -ForegroundColor Green
+    }
+    Remove-RcBootstrapSecretState
+}
+
+try {
 # -- Banner ----------------------------------------------------------------
 Write-Host ""
 Write-Host "    ____                              _        ____ _" -ForegroundColor Red
@@ -74,24 +359,86 @@ function Write-Step([int]$N, [string]$Title) {
 }
 
 $script:HadPrevious = $false
+function Wait-RcRestoredGateway {
+    $waited = 0
+    while ($waited -lt $HealthTimeout) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:${Port}/healthz" `
+                -UseBasicParsing -TimeoutSec 2
+            if ($response.StatusCode -eq 200) { return $true }
+        } catch {}
+        Start-Sleep -Seconds 2
+        $waited += 2
+    }
+    return $false
+}
+
 function Restore-PreviousContainer {
-    if (-not $script:HadPrevious) { return }
+    if (-not $script:HadPrevious -and -not $script:OldContainerStopped -and
+        -not $script:ReplacementAttempted -and -not $script:RcProfileTxId) { return }
     Write-Host "  ! The replacement did not become ready; restoring the previous version." -ForegroundColor Yellow
-    & { $ErrorActionPreference = 'Continue'; docker rm -f $Container 2>&1 | Out-Null }
+    if ($script:RcProfileCommitAttempted -and $script:RcProfileTxId) {
+        try {
+            Read-RcBootstrapPendingTransaction
+        } catch {
+            throw 'Could not determine whether the Profile commit point won; both containers were preserved.'
+        }
+        if ($script:RcProfilePendingState -eq 'committed') {
+            Rollback-RcBootstrapProfile
+            $script:ReplacementAttempted = $false
+            $script:OldContainerStopped = $false
+            if ($script:HadPrevious) {
+                & { $ErrorActionPreference = 'Continue'; docker rm -f $RollbackContainer 2>&1 | Out-Null }
+                if ($LASTEXITCODE -ne 0) { throw 'Could not remove the completed rollback container.' }
+                $script:HadPrevious = $false
+            }
+            return
+        }
+    }
+    if ($script:ReplacementAttempted) {
+        & { $ErrorActionPreference = 'Continue'; docker rm -f $Container 2>&1 | Out-Null }
+        $script:ReplacementAttempted = $false
+    }
+    if ($script:RcProfileTxId -and -not $script:RcProfileCommitted) {
+        try {
+            Rollback-RcBootstrapProfile
+        } catch {
+            Write-Host "  x Volume rollback failed. The previous container remains '$RollbackContainer'." -ForegroundColor Red
+            Write-RcLog "profile volume rollback failed"
+            throw 'Bootstrap Profile volume rollback failed.'
+        }
+    }
+    if ($script:OldContainerStopped) {
+        & { $ErrorActionPreference = 'Continue'; docker start $Container 2>&1 | Out-Null }
+        $restarted = $LASTEXITCODE -eq 0
+        if ($restarted -and (Wait-RcRestoredGateway)) {
+            Write-Host "  + Previous version restored" -ForegroundColor Green
+            Write-RcLog "rollback restarted previous container"
+            $script:OldContainerStopped = $false
+            return
+        }
+        $script:OldContainerStopped = $false
+        Write-RcLog "rollback restart failed"
+        throw 'Automatic rollback did not restore a healthy previous gateway.'
+    }
+    if (-not $script:HadPrevious) { return }
     & { $ErrorActionPreference = 'Continue'; docker rename $RollbackContainer $Container 2>&1 | Out-Null }
     $renamed = $LASTEXITCODE -eq 0
     if ($renamed) {
         & { $ErrorActionPreference = 'Continue'; docker start $Container 2>&1 | Out-Null }
     }
-    if ($renamed -and $LASTEXITCODE -eq 0) {
+    $started = $renamed -and $LASTEXITCODE -eq 0
+    if ($started -and (Wait-RcRestoredGateway)) {
         Write-Host "  + Previous version restored" -ForegroundColor Green
         Write-RcLog "rollback restored previous container"
+        $script:HadPrevious = $false
     } else {
-        Write-Host "  x Automatic rollback failed. The previous container is still named '$RollbackContainer'." -ForegroundColor Red
-        Write-Host "    Recover it with: docker rename $RollbackContainer $Container; docker start $Container"
+        Write-Host "  x Automatic rollback did not restore a healthy previous gateway." -ForegroundColor Red
+        Write-Host "    Inspect it with: docker ps -a --filter name=$Container; docker logs $Container"
         Write-RcLog "rollback failed"
+        $script:HadPrevious = $false
+        throw 'Automatic rollback did not restore a healthy previous gateway.'
     }
-    $script:HadPrevious = $false
 }
 
 # -- 1. Check Docker -------------------------------------------------------
@@ -140,7 +487,7 @@ if (-not $dockerOk) {
     Write-Host ""
     Write-Host "  After installing, start Docker Desktop, wait for it to show 'Running',"
     Write-Host "  then re-run this script."
-    return
+    throw 'Docker is unavailable.'
 }
 
 $dv = & { $ErrorActionPreference = 'Continue'; (& docker --version 2>&1) -replace '.*?(\d+\.\d+\.\d+).*', '$1' }
@@ -259,6 +606,19 @@ if (-not $registryOk) {
 }
 
 # -- 4b. Pull latest image (with retry + automatic GHCR fallback) ------------
+try {
+    Redeem-RcBootstrapProfile
+} finally {
+    # The public command invokes this file as a dynamic scriptblock. From this
+    # inner isolation scope, scope 1 is the real parameter-binding scope; using
+    # $script: would clear the caller/global scope and leave both copies alive.
+    Set-Variable -Name AuthToken -Scope 1 -Value $null
+    $parentBoundParameters = Get-Variable -Name PSBoundParameters -Scope 1 -ValueOnly
+    if ($parentBoundParameters -and $parentBoundParameters.ContainsKey('AuthToken')) {
+        [void]$parentBoundParameters.Remove('AuthToken')
+    }
+}
+
 Write-Step 3 "Pull image"
 # Fast reachability probe: a dead proxy or blocked registry makes `docker pull`
 # hang for minutes per attempt with zero output. Probe the registry's /v2/
@@ -400,7 +760,7 @@ if (-not $pullOk) {
     }
     Write-Host ""
     Write-Host "  See: https://github.com/wentorai/Research-Claw#手动安装--大陆网络--故障排查" -ForegroundColor DarkGray
-    return
+    throw 'The container image could not be pulled.'
 }
 Write-Host "  + Image pulled" -ForegroundColor Green
 $imageInfo = & {
@@ -416,7 +776,17 @@ $rollbackExists = & { $ErrorActionPreference = 'Continue'; docker ps -a --format
     Where-Object { $_ -eq $RollbackContainer }
 $existing = & { $ErrorActionPreference = 'Continue'; docker ps -a --format "{{.Names}}" 2>&1 } |
     Where-Object { $_ -eq $Container }
-if ($rollbackExists) {
+# Preserve the historical no-Token container-only recovery. Profile recovery
+# is deferred until the pending volume transaction is inspected below.
+if ($rollbackExists -and -not $RcProfileRequested) {
+    if (Test-RcBootstrapLockAuthority) {
+        try { Read-RcBootstrapPendingTransaction } catch {
+            throw 'Bootstrap Profile state could not be inspected; both containers were preserved.'
+        }
+        if ($script:RcProfileTxId) {
+            throw 'A Bootstrap Profile transaction is pending; re-run the same installer command with its Auth Token.'
+        }
+    }
     if ($existing) {
         $currentHealthy = $false
         $currentRunning = & { $ErrorActionPreference = 'Continue'; docker inspect --format '{{.State.Running}}' $Container 2>&1 }
@@ -428,34 +798,123 @@ if ($rollbackExists) {
         }
         if ($currentHealthy) {
             & { $ErrorActionPreference = 'Continue'; docker rm -f $RollbackContainer 2>&1 | Out-Null }
+            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the stale rollback container.' }
+            $rollbackExists = $false
         } else {
+            $script:ReplacementAttempted = $true
             $script:HadPrevious = $true
             Restore-PreviousContainer
+            $rollbackExists = $false
         }
     } else {
         Write-Host "  ! Found an interrupted update; restoring the previous container first." -ForegroundColor Yellow
-        & { $ErrorActionPreference = 'Continue'; docker rename $RollbackContainer $Container 2>&1 | Out-Null }
-        & { $ErrorActionPreference = 'Continue'; docker start $Container 2>&1 | Out-Null }
+        $script:HadPrevious = $true
+        Restore-PreviousContainer
         $existing = $Container
+        $rollbackExists = $false
     }
 }
 
-# Keep the previous container until the replacement passes its health check.
+# Establish/recover T04 lock authority under a real stop proof, then restart
+# and health-check the existing gateway before creating the isolated stage.
+if ($RcProfileRequested) {
+    $currentWasHealthy = $false
+    if ($existing) {
+        $currentRunning = & { $ErrorActionPreference = 'Continue'; docker inspect --format '{{.State.Running}}' $Container 2>&1 }
+        if ($currentRunning -eq 'true') {
+            try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:${Port}/healthz" `
+                    -UseBasicParsing -TimeoutSec 2
+                $currentWasHealthy = $response.StatusCode -eq 200
+            } catch {}
+        }
+        Write-Host "  > Preparing the existing gateway for Profile transaction recovery..." -ForegroundColor Cyan
+        & { $ErrorActionPreference = 'Continue'; docker stop $Container 2>&1 | Out-Null }
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not stop the existing container; it was left untouched.'
+        }
+        $script:OldContainerStopped = $true
+    }
+    Initialize-RcBootstrapDockerBaseline
+    Initialize-RcBootstrapLocks
+    Read-RcBootstrapPendingTransaction
+
+    if ($script:RcProfilePendingState -eq 'committed') {
+        Recover-RcBootstrapProfile
+        if ($rollbackExists -and $existing) {
+            & { $ErrorActionPreference = 'Continue'; docker rm -f $RollbackContainer 2>&1 | Out-Null }
+            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the completed rollback container.' }
+            $rollbackExists = $false
+        } elseif ($rollbackExists) {
+            throw "A committed Profile has no canonical container; '$RollbackContainer' was preserved for manual recovery."
+        }
+    } elseif ($script:RcProfileTxId -and $rollbackExists) {
+        $script:OldContainerStopped = $false
+        $script:ReplacementAttempted = [bool]$existing
+        $script:HadPrevious = $true
+        Restore-PreviousContainer
+        $existing = $Container
+        $rollbackExists = $false
+    } elseif ($script:RcProfileTxId) {
+        $pendingState = $script:RcProfilePendingState
+        Recover-RcBootstrapProfile
+        if ($existing -and $pendingState -ne 'staged') {
+            & { $ErrorActionPreference = 'Continue'; docker rm -f $Container 2>&1 | Out-Null }
+            $script:OldContainerStopped = $false
+            $existing = $null
+        }
+    } else {
+        Recover-RcBootstrapProfile
+    }
+
+    if ($rollbackExists) {
+        if ($existing -and $currentWasHealthy) {
+            & { $ErrorActionPreference = 'Continue'; docker rm -f $RollbackContainer 2>&1 | Out-Null }
+            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the stale rollback container.' }
+            $rollbackExists = $false
+        } elseif ($existing) {
+            $script:OldContainerStopped = $false
+            $script:ReplacementAttempted = $true
+            $script:HadPrevious = $true
+            Restore-PreviousContainer
+            $rollbackExists = $false
+        } else {
+            $script:HadPrevious = $true
+            Restore-PreviousContainer
+            $existing = $Container
+            $rollbackExists = $false
+        }
+    }
+
+    if ($existing -and $script:OldContainerStopped) {
+        & { $ErrorActionPreference = 'Continue'; docker start $Container 2>&1 | Out-Null }
+        if ($LASTEXITCODE -ne 0 -or -not (Wait-RcRestoredGateway)) {
+            throw 'The existing gateway did not recover after transaction preparation.'
+        }
+        $script:OldContainerStopped = $false
+    }
+    Stage-RcBootstrapProfile
+}
+
+# Keep the previous container until the replacement passes health + verify.
 if ($existing) {
     Write-Host "  > New image is ready - staging existing container for rollback..." -ForegroundColor Cyan
     & { $ErrorActionPreference = 'Continue'; docker stop $Container 2>&1 | Out-Null }
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "  x Could not stop the existing container; it was left untouched." -ForegroundColor Red
-        return
+        throw 'Could not stop the existing container; it was left untouched.'
     }
+    $script:OldContainerStopped = $true
     & { $ErrorActionPreference = 'Continue'; docker rename $Container $RollbackContainer 2>&1 | Out-Null }
     if ($LASTEXITCODE -ne 0) {
-        & { $ErrorActionPreference = 'Continue'; docker start $Container 2>&1 | Out-Null }
-        Write-Host "  x Could not prepare the existing container for rollback; it was restarted." -ForegroundColor Red
-        return
+        throw 'Could not prepare the existing container for rollback.'
     }
+    $script:OldContainerStopped = $false
     $script:HadPrevious = $true
     Write-Host "  + Previous version retained until health verification passes" -ForegroundColor Green
+}
+
+if ($script:RcProfileTxId) {
+    Apply-RcBootstrapProfile
 }
 
 # Never terminate an unrelated process just because it owns RC's default port.
@@ -466,7 +925,7 @@ if ($portInUse) {
     Write-Host "    Stop that service yourself, then re-run this installer." -ForegroundColor Yellow
     Write-Host "    No process was terminated." -ForegroundColor Yellow
     Restore-PreviousContainer
-    return
+    throw 'The Research-Claw port is already in use.'
 }
 
 # -- 4c. Clean up dangling images (old versions left by previous pulls) -------
@@ -482,6 +941,11 @@ if ($match) {
 # -- 5. Start container ------------------------------------------------------
 Write-Step 4 "Start container"
 Write-Host "  > Starting container..." -ForegroundColor Cyan
+$profileRunArgs = @()
+if ($script:RcProfileTxId) {
+    $profileRunArgs = @('-e', "RC_BOOTSTRAP_TX_ID=$($script:RcProfileTxId)")
+}
+$script:ReplacementAttempted = $true
 & {
     $ErrorActionPreference = 'Continue'
     docker run -d `
@@ -491,6 +955,7 @@ Write-Host "  > Starting container..." -ForegroundColor Cyan
         -v "rc-data:/app/.research-claw" `
         -v rc-workspace:/app/workspace `
         -v "rc-state:/root/.openclaw" `
+        @profileRunArgs `
         --restart unless-stopped `
         $Image 2>&1 | Out-Null
 }
@@ -501,7 +966,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "    - Port $Port already in use (run: Get-NetTCPConnection -LocalPort $Port)"
     Write-Host "    - Container name conflict (run: docker rm $Container)"
     Restore-PreviousContainer
-    return
+    throw 'The replacement container could not be started.'
 }
 
 # -- 5b. Verify container is actually running (not crash-looping) -----------
@@ -513,7 +978,7 @@ if ($containerRunning -ne 'true') {
     Write-Host "    Common fix: docker volume rm rc-config && re-run this script" -ForegroundColor Yellow
     Write-Host "    (This resets config only — chat history and data are preserved)" -ForegroundColor Yellow
     Restore-PreviousContainer
-    return
+    throw 'The replacement container exited before becoming ready.'
 }
 
 # -- 6. Wait for health -----------------------------------------------------
@@ -536,14 +1001,29 @@ if (-not $ready) {
     Write-Host "  ! Gateway did not become ready within ${HealthTimeout}s." -ForegroundColor Yellow
     Restore-PreviousContainer
     Write-Host "    Diagnostic log: $RcLog"
-    return
+    throw 'The replacement gateway did not become ready.'
+}
+
+if ($script:RcProfileTxId) {
+    Verify-RcBootstrapProfile
+    Probe-RcBootstrapProfile
+    Commit-RcBootstrapProfile
 }
 
 if ($script:HadPrevious) {
     & { $ErrorActionPreference = 'Continue'; docker rm $RollbackContainer 2>&1 | Out-Null }
+    if ($LASTEXITCODE -ne 0) {
+        # The replacement Gateway and any Profile commit already won. Preserve
+        # that state and the rollback container for the next run; do not undo a
+        # verified commit merely because publication cleanup failed.
+        $script:HadPrevious = $false
+        $script:ReplacementAttempted = $false
+        throw 'Could not remove the verified rollback container.'
+    }
     $script:HadPrevious = $false
     Write-Host "  + Update verified; previous container removed" -ForegroundColor Green
 }
+$script:ReplacementAttempted = $false
 
 # -- 7. Done -----------------------------------------------------------------
 $Url = "http://127.0.0.1:${Port}/"
@@ -557,9 +1037,36 @@ Write-Host "  Stop:       docker stop $Container"
 Write-Host "  Start:      docker start $Container"
 Write-Host "  Update:     irm https://wentor.ai/docker-install.ps1 | iex"
 Write-Host ""
-Write-Host "  TIP:  First time? Open the Dashboard -> Setup Wizard -> enter your API Key." -ForegroundColor Yellow
+if ($RcProfileRequested) {
+    Write-Host "  Bootstrap Profile ready - no Setup Wizard API Key entry is required." -ForegroundColor Green
+} else {
+    Write-Host "  TIP:  First time? Open the Dashboard -> Setup Wizard -> enter your API Key." -ForegroundColor Yellow
+}
 Write-Host ""
 
-Start-Process $Url
+try {
+    Start-Process $Url
+} catch {
+    Write-Host "  ! Dashboard could not be opened automatically; use the URL above." -ForegroundColor Yellow
+    Write-RcLog 'dashboard auto-open failed'
+}
+
+} finally {
+    # Also cover Docker/preflight failures that occur before redemption.
+    Set-Variable -Name AuthToken -Scope 1 -Value $null
+    $parentBoundParameters = Get-Variable -Name PSBoundParameters -Scope 1 -ValueOnly
+    if ($parentBoundParameters -and $parentBoundParameters.ContainsKey('AuthToken')) {
+        [void]$parentBoundParameters.Remove('AuthToken')
+    }
+    try {
+        if (($script:HadPrevious -or $script:OldContainerStopped -or
+            $script:ReplacementAttempted -or $script:RcProfileTxId) -and
+            -not $script:RcProfileCommitted) {
+            Restore-PreviousContainer
+        }
+    } finally {
+        Remove-RcBootstrapSecretState
+    }
+}
 
 } # end scriptblock

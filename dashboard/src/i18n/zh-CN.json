@@ -1409,7 +1409,7 @@
     "tokensOut": "输出",
     "heartbeat": "心跳",
     "version": "Research-Claw v{{version}}",
-    "versionFallback": "v0.8.2",
+    "versionFallback": "v0.8.3",
     "updateAvailable": "更新可用 v{{latest}}",
     "modelDefault": "（默认）",
     "modelNA": "N/A"

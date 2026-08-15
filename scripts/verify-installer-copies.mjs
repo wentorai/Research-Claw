@@ -7,6 +7,7 @@
  *
  *   node scripts/verify-installer-copies.mjs
  *   node scripts/verify-installer-copies.mjs --wentor-root /path/to/wentor
+ *   node scripts/verify-installer-copies.mjs --web-root /path/to/wentor-web
  */
 
 import fs from 'node:fs';
@@ -15,18 +16,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const flagIndex = process.argv.indexOf('--wentor-root');
-const wentorRoot = flagIndex >= 0
-  ? path.resolve(process.argv[flagIndex + 1] ?? '')
-  : path.resolve(rcRoot, '..');
-const publicUrlIndex = process.argv.indexOf('--public-url');
-const publicUrl = publicUrlIndex >= 0
-  ? process.argv[publicUrlIndex + 1]
-  : null;
-
-if (publicUrlIndex >= 0 && !publicUrl) {
-  throw new Error('--public-url requires a URL');
+function optionalFlag(name) {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return null;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
+  return value;
 }
+
+const wentorRootFlag = optionalFlag('--wentor-root');
+const webRootFlag = optionalFlag('--web-root');
+const rootInstallerFlag = optionalFlag('--root-installer');
+const publicUrl = optionalFlag('--public-url');
+const wentorRoot = path.resolve(wentorRootFlag ?? path.resolve(rcRoot, '..'));
+const webRoot = path.resolve(webRootFlag ?? path.join(wentorRoot, 'web'));
+// A standalone Web worktree has no parent-repository installer copy. Preserve
+// the historical monorepo check unless --web-root is supplied explicitly.
+const rootInstaller = rootInstallerFlag
+  ? path.resolve(rootInstallerFlag)
+  : (webRootFlag ? null : path.join(wentorRoot, 'install.sh'));
 
 function sha256(content) {
   return crypto.createHash('sha256').update(content).digest('hex');
@@ -37,25 +45,25 @@ const copySets = [
     label: 'native installer',
     source: path.join(rcRoot, 'scripts', 'install.sh'),
     copies: [
-      path.join(wentorRoot, 'install.sh'),
-      path.join(wentorRoot, 'web', 'public', 'install.sh'),
-      path.join(wentorRoot, 'web', 'dist', 'install.sh'),
+      ...(rootInstaller ? [rootInstaller] : []),
+      path.join(webRoot, 'public', 'install.sh'),
+      path.join(webRoot, 'dist', 'install.sh'),
     ],
   },
   {
     label: 'POSIX Docker installer',
     source: path.join(rcRoot, 'scripts', 'install-docker.sh'),
     copies: [
-      path.join(wentorRoot, 'web', 'public', 'docker-install.sh'),
-      path.join(wentorRoot, 'web', 'dist', 'docker-install.sh'),
+      path.join(webRoot, 'public', 'docker-install.sh'),
+      path.join(webRoot, 'dist', 'docker-install.sh'),
     ],
   },
   {
     label: 'Windows Docker installer',
     source: path.join(rcRoot, 'scripts', 'install-docker.ps1'),
     copies: [
-      path.join(wentorRoot, 'web', 'public', 'docker-install.ps1'),
-      path.join(wentorRoot, 'web', 'dist', 'docker-install.ps1'),
+      path.join(webRoot, 'public', 'docker-install.ps1'),
+      path.join(webRoot, 'dist', 'docker-install.ps1'),
     ],
   },
 ];

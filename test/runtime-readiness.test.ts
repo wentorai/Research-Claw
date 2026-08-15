@@ -2,7 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
-import { CORE_PROBES, evaluateGatewayHealth, extractJson } from '../scripts/runtime-readiness.mjs';
+import {
+  CORE_PROBES,
+  evaluateGatewayHealth,
+  extractJson,
+  planReadinessProbes,
+} from '../scripts/runtime-readiness.mjs';
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -42,6 +47,50 @@ describe('Research-Claw runtime readiness', () => {
       'rc.review.candidates', 'rc.periph.devices.list', 'rc.job.list',
       'rc.supervisor.reviews.list',
     ]));
+  });
+
+  it('treats a disabled peripheral RPC as required-absent instead of a readiness failure', () => {
+    const probes = planReadinessProbes({
+      plugins: {
+        entries: {
+          'research-claw-core': {
+            enabled: true,
+            config: {
+              productPolicy: {
+                capabilities: { peripherals: 'disabled' },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(probes.find((probe) => probe.method === 'rc.periph.devices.list')).toMatchObject({
+      expectation: 'unavailable',
+      reason: 'peripherals policy is disabled',
+    });
+    expect(probes.find((probe) => probe.method === 'rc.monitor.list')).toMatchObject({
+      expectation: 'available',
+    });
+  });
+
+  it('keeps enabled-hidden peripherals live because that policy hides only Dashboard UI', () => {
+    const probes = planReadinessProbes({
+      plugins: {
+        entries: {
+          'research-claw-core': {
+            enabled: true,
+            config: {
+              productPolicy: {
+                capabilities: { peripherals: 'enabled-hidden' },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(probes.find((probe) => probe.method === 'rc.periph.devices.list')).toMatchObject({
+      expectation: 'available',
+    });
   });
 
   it('parses JSON from CLI output and replaces healthz-only installer readiness', () => {

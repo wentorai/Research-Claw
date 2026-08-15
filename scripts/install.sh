@@ -65,12 +65,665 @@ die()  {
   exit 1
 }
 
+# ── Optional Bootstrap Profile capsule (0.8.3) ─────────────────────────
+# The Token exists only in this installer process and a private curl config.
+# It is never exported, logged, passed to Node, or written under INSTALL_DIR.
+RC_BOOTSTRAP_REDEEM_URL="https://wentor.ai/api/v1/rc/bootstrap/redeem"
+RC_PROFILE_AUTH_TOKEN=""
+RC_PROFILE_TEMP_PARENT=""
+RC_PROFILE_TEMP_ROOT=""
+RC_PROFILE_CURL_CONFIG=""
+RC_PROFILE_HEADERS=""
+RC_PROFILE_CAPSULE=""
+RC_PROFILE_TX_ID=""
+RC_PROFILE_PENDING_STATE=""
+RC_PROFILE_COMMITTED=false
+RC_PROFILE_COMMIT_ATTEMPTED=false
+
+# ── Installer lifecycle cleanup ────────────────────────────────────────
+# Update snapshots and heartbeat logs may contain user data or subprocess
+# output. Keep their identities frozen so EXIT never follows a swapped path.
+RC_INSTALL_CLEANUP_RUNNING=false
+RC_INSTALL_TEMP_PARENT=""
+RC_INSTALL_TEMP_PARENT_ID=""
+RC_HEARTBEAT_PID=""
+RC_HEARTBEAT_LOG=""
+RC_HEARTBEAT_LOG_ID=""
+RC_UPDATE_INSTALL_ROOT=""
+RC_UPDATE_INSTALL_ROOT_ID=""
+RC_UPDATE_BACKUP_ROOT=""
+RC_UPDATE_BACKUP_ROOT_ID=""
+RC_UPDATE_BACKUP_READY=false
+RC_UPDATE_MUTATION_STARTED=false
+
+rc_install_path_identity() {
+  local _value
+  if _value="$(stat -f '%d:%i' "$1" 2>/dev/null)"; then
+    printf '%s\n' "$_value"
+    return 0
+  fi
+  stat -c '%d:%i' "$1" 2>/dev/null
+}
+
+rc_install_path_owner() {
+  local _value
+  if _value="$(stat -f '%u' "$1" 2>/dev/null)"; then
+    printf '%s\n' "$_value"
+    return 0
+  fi
+  stat -c '%u' "$1" 2>/dev/null
+}
+
+rc_install_path_mode() {
+  local _value
+  if _value="$(stat -f '%Lp' "$1" 2>/dev/null)"; then
+    printf '%s\n' "$_value"
+    return 0
+  fi
+  stat -c '%a' "$1" 2>/dev/null
+}
+
+rc_install_init_temp_parent() {
+  if [ -n "$RC_INSTALL_TEMP_PARENT" ]; then
+    [ -d "$RC_INSTALL_TEMP_PARENT" ] && [ ! -L "$RC_INSTALL_TEMP_PARENT" ] \
+      && [ "$(rc_install_path_identity "$RC_INSTALL_TEMP_PARENT")" = "$RC_INSTALL_TEMP_PARENT_ID" ] \
+      || return 1
+    return 0
+  fi
+  RC_INSTALL_TEMP_PARENT="$(cd -P -- "${TMPDIR:-/tmp}" && pwd -P)" || return 1
+  [ -d "$RC_INSTALL_TEMP_PARENT" ] && [ ! -L "$RC_INSTALL_TEMP_PARENT" ] || return 1
+  RC_INSTALL_TEMP_PARENT_ID="$(rc_install_path_identity "$RC_INSTALL_TEMP_PARENT")" \
+    || return 1
+  [ -n "$RC_INSTALL_TEMP_PARENT_ID" ]
+}
+
+rc_install_validate_private_child() {
+  local _path="$1" _identity="$2" _prefix="$3" _kind="$4"
+  local _name
+  rc_install_init_temp_parent || return 1
+  [ -n "$_path" ] && [ ! -L "$_path" ] || return 1
+  [ "$(dirname "$_path")" = "$RC_INSTALL_TEMP_PARENT" ] || return 1
+  _name="$(basename "$_path")"
+  case "$_name" in "${_prefix}"*) ;; *) return 1 ;; esac
+  case "$_kind" in
+    directory) [ -d "$_path" ] ;;
+    file) [ -f "$_path" ] ;;
+    *) return 1 ;;
+  esac || return 1
+  [ "$(rc_install_path_owner "$_path")" = "$(id -u)" ] || return 1
+  [ "$(rc_install_path_identity "$_path")" = "$_identity" ] || return 1
+  case "$_kind" in
+    directory) [ "$(rc_install_path_mode "$_path")" = 700 ] ;;
+    file) [ "$(rc_install_path_mode "$_path")" = 600 ] ;;
+  esac
+}
+
+rc_install_remove_heartbeat_log() {
+  [ -n "$RC_HEARTBEAT_LOG" ] || return 0
+  rc_install_validate_private_child \
+    "$RC_HEARTBEAT_LOG" "$RC_HEARTBEAT_LOG_ID" rc-install-heartbeat. file \
+    || return 1
+  rm -f -- "$RC_HEARTBEAT_LOG" || return 1
+  [ ! -e "$RC_HEARTBEAT_LOG" ] && [ ! -L "$RC_HEARTBEAT_LOG" ] || return 1
+  RC_HEARTBEAT_LOG=""
+  RC_HEARTBEAT_LOG_ID=""
+}
+
+rc_install_cleanup_heartbeat() {
+  local _pid="${RC_HEARTBEAT_PID:-}" _ppid="" _failed=0 _attempt
+  if [ -n "$_pid" ]; then
+    case "$_pid" in *[!0-9]*|'') _failed=1 ;;
+      *)
+        if kill -0 "$_pid" 2>/dev/null; then
+          _ppid="$(ps -o ppid= -p "$_pid" 2>/dev/null | tr -d '[:space:]')"
+          if [ "$_ppid" = "$$" ]; then
+            kill -TERM "$_pid" 2>/dev/null || true
+            _attempt=0
+            while kill -0 "$_pid" 2>/dev/null && [ "$_attempt" -lt 20 ]; do
+              sleep 0.1
+              _attempt=$((_attempt + 1))
+            done
+            if kill -0 "$_pid" 2>/dev/null; then
+              kill -KILL "$_pid" 2>/dev/null || true
+            fi
+          else
+            _failed=1
+          fi
+        fi
+        wait "$_pid" 2>/dev/null || true
+        ;;
+    esac
+    RC_HEARTBEAT_PID=""
+  fi
+  rc_install_remove_heartbeat_log || _failed=1
+  [ "$_failed" -eq 0 ]
+}
+
+rc_install_validate_update_root() {
+  [ -n "$RC_UPDATE_INSTALL_ROOT" ] \
+    && [ -d "$RC_UPDATE_INSTALL_ROOT" ] \
+    && [ ! -L "$RC_UPDATE_INSTALL_ROOT" ] \
+    && [ "$(cd -P -- "$RC_UPDATE_INSTALL_ROOT" && pwd -P)" = "$RC_UPDATE_INSTALL_ROOT" ] \
+    && [ "$(rc_install_path_identity "$RC_UPDATE_INSTALL_ROOT")" = "$RC_UPDATE_INSTALL_ROOT_ID" ]
+}
+
+rc_install_validate_update_backup() {
+  rc_install_validate_private_child \
+    "$RC_UPDATE_BACKUP_ROOT" "$RC_UPDATE_BACKUP_ROOT_ID" rc-install-user-backup. directory
+}
+
+rc_install_snapshot_update_item() {
+  local _key="$1" _relative="$2"
+  local _source="$RC_UPDATE_INSTALL_ROOT/$_relative"
+  local _copy="$RC_UPDATE_BACKUP_ROOT/$_key.value"
+  local _type="$RC_UPDATE_BACKUP_ROOT/$_key.type"
+  if [ -L "$_source" ]; then
+    printf 'symlink\n' > "$_type" || return 1
+    cp -P "$_source" "$_copy" || return 1
+    [ -L "$_copy" ] || return 1
+  elif [ -f "$_source" ]; then
+    printf 'regular\n' > "$_type" || return 1
+    cp -p "$_source" "$_copy" || return 1
+    [ -f "$_copy" ] && [ ! -L "$_copy" ] || return 1
+  elif [ ! -e "$_source" ]; then
+    printf 'absent\n' > "$_type" || return 1
+  else
+    return 1
+  fi
+  chmod 600 "$_type" || return 1
+}
+
+rc_install_snapshot_update_backup() {
+  local _old_umask _root
+  [ -z "$RC_UPDATE_BACKUP_ROOT" ] || return 1
+  rc_install_init_temp_parent || return 1
+  RC_UPDATE_INSTALL_ROOT="$(cd -P -- "$INSTALL_DIR" && pwd -P)" || return 1
+  RC_UPDATE_INSTALL_ROOT_ID="$(rc_install_path_identity "$RC_UPDATE_INSTALL_ROOT")" \
+    || return 1
+  _old_umask="$(umask)"
+  umask 077
+  if ! _root="$(mktemp -d "$RC_INSTALL_TEMP_PARENT/rc-install-user-backup.XXXXXX")"; then
+    umask "$_old_umask"
+    return 1
+  fi
+  umask "$_old_umask"
+  RC_UPDATE_BACKUP_ROOT="$_root"
+  chmod 700 "$RC_UPDATE_BACKUP_ROOT" || return 1
+  RC_UPDATE_BACKUP_ROOT_ID="$(rc_install_path_identity "$RC_UPDATE_BACKUP_ROOT")" \
+    || return 1
+  rc_install_validate_update_backup || return 1
+  rc_install_snapshot_update_item soul workspace/.ResearchClaw/SOUL.md \
+    && rc_install_snapshot_update_item identity workspace/.ResearchClaw/IDENTITY.md \
+    && rc_install_snapshot_update_item tools workspace/.ResearchClaw/TOOLS.md \
+    && rc_install_snapshot_update_item rc-user workspace/.ResearchClaw/USER.md \
+    && rc_install_snapshot_update_item memory workspace/MEMORY.md \
+    && rc_install_snapshot_update_item workspace-user workspace/USER.md \
+    && rc_install_snapshot_update_item bootstrap-done workspace/.ResearchClaw/BOOTSTRAP.md.done \
+    || return 1
+  RC_UPDATE_BACKUP_READY=true
+}
+
+rc_install_prepare_restore_parent() {
+  local _relative="$1" _parent
+  rc_install_validate_update_root || return 1
+  case "$_relative" in
+    workspace) ;;
+    workspace/.ResearchClaw)
+      rc_install_prepare_restore_parent workspace || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  _parent="$RC_UPDATE_INSTALL_ROOT/$_relative"
+  [ ! -L "$_parent" ] || return 1
+  if [ ! -e "$_parent" ]; then mkdir "$_parent" || return 1; fi
+  [ -d "$_parent" ] && [ ! -L "$_parent" ] || return 1
+  [ "$(cd -P -- "$_parent" && pwd -P)" = "$_parent" ]
+}
+
+rc_install_restore_update_item() {
+  local _key="$1" _relative="$2" _parent_relative="$3"
+  local _type_file="$RC_UPDATE_BACKUP_ROOT/$_key.type"
+  local _copy="$RC_UPDATE_BACKUP_ROOT/$_key.value"
+  local _destination="$RC_UPDATE_INSTALL_ROOT/$_relative"
+  local _parent="$RC_UPDATE_INSTALL_ROOT/$_parent_relative" _type _temp
+  rc_install_validate_update_backup && rc_install_prepare_restore_parent "$_parent_relative" \
+    || return 1
+  [ -f "$_type_file" ] && [ ! -L "$_type_file" ] || return 1
+  _type="$(cat "$_type_file")" || return 1
+  if [ -e "$_destination" ] && [ ! -f "$_destination" ] && [ ! -L "$_destination" ]; then
+    return 1
+  fi
+  case "$_type" in
+    absent)
+      if [ -e "$_destination" ] || [ -L "$_destination" ]; then
+        rm -f -- "$_destination" || return 1
+      fi
+      ;;
+    regular)
+      [ -f "$_copy" ] && [ ! -L "$_copy" ] || return 1
+      _temp="$(mktemp "$_parent/.rc-install-restore.XXXXXX")" || return 1
+      if ! cp -p "$_copy" "$_temp" || ! mv -f "$_temp" "$_destination"; then
+        rm -f -- "$_temp" 2>/dev/null || true
+        return 1
+      fi
+      ;;
+    symlink)
+      [ -L "$_copy" ] || return 1
+      _temp="$(mktemp "$_parent/.rc-install-restore.XXXXXX")" || return 1
+      rm -f -- "$_temp" || return 1
+      if ! cp -P "$_copy" "$_temp" || [ ! -L "$_temp" ] \
+          || ! mv -f "$_temp" "$_destination"; then
+        rm -f -- "$_temp" 2>/dev/null || true
+        return 1
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+rc_install_restore_update_backup() {
+  [ "$RC_UPDATE_BACKUP_READY" = true ] || return 1
+  [ "$RC_UPDATE_MUTATION_STARTED" = true ] || return 0
+  rc_install_restore_update_item soul workspace/.ResearchClaw/SOUL.md workspace/.ResearchClaw \
+    && rc_install_restore_update_item identity workspace/.ResearchClaw/IDENTITY.md workspace/.ResearchClaw \
+    && rc_install_restore_update_item tools workspace/.ResearchClaw/TOOLS.md workspace/.ResearchClaw \
+    && rc_install_restore_update_item rc-user workspace/.ResearchClaw/USER.md workspace/.ResearchClaw \
+    && rc_install_restore_update_item memory workspace/MEMORY.md workspace \
+    && rc_install_restore_update_item workspace-user workspace/USER.md workspace \
+    && rc_install_restore_update_item bootstrap-done workspace/.ResearchClaw/BOOTSTRAP.md.done workspace/.ResearchClaw \
+    || return 1
+  RC_UPDATE_MUTATION_STARTED=false
+}
+
+rc_install_discard_update_backup() {
+  [ -n "$RC_UPDATE_BACKUP_ROOT" ] || return 0
+  [ "$RC_UPDATE_MUTATION_STARTED" != true ] || return 1
+  rc_install_validate_update_backup || return 1
+  rm -rf -- "$RC_UPDATE_BACKUP_ROOT" || return 1
+  [ ! -e "$RC_UPDATE_BACKUP_ROOT" ] && [ ! -L "$RC_UPDATE_BACKUP_ROOT" ] || return 1
+  RC_UPDATE_BACKUP_ROOT=""
+  RC_UPDATE_BACKUP_ROOT_ID=""
+  RC_UPDATE_BACKUP_READY=false
+  RC_UPDATE_INSTALL_ROOT=""
+  RC_UPDATE_INSTALL_ROOT_ID=""
+}
+
+rc_profile_parse_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --auth-token)
+        [ -z "$RC_PROFILE_AUTH_TOKEN" ] || die "--auth-token may be provided only once."
+        [ "$#" -ge 2 ] && [ -n "$2" ] || die "--auth-token requires a non-empty value."
+        [[ "$2" =~ ^rca_[A-Za-z0-9_-]{43,}$ ]] \
+          || die "--auth-token has an invalid format."
+        RC_PROFILE_AUTH_TOKEN="$2"
+        shift 2
+        ;;
+      *) die "Unknown installer argument: $1" ;;
+    esac
+  done
+}
+
+rc_profile_cleanup_host_secret() {
+  [ -n "$RC_PROFILE_TEMP_ROOT" ] || return 0
+  local _parent _name
+  _parent="$(dirname "$RC_PROFILE_TEMP_ROOT")"
+  _name="$(basename "$RC_PROFILE_TEMP_ROOT")"
+  [ -n "$RC_PROFILE_TEMP_PARENT" ] \
+    && [ "$_parent" = "$RC_PROFILE_TEMP_PARENT" ] \
+    && [[ "$_name" == rc-bootstrap-installer.* ]] \
+    || return 1
+  rm -rf -- "$RC_PROFILE_TEMP_ROOT" || return 1
+  [ ! -e "$RC_PROFILE_TEMP_ROOT" ] || return 1
+  RC_PROFILE_TEMP_PARENT=""
+  RC_PROFILE_TEMP_ROOT=""
+  RC_PROFILE_CURL_CONFIG=""
+  RC_PROFILE_HEADERS=""
+  RC_PROFILE_CAPSULE=""
+}
+
+rc_profile_validate_redeem_response() {
+  local _declared _actual
+  _declared="$(awk '
+    function reset_headers() {
+      content_type = ""; content_encoding = ""; content_length = ""
+      content_type_count = 0; content_encoding_count = 0; content_length_count = 0
+      transfer_encoding_count = 0
+    }
+    BEGIN { saw_status = 0; in_headers = 0; reset_headers() }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      lower = tolower(line)
+      if (lower ~ /^http\/[0-9.]+ [0-9][0-9][0-9]/) {
+        saw_status = 1
+        split(lower, status_fields, /[ \t]+/)
+        status_code = status_fields[2]
+        reset_headers()
+        in_headers = 1
+        next
+      }
+      if (!in_headers) next
+      if (line == "") { in_headers = 0; next }
+      separator = index(line, ":")
+      if (separator < 1) next
+      name = tolower(substr(line, 1, separator - 1))
+      value = substr(line, separator + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", value)
+      if (name == "content-type") {
+        content_type = tolower(value); content_type_count++
+      } else if (name == "content-encoding") {
+        content_encoding = tolower(value); content_encoding_count++
+      } else if (name == "content-length") {
+        content_length = value; content_length_count++
+      } else if (name == "transfer-encoding") {
+        transfer_encoding_count++
+      }
+    }
+    END {
+      if (!saw_status || status_code != "200" ||
+          content_type_count != 1 || content_encoding_count != 1 ||
+          content_length_count != 1 || transfer_encoding_count != 0 ||
+          content_type != "application/json; charset=utf-8" ||
+          content_encoding != "identity" ||
+          content_length !~ /^(0|[1-9][0-9]*)$/ ||
+          content_length + 0 > 2097152) exit 1
+      print content_length
+    }
+  ' "$RC_PROFILE_HEADERS")" || return 1
+  _actual="$(wc -c < "$RC_PROFILE_CAPSULE" | tr -d '[:space:]')"
+  [ -n "$_actual" ] && [ "$_actual" -gt 0 ] \
+    && [ "$_actual" -le 2097152 ] && [ "$_actual" = "$_declared" ]
+}
+
+rc_profile_native_cli() {
+  "$GW_NODE" "$INSTALL_DIR/scripts/apply-bootstrap-profile.cjs" "$1" \
+    --rc-root "$INSTALL_DIR" \
+    --config "$INSTALL_DIR/config/openclaw.json" \
+    --workspace "$INSTALL_DIR/workspace" \
+    --state-dir "$HOME/.openclaw" \
+    --db "$HOME/.research-claw/library.db" \
+    --global-config "$HOME/.openclaw/openclaw.json" \
+    "${@:2}"
+}
+
+rc_profile_rollback_native() {
+  local _result _state
+  [ -n "$RC_PROFILE_TX_ID" ] || return 0
+  if ! _result="$(rc_profile_native_cli rollback --tx-id "$RC_PROFILE_TX_ID")"; then
+    return 1
+  fi
+  _state="$(printf '%s' "$_result" | "$GW_NODE" -e '
+    let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
+      const state=JSON.parse(raw).state;
+      if (state !== "rolled-back" && state !== "committed") process.exit(1);
+      process.stdout.write(state);
+    });
+  ')" || return 1
+  [ "$_state" != committed ] || RC_PROFILE_COMMITTED=true
+  RC_PROFILE_TX_ID=""
+  RC_PROFILE_PENDING_STATE=""
+}
+
+rc_profile_load_pending_native() {
+  local _status _parsed
+  if ! _status="$(rc_profile_native_cli status)"; then
+    return 1
+  fi
+  _parsed="$(printf '%s' "$_status" | "$GW_NODE" -e '
+    let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
+      const pending=JSON.parse(raw).pendingTransaction;
+      if (pending === null) return;
+      if (!/^tx-[0-9a-f-]{36}$/.test(pending?.txId || "")
+          || !/^[a-z]+$/.test(pending?.state || "")) process.exit(1);
+      process.stdout.write(`${pending.txId} ${pending.state}`);
+    });
+  ')" || return 1
+  if [ -n "$_parsed" ]; then
+    read -r RC_PROFILE_TX_ID RC_PROFILE_PENDING_STATE <<EOF
+$_parsed
+EOF
+  else
+    RC_PROFILE_TX_ID=""
+    RC_PROFILE_PENDING_STATE=""
+  fi
+}
+
+rc_profile_cleanup_on_exit() {
+  local _failed=0
+  if [ -n "$RC_PROFILE_TX_ID" ] && [ "$RC_PROFILE_COMMITTED" != true ] \
+      && [ -x "${GW_NODE:-}" ] && [ -f "$INSTALL_DIR/scripts/apply-bootstrap-profile.cjs" ]; then
+    if [ "$RC_PROFILE_COMMIT_ATTEMPTED" != true ] || rc_profile_load_pending_native; then
+      rc_profile_rollback_native >/dev/null 2>&1 || true
+    fi
+  fi
+  if ! rc_profile_cleanup_host_secret; then
+    printf '  ✗ Could not remove Bootstrap Profile private files.\n' >&2
+    _failed=1
+  fi
+  [ "$_failed" -eq 0 ]
+}
+
+# Compatibility entry point used by the focused Profile harnesses. Production
+# installs use rc_install_exit_cleanup as the one EXIT orchestrator.
+rc_profile_exit_cleanup() {
+  local _status=$? _cleanup_status=0
+  trap - EXIT ERR
+  trap '' INT TERM
+  set +e
+  rc_profile_cleanup_on_exit || _cleanup_status=1
+  if [ "$_status" -eq 0 ] && [ "$_cleanup_status" -ne 0 ]; then _status=1; fi
+  exit "$_status"
+}
+
+rc_install_exit_cleanup() {
+  local _status=$? _failed=0
+  trap - EXIT ERR
+  if [ "$RC_INSTALL_CLEANUP_RUNNING" = true ]; then exit "$_status"; fi
+  RC_INSTALL_CLEANUP_RUNNING=true
+  trap '' INT TERM
+  set +e
+
+  if ! rc_install_cleanup_heartbeat; then
+    printf '  ✗ Could not clean up an installer subprocess or heartbeat log.\n' >&2
+    _failed=1
+  fi
+
+  if [ -n "$RC_UPDATE_BACKUP_ROOT" ]; then
+    if [ "$RC_UPDATE_MUTATION_STARTED" = true ] \
+        && ! rc_install_restore_update_backup; then
+      printf '  ✗ Could not restore update user files; backup retained at %s\n' \
+        "$RC_UPDATE_BACKUP_ROOT" >&2
+      _failed=1
+    fi
+    if [ "$RC_UPDATE_MUTATION_STARTED" != true ] \
+        && ! rc_install_discard_update_backup; then
+      printf '  ✗ Could not remove the private update backup at %s\n' \
+        "$RC_UPDATE_BACKUP_ROOT" >&2
+      _failed=1
+    fi
+  fi
+
+  rc_profile_cleanup_on_exit || _failed=1
+  if [ "$_status" -eq 0 ] && [ "$_failed" -ne 0 ]; then _status=1; fi
+  exit "$_status"
+}
+
+rc_install_on_interrupt() {
+  trap '' INT TERM
+  if [ -n "${RC_LOG:-}" ]; then
+    printf "\n${Y}  ⚠ Interrupted.${N} The installer is stopping safely and remains resumable.\n"
+    printf "  Re-run the same command to continue where it left off:\n"
+    printf "    ${B}curl -fsSL https://wentor.ai/install.sh | bash${N}\n"
+    printf "  ${D}Diagnostic log: ${RC_LOG}${N}\n\n"
+  fi
+  exit 130
+}
+
+rc_profile_redeem() {
+  [ -n "$RC_PROFILE_AUTH_TOKEN" ] || return 0
+  command -v curl >/dev/null 2>&1 || die "curl is required to redeem a Bootstrap Profile."
+  command -v head >/dev/null 2>&1 && head -c 1 </dev/null >/dev/null 2>&1 \
+    || die "head with byte-count support is required to redeem a Bootstrap Profile."
+  umask 077
+  RC_PROFILE_TEMP_PARENT="$(cd -P -- "${TMPDIR:-/tmp}" && pwd -P)" \
+    || die "Could not resolve the Bootstrap Profile private temp parent."
+  RC_PROFILE_TEMP_ROOT="$(mktemp -d "$RC_PROFILE_TEMP_PARENT/rc-bootstrap-installer.XXXXXX")"
+  trap rc_profile_exit_cleanup EXIT
+  chmod 700 "$RC_PROFILE_TEMP_ROOT"
+  RC_PROFILE_CURL_CONFIG="$RC_PROFILE_TEMP_ROOT/redeem.curl"
+  RC_PROFILE_HEADERS="$RC_PROFILE_TEMP_ROOT/headers"
+  RC_PROFILE_CAPSULE="$RC_PROFILE_TEMP_ROOT/capsule.json"
+  : > "$RC_PROFILE_CURL_CONFIG"
+  : > "$RC_PROFILE_HEADERS"
+  : > "$RC_PROFILE_CAPSULE"
+  chmod 600 "$RC_PROFILE_CURL_CONFIG" "$RC_PROFILE_HEADERS" "$RC_PROFILE_CAPSULE"
+  cat > "$RC_PROFILE_CURL_CONFIG" <<EOF
+url = "$RC_BOOTSTRAP_REDEEM_URL"
+request = "POST"
+header = "Authorization: Bearer $RC_PROFILE_AUTH_TOKEN"
+header = "Accept: application/json"
+header = "Accept-Encoding: identity"
+dump-header = "$RC_PROFILE_HEADERS"
+fail
+silent
+show-error
+max-redirs = 0
+max-filesize = 2097152
+proto = "=https"
+EOF
+  if ! curl -q --config "$RC_PROFILE_CURL_CONFIG" \
+      | head -c 2097153 > "$RC_PROFILE_CAPSULE"; then
+    unset RC_PROFILE_AUTH_TOKEN
+    rm -f "$RC_PROFILE_CURL_CONFIG"
+    die "Bootstrap Profile redemption failed. The installation was not modified."
+  fi
+  unset RC_PROFILE_AUTH_TOKEN
+  rm -f "$RC_PROFILE_CURL_CONFIG"
+  RC_PROFILE_CURL_CONFIG=""
+  if ! rc_profile_validate_redeem_response; then
+    rm -f "$RC_PROFILE_HEADERS"
+    RC_PROFILE_HEADERS=""
+    die "Bootstrap Profile redemption returned invalid metadata or Capsule bytes."
+  fi
+  rm -f "$RC_PROFILE_HEADERS"
+  RC_PROFILE_HEADERS=""
+}
+
+rc_profile_assert_gateway_stopped() {
+  local _run_lock="${RC_RUN_LOCK_DIR:-${TMPDIR:-/tmp}/research-claw-gateway.lock}"
+  local _owner=""
+  _owner="$(cat "$_run_lock/pid" 2>/dev/null || true)"
+  if [ -n "$_owner" ] && kill -0 "$_owner" 2>/dev/null; then
+    die "Research-Claw is running (PID $_owner). Stop it normally, then re-run this installer."
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    local _listeners
+    _listeners="$(lsof -ti :"$PORT" 2>/dev/null || true)"
+    [ -z "$_listeners" ] || die "Port $PORT is active. Stop the running Gateway yourself, then re-run."
+  fi
+}
+
+rc_profile_recover_native() {
+  rc_profile_native_cli initialize-locks >/dev/null
+  rc_profile_native_cli recover >/dev/null
+  RC_PROFILE_TX_ID=""
+  RC_PROFILE_PENDING_STATE=""
+}
+
+rc_profile_stage_native() {
+  local _result
+  if ! _result="$(rc_profile_native_cli stage --capsule-file "$RC_PROFILE_CAPSULE")"; then
+    rc_profile_load_pending_native >/dev/null 2>&1 || true
+    return 1
+  fi
+  RC_PROFILE_TX_ID="$(printf '%s' "$_result" | "$GW_NODE" -e '
+    let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
+      const value=JSON.parse(raw); if (!/^tx-[0-9a-f-]{36}$/.test(value.txId || "")) process.exit(1);
+      process.stdout.write(value.txId);
+    });
+  ')" || die "Bootstrap Profile staging returned an invalid transaction."
+  [ -n "$RC_PROFILE_TX_ID" ] || die "Bootstrap Profile staging failed."
+}
+
+rc_profile_apply_native() {
+  rc_profile_native_cli apply --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+}
+
+rc_profile_verify_native() {
+  rc_profile_native_cli verify --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+}
+
+rc_profile_probe_native() {
+  local _provider _profile _probe_output
+  read -r _provider _profile <<EOF
+$("$GW_NODE" -e '
+  const fs=require("fs");
+  const c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+  const primary=typeof c.agents?.defaults?.model === "string"
+    ? c.agents.defaults.model : c.agents?.defaults?.model?.primary;
+  const provider=typeof primary === "string" ? primary.split("/")[0] : "";
+  const profile=c.auth?.order?.[provider]?.[0] || "";
+  if (!provider || !profile) process.exit(1);
+  process.stdout.write(provider+" "+profile);
+' "$INSTALL_DIR/config/openclaw.json")
+EOF
+  [ -n "$_provider" ] && [ -n "$_profile" ] || die "Bootstrap Profile model identity is incomplete."
+  _probe_output="$RC_PROFILE_TEMP_ROOT/model-probe.json"
+  if ! "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
+      --root "$INSTALL_DIR" \
+      --config "$INSTALL_DIR/config/openclaw.json" \
+      --state "$HOME/.openclaw" \
+      --provider "$_provider" \
+      --profile "$_profile" \
+      --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null; then
+    die "Bootstrap Profile credential/model probe failed."
+  fi
+  "$GW_NODE" -e '
+    const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+    if (value?.ok !== true || value?.status !== "ok") process.exit(1);
+  ' "$_probe_output" || die "Bootstrap Profile credential/model probe was not accepted."
+}
+
+rc_profile_commit_native() {
+  local _status
+  RC_PROFILE_COMMIT_ATTEMPTED=true
+  if ! rc_profile_native_cli commit --tx-id "$RC_PROFILE_TX_ID" >/dev/null; then
+    if ! rc_profile_load_pending_native \
+        || [ "$RC_PROFILE_PENDING_STATE" != committed ] \
+        || ! rc_profile_rollback_native; then
+      return 1
+    fi
+  else
+    RC_PROFILE_COMMITTED=true
+    RC_PROFILE_TX_ID=""
+    RC_PROFILE_PENDING_STATE=""
+  fi
+  _status="$(rc_profile_native_cli status)"
+  printf '%s' "$_status" | "$GW_NODE" -e '
+    let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
+      const value=JSON.parse(raw), p=value.profile;
+      if (p) process.stdout.write(`  ✓ Bootstrap Profile ${p.id} revision ${p.revision}\n`);
+    });
+  '
+  rc_profile_cleanup_host_secret
+}
+
+rc_profile_parse_args "$@"
+trap 'exit 130' INT TERM
+rc_profile_redeem
+
 # ── Diagnostic breadcrumb log ─────────────────────────────────────────
 # Key decisions and failure details land here so a failed install has an
 # attachable log. Screen output is NOT tee'd (that would break TTY detection
 # and progress rendering for child processes).
 RC_LOG="${TMPDIR:-/tmp}/rc-install-$(date +%Y%m%d-%H%M%S).log"
 rclog() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >>"$RC_LOG" 2>/dev/null || true; }
+
+# From this point onward every path (including the no-token installer) shares
+# one EXIT cleanup and one interrupt ABI.
+trap rc_install_exit_cleanup EXIT
+trap rc_install_on_interrupt INT TERM
 
 INSTALL_START_TS=$(date +%s)
 _elapsed() {
@@ -80,10 +733,6 @@ _elapsed() {
 
 step() { printf "\n${C}  ▸ [%s/8]${N} ${B}%s${N}\n" "$1" "$2"; rclog "step $1/8: $2"; }
 
-# Interrupted installs are fully resumable — say so instead of dying silently.
-# (The gateway launch section at the end replaces this trap with its own.)
-trap 'printf "\n${Y}  ⚠ Interrupted.${N} Nothing is broken — this installer is resumable.\n  Re-run the same command to continue where it left off:\n    ${B}curl -fsSL https://wentor.ai/install.sh | bash${N}\n  ${D}Diagnostic log: ${RC_LOG}${N}\n\n"; exit 130' INT TERM
-
 # Run a long command with a visible heartbeat instead of dead silence.
 # Full output is captured to a temp log. On a TTY one line shows the label and
 # elapsed seconds; otherwise a liveness line prints every 15s. Set
@@ -91,10 +740,21 @@ trap 'printf "\n${Y}  ⚠ Interrupted.${N} Nothing is broken — this installer 
 # that have a quieter fallback path).
 run_with_heartbeat() {
   local _label="$1"; shift
-  local _log _pid _rc=0 _t=0
-  _log="$(mktemp)"
-  "$@" >"$_log" 2>&1 &
-  _pid=$!
+  local _pid _rc=0 _cleanup_rc=0 _t=0 _old_umask
+  [ -z "$RC_HEARTBEAT_PID" ] && [ -z "$RC_HEARTBEAT_LOG" ] || return 125
+  rc_install_init_temp_parent || return 1
+  _old_umask="$(umask)"
+  umask 077
+  if ! RC_HEARTBEAT_LOG="$(mktemp "$RC_INSTALL_TEMP_PARENT/rc-install-heartbeat.XXXXXX")"; then
+    umask "$_old_umask"
+    return 1
+  fi
+  umask "$_old_umask"
+  chmod 600 "$RC_HEARTBEAT_LOG" || return 1
+  RC_HEARTBEAT_LOG_ID="$(rc_install_path_identity "$RC_HEARTBEAT_LOG")" || return 1
+  "$@" >"$RC_HEARTBEAT_LOG" 2>&1 &
+  RC_HEARTBEAT_PID=$!
+  _pid="$RC_HEARTBEAT_PID"
   while kill -0 "$_pid" 2>/dev/null; do
     sleep 1
     _t=$((_t + 1))
@@ -105,13 +765,16 @@ run_with_heartbeat() {
     fi
   done
   wait "$_pid" || _rc=$?
+  RC_HEARTBEAT_PID=""
   if [ -t 1 ] && [ "$_t" -gt 0 ]; then printf "\r\033[2K"; fi
-  if [ "$_rc" -ne 0 ] && [ "${HB_SHOW_FAIL_LOG:-0}" = "1" ] && [ -s "$_log" ]; then
+  if [ "$_rc" -ne 0 ] && [ "${HB_SHOW_FAIL_LOG:-0}" = "1" ] \
+      && [ -s "$RC_HEARTBEAT_LOG" ]; then
     warn "$_label failed (exit $_rc). Last output:"
-    tail -5 "$_log" | sed 's/^/      /' >&2
+    tail -5 "$RC_HEARTBEAT_LOG" | sed 's/^/      /' >&2
   fi
-  rm -f "$_log"
-  return "$_rc"
+  rc_install_remove_heartbeat_log || _cleanup_rc=1
+  [ "$_rc" -ne 0 ] && return "$_rc"
+  return "$_cleanup_rc"
 }
 
 ensure_ppt_master() {
@@ -734,16 +1397,11 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   # L3 user-owned (SOUL, IDENTITY, TOOLS, USER) + L2 sentinel (BOOTSTRAP.md.done)
   # + workspace-level files are gitignored, but we backup for safety in case of
   # migration from older versions where they were still tracked.
-  RC_DIR="workspace/.ResearchClaw"
-  _RC_BAK="$(mktemp -d)"
-  for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
-    [ -f "$RC_DIR/$f" ] && cp "$RC_DIR/$f" "$_RC_BAK/$f"
-  done
-  [ -f "workspace/MEMORY.md" ] && cp "workspace/MEMORY.md" "$_RC_BAK/MEMORY.md"
-  [ -f "workspace/USER.md" ] && cp "workspace/USER.md" "$_RC_BAK/WS_USER.md"
-  [ -f "$RC_DIR/BOOTSTRAP.md.done" ] && cp "$RC_DIR/BOOTSTRAP.md.done" "$_RC_BAK/BOOTSTRAP.md.done"
+  rc_install_snapshot_update_backup \
+    || die "Could not preserve user files before updating. The installation was not modified."
 
   # Recover from interrupted rebase/merge (e.g. user Ctrl+C during update)
+  RC_UPDATE_MUTATION_STARTED=true
   git rebase --abort 2>/dev/null || true
   git merge --abort 2>/dev/null || true
   git reset --hard HEAD 2>/dev/null || true
@@ -795,14 +1453,11 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     fi
   fi
 
-  # --- Restore user data files ---
-  for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
-    [ -f "$_RC_BAK/$f" ] && cp "$_RC_BAK/$f" "$RC_DIR/$f"
-  done
-  [ -f "$_RC_BAK/MEMORY.md" ] && cp "$_RC_BAK/MEMORY.md" "workspace/MEMORY.md"
-  [ -f "$_RC_BAK/WS_USER.md" ] && cp "$_RC_BAK/WS_USER.md" "workspace/USER.md"
-  [ -f "$_RC_BAK/BOOTSTRAP.md.done" ] && cp "$_RC_BAK/BOOTSTRAP.md.done" "$RC_DIR/BOOTSTRAP.md.done"
-  rm -rf "$_RC_BAK"
+  # --- Restore user data files before discarding the private snapshot ---
+  rc_install_restore_update_backup \
+    || die "Could not restore user files after updating. The private backup was retained."
+  rc_install_discard_update_backup \
+    || die "Could not remove the private update backup after restoring user files."
 
   if ! $UPDATE_FAILED; then
     # Invalidate pnpm's "already up to date" cache after git pull.
@@ -928,7 +1583,8 @@ fi
 # Why not a symlink? pnpm's bin wrapper resolves paths relative to $0.
 # On Linux, $0 for a symlink is the symlink path itself (not the target),
 # so relative paths break: ~/.local/bin/../openclaw/openclaw.mjs → MODULE_NOT_FOUND.
-# A wrapper that cd's into node_modules/.bin makes $0 = ./openclaw → paths resolve correctly.
+# Run from the project root so both pnpm's relative bin shim and OpenClaw's
+# project-relative plugin paths resolve against the installed Research-Claw.
 OC_BIN_DIR="$INSTALL_DIR/node_modules/.bin"
 if [ -x "$OC_BIN_DIR/openclaw" ]; then
   LOCAL_BIN="$HOME/.local/bin"
@@ -939,7 +1595,10 @@ if [ -x "$OC_BIN_DIR/openclaw" ]; then
 #!/bin/sh
 # Research-Claw — openclaw CLI wrapper (generated by install.sh)
 # Do not edit; re-run install.sh to regenerate.
-cd "${INSTALL_DIR}/node_modules/.bin" 2>/dev/null && exec ./openclaw "\$@"
+if cd "${INSTALL_DIR}" 2>/dev/null; then
+  export OPENCLAW_CONFIG_PATH="${INSTALL_DIR}/config/openclaw.json"
+  exec ./node_modules/.bin/openclaw "\$@"
+fi
 echo "Error: Research-Claw not found at ${INSTALL_DIR}" >&2
 echo "Reinstall: curl -fsSL https://wentor.ai/install.sh | bash" >&2
 exit 1
@@ -956,6 +1615,7 @@ RC_CONFIG_CREATED=0
 if [ ! -f config/openclaw.json ]; then
   if [ -f config/openclaw.example.json ]; then
     cp config/openclaw.example.json config/openclaw.json
+    chmod 600 config/openclaw.json
     RC_CONFIG_CREATED=1
     ok "Config created from template"
   fi
@@ -1350,8 +2010,9 @@ else
 fi
 rm -f "$RP_LOG"
 
-# Restore default SIGINT handling
-trap - INT
+# Restore the installer-wide SIGINT handler; never fall back to Bash default
+# before Profile/config validation and the final handoff are complete.
+trap rc_install_on_interrupt INT
 if $_RP_INTERRUPTED; then
   printf "\n"
   info "Interrupted. Research-plugins can be installed later:"
@@ -1362,6 +2023,17 @@ if $_RP_INTERRUPTED; then
 fi
 
 fi  # end: if ! $UPDATE_FAILED (skip build/install/plugins)
+
+# A Profile transaction starts only after the 0.8.3 candidate and optional
+# plugin install have reached a terminal state. The existing Gateway is never
+# killed: the native path requires the operator's explicit stop proof.
+if [ -n "$RC_PROFILE_CAPSULE" ]; then
+  $UPDATE_FAILED && die "The 0.8.3 candidate was not installed; refusing to apply a new Bootstrap Profile."
+  rc_profile_assert_gateway_stopped
+  rc_profile_recover_native
+  rc_profile_stage_native
+  rc_profile_apply_native
+fi
 
 # Reconcile plugin configuration only after the optional download has reached a
 # terminal state. A missing/partial research-plugins install is removed from the
@@ -1383,6 +2055,12 @@ if [ -f "$INSTALL_DIR/config/openclaw.json" ]; then
     printf "%s\n" "$VALIDATION_OUTPUT" | tail -12
     die "Run the installer again after checking the message above."
   fi
+fi
+
+if [ -n "$RC_PROFILE_TX_ID" ]; then
+  rc_profile_verify_native
+  rc_profile_probe_native
+  rc_profile_commit_native
 fi
 
 if ! node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \

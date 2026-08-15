@@ -1,5 +1,6 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -61,7 +62,7 @@ describe('release installation surfaces', () => {
     expect(native).toContain('ensure_ffmpeg');
     expect(native).toContain('pkg_install ffmpeg');
     expect(native).toContain('brew install ffmpeg');
-    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bffmpeg\b/);
+    expect(dockerfile).toMatch(/apt-get[^\n]*\binstall\b[\s\S]*\bffmpeg\b/);
   });
 
   it('native and Docker startup both pass through the shared idempotent config migration', () => {
@@ -85,9 +86,45 @@ describe('release installation surfaces', () => {
   it('provides a public URL parity gate for the curl installer', () => {
     const verifier = read(path.join(ROOT, 'scripts', 'verify-installer-copies.mjs'));
 
-    expect(verifier).toContain("process.argv.indexOf('--public-url')");
+    expect(verifier).toContain("optionalFlag('--public-url')");
+    expect(verifier).toContain("optionalFlag('--web-root')");
     expect(verifier).toContain('DRIFT public native installer');
     expect(verifier).toContain("createHash('sha256')");
+  });
+
+  it('verifies all three public and built copies in an independent Web worktree', () => {
+    const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-installer-copy-parity-'));
+    const verifier = path.join(ROOT, 'scripts', 'verify-installer-copies.mjs');
+    const copyMap = [
+      [scripts.native, 'install.sh'],
+      [scripts.dockerPosix, 'docker-install.sh'],
+      [scripts.dockerWindows, 'docker-install.ps1'],
+    ] as const;
+    try {
+      for (const directory of ['public', 'dist']) {
+        fs.mkdirSync(path.join(staging, directory), { recursive: true });
+        for (const [source, name] of copyMap) {
+          fs.copyFileSync(source, path.join(staging, directory, name));
+        }
+      }
+
+      const clean = spawnSync(process.execPath, [verifier, '--web-root', staging], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+      expect(clean.status, `${clean.stdout}\n${clean.stderr}`).toBe(0);
+      expect(clean.stdout.match(/^MATCH /gm)).toHaveLength(6);
+
+      fs.appendFileSync(path.join(staging, 'public', 'docker-install.ps1'), '# T10 drift\n');
+      const drifted = spawnSync(process.execPath, [verifier, '--web-root', staging], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+      expect(drifted.status).toBe(1);
+      expect(drifted.stderr).toContain('DRIFT Windows Docker installer');
+    } finally {
+      fs.rmSync(staging, { recursive: true, force: true });
+    }
   });
 
   it('POSIX and PowerShell source updates complete the shared config migration before reporting success', () => {

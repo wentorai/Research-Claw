@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+: "${RC_ACCEPTANCE_LOG_DIR:?}"
+: "${RC_PROC_VERSION_FIXTURE:?}"
+# Redirect only the exact kernel-version operand used by install-docker.sh.
+# Every option, pattern, and unrelated path remains byte-for-byte delegated to
+# the distro's real grep.
+arguments=("$@")
+redirected=false
+wslconfig_read=false
+for index in "${!arguments[@]}"; do
+  if [[ "${arguments[$index]}" == /proc/version ]]; then
+    arguments[$index]="$RC_PROC_VERSION_FIXTURE"
+    redirected=true
+  elif [[ "${arguments[$index]}" == /mnt/c/Users/fixture-user/.wslconfig ]]; then
+    wslconfig_read=true
+  fi
+done
+if [[ "$redirected" == true ]]; then
+  case "$(basename -- "$RC_PROC_VERSION_FIXTURE")" in
+    proc-version-wsl2.txt) fixture_kind=wsl2 ;;
+    proc-version-linux.txt) fixture_kind=linux ;;
+    *) fixture_kind=unapproved ;;
+  esac
+  printf 'redirect:/proc/version:fixture=%s\n' "$fixture_kind" \
+    >>"$RC_ACCEPTANCE_LOG_DIR/grep.calls"
+  exec /usr/bin/grep "${arguments[@]}"
+fi
+if [[ "$wslconfig_read" == true ]]; then
+  set +e
+  /usr/bin/grep "${arguments[@]}"
+  grep_rc=$?
+  set -e
+  if [[ "$grep_rc" -eq 0 ]]; then
+    printf 'delegate:wslconfig:path=fixture-user/.wslconfig:matched=true\n' \
+      >>"$RC_ACCEPTANCE_LOG_DIR/grep.calls"
+  else
+    printf 'delegate:wslconfig:path=fixture-user/.wslconfig:matched=false\n' \
+      >>"$RC_ACCEPTANCE_LOG_DIR/grep.calls"
+  fi
+  exit "$grep_rc"
+fi
+printf 'delegate:other\n' >>"$RC_ACCEPTANCE_LOG_DIR/grep.calls"
+exec /usr/bin/grep "${arguments[@]}"

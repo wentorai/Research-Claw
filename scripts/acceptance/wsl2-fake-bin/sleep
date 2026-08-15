@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+: "${RC_ACCEPTANCE_LOG_DIR:?}"
+printf '%s\n' "$*" >>"$RC_ACCEPTANCE_LOG_DIR/sleep.calls"
+exit 0

@@ -1,0 +1,1 @@
+Linux version 6.12.0-linuxkit (acceptance@fixture.invalid) #1 SMP GNU/Linux

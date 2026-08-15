@@ -1,0 +1,1 @@
+Linux version 5.15.153.1-microsoft-standard-WSL2 (acceptance@fixture.invalid) #1 SMP GNU/Linux

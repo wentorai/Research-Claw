@@ -2,10 +2,14 @@
 # Windows git clone with core.autocrlf=true converts LF→CRLF, which breaks
 # shell scripts in Docker (#!/bin/sh\r → "no such file or directory").
 *.sh text eol=lf
+*.ps1 text eol=lf
 *.cjs text eol=lf
 *.mjs text eol=lf
 Dockerfile text eol=lf
 docker-compose.yml text eol=lf
+/package.json text eol=lf
+/pnpm-lock.yaml text eol=lf
+/scripts/bootstrap-profile/unicode-15.0-assigned-ranges.json text eol=lf
 
 # pnpm patch files ARE unified diffs: context lines are "<space-marker><tab>code",
 # which `git diff --check` flags as "space before tab". That is inherent to the

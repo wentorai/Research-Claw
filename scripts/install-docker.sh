@@ -52,25 +52,411 @@ ok()   { printf "${G}  ✓${N} %s\n" "$1"; }
 info() { printf "${C}  ▸${N} %s\n" "$1"; }
 warn() { printf "${Y}  ⚠${N} %s\n" "$1"; }
 err()  { printf "${R}  ✗ %s${N}\n" "$1" >&2; }
+die()  { err "$1"; exit 1; }
+
+RC_BOOTSTRAP_REDEEM_URL="https://wentor.ai/api/v1/rc/bootstrap/redeem"
+RC_PROFILE_AUTH_TOKEN=""
+RC_PROFILE_TEMP_PARENT=""
+RC_PROFILE_TEMP_ROOT=""
+RC_PROFILE_CURL_CONFIG=""
+RC_PROFILE_HEADERS=""
+RC_PROFILE_CAPSULE=""
+RC_PROFILE_TX_ID=""
+RC_PROFILE_PENDING_STATE=""
+RC_PROFILE_COMMITTED=false
+RC_PROFILE_COMMIT_ATTEMPTED=false
+
+rc_profile_parse_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --auth-token)
+        [ -z "$RC_PROFILE_AUTH_TOKEN" ] || die "--auth-token may be provided only once."
+        [ "$#" -ge 2 ] && [ -n "$2" ] || die "--auth-token requires a non-empty value."
+        [[ "$2" =~ ^rca_[A-Za-z0-9_-]{43,}$ ]] \
+          || die "--auth-token has an invalid format."
+        RC_PROFILE_AUTH_TOKEN="$2"
+        shift 2
+        ;;
+      *) die "Unknown installer argument: $1" ;;
+    esac
+  done
+}
+
+rc_profile_cleanup_host_secret() {
+  [ -n "$RC_PROFILE_TEMP_ROOT" ] || return 0
+  local _parent _name
+  _parent="$(dirname "$RC_PROFILE_TEMP_ROOT")"
+  _name="$(basename "$RC_PROFILE_TEMP_ROOT")"
+  [ -n "$RC_PROFILE_TEMP_PARENT" ] \
+    && [ "$_parent" = "$RC_PROFILE_TEMP_PARENT" ] \
+    && [[ "$_name" == rc-bootstrap-installer.* ]] \
+    || return 1
+  rm -rf -- "$RC_PROFILE_TEMP_ROOT" || return 1
+  [ ! -e "$RC_PROFILE_TEMP_ROOT" ] || return 1
+  RC_PROFILE_TEMP_PARENT=""
+  RC_PROFILE_TEMP_ROOT=""
+  RC_PROFILE_CURL_CONFIG=""
+  RC_PROFILE_HEADERS=""
+  RC_PROFILE_CAPSULE=""
+}
+
+rc_profile_validate_redeem_response() {
+  local _declared _actual
+  _declared="$(awk '
+    function reset_headers() {
+      content_type = ""; content_encoding = ""; content_length = ""
+      content_type_count = 0; content_encoding_count = 0; content_length_count = 0
+      transfer_encoding_count = 0
+    }
+    BEGIN { saw_status = 0; in_headers = 0; reset_headers() }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      lower = tolower(line)
+      if (lower ~ /^http\/[0-9.]+ [0-9][0-9][0-9]/) {
+        saw_status = 1
+        split(lower, status_fields, /[ \t]+/)
+        status_code = status_fields[2]
+        reset_headers()
+        in_headers = 1
+        next
+      }
+      if (!in_headers) next
+      if (line == "") { in_headers = 0; next }
+      separator = index(line, ":")
+      if (separator < 1) next
+      name = tolower(substr(line, 1, separator - 1))
+      value = substr(line, separator + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", value)
+      if (name == "content-type") {
+        content_type = tolower(value); content_type_count++
+      } else if (name == "content-encoding") {
+        content_encoding = tolower(value); content_encoding_count++
+      } else if (name == "content-length") {
+        content_length = value; content_length_count++
+      } else if (name == "transfer-encoding") {
+        transfer_encoding_count++
+      }
+    }
+    END {
+      if (!saw_status || status_code != "200" ||
+          content_type_count != 1 || content_encoding_count != 1 ||
+          content_length_count != 1 || transfer_encoding_count != 0 ||
+          content_type != "application/json; charset=utf-8" ||
+          content_encoding != "identity" ||
+          content_length !~ /^(0|[1-9][0-9]*)$/ ||
+          content_length + 0 > 2097152) exit 1
+      print content_length
+    }
+  ' "$RC_PROFILE_HEADERS")" || return 1
+  _actual="$(wc -c < "$RC_PROFILE_CAPSULE" | tr -d '[:space:]')"
+  [ -n "$_actual" ] && [ "$_actual" -gt 0 ] \
+    && [ "$_actual" -le 2097152 ] && [ "$_actual" = "$_declared" ]
+}
+
+rc_profile_redeem() {
+  [ -n "$RC_PROFILE_AUTH_TOKEN" ] || return 0
+  command -v curl >/dev/null 2>&1 || die "curl is required to redeem a Bootstrap Profile."
+  command -v head >/dev/null 2>&1 && head -c 1 </dev/null >/dev/null 2>&1 \
+    || die "head with byte-count support is required to redeem a Bootstrap Profile."
+  umask 077
+  RC_PROFILE_TEMP_PARENT="$(cd -P -- "${TMPDIR:-/tmp}" && pwd -P)" \
+    || die "Could not resolve the Bootstrap Profile private temp parent."
+  RC_PROFILE_TEMP_ROOT="$(mktemp -d "$RC_PROFILE_TEMP_PARENT/rc-bootstrap-installer.XXXXXX")"
+  trap rc_profile_exit_cleanup EXIT
+  chmod 700 "$RC_PROFILE_TEMP_ROOT"
+  RC_PROFILE_CURL_CONFIG="$RC_PROFILE_TEMP_ROOT/redeem.curl"
+  RC_PROFILE_HEADERS="$RC_PROFILE_TEMP_ROOT/headers"
+  RC_PROFILE_CAPSULE="$RC_PROFILE_TEMP_ROOT/capsule.json"
+  : > "$RC_PROFILE_CURL_CONFIG"
+  : > "$RC_PROFILE_HEADERS"
+  : > "$RC_PROFILE_CAPSULE"
+  chmod 600 "$RC_PROFILE_CURL_CONFIG" "$RC_PROFILE_HEADERS" "$RC_PROFILE_CAPSULE"
+  cat > "$RC_PROFILE_CURL_CONFIG" <<EOF
+url = "$RC_BOOTSTRAP_REDEEM_URL"
+request = "POST"
+header = "Authorization: Bearer $RC_PROFILE_AUTH_TOKEN"
+header = "Accept: application/json"
+header = "Accept-Encoding: identity"
+dump-header = "$RC_PROFILE_HEADERS"
+fail
+silent
+show-error
+max-redirs = 0
+max-filesize = 2097152
+proto = "=https"
+EOF
+  if ! curl -q --config "$RC_PROFILE_CURL_CONFIG" \
+      | head -c 2097153 > "$RC_PROFILE_CAPSULE"; then
+    unset RC_PROFILE_AUTH_TOKEN
+    rm -f "$RC_PROFILE_CURL_CONFIG"
+    die "Bootstrap Profile redemption failed. Docker state was not modified."
+  fi
+  unset RC_PROFILE_AUTH_TOKEN
+  rm -f "$RC_PROFILE_CURL_CONFIG"
+  RC_PROFILE_CURL_CONFIG=""
+  if ! rc_profile_validate_redeem_response; then
+    rm -f "$RC_PROFILE_HEADERS"
+    RC_PROFILE_HEADERS=""
+    die "Bootstrap Profile redemption returned invalid metadata or Capsule bytes."
+  fi
+  rm -f "$RC_PROFILE_HEADERS"
+  RC_PROFILE_HEADERS=""
+}
+
+rc_profile_docker_cli() {
+  local _command="$1"; shift
+  docker run --rm -i \
+    --entrypoint node \
+    -v rc-config:/app/config \
+    -v rc-data:/app/.research-claw \
+    -v rc-workspace:/app/workspace \
+    -v rc-state:/root/.openclaw \
+    "$IMAGE" /app/scripts/apply-bootstrap-profile.cjs "$_command" \
+      --rc-root /app \
+      --config /app/config/openclaw.json \
+      --workspace /app/workspace \
+      --state-dir /root/.openclaw \
+      --db /app/.research-claw/library.db \
+      --global-config /root/.openclaw/openclaw.json \
+      "$@"
+}
+
+rc_profile_seed_docker_baseline() {
+  docker run --rm \
+    --entrypoint sh \
+    -v rc-config:/app/config \
+    -v rc-data:/app/.research-claw \
+    -v rc-workspace:/app/workspace \
+    -v rc-state:/root/.openclaw \
+    "$IMAGE" -c '
+      set -eu
+      umask 077
+      mkdir -p /app/config /app/.research-claw /app/workspace /root/.openclaw
+      if [ ! -f /app/config/openclaw.json ]; then
+        cp /defaults/openclaw.example.json /app/config/openclaw.json
+        chmod 600 /app/config/openclaw.json
+      fi
+      if [ ! -f /root/.openclaw/openclaw.json ]; then
+        printf "{}\n" > /root/.openclaw/openclaw.json
+        chmod 600 /root/.openclaw/openclaw.json
+      fi
+    ' >/dev/null
+}
+
+rc_profile_docker_has_lock_authority() {
+  docker run --rm \
+    --entrypoint sh \
+    -v rc-config:/app/config:ro \
+    "$IMAGE" -c 'test -d /app/config/.rc-bootstrap/locks' >/dev/null 2>&1
+}
+
+rc_profile_recover_docker() {
+  rc_profile_docker_cli recover </dev/null >/dev/null
+  RC_PROFILE_TX_ID=""
+  RC_PROFILE_PENDING_STATE=""
+}
+
+rc_profile_initialize_locks_docker() {
+  rc_profile_docker_cli initialize-locks </dev/null >/dev/null
+}
+
+rc_profile_load_pending_docker() {
+  local _status
+  if ! _status="$(rc_profile_docker_cli status </dev/null)"; then
+    return 1
+  fi
+  RC_PROFILE_TX_ID="$(printf '%s' "$_status" \
+    | sed -nE 's/^.*"pendingTransaction":\{"txId":"(tx-[0-9a-f-]{36})".*$/\1/p')"
+  RC_PROFILE_PENDING_STATE="$(printf '%s' "$_status" \
+    | sed -nE 's/^.*"pendingTransaction":\{"txId":"tx-[0-9a-f-]{36}","state":"([a-z]+)".*$/\1/p')"
+  if [ -z "$RC_PROFILE_TX_ID" ]; then
+    printf '%s' "$_status" | grep -q '"pendingTransaction":null' \
+      || return 1
+    RC_PROFILE_PENDING_STATE=""
+  else
+    [ -n "$RC_PROFILE_PENDING_STATE" ] \
+      || return 1
+  fi
+}
+
+rc_profile_stage_docker() {
+  local _result
+  if ! _result="$(rc_profile_docker_cli stage < "$RC_PROFILE_CAPSULE")"; then
+    # Stage may have durably published immediately before its helper failed or
+    # was interrupted. Recover the opaque tx-id so EXIT/INT/TERM can roll it
+    # back instead of waiting for a later installer run.
+    rc_profile_load_pending_docker >/dev/null 2>&1 || true
+    return 1
+  fi
+  RC_PROFILE_TX_ID="$(printf '%s' "$_result" | sed -nE 's/^.*"txId":"(tx-[0-9a-f-]{36})".*$/\1/p')"
+  [ -n "$RC_PROFILE_TX_ID" ] || die "Bootstrap Profile staging returned an invalid transaction."
+}
+
+rc_profile_apply_docker() {
+  rc_profile_docker_cli apply --tx-id "$RC_PROFILE_TX_ID" </dev/null >/dev/null
+}
+
+rc_profile_verify_docker() {
+  rc_profile_docker_cli verify --tx-id "$RC_PROFILE_TX_ID" </dev/null >/dev/null
+}
+
+rc_profile_probe_docker() {
+  docker run --rm \
+    --entrypoint sh \
+    -v rc-config:/app/config:ro \
+    -v rc-state:/root/.openclaw:ro \
+    "$IMAGE" -c '
+      set -eu
+      pair=$(node -e '\''
+        const fs=require("fs"), c=JSON.parse(fs.readFileSync("/app/config/openclaw.json","utf8"));
+        const primary=typeof c.agents?.defaults?.model === "string"
+          ? c.agents.defaults.model : c.agents?.defaults?.model?.primary;
+        const provider=typeof primary === "string" ? primary.split("/")[0] : "";
+        const profile=c.auth?.order?.[provider]?.[0] || "";
+        if (!provider || !profile) process.exit(1);
+        process.stdout.write(provider+" "+profile);
+      '\'')
+      set -- $pair
+      node /app/scripts/bootstrap-profile/model-probe.cjs \
+        --root /app --config /app/config/openclaw.json \
+        --state /root/.openclaw --provider "$1" --profile "$2" \
+        --scratch-root /tmp >/dev/null
+    ' >/dev/null
+}
+
+rc_profile_rollback_docker() {
+  local _result _state
+  [ -n "$RC_PROFILE_TX_ID" ] || return 0
+  if ! _result="$(rc_profile_docker_cli rollback --tx-id "$RC_PROFILE_TX_ID" </dev/null)"; then
+    return 1
+  fi
+  _state="$(printf '%s' "$_result" | sed -nE 's/^.*"state":"([a-z-]+)".*$/\1/p')"
+  case "$_state" in
+    rolled-back) ;;
+    committed) RC_PROFILE_COMMITTED=true ;;
+    *) return 1 ;;
+  esac
+  RC_PROFILE_TX_ID=""
+  RC_PROFILE_PENDING_STATE=""
+}
+
+rc_profile_commit_docker() {
+  local _status
+  RC_PROFILE_COMMIT_ATTEMPTED=true
+  if ! rc_profile_docker_cli commit --tx-id "$RC_PROFILE_TX_ID" </dev/null >/dev/null; then
+    if ! rc_profile_load_pending_docker \
+        || [ "$RC_PROFILE_PENDING_STATE" != committed ] \
+        || ! rc_profile_rollback_docker; then
+      return 1
+    fi
+  else
+    RC_PROFILE_COMMITTED=true
+    RC_PROFILE_TX_ID=""
+    RC_PROFILE_PENDING_STATE=""
+  fi
+  _status="$(rc_profile_docker_cli status </dev/null)"
+  printf '%s\n' "$_status" | sed -nE 's/^.*"id":"([a-z0-9-]+)".*"revision":([0-9]+).*$/  ✓ Bootstrap Profile \1 revision \2/p'
+  rc_profile_cleanup_host_secret
+}
 
 HAD_PREVIOUS=false
+OLD_CONTAINER_STOPPED=false
+REPLACEMENT_ATTEMPTED=false
+rc_profile_wait_for_restored_health() {
+  local _waited=0 _timeout="${HEALTH_TIMEOUT:-60}"
+  while [ "$_waited" -lt "$_timeout" ]; do
+    if curl -sf --noproxy '*' "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+    _waited=$((_waited + 2))
+  done
+  return 1
+}
+
 restore_previous_container() {
-  if [ "$HAD_PREVIOUS" != true ]; then
-    return
+  if [ "$HAD_PREVIOUS" != true ] && [ "$OLD_CONTAINER_STOPPED" != true ] \
+      && [ "$REPLACEMENT_ATTEMPTED" != true ] && [ -z "$RC_PROFILE_TX_ID" ]; then
+    return 0
   fi
   warn "The replacement did not become ready; restoring the previous version."
-  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  if [ "$RC_PROFILE_COMMIT_ATTEMPTED" = true ] && [ -n "$RC_PROFILE_TX_ID" ]; then
+    if ! rc_profile_load_pending_docker; then
+      err "Could not determine whether the Profile commit point won; both containers were preserved."
+      return 1
+    fi
+    if [ "$RC_PROFILE_PENDING_STATE" = committed ]; then
+      if ! rc_profile_rollback_docker; then
+        err "Committed Profile cleanup failed; both containers were preserved."
+        return 1
+      fi
+      REPLACEMENT_ATTEMPTED=false
+      OLD_CONTAINER_STOPPED=false
+      if [ "$HAD_PREVIOUS" = true ]; then
+        docker rm -f "$ROLLBACK_CONTAINER" >/dev/null 2>&1 || return 1
+        HAD_PREVIOUS=false
+      fi
+      return 0
+    fi
+  fi
+  if [ "$REPLACEMENT_ATTEMPTED" = true ]; then
+    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    REPLACEMENT_ATTEMPTED=false
+  fi
+  if [ -n "$RC_PROFILE_TX_ID" ] && [ "$RC_PROFILE_COMMITTED" != true ]; then
+    if ! rc_profile_rollback_docker; then
+      err "Volume rollback failed; the previous container remains '${ROLLBACK_CONTAINER}'."
+      rclog "profile volume rollback failed"
+      return 1
+    fi
+  fi
+  if [ "$OLD_CONTAINER_STOPPED" = true ]; then
+    if docker start "$CONTAINER" >/dev/null 2>&1 && rc_profile_wait_for_restored_health; then
+      ok "Previous version restored"
+      rclog "rollback restarted previous container"
+      OLD_CONTAINER_STOPPED=false
+      return 0
+    fi
+    err "Automatic rollback did not restore a healthy previous gateway."
+    rclog "rollback restart failed"
+    OLD_CONTAINER_STOPPED=false
+    return 1
+  fi
+  if [ "$HAD_PREVIOUS" != true ]; then
+    return 0
+  fi
   if docker rename "$ROLLBACK_CONTAINER" "$CONTAINER" >/dev/null 2>&1 &&
-     docker start "$CONTAINER" >/dev/null 2>&1; then
+     docker start "$CONTAINER" >/dev/null 2>&1 &&
+     rc_profile_wait_for_restored_health; then
     ok "Previous version restored"
     rclog "rollback restored previous container"
+    HAD_PREVIOUS=false
   else
-    err "Automatic rollback failed. The previous container is still named '${ROLLBACK_CONTAINER}'."
-    echo "  Recover it with: docker rename ${ROLLBACK_CONTAINER} ${CONTAINER} && docker start ${CONTAINER}"
+    err "Automatic rollback did not restore a healthy previous gateway."
+    echo "  Inspect it with: docker ps -a --filter name=${CONTAINER} && docker logs ${CONTAINER}"
     rclog "rollback failed"
+    HAD_PREVIOUS=false
+    return 1
   fi
-  HAD_PREVIOUS=false
 }
+
+rc_profile_exit_cleanup() {
+  local _status=$?
+  trap - EXIT
+  if { [ "$HAD_PREVIOUS" = true ] || [ "$OLD_CONTAINER_STOPPED" = true ] \
+      || [ "$REPLACEMENT_ATTEMPTED" = true ] || [ -n "$RC_PROFILE_TX_ID" ]; } \
+      && [ "$RC_PROFILE_COMMITTED" != true ]; then
+    restore_previous_container >/dev/null 2>&1 || true
+  fi
+  if ! rc_profile_cleanup_host_secret; then
+    printf '  ✗ Could not remove Bootstrap Profile private files.\n' >&2
+    [ "$_status" -ne 0 ] || _status=1
+  fi
+  exit "$_status"
+}
+
+rc_profile_parse_args "$@"
 
 # ── Diagnostic breadcrumb log ─────────────────────────────────────────
 # Key decisions and failure details are appended here so a failed install
@@ -324,6 +710,8 @@ _pull_with_retry() {
   return 1
 }
 
+rc_profile_redeem
+
 step 3 "Pull image"
 
 PULL_OK=false
@@ -405,39 +793,147 @@ if [ -n "$IMAGE_INFO" ]; then
   ok "$IMAGE_INFO"
 fi
 
-# Recover an interrupted update before starting another one. If the canonical
-# container exists it is newer than a stale rollback copy, so discard the copy.
+# Ordinary no-Token recovery keeps its historical container-only behavior.
+# A Profile install defers rollback-container handling until the pending
+# transaction has been inspected under a real stop proof below.
+ROLLBACK_EXISTS=false
 if docker ps -a --format '{{.Names}}' | grep -qx "${ROLLBACK_CONTAINER}"; then
+  ROLLBACK_EXISTS=true
+fi
+if [ "$ROLLBACK_EXISTS" = true ] && [ -z "$RC_PROFILE_CAPSULE" ]; then
+  if rc_profile_docker_has_lock_authority; then
+    if ! rc_profile_load_pending_docker; then
+      die "Bootstrap Profile state could not be inspected; both containers were preserved."
+    fi
+    if [ -n "$RC_PROFILE_TX_ID" ]; then
+      die "A Bootstrap Profile transaction is pending; re-run the same installer command with its Auth Token."
+    fi
+  fi
   if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
     if [ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" = true ] &&
        curl -sf --noproxy '*' "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
       docker rm -f "$ROLLBACK_CONTAINER" >/dev/null 2>&1 || true
+      ROLLBACK_EXISTS=false
     else
+      REPLACEMENT_ATTEMPTED=true
       HAD_PREVIOUS=true
       restore_previous_container
+      ROLLBACK_EXISTS=false
     fi
   else
     warn "Found an interrupted update; restoring the previous container first."
-    docker rename "$ROLLBACK_CONTAINER" "$CONTAINER"
-    docker start "$CONTAINER" >/dev/null 2>&1 || true
+    HAD_PREVIOUS=true
+    restore_previous_container
+    ROLLBACK_EXISTS=false
   fi
 fi
 
-# Replace the old service only after the new image is safely available. Keep
-# the previous container until the replacement passes its health check.
+# Stage the isolated transaction before the replacement boundary. T04 lock
+# initialization and recovery require a real container-stop proof, so an
+# existing gateway is stopped briefly, recovered, restarted, and health-checked
+# before stage. The final stop/rename then brackets only apply + replacement.
+EXISTING_CONTAINER=false
 if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
+  EXISTING_CONTAINER=true
+fi
+
+if [ -n "$RC_PROFILE_CAPSULE" ]; then
+  CURRENT_WAS_HEALTHY=false
+  if [ "$EXISTING_CONTAINER" = true ]; then
+    if [ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" = true ] \
+        && curl -sf --noproxy '*' "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
+      CURRENT_WAS_HEALTHY=true
+    fi
+    info "Preparing the existing gateway for Profile transaction recovery..."
+    if ! docker stop "$CONTAINER" >/dev/null 2>&1; then
+      die "Could not stop the existing container; it was left untouched."
+    fi
+    OLD_CONTAINER_STOPPED=true
+  fi
+  rc_profile_seed_docker_baseline
+  rc_profile_initialize_locks_docker
+  rc_profile_load_pending_docker
+
+  if [ "$RC_PROFILE_PENDING_STATE" = committed ]; then
+    # The global commit point won. Recovery may finish cleanup only; it must
+    # never roll back the already committed Profile.
+    rc_profile_recover_docker
+    if [ "$ROLLBACK_EXISTS" = true ] && [ "$EXISTING_CONTAINER" = true ]; then
+      docker rm -f "$ROLLBACK_CONTAINER" >/dev/null
+      ROLLBACK_EXISTS=false
+    elif [ "$ROLLBACK_EXISTS" = true ]; then
+      die "A committed Profile has no canonical container; '${ROLLBACK_CONTAINER}' was preserved for manual recovery."
+    fi
+  elif [ -n "$RC_PROFILE_TX_ID" ] && [ "$ROLLBACK_EXISTS" = true ]; then
+    # An interrupted replacement owns both the pending volume transaction and
+    # the rollback container. Restore them as one unit, volume bytes first.
+    OLD_CONTAINER_STOPPED=false
+    REPLACEMENT_ATTEMPTED="$EXISTING_CONTAINER"
+    HAD_PREVIOUS=true
+    restore_previous_container
+    EXISTING_CONTAINER=true
+    ROLLBACK_EXISTS=false
+  elif [ -n "$RC_PROFILE_TX_ID" ]; then
+    _pending_state="$RC_PROFILE_PENDING_STATE"
+    rc_profile_recover_docker
+    if [ "$EXISTING_CONTAINER" = true ] && [ "$_pending_state" != staged ]; then
+      # No rollback container exists and live mutation had begun. The only
+      # safe automatic result is restored volumes with no ambiguous container.
+      docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+      OLD_CONTAINER_STOPPED=false
+      EXISTING_CONTAINER=false
+    fi
+  else
+    # Also reconciles authenticated unpublished stage material.
+    rc_profile_recover_docker
+  fi
+
+  if [ "$ROLLBACK_EXISTS" = true ]; then
+    if [ "$EXISTING_CONTAINER" = true ] && [ "$CURRENT_WAS_HEALTHY" = true ]; then
+      docker rm -f "$ROLLBACK_CONTAINER" >/dev/null
+      ROLLBACK_EXISTS=false
+    elif [ "$EXISTING_CONTAINER" = true ]; then
+      OLD_CONTAINER_STOPPED=false
+      REPLACEMENT_ATTEMPTED=true
+      HAD_PREVIOUS=true
+      restore_previous_container
+      ROLLBACK_EXISTS=false
+    else
+      HAD_PREVIOUS=true
+      restore_previous_container
+      EXISTING_CONTAINER=true
+      ROLLBACK_EXISTS=false
+    fi
+  fi
+
+  if [ "$EXISTING_CONTAINER" = true ] && [ "$OLD_CONTAINER_STOPPED" = true ]; then
+    if ! docker start "$CONTAINER" >/dev/null 2>&1 \
+        || ! rc_profile_wait_for_restored_health; then
+      die "The existing gateway did not recover after transaction preparation."
+    fi
+    OLD_CONTAINER_STOPPED=false
+  fi
+  rc_profile_stage_docker
+fi
+
+# Replace the old service only after the new image and isolated transaction are
+# ready. Keep the previous container until replacement health + verify passes.
+if [ "$EXISTING_CONTAINER" = true ]; then
   info "New image is ready — staging existing container for rollback..."
   if ! docker stop "$CONTAINER" >/dev/null 2>&1; then
-    err "Could not stop the existing container; it was left untouched."
-    exit 1
+    die "Could not stop the existing container; it was left untouched."
   fi
+  OLD_CONTAINER_STOPPED=true
   if ! docker rename "$CONTAINER" "$ROLLBACK_CONTAINER"; then
-    docker start "$CONTAINER" >/dev/null 2>&1 || true
-    err "Could not prepare the existing container for rollback; it was restarted."
-    exit 1
+    die "Could not prepare the existing container for rollback."
   fi
+  OLD_CONTAINER_STOPPED=false
   HAD_PREVIOUS=true
   ok "Previous version retained until health verification passes"
+fi
+
+if [ -n "$RC_PROFILE_TX_ID" ]; then
+  rc_profile_apply_docker
 fi
 
 # Never terminate an unrelated process just because it owns RC's default port.
@@ -462,6 +958,11 @@ fi
 # ── 5. Start container ────────────────────────────────────────────────
 step 4 "Start container"
 info "Starting container..."
+RC_PROFILE_RUN_ARGS=()
+if [ -n "$RC_PROFILE_TX_ID" ]; then
+  RC_PROFILE_RUN_ARGS=(-e "RC_BOOTSTRAP_TX_ID=$RC_PROFILE_TX_ID")
+fi
+REPLACEMENT_ATTEMPTED=true
 if ! docker run -d \
   --name "$CONTAINER" \
   -p "127.0.0.1:${PORT}:${PORT}" \
@@ -469,6 +970,7 @@ if ! docker run -d \
   -v rc-data:/app/.research-claw \
   -v rc-workspace:/app/workspace \
   -v rc-state:/root/.openclaw \
+  ${RC_PROFILE_RUN_ARGS[@]+"${RC_PROFILE_RUN_ARGS[@]}"} \
   --restart unless-stopped \
   "$IMAGE" >/dev/null; then
   err "Failed to start container. Possible causes:"
@@ -520,11 +1022,21 @@ if [ "$READY" = false ]; then
   exit 1
 fi
 
+if [ -n "$RC_PROFILE_TX_ID" ]; then
+  if ! rc_profile_verify_docker || ! rc_profile_probe_docker; then
+    err "Bootstrap Profile verification failed."
+    restore_previous_container
+    exit 1
+  fi
+  rc_profile_commit_docker
+fi
+
 if [ "$HAD_PREVIOUS" = true ]; then
   docker rm "$ROLLBACK_CONTAINER" >/dev/null
   HAD_PREVIOUS=false
   ok "Update verified; previous container removed"
 fi
+REPLACEMENT_ATTEMPTED=false
 
 # ── 7. Done ───────────────────────────────────────────────────────────
 URL="http://127.0.0.1:${PORT}/"
