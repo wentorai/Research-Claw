@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = path.resolve(__dirname, '..');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'ci.yml');
+const UNIT_TEST_COMMAND = 'pnpm exec vitest run --pool=forks --maxWorkers=1 --minWorkers=1 --no-file-parallelism --maxConcurrency=1 && pnpm --filter dashboard exec vitest run --pool=forks --maxWorkers=1 --minWorkers=1 --no-file-parallelism --maxConcurrency=1';
 
 type Step = {
   name?: string;
@@ -55,7 +56,7 @@ describe('GitHub Actions release gate contract', () => {
     expect(config.jobs.unit).toEqual({
       name: 'CI / Unit',
       'runs-on': 'ubuntu-latest',
-      'timeout-minutes': 30,
+      'timeout-minutes': 60,
       steps: [
         {
           uses: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
@@ -94,7 +95,7 @@ describe('GitHub Actions release gate contract', () => {
         },
         {
           name: 'Test',
-          run: 'pnpm test',
+          run: UNIT_TEST_COMMAND,
         },
         {
           name: 'Verify PowerShell updater behavior',
@@ -186,7 +187,7 @@ describe('GitHub Actions release gate contract', () => {
     const unitSteps = stepsOf(config.jobs.unit as Job);
     const e2eSteps = stepsOf(config.jobs.e2e as Job);
     const testSteps = unitSteps.filter(
-      (step) => step.run?.trim() === 'pnpm test',
+      (step) => step.run?.trim() === UNIT_TEST_COMMAND,
     );
 
     expect(testSteps).toHaveLength(1);
