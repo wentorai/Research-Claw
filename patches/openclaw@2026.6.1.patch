@@ -205,7 +205,37 @@ index 8b6e1342cdfd6f9539f1eada48fefdf658055936..9fd36d55fe9b5c6502a04a2a8066f839
  		action: "surface_error",
  		reason: params.failoverReason
  	};
-@@ -3448,6 +3458,7 @@ async function runEmbeddedAgent(paramsInput) {
+@@ -719,6 +729,10 @@ function resolveRunFailoverDecision(params) {
+ async function handleAssistantFailover(params) {
+ 	let overloadProfileRotations = params.overloadProfileRotations;
+ 	let decision = params.initialDecision;
++	if (params.isProbeSession) decision = {
++		action: "surface_error",
++		reason: params.failoverReason ?? decision.reason ?? "unknown"
++	};
+ 	const sameModelIdleTimeoutRetry = () => {
+ 		params.warn(`[llm-idle-timeout] ${sanitizeForLog(params.provider)}/${sanitizeForLog(params.modelId)} produced no reply before the idle watchdog; retrying same model`);
+ 		return {
+@@ -2307,7 +2321,8 @@ async function runEmbeddedAgent(paramsInput) {
+ 			const preferredProfileId = pluginHarnessOwnsTransport ? resolvePluginHarnessPreferredProfileId() : piExternalCliAuthScope.ignoreAutoPreferredProfile && !requestedProfileIsUserLocked ? void 0 : requestedProfileId;
++			if (requestedProfileIsUserLocked && !preferredProfileId) throw new Error(`USER_LOCKED_AUTH_PROFILE_NOT_FORWARDABLE:${provider}`);
+ 			let lockedProfileId = requestedProfileIsUserLocked ? preferredProfileId : void 0;
+ 			if (lockedProfileId) if (pluginHarnessOwnsTransport) {
+-				if (!isForwardablePluginHarnessAuthProfile(lockedProfileId)) lockedProfileId = void 0;
++				if (!isForwardablePluginHarnessAuthProfile(lockedProfileId)) throw new Error(`USER_LOCKED_AUTH_PROFILE_NOT_FORWARDABLE:${provider}`);
+ 			} else {
+ 				const lockedProfile = authStore.profiles[lockedProfileId];
+ 				const lockedProfileProvider = lockedProfile ? resolveProviderIdForAuth(lockedProfile.provider, {
+@@ -2318,7 +2333,7 @@ async function runEmbeddedAgent(paramsInput) {
+ 					config: params.config,
+ 					workspaceDir: resolvedWorkspace
+ 				});
+-				if (!lockedProfile || !lockedProfileProvider || lockedProfileProvider !== runProvider) lockedProfileId = void 0;
++				if (!lockedProfile || !lockedProfileProvider || lockedProfileProvider !== runProvider) throw new Error(`USER_LOCKED_AUTH_PROFILE_PROVIDER_MISMATCH:${provider}`);
+ 			}
+ 			const forwardedPluginHarnessProfileId = pluginHarnessOwnsTransport && !lockedProfileId && isForwardablePluginHarnessAuthProfile(preferredProfileId) ? preferredProfileId : void 0;
+ 			if (lockedProfileId && !pluginHarnessOwnsTransport) {
+@@ -3448,6 +3462,7 @@ async function runEmbeddedAgent(paramsInput) {
  							stage: "prompt",
  							aborted,
  							externalAbort,
@@ -213,7 +243,18 @@ index 8b6e1342cdfd6f9539f1eada48fefdf658055936..9fd36d55fe9b5c6502a04a2a8066f839
  							fallbackConfigured,
  							failoverFailure: promptFailoverFailure,
  							failoverReason: promptFailoverReason,
-@@ -3481,6 +3492,7 @@ async function runEmbeddedAgent(paramsInput) {
+@@ -3454,6 +3469,10 @@ async function runEmbeddedAgent(paramsInput) {
+ 							harnessOwnsTransport: pluginHarnessOwnsTransport,
+ 							profileRotated: false
+ 						});
++						if (isProbeSession) promptFailoverDecision = {
++							action: "surface_error",
++							reason: promptFailoverReason ?? "unknown"
++						};
+ 						if (promptFailoverDecision.action === "rotate_profile" && await advanceAttemptAuthProfile()) {
+ 							if (failedPromptProfileId && promptProfileFailureReason) maybeMarkAuthProfileFailure({
+ 								profileId: failedPromptProfileId,
+@@ -3481,6 +3496,7 @@ async function runEmbeddedAgent(paramsInput) {
  							stage: "prompt",
  							aborted,
  							externalAbort,
@@ -221,7 +262,7 @@ index 8b6e1342cdfd6f9539f1eada48fefdf658055936..9fd36d55fe9b5c6502a04a2a8066f839
  							fallbackConfigured,
  							failoverFailure: promptFailoverFailure,
  							failoverReason: promptFailoverReason,
-@@ -3592,6 +3604,7 @@ async function runEmbeddedAgent(paramsInput) {
+@@ -3592,6 +3608,7 @@ async function runEmbeddedAgent(paramsInput) {
  						allowFormatRetry: cloudCodeAssistFormatError,
  						aborted,
  						externalAbort,
@@ -841,6 +882,42 @@ index 8ccfe146570eefcf8961c9a91a5bbd59408c4be0..fcb3ee36b7a0ba9f97056232fc37e5de
  				return "ready";
  			}
  			return await this.#waitBeforeRetryOnRecoverableSetupError(err, "Telegram webhook cleanup failed") ? "retry" : "exit";
+diff --git a/dist/extra-params-D_aTqTqO.js b/dist/extra-params-D_aTqTqO.js
+--- a/dist/extra-params-D_aTqTqO.js
++++ b/dist/extra-params-D_aTqTqO.js
+@@ -296,6 +296,7 @@ function createStreamFnWithExtraParams(baseStreamFn, extraParams, provider, mod
+ 	if (typeof extraParams.topP === "number") streamParams.topP = extraParams.topP;
+ 	const maxTokens = resolveMaxTokensParam(extraParams);
+ 	if (maxTokens !== void 0) streamParams.maxTokens = maxTokens;
++	if (Number.isInteger(extraParams.maxRetries) && extraParams.maxRetries >= 0) streamParams.maxRetries = extraParams.maxRetries;
+ 	const resolvedResponseFormat = resolveAliasedParamValue([extraParams], "response_format", "responseFormat");
+ 	if (resolvedResponseFormat && typeof resolvedResponseFormat === "object" && !Array.isArray(resolvedResponseFormat)) streamParams.responseFormat = resolvedResponseFormat;
+ 	const transport = resolveSupportedTransport(extraParams.transport);
+@@ -335,7 +336,8 @@ function createStreamFnWithExtraParams(baseStreamFn, extraParams, provider, mod
+ 		return underlying(callModel, context, {
+ 			...streamParams,
+ 			...cacheRetention ? { cacheRetention } : {},
+-			...options
++			...options,
++			...options?.maxRetries === void 0 && streamParams.maxRetries !== void 0 ? { maxRetries: streamParams.maxRetries } : {}
+ 		});
+ 	};
+ 	return wrappedStreamFn;
+diff --git a/dist/list.probe-mQzaBjB8.js b/dist/list.probe-mQzaBjB8.js
+--- a/dist/list.probe-mQzaBjB8.js
++++ b/dist/list.probe-mQzaBjB8.js
+@@ -333,7 +333,10 @@ async function probeTarget(params) {
+ 			thinkLevel: "off",
+ 			reasoningLevel: "off",
+ 			verboseLevel: "off",
+-			streamParams: { maxTokens },
++			streamParams: {
++				maxTokens,
++				maxRetries: 0
++			},
+ 			disableTools: true,
+ 			modelRun: true,
+ 			cleanupBundleMcpOnRunEnd: true
 diff --git a/dist/openai-transport-stream-BN2CKZjs.js b/dist/openai-transport-stream-BN2CKZjs.js
 index ead7d378ce86c31f483e84fff2dbb9dd40380ffc..779ec4ec59a6c05dfbe5e62ff5d3d8853d2d1e35 100644
 --- a/dist/openai-transport-stream-BN2CKZjs.js
@@ -853,6 +930,67 @@ index ead7d378ce86c31f483e84fff2dbb9dd40380ffc..779ec4ec59a6c05dfbe5e62ff5d3d885
  	const body = await readResponseTextLimited(params.response).catch(() => "");
  	await params.release().catch(() => void 0);
  	params.localServiceLease?.release();
+@@ -2268,15 +2269,19 @@ function resolveOpenAISdkTimeoutMs(model) {
+ 	return resolveModelRequestTimeoutMs(model, void 0);
+ }
+-function buildOpenAISdkClientOptions(model) {
++function buildOpenAISdkClientOptions(model, maxRetries) {
+ 	const timeout = resolveOpenAISdkTimeoutMs(model);
+-	return timeout === void 0 ? {} : { timeout };
++	return {
++		...timeout !== void 0 ? { timeout } : {},
++		...Number.isInteger(maxRetries) && maxRetries >= 0 ? { maxRetries } : {}
++	};
+ }
+-function buildOpenAISdkRequestOptions(model, signal) {
++function buildOpenAISdkRequestOptions(model, signal, maxRetries) {
+ 	const timeout = resolveOpenAISdkTimeoutMs(model);
+-	if (timeout === void 0 && !signal) return;
++	if (timeout === void 0 && !signal && maxRetries === void 0) return;
+ 	return {
+ 		...signal ? { signal } : {},
+-		...timeout !== void 0 ? { timeout } : {}
++		...timeout !== void 0 ? { timeout } : {},
++		...Number.isInteger(maxRetries) && maxRetries >= 0 ? { maxRetries } : {}
+ 	};
+ }
+ function createOpenAIResponsesClient(model, context, apiKey, optionHeaders, turnHeaders) {
+@@ -2686,7 +2691,7 @@ function assertOpenAICompletionsPayloadHasConversationTurn(params, model) {
+ 	if (!Array.isArray(messages) || hasOpenAICompatibleConversationTurn(messages)) return;
+ 	throw new Error(`OpenAI-compatible chat payload for ${model.provider}/${model.id} contains no non-empty user or assistant messages after compaction and transport transforms; refusing to send a system/tool-only request. Start a new user turn or repair the compacted session history.`);
+ }
+-function createOpenAICompletionsClient(model, context, apiKey, optionHeaders) {
++function createOpenAICompletionsClient(model, context, apiKey, optionHeaders, maxRetries) {
+ 	const clientConfig = buildOpenAICompletionsClientConfig(model, context, optionHeaders);
+ 	return new OpenAI({
+ 		apiKey,
+@@ -2695,7 +2700,7 @@ function createOpenAICompletionsClient(model, context, apiKey, optionHeaders) {
+ 		defaultHeaders: clientConfig.defaultHeaders,
+ 		defaultQuery: clientConfig.defaultQuery,
+ 		fetch: buildGuardedModelFetch(model),
+-		...buildOpenAISdkClientOptions(model)
++		...buildOpenAISdkClientOptions(model, maxRetries)
+ 	});
+ }
+ function isAzureOpenAICompatibleHost(hostname) {
+@@ -2756,7 +2761,7 @@ function createOpenAICompletionsTransportStreamFn() {
+ 				timestamp: Date.now()
+ 			};
+ 			try {
+-				const client = createOpenAICompletionsClient(model, context, options?.apiKey || getEnvApiKey(model.provider) || "", options?.headers);
++				const client = createOpenAICompletionsClient(model, context, options?.apiKey || getEnvApiKey(model.provider) || "", options?.headers, options?.maxRetries);
+ 				let params = buildOpenAICompletionsParams(model, context, options);
+ 				const nextParams = await options?.onPayload?.(params, model);
+ 				if (nextParams !== void 0) params = nextParams;
+@@ -2765,7 +2770,7 @@ function createOpenAICompletionsTransportStreamFn() {
+ 				}
+ 				if (getCompat(model).requiresNonEmptyUserOrAssistantMessage) assertOpenAICompletionsPayloadHasConversationTurn(params, model);
+ 				const emitReasoning = shouldEmitOpenAICompletionsReasoning(model, options);
+-				const responseStream = await client.chat.completions.create(params, buildOpenAISdkRequestOptions(model, options?.signal));
++				const responseStream = await client.chat.completions.create(params, buildOpenAISdkRequestOptions(model, options?.signal, options?.maxRetries));
+ 				stream.push({
+ 					type: "start",
+ 					partial: output
 diff --git a/dist/program-GRZ2W39w.js b/dist/program-GRZ2W39w.js
 index e1614c5e7b2b096795e880128dc836f93b31c066..2e36c6f6f3aecdfd7b13867c23f56c582cbe5496 100644
 --- a/dist/program-GRZ2W39w.js

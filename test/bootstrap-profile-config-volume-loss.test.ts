@@ -1004,8 +1004,15 @@ describe('config-volume loss lock authority boundary', () => {
     resetToMountedEmptyConfigRoot(harness);
     await killPausedRecovery(harness, 'after-authority-committed');
 
-    fs.unlinkSync(harness.configPath);
-    fs.writeFileSync(harness.configPath, bytes, { mode: 0o600 });
+    const placeholderIdentity = fs.lstatSync(harness.configPath, { bigint: true });
+    const replacement = path.join(harness.root, `user-replacement-${crypto.randomUUID()}`);
+    fs.writeFileSync(replacement, bytes, { mode: 0o600 });
+    const replacementIdentity = fs.lstatSync(replacement, { bigint: true });
+    expect({ dev: replacementIdentity.dev, ino: replacementIdentity.ino }).not.toEqual({
+      dev: placeholderIdentity.dev,
+      ino: placeholderIdentity.ino,
+    });
+    fs.renameSync(replacement, harness.configPath);
     if (process.platform !== 'win32') fs.chmodSync(harness.configPath, 0o600);
     const before = treeDigest(harness.configRoot);
 

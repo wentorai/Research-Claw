@@ -208,6 +208,7 @@ async function main() {
   const cliTimeoutMs = resolveCliTimeoutMs();
   let tempRoot;
   let server;
+  let failProvider = false;
   const requests = [];
   try {
     const openclawVersion = await assertOpenClawVersion();
@@ -239,6 +240,11 @@ async function main() {
           authorization: request.headers.authorization ?? null,
           body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
         });
+        if (failProvider) {
+          response.writeHead(503, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ error: { message: 'injected credential probe outage' } }));
+          return;
+        }
         sendCompletion(response);
         return;
       }
@@ -326,6 +332,41 @@ async function main() {
     assert(agent.stdout.includes(REPLY), 'conflict: agent response did not contain fixture reply');
     results.find(result => result.scenario === 'conflict').agentCredential = 'auth-profile';
 
+    // An auth probe is a single credential check, not a provider-availability
+    // retry loop. Run this final because a failed probe intentionally marks the
+    // provider unavailable for later agent turns in the isolated state root.
+    requests.length = 0;
+    await writeFile(configPath, `${JSON.stringify(configFor({
+      workspace,
+      baseUrl,
+      apiKey: PROFILE_ID,
+      withProfile: true,
+    }), null, 2)}\n`, { mode: 0o600 });
+    failProvider = true;
+    const failureStatus = await runCli([
+      'models', 'status', '--json', '--probe', '--probe-provider', PROVIDER,
+      '--probe-profile', PROFILE_ID,
+      '--probe-timeout', '5000', '--probe-max-tokens', '4',
+    ], env, { signal: signalBridge.signal, timeoutMs: cliTimeoutMs });
+    failProvider = false;
+    signalBridge.throwIfInterrupted();
+    assert(failureStatus.code === 0, `failure-path: models status failed: ${failureStatus.stderr}`);
+    const parsedFailureStatus = JSON.parse(failureStatus.stdout);
+    const failureProbe = parsedFailureStatus.auth?.probes?.results?.[0];
+    assert(failureProbe?.status && failureProbe.status !== 'ok', 'failure-path: provider outage unexpectedly passed');
+    const failureCredentialLabels = requests.map((request) =>
+      request.authorization === `Bearer ${PROFILE_KEY}` ? 'auth-profile'
+        : request.authorization === `Bearer ${CONFIG_KEY}` ? 'provider-config' : 'other');
+    assert(requests.length === 1,
+      `failure-path: expected one provider request, observed ${requests.length} (${failureCredentialLabels.join(',')})`);
+    assert(requests[0]?.authorization === `Bearer ${PROFILE_KEY}`,
+      'failure-path: probe did not retain the resolved auth-profile credential');
+    const failureResult = {
+      status: failureProbe.status,
+      requestCount: requests.length,
+      credential: 'auth-profile',
+    };
+
     const permissions = await authStorePermissionEvidence(authPath);
     process.stdout.write(`${JSON.stringify({
       schema: 'research-claw.credential-contract-probe.v1',
@@ -338,6 +379,7 @@ async function main() {
         schema: { version: 1, credentialType: 'api_key', keyField: 'key' },
       },
       precedence: 'eligible auth profile before literal provider config apiKey',
+      failureProbe: failureResult,
       results,
     }, null, 2)}\n`);
   } finally {

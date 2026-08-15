@@ -10,6 +10,7 @@ const PROBE = path.join(ROOT, 'scripts', 'probe-credential-contract.mjs');
 const REAL_SMOKE = path.join(ROOT, 'scripts', 'probe-real-provider-smoke.mjs');
 const SYNC = path.join(ROOT, 'scripts', 'sync-global-config.cjs');
 const OPENCLAW_PACKAGE = path.join(ROOT, 'node_modules', 'openclaw', 'package.json');
+const OPENCLAW_PATCH = path.join(ROOT, 'patches', 'openclaw@2026.6.1.patch');
 const TEMP_PREFIX = 'rc-credential-contract-';
 const REAL_TEMP_PREFIX = 'rc-real-provider-smoke-';
 
@@ -54,6 +55,19 @@ function waitForExit(child: ReturnType<typeof spawn>) {
 }
 
 describe('OpenClaw 2026.6.1 credential contract probe', () => {
+  it('never downgrades a user-locked auth profile to literal provider config', () => {
+    const patch = fs.readFileSync(OPENCLAW_PATCH, 'utf8');
+    expect(patch).toContain(
+      'if (requestedProfileIsUserLocked && !preferredProfileId) throw new Error(`USER_LOCKED_AUTH_PROFILE_NOT_FORWARDABLE:${provider}`);',
+    );
+    expect(patch).toContain(
+      'if (!lockedProfile || !lockedProfileProvider || lockedProfileProvider !== runProvider) throw new Error(`USER_LOCKED_AUTH_PROFILE_PROVIDER_MISMATCH:${provider}`);',
+    );
+    expect(patch).not.toContain(
+      '\n+\t\t\t\tif (!lockedProfile || !lockedProfileProvider || lockedProfileProvider !== runProvider) lockedProfileId = void 0;',
+    );
+  });
+
   it('uses the same credential for models status --probe and a real embedded agent turn', () => {
     const output = execFileSync(process.execPath, [PROBE], {
       cwd: ROOT,
@@ -87,6 +101,11 @@ describe('OpenClaw 2026.6.1 credential contract probe', () => {
       expect.objectContaining({ scenario: 'profile-only', status: 'ok', statusCredential: 'auth-profile' }),
       expect.objectContaining({ scenario: 'conflict', status: 'ok', statusCredential: 'auth-profile', agentCredential: 'auth-profile' }),
     ]);
+    expect(result.failureProbe).toEqual({
+      status: expect.not.stringMatching(/^ok$/),
+      requestCount: 1,
+      credential: 'auth-profile',
+    });
   }, 90_000);
 
   it('fails closed when either probe is run against a different OpenClaw version', () => {

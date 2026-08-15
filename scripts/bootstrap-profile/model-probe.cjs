@@ -147,6 +147,8 @@ function isolatedEnv({ home, stateDir, agentDir, configPath }) {
     OPENCLAW_CONFIG_PATH: configPath,
     OPENCLAW_AGENT_DIR: agentDir,
     OPENCLAW_AUTH_STORE_READONLY: '1',
+    OPENCLAW_NO_RESPAWN: '1',
+    NODE_DISABLE_COMPILE_CACHE: '1',
   };
 }
 
@@ -235,6 +237,15 @@ async function main() {
       || typeof credential.key !== 'string' || credential.key.length < 16) fail('INVALID_AUTH_STORE');
   if (configBytes.includes(Buffer.from(credential.key, 'utf8'))) fail('SECRET_COPY_DETECTED');
 
+  // This subprocess proves only the selected credential/model path. Loading
+  // the caller's plugins or MCP servers would expand that boundary and can
+  // mutate model/auth selection through runtime hooks. Keep the ordinary
+  // config fields intact while removing both executable extension surfaces.
+  config.plugins = { enabled: false };
+  delete config.mcp;
+  const probeConfigBytes = Buffer.from(`${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  if (probeConfigBytes.includes(Buffer.from(credential.key, 'utf8'))) fail('SECRET_COPY_DETECTED');
+
   const scratchParent = values['scratch-root']
     ? assertAbsoluteDirectory(path.resolve(values['scratch-root']), 'INVALID_SCRATCH_ROOT')
     : assertAbsoluteDirectory(os.tmpdir(), 'INVALID_SCRATCH_ROOT');
@@ -246,7 +257,7 @@ async function main() {
   const configPath = path.join(scratch, 'config', 'openclaw.json');
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   fs.mkdirSync(agentDir, { recursive: true, mode: 0o700 });
-  writePrivateFile(configPath, configBytes);
+  writePrivateFile(configPath, probeConfigBytes);
   writePrivateFile(path.join(agentDir, 'auth-profiles.json'), Buffer.from(`${JSON.stringify({
     version: 1,
     profiles: { [profileId]: credential },
@@ -255,6 +266,7 @@ async function main() {
   const result = await runChild(entry, [
     'models', 'status', '--json', '--probe',
     '--probe-provider', provider,
+    '--probe-profile', profileId,
     '--probe-timeout', String(Math.min(timeoutMs, 30_000)),
     '--probe-max-tokens', '4',
   ], isolatedEnv({ home, stateDir, agentDir, configPath }), timeoutMs, candidateRoot);

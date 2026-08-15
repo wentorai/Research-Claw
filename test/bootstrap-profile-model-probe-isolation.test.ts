@@ -40,6 +40,8 @@ function harness(failure = false) {
     agents: { defaults: { model: { primary: `${PROVIDER}/fixture` } } },
     models: { providers: { [PROVIDER]: { apiKey: PROFILE } } },
     auth: { order: { [PROVIDER]: [PROFILE] } },
+    plugins: { enabled: true, load: { paths: ['/must-not-enter-isolated-probe'] } },
+    mcp: { servers: { forbidden: { command: '/must-not-run' } } },
   });
   writeJson(authPath, {
     version: 1,

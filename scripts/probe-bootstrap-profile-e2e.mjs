@@ -61,6 +61,7 @@ let gateway;
 let gatewayStderr = '';
 let cleanupPromise;
 let failModelProbe = false;
+let providerPhase = 'startup';
 const children = new Set();
 const providerRecords = [];
 const taskState = new Map();
@@ -91,7 +92,16 @@ function credentialLabel(authorization) {
     [`Bearer ${rotatedKey}`, 'rotated'],
     [`Bearer ${switchedKey}`, 'switched'],
   ]);
-  return known.get(authorization) ?? 'unexpected';
+  if (known.has(authorization)) return known.get(authorization);
+  if (authorization === null) return 'unexpected-missing';
+  if (authorization === 'Bearer ordinary:manual') return 'unexpected-ordinary-profile-id';
+  if (authorization === 'Bearer custom-rc-profile-thermoelectric-user-a:managed') {
+    return 'unexpected-managed-profile-a-id';
+  }
+  if (authorization === 'Bearer custom-rc-profile-thermoelectric-user-b:managed') {
+    return 'unexpected-managed-profile-b-id';
+  }
+  return 'unexpected-other';
 }
 
 function assertAgentCredentialSince(startIndex, expected, operation) {
@@ -110,7 +120,7 @@ function assertProbeCredentialSince(startIndex, expected, operation) {
     `${operation} did not reach the provider with the expected credential label`,
   );
   invariant(
-    records.every((record) => record.credential !== 'unexpected'),
+    records.every((record) => !record.credential.startsWith('unexpected-')),
     `${operation} sent an unknown provider credential`,
   );
 }
@@ -191,6 +201,10 @@ async function startProvider() {
       credential: credentialLabel(authorization),
       model: body.model,
       isAgentRequest,
+      phase: providerPhase,
+      retryCount: /^[0-9]+$/.test(String(request.headers['x-stainless-retry-count'] ?? ''))
+        ? Number(request.headers['x-stainless-retry-count']) : null,
+      streamed: body.stream === true,
     });
 
     if (failModelProbe) {
@@ -558,6 +572,7 @@ async function ensureAndValidate(paths) {
 }
 
 async function runAgent(paths, sessionId, prompt, expectedCredential, timeoutSeconds = 20) {
+  providerPhase = `agent-${expectedCredential}`;
   const recordStart = providerRecords.length;
   const result = await runCli(paths, [
     'agent', '--local', '--json', '--session-id', sessionId,
@@ -628,6 +643,12 @@ function pathSnapshot(target, includeMtime = true) {
   return { type: 'other', ...base };
 }
 
+function recordDiffKeys(before, after) {
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .sort()
+    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+}
+
 function liveManagedSnapshot(paths, includeMtime = true) {
   const configRoot = path.dirname(paths.configPath);
   return Object.fromEntries([
@@ -637,6 +658,12 @@ function liveManagedSnapshot(paths, includeMtime = true) {
     path.join(configRoot, '.rc-bootstrap', 'receipt.json'),
     path.join(configRoot, '.rc-bootstrap', 'peripheral-suspensions.json'),
     path.join(paths.workspace, 'skills'),
+    path.join(paths.stateDir, 'state', 'openclaw.sqlite'),
+    path.join(paths.stateDir, 'state', 'openclaw.sqlite-wal'),
+    path.join(paths.stateDir, 'state', 'openclaw.sqlite-shm'),
+    paths.dbPath,
+    `${paths.dbPath}-wal`,
+    `${paths.dbPath}-shm`,
   ].map((target) => [path.relative(tempRoot, target), pathSnapshot(target, includeMtime)]));
 }
 
@@ -687,6 +714,7 @@ async function installAndCommit(paths, capsuleBytes) {
 }
 
 async function runIsolatedModelProbe(paths, provider, profileId, expectedCredential, timeoutMs = 45_000) {
+  providerPhase = `probe-${expectedCredential}`;
   const recordStart = providerRecords.length;
   const { stdout } = await execFileAsync(process.execPath, [
     modelProbeHelper,
@@ -740,6 +768,7 @@ async function main() {
   const paths = await makeHarness(providerPort);
 
   // Complete no-Profile/no-Token control on the same isolated installation.
+  providerPhase = 'gateway-ordinary';
   const ordinaryGateway = await runGatewayProbe(paths);
   invariant(ordinaryGateway.readiness.ok, 'ordinary readiness failed');
   invariant(!ordinaryGateway.readiness.probes.some((probe) => probe.expectedUnavailable), 'ordinary peripherals unexpectedly absent');
@@ -759,6 +788,7 @@ async function main() {
   await ensureAndValidate(paths);
   transaction.initial.push('real-config-valid');
 
+  providerPhase = 'gateway-initial';
   const profileGateway = await runGatewayProbe(paths);
   invariant(profileGateway.readiness.ok, `Profile readiness failed: ${JSON.stringify(profileGateway.readiness)}`);
   transaction.initial.push('runtime-verified');
@@ -833,11 +863,11 @@ async function main() {
 
   // An external provider failure after apply rolls the whole write-set back.
   const beforeFailure = liveManagedSnapshot(paths, false);
-  const beforeFailureRuntime = pathSnapshot(paths.stateDir, false);
   const failedCapsule = makeCapsule(providerPort, { revision: 2, key: failedKey });
   const failedStage = await applier.stageProfile({ ...paths, capsuleBytes: failedCapsule, rcVersion: '0.8.3' });
   await applier.applyProfile({ ...paths, txId: failedStage.txId });
   let probeFailed = false;
+  const failedProbeRecordStart = providerRecords.length;
   failModelProbe = true;
   try {
     await runIsolatedModelProbe(
@@ -853,11 +883,26 @@ async function main() {
     failModelProbe = false;
   }
   invariant(probeFailed, 'injected provider failure unexpectedly passed');
+  const failedProbeRecords = providerRecords.slice(failedProbeRecordStart).map((record) => ({
+    credential: record.credential,
+    retryCount: record.retryCount,
+    isAgentRequest: record.isAgentRequest,
+    streamed: record.streamed,
+  }));
+  invariant(
+    failedProbeRecords.length === 1 && failedProbeRecords[0].credential === 'failed',
+    `failed model probe request boundary mismatch: ${JSON.stringify(failedProbeRecords)}`,
+  );
   await applier.rollbackProfile({ ...paths, txId: failedStage.txId });
-  const failedProbeRolledBack = JSON.stringify(beforeFailure) === JSON.stringify(liveManagedSnapshot(paths, false))
-    && JSON.stringify(beforeFailureRuntime) === JSON.stringify(pathSnapshot(paths.stateDir, false))
-    && countSecret(tempRoot, failedKey) === 0;
-  invariant(failedProbeRolledBack, 'failed runtime probe did not restore the previous Profile');
+  const afterFailure = liveManagedSnapshot(paths, false);
+  const managedStateRestored = JSON.stringify(beforeFailure) === JSON.stringify(afterFailure);
+  const failedKeyLocations = secretLocations(tempRoot, failedKey);
+  const failedKeyRemoved = failedKeyLocations.length === 0;
+  const failedProbeRolledBack = managedStateRestored && failedKeyRemoved;
+  invariant(
+    failedProbeRolledBack,
+    `failed runtime probe did not restore the previous Profile: managed=${managedStateRestored}; failedKeyRemoved=${failedKeyRemoved}; failedKeyLocations=${JSON.stringify(failedKeyLocations)}; managedDiff=${JSON.stringify(recordDiffKeys(beforeFailure, afterFailure))}`,
+  );
 
   // Revision/key rotation must remove the old managed key before reuse.
   const rotatedCapsule = makeCapsule(providerPort, { revision: 2, key: rotatedKey });
@@ -883,7 +928,17 @@ async function main() {
     && countSecret(tempRoot, rotatedKey) === 0
     && countSecret(tempRoot, switchedKey) === 1;
   invariant(profileSwitchClean, 'Profile switch left receipt-owned state behind');
-  invariant(providerRecords.length > 0 && providerRecords.every((record) => record.credential !== 'unexpected'), 'provider Authorization did not match a known auth profile');
+  const unexpectedCredentials = providerRecords
+    .filter((record) => record.credential.startsWith('unexpected-'))
+    .reduce((counts, record) => {
+      const key = `${record.credential}:${record.phase}:${record.isAgentRequest ? 'agent' : 'aux'}`;
+      counts[key] = (counts[key] ?? 0) + 1;
+      return counts;
+    }, {});
+  invariant(
+    providerRecords.length > 0 && Object.keys(unexpectedCredentials).length === 0,
+    `provider Authorization did not match a known auth profile: ${JSON.stringify(unexpectedCredentials)}`,
+  );
   invariant(providerRecords.filter((record) => record.isAgentRequest)
     .every((record) => record.model === 'thermoelectric-fixture-model'), 'unexpected model was requested');
 
@@ -901,7 +956,7 @@ async function main() {
       providerId: 'custom-rc-profile-thermoelectric-user-a',
       modelId: 'thermoelectric-fixture-model',
       initialConversation: initialConversation.includes('T09_CONVERSATION_OK') ? 'T09_CONVERSATION_OK' : 'failed',
-      expectedAuthorizationOnly: providerRecords.every((record) => record.credential !== 'unexpected'),
+      expectedAuthorizationOnly: providerRecords.every((record) => !record.credential.startsWith('unexpected-')),
     },
     skills: { inventory, triggered },
     supervisor: { dangerousToolBlocked: dangerStep === 2, blockAuditObserved },
