@@ -40,6 +40,11 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # The real config is intentionally gitignored because it can contain
+      # credentials. Runtime preflight still needs a structurally valid input.
+      - name: Prepare runtime verification config
+        run: install -m 0600 config/openclaw.example.json config/openclaw.json
+
       - name: Verify runtime contract
         run: pnpm verify:runtime
 

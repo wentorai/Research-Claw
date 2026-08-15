@@ -85,6 +85,10 @@ describe('GitHub Actions release gate contract', () => {
           run: 'pnpm build',
         },
         {
+          name: 'Prepare runtime verification config',
+          run: 'install -m 0600 config/openclaw.example.json config/openclaw.json',
+        },
+        {
           name: 'Verify runtime contract',
           run: 'pnpm verify:runtime',
         },
