@@ -12,7 +12,7 @@ const {
 } = require('../scripts/bootstrap-profile/secret-copy-scan.cjs');
 
 const CHUNK_BYTES = 64 * 1024;
-const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 const SECRET = 'RC_SCAN_KEY_1234'; // Exactly 16 UTF-8 bytes.
 const PROVIDER = 'custom-rc-profile-test';
 const AUTH_PROFILE_ID = `${PROVIDER}:managed`;
@@ -251,6 +251,23 @@ describe('bounded raw secret-copy scan', () => {
     },
   );
 
+  it.skipIf(process.platform === 'win32')(
+    'accepts but never follows user-owned top-level skill directory symlinks',
+    () => {
+      const root = makeStateRoot();
+      const external = makeStateRoot();
+      fs.writeFileSync(path.join(external, 'SKILL.md'), `external bytes include ${SECRET}\n`, {
+        mode: 0o600,
+      });
+      const skills = path.join(root, 'skills');
+      fs.mkdirSync(skills, { mode: 0o700 });
+      fs.symlinkSync(external, path.join(skills, 'personal-skill'));
+
+      expect(assertNoUnexpectedStateSecretCopies({ stateDir: root, secret: SECRET }))
+        .toEqual({ filesScanned: 0, bytesScanned: Buffer.byteLength(external) });
+    },
+  );
+
   it.skipIf(process.platform === 'win32')('still fails closed on symlinks outside plugin-skills', () => {
     const root = makeStateRoot();
     const external = makeStateRoot();
@@ -266,6 +283,26 @@ describe('bounded raw secret-copy scan', () => {
     fs.symlinkSync(`/fixture/${SECRET}`, path.join(generated, 'leaking-skill'));
     expect(() => assertNoUnexpectedStateSecretCopies({ stateDir: root, secret: SECRET }))
       .toThrow(expect.objectContaining({ code: 'SECRET_COPY_DETECTED' }));
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a user skill symlink target string containing the key', () => {
+    const root = makeStateRoot();
+    const skills = path.join(root, 'skills');
+    fs.mkdirSync(skills, { mode: 0o700 });
+    fs.symlinkSync(`/fixture/${SECRET}`, path.join(skills, 'leaking-skill'));
+    expect(() => assertNoUnexpectedStateSecretCopies({ stateDir: root, secret: SECRET }))
+      .toThrow(expect.objectContaining({ code: 'SECRET_COPY_DETECTED' }));
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a user skill symlink to a regular file', () => {
+    const root = makeStateRoot();
+    const external = path.join(makeStateRoot(), 'SKILL.md');
+    fs.writeFileSync(external, 'ordinary skill bytes\n', { mode: 0o600 });
+    const skills = path.join(root, 'skills');
+    fs.mkdirSync(skills, { mode: 0o700 });
+    fs.symlinkSync(external, path.join(skills, 'not-a-directory'));
+    expect(() => assertNoUnexpectedStateSecretCopies({ stateDir: root, secret: SECRET }))
+      .toThrow(expect.objectContaining({ code: 'SECRET_SCAN_FAILED' }));
   });
 
   it('detects the complete key across a 64 KiB chunk boundary', () => {
@@ -301,7 +338,7 @@ describe('bounded raw secret-copy scan', () => {
       .toThrow(expect.objectContaining({ code: 'SECRET_COPY_DETECTED' }));
   });
 
-  it('fails before reading a file that exceeds the 512 MiB aggregate byte budget', () => {
+  it('fails before reading a file that exceeds the 2 GiB aggregate byte budget', () => {
     const root = makeStateRoot();
     const sparse = path.join(root, 'oversize.bin');
     const descriptor = fs.openSync(sparse, 'w', 0o600);

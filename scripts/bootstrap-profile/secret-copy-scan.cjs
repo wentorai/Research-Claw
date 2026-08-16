@@ -4,7 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const MAX_FILES = 20_000;
-const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+// Long-lived OpenClaw state includes browser models and agent transcripts.
+// Keep the scan bounded, but leave enough headroom for a real workstation
+// state tree instead of treating ordinary state growth as a secret leak.
+const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 const CHUNK_BYTES = 64 * 1024;
 const JSON_STRUCTURED_LIMIT = 2 * 1024 * 1024;
 const MIN_SECRET_BYTES = 16;
@@ -261,13 +264,16 @@ function assertNoUnexpectedStateSecretCopies({ stateDir, secret, allowedFiles = 
   }
   const budget = { files: 0, bytes: 0 };
   const secretBytes = validatedSecretBytes(secret);
-  const generatedPluginSkillsRoot = path.join(root, 'plugin-skills');
-  const inspectGeneratedPluginSkillLink = (target, metadata) => {
-    // OpenClaw 2026.6.1 intentionally publishes one generated symlink per
-    // plugin Skill directly under $OPENCLAW_STATE_DIR/plugin-skills. These are
-    // directory references, not copies of their target bytes. Never follow
-    // them during a secret-copy scan, but keep every other symlink fail-closed.
-    if (path.dirname(target) !== generatedPluginSkillsRoot) return false;
+  const skillLinkRoots = new Set([
+    path.join(root, 'plugin-skills'),
+    path.join(root, 'skills'),
+  ]);
+  const inspectSkillDirectoryLink = (target, metadata) => {
+    // OpenClaw publishes plugin Skills under plugin-skills, while users may
+    // install personal Skills as direct links under skills. Both are directory
+    // references rather than copies of their target bytes. Inspect only the
+    // link text and target type; never traverse an external Skill tree.
+    if (!skillLinkRoots.has(path.dirname(target))) return false;
     let linkTarget;
     try {
       linkTarget = fs.readlinkSync(target);
@@ -278,6 +284,13 @@ function assertNoUnexpectedStateSecretCopies({ stateDir, secret, allowedFiles = 
     budget.bytes += linkBytes.length;
     if (budget.bytes > MAX_TOTAL_BYTES) fail('SECRET_SCAN_LIMIT_EXCEEDED');
     if (linkBytes.includes(secretBytes)) fail('SECRET_COPY_DETECTED');
+    let targetMetadata;
+    try {
+      targetMetadata = fs.statSync(target);
+    } catch {
+      fail('SECRET_SCAN_FAILED');
+    }
+    if (!targetMetadata.isDirectory()) fail('SECRET_SCAN_FAILED');
     const after = lstatIfPresent(target);
     if (!after || !after.isSymbolicLink()
         || after.dev !== metadata.dev || after.ino !== metadata.ino
@@ -290,7 +303,7 @@ function assertNoUnexpectedStateSecretCopies({ stateDir, secret, allowedFiles = 
     const metadata = lstatIfPresent(target);
     if (!metadata) return;
     if (metadata.isSymbolicLink()) {
-      if (inspectGeneratedPluginSkillLink(target, metadata)) return;
+      if (inspectSkillDirectoryLink(target, metadata)) return;
       fail('SECRET_SCAN_FAILED');
     }
     if (metadata.isDirectory()) {
