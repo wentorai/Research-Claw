@@ -926,8 +926,6 @@ async function stageProfile(options) {
         || typeof receipt.profile.digest !== 'string') fail('INVALID_RECEIPT');
     if (receipt.profile.id === validated.capsule.profile.id) {
       if (validated.capsule.profile.revision < receipt.profile.revision) fail('REVISION_ROLLBACK');
-      if (validated.capsule.profile.revision === receipt.profile.revision
-          && validated.digest !== receipt.profile.digest) fail('REVISION_DIGEST_CONFLICT');
     }
   }
   const precondition = ownershipPrecondition(paths, validated.capsule, receipt);
@@ -5722,6 +5720,20 @@ function buildReceipt(capsule, validated, skillState, managedDeny, ledger) {
   };
 }
 
+function receiptEffectValue(receipt) {
+  if (!receipt) return null;
+  const value = clone(receipt);
+  // A raw Capsule digest authenticates the transaction bytes, but array order
+  // does not change the installed Skill tree.  Normalize only the receipt's
+  // unordered Skill/file sets when comparing an already-installed revision.
+  value.profile.digest = '<raw-capsule-digest>';
+  value.skills = value.skills.map((skill) => ({
+    ...skill,
+    files: [...skill.files].sort((left, right) => left.path.localeCompare(right.path)),
+  })).sort((left, right) => left.slug.localeCompare(right.slug));
+  return value;
+}
+
 function afterStep(paths, txId, step, fault) {
   updateManifest(paths, txId, { state: 'applying', lastCompletedStep: step });
   updateMarkerStates(paths, txId, 'applying');
@@ -5763,17 +5775,25 @@ async function buildApplyPlan(paths, txId, validated, receipt) {
   const nextReceipt = buildReceipt(
     capsule, validated, skills, configPlan.managedDeny, peripheralPlan.ledger,
   );
-  const converged = receipt?.profile?.id === capsule.profile.id
-    && receipt?.profile?.revision === capsule.profile.revision
-    && receipt?.profile?.digest === validated.digest
-    && equal(currentConfig, configPlan.config)
+  const managedStateConverged = equal(currentConfig, configPlan.config)
     && equal(currentAuth, auth)
     && equal(currentGlobal, globalConfig)
     && equal(initialLedger, peripheralPlan.ledger)
     && equal(rows, peripheralPlan.rows)
     && equal(inspected.output.jobs, peripheralPlan.jobs)
-    && equal(receipt, nextReceipt)
     && skillsConverged(paths, capsule, skills);
+  const sameRevisionDifferentDigest = receipt?.profile?.id === capsule.profile.id
+    && receipt?.profile?.revision === capsule.profile.revision
+    && receipt?.profile?.digest !== validated.digest;
+  if (sameRevisionDifferentDigest && (!managedStateConverged
+      || !equal(receiptEffectValue(receipt), receiptEffectValue(nextReceipt)))) {
+    fail('REVISION_DIGEST_CONFLICT');
+  }
+  const converged = receipt?.profile?.id === capsule.profile.id
+    && receipt?.profile?.revision === capsule.profile.revision
+    && receipt?.profile?.digest === validated.digest
+    && managedStateConverged
+    && equal(receipt, nextReceipt);
   return {
     currentConfig,
     currentAuth,

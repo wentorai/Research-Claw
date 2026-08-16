@@ -176,7 +176,7 @@ describe('transaction stage and ownership', () => {
       .not.toHaveProperty('modelApiKey');
   });
 
-  it('rejects lower revision and same revision with a different raw digest before mutation', async () => {
+  it('rejects lower revision and a changed same revision before live mutation', async () => {
     const paths = makePaths();
     const installed = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
     installed.profile.revision = 2;
@@ -191,8 +191,46 @@ describe('transaction stage and ownership', () => {
 
     const conflicting = structuredClone(installed);
     conflicting.model.model.name += ' conflict';
-    await expect(stage(paths, Buffer.from(`${JSON.stringify(conflicting)}\n`)))
+    const conflictStage = await stage(paths, Buffer.from(`${JSON.stringify(conflicting)}\n`));
+    await expect(mutate(paths, () => applier.applyProfile({ ...paths, txId: conflictStage.txId })))
       .rejects.toMatchObject({ code: 'REVISION_DIGEST_CONFLICT' });
+    await applier.rollbackProfile({ ...paths, txId: conflictStage.txId });
+  });
+
+  it('rebinds an effect-identical same revision whose Skill file arrays are reordered', async () => {
+    const paths = makePaths();
+    const originalRaw = fs.readFileSync(FIXTURE);
+    const first = await stage(paths, originalRaw);
+    await mutate(paths, () => applier.applyProfile({ ...paths, txId: first.txId }));
+    await applier.verifyProfile({ ...paths, txId: first.txId });
+    await applier.commitProfile({ ...paths, txId: first.txId });
+
+    const before = {
+      config: treeDigest(paths.configPath),
+      skills: treeDigest(path.join(paths.workspace, 'skills')),
+      auth: treeDigest(path.join(paths.stateDir, 'agents/main/agent/auth-profiles.json')),
+      globalConfig: treeDigest(paths.globalConfigPath),
+      data: treeDigest(paths.dbPath),
+    };
+    const reordered = JSON.parse(originalRaw.toString('utf8'));
+    for (const skill of reordered.skills.items) skill.files.reverse();
+    const reorderedRaw = Buffer.from(`${JSON.stringify(reordered)}\n`);
+    expect(crypto.createHash('sha256').update(reorderedRaw).digest('hex'))
+      .not.toBe(crypto.createHash('sha256').update(originalRaw).digest('hex'));
+
+    const rebound = await stage(paths, reorderedRaw);
+    const applied = await mutate(paths, () => applier.applyProfile({ ...paths, txId: rebound.txId }));
+    expect(applied.noop).toBe(false);
+    await applier.verifyProfile({ ...paths, txId: rebound.txId });
+    await applier.commitProfile({ ...paths, txId: rebound.txId });
+
+    expect(treeDigest(paths.configPath)).toBe(before.config);
+    expect(treeDigest(path.join(paths.workspace, 'skills'))).toBe(before.skills);
+    expect(treeDigest(path.join(paths.stateDir, 'agents/main/agent/auth-profiles.json'))).toBe(before.auth);
+    expect(treeDigest(paths.globalConfigPath)).toBe(before.globalConfig);
+    expect(treeDigest(paths.dbPath)).toBe(before.data);
+    expect((await applier.profileStatus(paths)).profile.digest)
+      .toBe(crypto.createHash('sha256').update(reorderedRaw).digest('hex'));
   });
 
   it('fails closed on an unowned target Skill or same-name workspace Skill', async () => {
