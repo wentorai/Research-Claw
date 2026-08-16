@@ -6,8 +6,7 @@
 # Usage:
 #   curl -fsSL https://wentor.ai/install.sh | bash
 #
-# Platforms: macOS, Linux, and WSL2 (run inside the Linux distribution).
-# Native Windows users should use scripts/install-docker.ps1 with Docker Desktop.
+# Platforms: macOS, Linux/WSL2, and native Windows through install-windows.ps1.
 #
 # Idempotent: first run = install, subsequent runs = update + start.
 # All configuration is handled in the browser via Setup Wizard.
@@ -359,6 +358,17 @@ rc_profile_parse_args() {
         RC_PROFILE_AUTH_TOKEN="$2"
         shift 2
         ;;
+      --auth-token-file)
+        [ -z "$RC_PROFILE_AUTH_TOKEN" ] || die "A Bootstrap Profile token may be provided only once."
+        [ "$#" -ge 2 ] && [ -n "$2" ] || die "--auth-token-file requires a path."
+        [ -f "$2" ] && [ ! -L "$2" ] || die "--auth-token-file must name a regular private file."
+        RC_PROFILE_AUTH_TOKEN="$(cat -- "$2")"
+        rm -f -- "$2" || die "Could not remove the consumed Bootstrap Profile token file."
+        [ ! -e "$2" ] || die "The consumed Bootstrap Profile token file still exists."
+        [[ "$RC_PROFILE_AUTH_TOKEN" =~ ^rca_[A-Za-z0-9_-]{43,}$ ]] \
+          || die "The Bootstrap Profile token file has invalid contents."
+        shift 2
+        ;;
       *) die "Unknown installer argument: $1" ;;
     esac
   done
@@ -584,7 +594,7 @@ request = "POST"
 header = "Authorization: Bearer $RC_PROFILE_AUTH_TOKEN"
 header = "Accept: application/json"
 header = "Accept-Encoding: identity"
-dump-header = "$RC_PROFILE_HEADERS"
+dump-header = "headers"
 fail
 silent
 show-error
@@ -592,7 +602,7 @@ max-redirs = 0
 max-filesize = 2097152
 proto = "=https"
 EOF
-  if ! curl -q --config "$RC_PROFILE_CURL_CONFIG" \
+  if ! (cd -- "$RC_PROFILE_TEMP_ROOT" && curl -q --config "$RC_PROFILE_CURL_CONFIG") \
       | head -c 2097153 > "$RC_PROFILE_CAPSULE"; then
     unset RC_PROFILE_AUTH_TOKEN
     rm -f "$RC_PROFILE_CURL_CONFIG"
@@ -621,6 +631,13 @@ rc_profile_assert_gateway_stopped() {
     local _listeners
     _listeners="$(lsof -ti :"$PORT" 2>/dev/null || true)"
     [ -z "$_listeners" ] || die "Port $PORT is active. Stop the running Gateway yourself, then re-run."
+  elif [ "$RC_OS" = windows ]; then
+    "$GW_NODE" -e '
+      const net=require("net");
+      const server=net.createServer();
+      server.once("error",()=>process.exit(1));
+      server.listen(Number(process.argv[1]),"127.0.0.1",()=>server.close(()=>process.exit(0)));
+    ' "$PORT" || die "Port $PORT is active. Stop the running Gateway yourself, then re-run."
   fi
 }
 
@@ -869,7 +886,8 @@ OS="$(uname -s)"
 case "$OS" in
   Darwin) RC_OS=mac ;;
   Linux)  RC_OS=linux ;; # Includes WSL2.
-  *)      die "Unsupported OS: $OS. Use macOS or Linux." ;;
+  MINGW*|MSYS*|CYGWIN*) RC_OS=windows ;;
+  *)      die "Unsupported OS: $OS. Use macOS, Linux, or the native Windows installer." ;;
 esac
 info "Platform: $OS / $(uname -m)"
 rclog "platform: $(uname -a)"
@@ -919,6 +937,8 @@ step 2 "Git"
 if ! command -v git &>/dev/null; then
   if [ "$RC_OS" = linux ]; then
     pkg_install git
+  elif [ "$RC_OS" = windows ]; then
+    die "Git for Windows is unavailable. Re-run https://wentor.ai/install.ps1 from PowerShell."
   else
     die "git not found. Run: xcode-select --install"
   fi
@@ -965,7 +985,7 @@ if [ "$RC_OS" = mac ]; then
     warn "python3 not found. Native module compilation may fail."
     warn "Install via: brew install python3  OR  xcode-select --install"
   fi
-else
+elif [ "$RC_OS" = linux ]; then
   # Linux: build tools + python3 + unzip (required by fnm installer) + curl
   NEED_PKGS=""
   if ! (command -v make &>/dev/null && command -v g++ &>/dev/null); then
@@ -978,6 +998,8 @@ else
     # shellcheck disable=SC2086
     pkg_install $NEED_PKGS
   fi
+else
+  info "Native Windows toolchain ready (no WSL or Docker required)"
 fi
 
 # Camera capture and RTSP preview both execute ffmpeg at runtime. Install it
@@ -1001,12 +1023,16 @@ ensure_ffmpeg() {
       warn "Camera and RTSP features need: https://brew.sh, then brew install ffmpeg"
       return 0
     fi
-  else
+  elif [ "$RC_OS" = linux ]; then
     if ! pkg_install ffmpeg; then
       warn "ffmpeg installation failed. Camera and RTSP features will remain unavailable."
       warn "Install the ffmpeg package with your Linux distribution, then re-run this installer."
       return 0
     fi
+  else
+    warn "ffmpeg is not installed; camera and RTSP features remain unavailable."
+    warn "Optional fix: winget install --id Gyan.FFmpeg -e --source winget"
+    return 0
   fi
 
   if command -v ffmpeg &>/dev/null && command -v ffprobe &>/dev/null; then
@@ -1232,6 +1258,10 @@ ensure_node() {
     fi
   fi
 
+  if [ "${RC_OS:-}" = windows ]; then
+    die "Node.js 22.x is unavailable. Re-run https://wentor.ai/install.ps1 from PowerShell."
+  fi
+
   # Node missing or too old — try version managers in order
   # Use || true so failures fall through to the verification block below
   # (which shows actionable error messages instead of a cryptic ERR trap line number)
@@ -1300,7 +1330,19 @@ pnpm_cmd_works() {
 install_private_pnpm() {
   mkdir -p "$RC_PNPM_PREFIX"
   info "Installing standalone pnpm $PNPM_VERSION..."
-  npm install --prefix "$RC_PNPM_PREFIX" -g "pnpm@$PNPM_VERSION"
+  if [ "${RC_OS:-}" = windows ]; then
+    mkdir -p "$RC_PNPM_PREFIX/bin"
+    cat > "$RC_PNPM_PREFIX/bin/pnpm" <<EOF
+#!/usr/bin/env bash
+set -e
+export RC_PNPM_PREFIX="\$(cygpath -w '$RC_PNPM_PREFIX')"
+exec node "$INSTALL_DIR/scripts/run-pnpm.cjs" "\$@"
+EOF
+    chmod 755 "$RC_PNPM_PREFIX/bin/pnpm"
+    "$RC_PNPM_PREFIX/bin/pnpm" --version >/dev/null
+  else
+    npm install --prefix "$RC_PNPM_PREFIX" -g "pnpm@$PNPM_VERSION"
+  fi
   activate_private_pnpm
 }
 
@@ -2141,15 +2183,26 @@ fi
 export OPENCLAW_CONFIG_PATH="$INSTALL_DIR/config/openclaw.json"
 
 # --- Chrome/Chromium check (browser tool requires it) ---
-if [ "$(uname)" = "Darwin" ]; then
+if [ "$RC_OS" = mac ]; then
   if ! [ -d "/Applications/Google Chrome.app" ] && ! [ -d "/Applications/Chromium.app" ]; then
     printf "\n  ${Y}NOTE:${N} Chrome/Chromium not found. The ${B}browser${N} tool will not work.\n"
     printf "        Install: ${C}https://www.google.com/chrome/${N}\n"
   fi
-else
+elif [ "$RC_OS" = linux ]; then
   if ! command -v google-chrome &>/dev/null && ! command -v chromium &>/dev/null && ! command -v chromium-browser &>/dev/null; then
     printf "\n  ${Y}NOTE:${N} Chrome/Chromium not found. The ${B}browser${N} tool will not work.\n"
     printf "        Install: ${C}https://www.google.com/chrome/${N}\n"
+  fi
+else
+  _chrome_found=false
+  for _chrome in \
+    "/c/Program Files/Google/Chrome/Application/chrome.exe" \
+    "/c/Program Files (x86)/Google/Chrome/Application/chrome.exe" \
+    "$HOME/AppData/Local/Google/Chrome/Application/chrome.exe"; do
+    [ -f "$_chrome" ] && _chrome_found=true && break
+  done
+  if ! $_chrome_found; then
+    printf "\n  ${Y}NOTE:${N} Chrome not found. Edge can open the Dashboard, but Chrome is recommended.\n"
   fi
 fi
 
@@ -2191,6 +2244,8 @@ printf "  ${D}Press Ctrl+C to stop${N}\n\n"
       --port "$PORT" &>/dev/null; then
     if [ "$RC_OS" = mac ]; then
       open "$DASHBOARD_URL" 2>/dev/null || true
+    elif [ "$RC_OS" = windows ]; then
+      cmd.exe /c start "" "$DASHBOARD_URL" >/dev/null 2>&1 || true
     else
       xdg-open "$DASHBOARD_URL" 2>/dev/null || true
     fi

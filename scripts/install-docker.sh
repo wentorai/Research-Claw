@@ -178,7 +178,7 @@ request = "POST"
 header = "Authorization: Bearer $RC_PROFILE_AUTH_TOKEN"
 header = "Accept: application/json"
 header = "Accept-Encoding: identity"
-dump-header = "$RC_PROFILE_HEADERS"
+dump-header = "headers"
 fail
 silent
 show-error
@@ -186,7 +186,7 @@ max-redirs = 0
 max-filesize = 2097152
 proto = "=https"
 EOF
-  if ! curl -q --config "$RC_PROFILE_CURL_CONFIG" \
+  if ! (cd -- "$RC_PROFILE_TEMP_ROOT" && curl -q --config "$RC_PROFILE_CURL_CONFIG") \
       | head -c 2097153 > "$RC_PROFILE_CAPSULE"; then
     unset RC_PROFILE_AUTH_TOKEN
     rm -f "$RC_PROFILE_CURL_CONFIG"

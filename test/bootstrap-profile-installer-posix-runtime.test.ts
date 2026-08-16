@@ -59,6 +59,8 @@ fi
 printf '%s %s\\n' "$root_mode" "$mode" > "$RC_TEST_OBSERVATIONS/modes"
 if [ "\${RC_TEST_CURL_FAIL:-0}" = 1 ]; then exit 22; fi
 headers=$(sed -n 's/^dump-header = "\\(.*\\)"$/\\1/p' "$config")
+test "$headers" = headers
+test "$(pwd -P)" = "$(dirname "$config")"
 case "\${RC_TEST_REDEEM_MODE:-valid}" in
   oversized)
     length=3145728

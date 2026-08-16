@@ -62,7 +62,8 @@ describe('Bootstrap Profile installer ABI and secret boundary', () => {
 
   it('all installers fail closed on an oversized or metadata-drifted Capsule response', () => {
     for (const source of [native, dockerPosix]) {
-      expect(source).toContain('dump-header = "$RC_PROFILE_HEADERS"');
+      expect(source).toContain('dump-header = "headers"');
+      expect(source).toContain('(cd -- "$RC_PROFILE_TEMP_ROOT" && curl -q --config "$RC_PROFILE_CURL_CONFIG")');
       expect(source).toContain('header = "Accept: application/json"');
       expect(source).toContain('header = "Accept-Encoding: identity"');
       expect(source).toContain('max-filesize = 2097152');

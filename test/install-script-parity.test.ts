@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +11,7 @@ const scripts = {
   native: path.join(ROOT, 'scripts', 'install.sh'),
   dockerPosix: path.join(ROOT, 'scripts', 'install-docker.sh'),
   dockerWindows: path.join(ROOT, 'scripts', 'install-docker.ps1'),
+  nativeWindows: path.join(ROOT, 'scripts', 'install-windows.ps1'),
   dockerEntrypoint: path.join(ROOT, 'scripts', 'docker-entrypoint.sh'),
   updatePosix: path.join(ROOT, 'scripts', 'update-research-claw.sh'),
   updateWindows: path.join(ROOT, 'scripts', 'update-research-claw.ps1'),
@@ -25,6 +27,39 @@ describe('release installation surfaces', () => {
     expect(fs.existsSync(scripts.native)).toBe(true);
     expect(fs.existsSync(scripts.dockerPosix)).toBe(true);
     expect(fs.existsSync(scripts.dockerWindows)).toBe(true);
+    expect(fs.existsSync(scripts.nativeWindows)).toBe(true);
+  });
+
+  it('provides a native Windows bootstrap without WSL or Docker', () => {
+    const native = read(scripts.native);
+    const windows = read(scripts.nativeWindows);
+    const runtime = read(path.join(ROOT, 'scripts', 'node-runtime.cjs'));
+
+    expect(native).toMatch(/MINGW\*\|MSYS\*\|CYGWIN\*\).*RC_OS=windows/);
+    expect(native).toContain('--auth-token-file');
+    expect(native).toContain('cmd.exe /c start "" "$DASHBOARD_URL"');
+    expect(windows).toContain("$NodeVersion = '22.22.2'");
+    expect(windows).toContain("$NodeSha256 = '7c93e9d92bf68c07182b471aa187e35ee6cd08ef0f24ab060dfff605fcc1c57c'");
+    expect(windows).toContain("$GitVersion = '2.55.0'");
+    expect(windows).toContain("$GitRelease = '2.55.0.4'");
+    expect(windows).toContain("$GitSha256 = '016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5'");
+    expect(windows).toContain("$SevenZipSha256 = '56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72'");
+    const installSha = crypto.createHash('sha256').update(native).digest('hex');
+    expect(windows).toContain(`$InstallShSha256 = '${installSha}'`);
+    expect(windows).toContain('https://npmmirror.com/mirrors/node/');
+    expect(windows).toContain('https://registry.npmmirror.com/-/binary/git-for-windows/');
+    expect(windows).toContain('https://github.com/git-for-windows/git/releases/download/');
+    expect(windows).toContain('function Resolve-BundledAsset');
+    expect(windows).toContain("$extractArguments = @('x', '-y', \"-o$extract\", $archive)");
+    expect(windows).toContain('& $sevenZip @extractArguments | Out-Host');
+    expect(windows).toContain("& $stageLauncher '--no-needs-console' '--hide' '--no-cd' '--command=post-install.bat' | Out-Host");
+    expect(windows).toContain("$env:RC_WINDOWS_NATIVE = '1'");
+    expect(windows).toContain("$arguments += @('--auth-token-file', $tokenPosix)");
+    expect(windows).not.toMatch(/\bwsl\.exe\b|\bwinget(?:\.exe)?\b|docker\.exe/i);
+    expect(runtime).toContain("if (process.platform !== 'win32') return value;");
+    expect(runtime).toContain('drive[1].toLowerCase()');
+    expect(runtime).toContain("process.platform === 'win32' && executable === 'pnpm'");
+    expect(runtime).toContain("path.join(__dirname, 'run-pnpm.cjs')");
   });
 
   it('the native installer explicitly covers macOS, Linux and WSL2', () => {

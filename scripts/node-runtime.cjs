@@ -82,6 +82,14 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
+function shellPath(value) {
+  if (process.platform !== 'win32') return value;
+  const normalized = String(value).replaceAll('\\', '/');
+  const drive = /^([A-Za-z]):\/(.*)$/.exec(normalized);
+  if (drive) return `/${drive[1].toLowerCase()}/${drive[2]}`;
+  return normalized;
+}
+
 function failNoRuntime() {
   process.stderr.write(
     '[runtime] Research-Claw requires Node 22.16+ within the Node 22 line (ABI 127).\n'
@@ -97,8 +105,8 @@ if (!runtime) failNoRuntime();
 if (command === 'resolve') {
   if (args.includes('--shell')) {
     process.stdout.write([
-      `RC_NODE_PATH=${shellQuote(runtime.path)}`,
-      `RC_NODE_DIR=${shellQuote(path.dirname(runtime.path))}`,
+      `RC_NODE_PATH=${shellQuote(shellPath(runtime.path))}`,
+      `RC_NODE_DIR=${shellQuote(shellPath(path.dirname(runtime.path)))}`,
       `RC_NODE_VERSION=${shellQuote(runtime.version)}`,
       `RC_NODE_ABI=${shellQuote(runtime.modules)}`,
     ].join('\n') + '\n');
@@ -118,7 +126,12 @@ if (command === 'resolve') {
     RC_NODE_PATH: runtime.path,
     PATH: `${path.dirname(runtime.path)}${path.delimiter}${process.env.PATH || ''}`,
   };
-  const result = spawnSync(executable, childArgs, { env, stdio: 'inherit' });
+  const useWindowsPnpmRunner = process.platform === 'win32' && executable === 'pnpm';
+  const childExecutable = useWindowsPnpmRunner ? process.execPath : executable;
+  const finalArgs = useWindowsPnpmRunner
+    ? [path.join(__dirname, 'run-pnpm.cjs'), ...childArgs]
+    : childArgs;
+  const result = spawnSync(childExecutable, finalArgs, { env, stdio: 'inherit' });
   if (result.error) {
     process.stderr.write(`[runtime] Could not execute ${executable}: ${result.error.message}\n`);
     process.exit(127);

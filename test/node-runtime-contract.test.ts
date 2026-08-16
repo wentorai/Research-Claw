@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -59,5 +60,25 @@ describe('Research-Claw Node runtime contract', () => {
     ], { encoding: 'utf8' }).trim();
 
     expect(output).toMatch(/^22\..*:127$/);
+  });
+
+  it('routes pnpm through the JavaScript runner under native Windows process rules', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-node-runtime-win32-'));
+    const resolver = path.join(root, 'node-runtime.cjs');
+    const runner = path.join(root, 'run-pnpm.cjs');
+    try {
+      fs.copyFileSync(RESOLVER, resolver);
+      fs.copyFileSync(path.join(ROOT, 'scripts', 'runtime-contract.cjs'), path.join(root, 'runtime-contract.cjs'));
+      fs.writeFileSync(runner, 'process.stdout.write(JSON.stringify(process.argv.slice(2)));\n');
+      const probe = [
+        "Object.defineProperty(process, 'platform', { value: 'win32' });",
+        `process.argv = [process.execPath, ${JSON.stringify(resolver)}, 'exec', '--', 'pnpm', 'build:runtime'];`,
+        `require(${JSON.stringify(resolver)});`,
+      ].join('\n');
+      const output = execFileSync(process.execPath, ['-e', probe], { encoding: 'utf8' });
+      expect(JSON.parse(output)).toEqual(['build:runtime']);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

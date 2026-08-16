@@ -50,6 +50,8 @@ if [ "\${1:-}" = -q ] && [ "\${2:-}" = --config ]; then
   config="$3"
   test "$(grep -Fxc 'header = "Accept: application/json"' "$config")" = 1
   headers=$(sed -n 's/^dump-header = "\\(.*\\)"$/\\1/p' "$config")
+  test "$headers" = headers
+  test "$(pwd -P)" = "$(dirname "$config")"
   length=17
   printf 'HTTP/1.1 200 OK\\r\\nContent-Type: application/json; charset=utf-8\\r\\nContent-Encoding: identity\\r\\nContent-Length: %s\\r\\n\\r\\n' "$length" > "$headers"
   printf '{"fixture":true}\\n'
