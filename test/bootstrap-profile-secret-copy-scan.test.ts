@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const {
-  assertCanonicalAuthSecret,
+  assertCanonicalAuthSecretPlacement,
   assertNoUnexpectedStateSecretCopies,
 } = require('../scripts/bootstrap-profile/secret-copy-scan.cjs');
 
@@ -45,12 +45,129 @@ function canonicalAuth(key = SECRET): Record<string, unknown> {
 
 describe('typed canonical auth secret assertion', () => {
   it('accepts exactly one key at the canonical managed API-key profile', () => {
-    expect(assertCanonicalAuthSecret({
+    expect(assertCanonicalAuthSecretPlacement({
       authStore: canonicalAuth(),
+      preimageAuthStore: {
+        version: 1,
+        profiles: {
+          'user-provider:manual': {
+            type: 'api_key', provider: 'user-provider', key: 'UNRELATED_USER_KEY',
+          },
+        },
+      },
       authProfileId: AUTH_PROFILE_ID,
       providerId: PROVIDER,
       secret: SECRET,
-    })).toEqual({ occurrences: 1 });
+    })).toEqual({ occurrences: 1, preexistingAliases: 0 });
+  });
+
+  it('accepts an unchanged preexisting manual profile that uses the managed key', () => {
+    const manualProfile = { type: 'api_key', provider: 'deepseek', key: SECRET };
+    const preimageAuthStore = {
+      version: 1,
+      profiles: { 'deepseek:manual': manualProfile },
+    };
+    const authStore = canonicalAuth();
+    authStore.profiles['deepseek:manual'] = { ...manualProfile };
+
+    expect(assertCanonicalAuthSecretPlacement({
+      authStore,
+      preimageAuthStore,
+      authProfileId: AUTH_PROFILE_ID,
+      providerId: PROVIDER,
+      secret: SECRET,
+    })).toEqual({ occurrences: 2, preexistingAliases: 1 });
+  });
+
+  it('accepts an unchanged managed profile in the preimage on an idempotent rerun', () => {
+    const authStore = canonicalAuth();
+    expect(assertCanonicalAuthSecretPlacement({
+      authStore,
+      preimageAuthStore: JSON.parse(JSON.stringify(authStore)),
+      authProfileId: AUTH_PROFILE_ID,
+      providerId: PROVIDER,
+      secret: SECRET,
+    })).toEqual({ occurrences: 1, preexistingAliases: 0 });
+  });
+
+  it('accepts removal of the canonical previous managed profile during a profile switch', () => {
+    const authStore = canonicalAuth();
+    const oldProvider = 'custom-rc-profile-old-profile';
+    const oldAuthProfileId = `${oldProvider}:managed`;
+    const preimageAuthStore = {
+      version: 1,
+      profiles: {
+        [oldAuthProfileId]: { type: 'api_key', provider: oldProvider, key: SECRET },
+        'user-provider:manual': {
+          type: 'api_key', provider: 'user-provider', key: 'UNRELATED_USER_KEY',
+        },
+      },
+    };
+
+    expect(assertCanonicalAuthSecretPlacement({
+      authStore,
+      preimageAuthStore,
+      retiredAuthProfileId: oldAuthProfileId,
+      authProfileId: AUTH_PROFILE_ID,
+      providerId: PROVIDER,
+      secret: SECRET,
+    })).toEqual({
+      occurrences: 1,
+      preexistingAliases: 0,
+      retiredManagedProfiles: 1,
+    });
+  });
+
+  it('rejects removal of an unbound managed-looking profile from the preimage', () => {
+    const oldProvider = 'custom-rc-profile-unowned';
+    const oldAuthProfileId = `${oldProvider}:managed`;
+    expect(() => assertCanonicalAuthSecretPlacement({
+      authStore: canonicalAuth(),
+      preimageAuthStore: {
+        version: 1,
+        profiles: {
+          [oldAuthProfileId]: { type: 'api_key', provider: oldProvider, key: SECRET },
+        },
+      },
+      retiredAuthProfileId: 'custom-rc-profile-different:managed',
+      authProfileId: AUTH_PROFILE_ID,
+      providerId: PROVIDER,
+      secret: SECRET,
+    })).toThrow(expect.objectContaining({ code: 'SECRET_COPY_DETECTED' }));
+  });
+
+  it.each([
+    ['a new post-stage alias', (current: any) => {
+      current.profiles['late-provider:manual'] = {
+        type: 'api_key', provider: 'late-provider', key: SECRET,
+      };
+    }],
+    ['a changed preexisting alias', (current: any) => {
+      current.profiles['deepseek:manual'].metadata = 'changed';
+    }],
+    ['a deleted preexisting alias', (current: any) => {
+      delete current.profiles['deepseek:manual'];
+    }],
+    ['the key in auth metadata', (current: any) => {
+      current.metadata = { copiedKey: SECRET };
+    }],
+  ] as const)('rejects %s', (_label, mutate) => {
+    const manualProfile = { type: 'api_key', provider: 'deepseek', key: SECRET };
+    const preimageAuthStore = {
+      version: 1,
+      profiles: { 'deepseek:manual': manualProfile },
+    };
+    const authStore = canonicalAuth() as any;
+    authStore.profiles['deepseek:manual'] = { ...manualProfile };
+    mutate(authStore);
+
+    expect(() => assertCanonicalAuthSecretPlacement({
+      authStore,
+      preimageAuthStore,
+      authProfileId: AUTH_PROFILE_ID,
+      providerId: PROVIDER,
+      secret: SECRET,
+    })).toThrow(expect.objectContaining({ code: 'SECRET_COPY_DETECTED' }));
   });
 
   it.each([
@@ -64,8 +181,9 @@ describe('typed canonical auth secret assertion', () => {
     mutate(auth);
     let caught: any;
     try {
-      assertCanonicalAuthSecret({
+      assertCanonicalAuthSecretPlacement({
         authStore: auth,
+        preimageAuthStore: { version: 1, profiles: {} },
         authProfileId: AUTH_PROFILE_ID,
         providerId: PROVIDER,
         secret: SECRET,
@@ -80,8 +198,9 @@ describe('typed canonical auth secret assertion', () => {
   it('fails closed when the credential store itself is not the OpenClaw v1 shape', () => {
     const auth = canonicalAuth() as any;
     auth.version = 2;
-    expect(() => assertCanonicalAuthSecret({
+    expect(() => assertCanonicalAuthSecretPlacement({
       authStore: auth,
+      preimageAuthStore: { version: 1, profiles: {} },
       authProfileId: AUTH_PROFILE_ID,
       providerId: PROVIDER,
       secret: SECRET,

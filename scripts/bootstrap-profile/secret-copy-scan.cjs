@@ -66,30 +66,126 @@ function exactKeys(value, keys) {
     && actual.every((key, index) => key === expected[index]);
 }
 
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+}
+
+function equalStructured(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+
+function secretValuePaths(value, secret, current = [], result = []) {
+  if (typeof value === 'string') {
+    if (value === secret) result.push(current);
+    return result;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => secretValuePaths(item, secret, [...current, index], result));
+    return result;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      secretValuePaths(item, secret, [...current, key], result);
+    }
+  }
+  return result;
+}
+
+function validateAuthStoreShape(authStore) {
+  return authStore && typeof authStore === 'object' && !Array.isArray(authStore)
+    && authStore.version === 1 && Object.hasOwn(authStore, 'profiles')
+    && authStore.profiles && typeof authStore.profiles === 'object'
+    && !Array.isArray(authStore.profiles);
+}
+
+function canonicalApiKeyProfile(profile, providerId, secret) {
+  return exactKeys(profile, ['type', 'provider', 'key'])
+    && profile.type === 'api_key'
+    && profile.provider === providerId
+    && profile.key === secret;
+}
+
 /**
  * The credential file is excluded from the raw tree scan because it is the one
- * allowed long-lived plaintext location. Compensate with a typed assertion:
- * the secret must occur exactly once in the whole store and that occurrence
- * must be the exact OpenClaw API-key profile owned by this transaction.
+ * allowed long-lived plaintext location. Compensate with a provenance-aware
+ * typed assertion. The transaction-owned managed profile must be canonical.
+ * A matching manual profile is allowed only when it already existed in the
+ * authenticated transaction preimage and remains structurally identical.
+ * New aliases and values outside canonical profile.key fields
+ * remain fail-closed.
  */
-function assertCanonicalAuthSecret({ authStore, authProfileId, providerId, secret }) {
+function assertCanonicalAuthSecretPlacement({
+  authStore, preimageAuthStore, retiredAuthProfileId = null, authProfileId, providerId, secret,
+}) {
   validatedSecretBytes(secret);
   if (typeof authProfileId !== 'string' || authProfileId.length === 0
       || typeof providerId !== 'string' || providerId.length === 0
       || authProfileId !== `${providerId}:managed`
-      || !authStore || typeof authStore !== 'object' || Array.isArray(authStore)
-      || authStore.version !== 1 || !Object.hasOwn(authStore, 'profiles')
-      || !authStore.profiles || typeof authStore.profiles !== 'object'
-      || Array.isArray(authStore.profiles)) fail('SECRET_SCAN_FAILED');
+      || (retiredAuthProfileId !== null
+        && (typeof retiredAuthProfileId !== 'string' || retiredAuthProfileId.length === 0))
+      || !validateAuthStoreShape(authStore)
+      || !validateAuthStoreShape(preimageAuthStore)) fail('SECRET_SCAN_FAILED');
   const profile = Object.hasOwn(authStore.profiles, authProfileId)
     ? authStore.profiles[authProfileId] : null;
-  const canonical = exactKeys(profile, ['type', 'provider', 'key'])
-    && profile.type === 'api_key'
-    && profile.provider === providerId
-    && profile.key === secret;
-  const occurrences = structuredValueCount(authStore, secret);
-  if (!canonical || occurrences !== 1) fail('SECRET_COPY_DETECTED');
-  return { occurrences };
+  if (!canonicalApiKeyProfile(profile, providerId, secret)) fail('SECRET_COPY_DETECTED');
+
+  const managedPath = JSON.stringify(['profiles', authProfileId, 'key']);
+  const preimageAliases = new Set();
+  const retiredManagedProfiles = new Set();
+  for (const placement of secretValuePaths(preimageAuthStore, secret)) {
+    const encoded = JSON.stringify(placement);
+    if (encoded === managedPath) {
+      const managedPreimage = preimageAuthStore.profiles[authProfileId];
+      if (!canonicalApiKeyProfile(managedPreimage, providerId, secret)) {
+        fail('SECRET_COPY_DETECTED');
+      }
+      continue;
+    }
+    if (placement.length !== 3 || placement[0] !== 'profiles' || placement[2] !== 'key'
+        || typeof placement[1] !== 'string' || placement[1] === authProfileId) {
+      fail('SECRET_COPY_DETECTED');
+    }
+    const aliasId = placement[1];
+    const alias = preimageAuthStore.profiles[aliasId];
+    if (!exactKeys(alias, ['type', 'provider', 'key']) || alias.type !== 'api_key'
+        || typeof alias.provider !== 'string' || alias.provider.length === 0
+        || alias.key !== secret) fail('SECRET_COPY_DETECTED');
+    // Profile switching is the sole plan operation that can remove a previous
+    // managed credential. The authenticated preimage proves its exact shape;
+    // the live store must either preserve an ordinary alias or omit a
+    // canonical previous managed entry. buildAuthPlan never deletes any other
+    // profile, and plan.converged below binds the resulting live store.
+    if (aliasId === retiredAuthProfileId && aliasId === `${alias.provider}:managed`
+        && !Object.hasOwn(authStore.profiles, aliasId)) {
+      retiredManagedProfiles.add(aliasId);
+      continue;
+    }
+    preimageAliases.add(aliasId);
+  }
+
+  const allowedCurrentPaths = new Set([
+    managedPath,
+    ...[...preimageAliases].map((aliasId) => JSON.stringify(['profiles', aliasId, 'key'])),
+  ]);
+  const currentPlacements = secretValuePaths(authStore, secret);
+  if (currentPlacements.some((placement) => !allowedCurrentPaths.has(JSON.stringify(placement)))) {
+    fail('SECRET_COPY_DETECTED');
+  }
+  for (const aliasId of preimageAliases) {
+    if (!Object.hasOwn(authStore.profiles, aliasId)
+        || !equalStructured(authStore.profiles[aliasId], preimageAuthStore.profiles[aliasId])) {
+      fail('SECRET_COPY_DETECTED');
+    }
+  }
+  if (currentPlacements.length !== preimageAliases.size + 1) fail('SECRET_COPY_DETECTED');
+  return {
+    occurrences: currentPlacements.length,
+    preexistingAliases: preimageAliases.size,
+    ...(retiredManagedProfiles.size > 0
+      ? { retiredManagedProfiles: retiredManagedProfiles.size } : {}),
+  };
 }
 
 function streamContains(file, secret, secretBytes, expected, budget) {
@@ -212,6 +308,6 @@ function assertNoUnexpectedStateSecretCopies({ stateDir, secret, allowedFiles = 
 
 module.exports = {
   SecretCopyScanError,
-  assertCanonicalAuthSecret,
+  assertCanonicalAuthSecretPlacement,
   assertNoUnexpectedStateSecretCopies,
 };

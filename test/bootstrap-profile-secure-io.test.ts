@@ -429,19 +429,21 @@ describe('structured secret-copy verification', () => {
       .resolves.toMatchObject({ state: 'verified' });
   }, 30_000);
 
-  it('rejects an actual duplicate structured API-key value with the secret-copy error', async () => {
+  it('accepts an unchanged preexisting manual profile that uses the managed API key', async () => {
     const duplicate = makeHarness();
     const duplicateKey = 'RC_TEST_ONLY_DUPLICATE_STRUCTURED_SECRET_987654321';
     const authFile = path.join(duplicate.stateDir, 'agents/main/agent/auth-profiles.json');
     const auth = JSON.parse(fs.readFileSync(authFile, 'utf8'));
-    auth.profiles['user-provider:duplicate-secret'] = {
-      type: 'api_key', provider: 'user-provider', key: duplicateKey,
+    auth.profiles['deepseek:manual'] = {
+      type: 'api_key', provider: 'deepseek', key: duplicateKey,
     };
     writeJson(authFile, auth);
     const duplicateStage = await stage(duplicate, capsuleBytes(duplicateKey));
     await applier.applyProfile({ ...duplicate, txId: duplicateStage.txId });
     await expect(applier.verifyProfile({ ...duplicate, txId: duplicateStage.txId }))
-      .rejects.toMatchObject({ code: 'SECRET_COPY_DETECTED' });
+      .resolves.toMatchObject({ state: 'verified' });
+    expect(JSON.parse(fs.readFileSync(authFile, 'utf8')).profiles['deepseek:manual'])
+      .toEqual({ type: 'api_key', provider: 'deepseek', key: duplicateKey });
   }, 60_000);
 });
 

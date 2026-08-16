@@ -8,7 +8,7 @@ const { MAX_CAPSULE_BYTES, validateCapsuleBytes } = require('./schema.cjs');
 const { jobsDigest } = require('./cron-digest.cjs');
 const { withBootstrapLocks } = require('./maintenance-lease.cjs');
 const {
-  assertCanonicalAuthSecret,
+  assertCanonicalAuthSecretPlacement,
   assertNoUnexpectedStateSecretCopies,
 } = require('./secret-copy-scan.cjs');
 const {
@@ -991,6 +991,73 @@ function markerRoots(paths, txId) {
 
 function authStorePath(paths) {
   return path.join(paths.stateDir, 'agents/main/agent/auth-profiles.json');
+}
+
+function readSnapshotRootFile(snapshotRoot, expectedDigest, maxBytes) {
+  let snapshot;
+  try {
+    snapshot = verifySnapshot(snapshotRoot, expectedDigest);
+  } catch {
+    fail('INVALID_TRANSACTION_PREIMAGE');
+  }
+  const root = snapshot.entries.find((entry) => entry.path === '');
+  if (!root) fail('INVALID_TRANSACTION_PREIMAGE');
+  if (root.type === 'absent') return null;
+  if (root.type !== 'file' || typeof root.content !== 'string'
+      || !/^[0-9a-f]{64}$/.test(root.sha256)) fail('INVALID_TRANSACTION_PREIMAGE');
+  const contentRoot = path.join(snapshotRoot, 'content');
+  const contentFile = path.join(contentRoot, root.content);
+  if (!isInside(contentRoot, contentFile)) fail('INVALID_TRANSACTION_PREIMAGE');
+  try {
+    const bytes = readPrivateFile(contentFile, { maxBytes, exactMode: 0o600 });
+    if (sha256(bytes) !== root.sha256) fail('INVALID_TRANSACTION_PREIMAGE');
+    verifySnapshot(snapshotRoot, expectedDigest);
+    return bytes;
+  } catch (error) {
+    if (error instanceof BootstrapProfileTransactionError) throw error;
+    fail('INVALID_TRANSACTION_PREIMAGE');
+  }
+}
+
+function readAuthVerificationPreimage(paths, txId, manifest) {
+  const markers = readBoundMarkers(paths, txId, manifest);
+  const roots = markerRoots(paths, txId);
+  const authAsset = markers.state?.assets?.find((candidate) => candidate.id === 'auth');
+  const receiptAsset = markers.config?.assets?.find((candidate) => candidate.id === 'receipt');
+  if (!authAsset || !receiptAsset) fail('INVALID_TRANSACTION_PREIMAGE');
+  const authBytes = readSnapshotRootFile(
+    path.join(roots.state, authAsset.snapshot), authAsset.digest, AUTH_STORE_MAX_BYTES,
+  );
+  const receiptBytes = readSnapshotRootFile(
+    path.join(roots.config, receiptAsset.snapshot), receiptAsset.digest, 2 * 1024 * 1024,
+  );
+  let authStore;
+  let previousReceipt = null;
+  try {
+    authStore = authBytes === null
+      ? { version: 1, profiles: {} } : JSON.parse(authBytes.toString('utf8'));
+    previousReceipt = receiptBytes === null ? null : JSON.parse(receiptBytes.toString('utf8'));
+  } catch (error) {
+    fail('INVALID_TRANSACTION_PREIMAGE');
+  }
+  const receiptBinding = manifest.ownershipPrecondition?.receipt;
+  if (!isObject(authStore) || !isObject(receiptBinding)
+      || receiptBinding.present !== (previousReceipt !== null)
+      || (previousReceipt === null ? receiptBinding.digest !== null
+        : !isObject(previousReceipt) || valueHash(previousReceipt) !== receiptBinding.digest)) {
+    fail('INVALID_TRANSACTION_PREIMAGE');
+  }
+  let retiredAuthProfileId = null;
+  if (previousReceipt !== null) {
+    const previousProvider = previousReceipt.provider;
+    if (!isObject(previousProvider) || typeof previousProvider.id !== 'string'
+        || typeof previousProvider.authProfileId !== 'string'
+        || previousProvider.authProfileId !== `${previousProvider.id}:managed`) {
+      fail('INVALID_TRANSACTION_PREIMAGE');
+    }
+    retiredAuthProfileId = previousProvider.authProfileId;
+  }
+  return { authStore, retiredAuthProfileId };
 }
 
 function authAtomicIntentPath(paths, txId) {
@@ -5817,6 +5884,7 @@ async function verifyProfile(options) {
   if (!receipt || receipt.profile.id !== validated.capsule.profile.id
       || receipt.profile.revision !== validated.capsule.profile.revision
       || receipt.profile.digest !== validated.digest) fail('VERIFY_FAILED');
+  const preimageAuth = readAuthVerificationPreimage(paths, options.txId, manifest);
   const plan = await buildApplyPlan(paths, options.txId, validated, receipt);
   const key = validated.capsule.secrets.modelApiKey;
   const countStructuredValue = (value) => {
@@ -5844,8 +5912,10 @@ async function verifyProfile(options) {
         secret: key,
       });
     }
-    assertCanonicalAuthSecret({
+    assertCanonicalAuthSecretPlacement({
       authStore: plan.currentAuth,
+      preimageAuthStore: preimageAuth.authStore,
+      retiredAuthProfileId: preimageAuth.retiredAuthProfileId,
       authProfileId: validated.authProfileId,
       providerId: validated.capsule.model.providerId,
       secret: key,
