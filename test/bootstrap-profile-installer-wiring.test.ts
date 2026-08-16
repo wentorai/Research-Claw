@@ -120,6 +120,18 @@ describe('Bootstrap Profile installer ABI and secret boundary', () => {
 });
 
 describe('Bootstrap Profile installer transaction ordering', () => {
+  it('Native update falls back to the other official mirror without changing origin', () => {
+    expect(native).toContain('_ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"');
+    expect(native).toContain('_FALLBACK_REPO="$GITHUB_REPO"');
+    expect(native).toContain('*github.com*wentorai*Research-Claw.git*)');
+    expect(native).toContain('_FALLBACK_REPO="$GITEE_REPO"');
+    expect(native).toContain('git remote set-url "$_FALLBACK_REMOTE" "$_FALLBACK_REPO"');
+    expect(native).toContain('git fetch --depth 1 "$_FALLBACK_REMOTE" "$_BRANCH"');
+    expect(native).toContain('git reset --hard "$_FALLBACK_REMOTE/$_BRANCH"');
+    expect(native).not.toContain('git remote set-url origin "$GITHUB_REPO"');
+    expect(native).not.toContain('git remote set-url origin "$GITEE_REPO"');
+  });
+
   it('runs every credential probe in an isolated scratch state with read-only Docker volumes', () => {
     expect(native).toContain('scripts/bootstrap-profile/model-probe.cjs');
     expect(native).toContain('--scratch-root "$RC_PROFILE_TEMP_ROOT"');

@@ -1437,11 +1437,9 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   # Gitignored files (config, data, node_modules, workspace runtime) are preserved.
   git clean -fd 2>/dev/null || true
   # --- Self-healing dual-remote update ---
-  # Try the existing origin first (Gitee for most installs). If it fails — most
-  # commonly a Gitee anonymous-fetch 401 that now fast-fails instead of hanging,
-  # thanks to GIT_TERMINAL_PROMPT=0 above — fall back to the GitHub mirror without
-  # permanently re-pointing origin, so a Gitee-only (GFW) machine still prefers
-  # Gitee on the next run. This mirrors the clone path's Gitee→GitHub fallback.
+  # Try the existing origin first. If it fails, select the other official
+  # mirror instead of blindly retrying the same host. Do not permanently
+  # re-point origin: each installation keeps its preferred source next time.
   _BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
   [ "$_BRANCH" = "HEAD" ] && _BRANCH="main"
   _PULLED=false
@@ -1450,13 +1448,26 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   else
     git rebase --abort 2>/dev/null || true
     git reset --hard HEAD 2>/dev/null || true
-    warn "Update from origin failed — trying GitHub mirror..."
-    git remote set-url github "$GITHUB_REPO" 2>/dev/null \
-      || git remote add github "$GITHUB_REPO" 2>/dev/null || true
-    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Updating from GitHub mirror" git fetch --depth 1 github "$_BRANCH" \
-       && (git reset --hard "github/$_BRANCH" 2>/dev/null || git reset --hard FETCH_HEAD 2>/dev/null); then
+    _ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+    _FALLBACK_REMOTE=github
+    _FALLBACK_REPO="$GITHUB_REPO"
+    _FALLBACK_LABEL=GitHub
+    case "$_ORIGIN_URL" in
+      *github.com*wentorai*Research-Claw.git*)
+        _FALLBACK_REMOTE=gitee
+        _FALLBACK_REPO="$GITEE_REPO"
+        _FALLBACK_LABEL=Gitee
+        ;;
+    esac
+    warn "Update from origin failed — trying $_FALLBACK_LABEL mirror..."
+    git remote set-url "$_FALLBACK_REMOTE" "$_FALLBACK_REPO" 2>/dev/null \
+      || git remote add "$_FALLBACK_REMOTE" "$_FALLBACK_REPO" 2>/dev/null || true
+    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Updating from $_FALLBACK_LABEL mirror" \
+       git fetch --depth 1 "$_FALLBACK_REMOTE" "$_BRANCH" \
+       && (git reset --hard "$_FALLBACK_REMOTE/$_BRANCH" 2>/dev/null \
+         || git reset --hard FETCH_HEAD 2>/dev/null); then
       _PULLED=true
-      ok "Updated from GitHub mirror"
+      ok "Updated from $_FALLBACK_LABEL mirror"
     fi
   fi
 
