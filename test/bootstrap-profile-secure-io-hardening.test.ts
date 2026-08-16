@@ -112,6 +112,29 @@ describe('CLI --capsule-file descriptor security', () => {
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
   }, 15_000);
 
+  it('stages a Profile without unsupported directory fsync under native Windows rules', () => {
+    const harness = makeHarness();
+    const file = privateCapsule(harness, 'windows-capsule.json');
+    const platformHook = path.join(harness.root, 'win32-platform.cjs');
+    fs.writeFileSync(
+      platformHook,
+      "Object.defineProperty(process, 'platform', { value: 'win32' });\n",
+      { mode: 0o600 },
+    );
+    const result = spawnSync(process.execPath, stageArgs(harness, file), {
+      cwd: ROOT,
+      env: {
+        PATH: process.env.PATH ?? '',
+        NODE_OPTIONS: `--require=${platformHook}`,
+      },
+      encoding: 'utf8',
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  }, 20_000);
+
   it.skipIf(process.platform === 'win32').each([0o400, 0o640, 0o700])(
     'rejects a valid Capsule whose mode is %s instead of exact 0600',
     (mode) => {
@@ -162,6 +185,39 @@ describe('CLI --capsule-file descriptor security', () => {
 });
 
 describe('private atomic-write durability', () => {
+  it('does not open unsupported directory handles under native Windows rules', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-win-dir-fsync-'));
+    const probe = [
+      "Object.defineProperty(process, 'platform', { value: 'win32' });",
+      "const fs = require('node:fs');",
+      `const root = ${JSON.stringify(root)};`,
+      "const originalOpen = fs.openSync;",
+      "let directoryOpenAttempts = 0;",
+      "fs.openSync = function(target, ...args) {",
+      "  if (String(target) === root) {",
+      "    directoryOpenAttempts += 1;",
+      "    const error = new Error('synthetic Windows directory-open failure');",
+      "    error.code = 'EPERM';",
+      "    throw error;",
+      "  }",
+      "  return originalOpen.call(this, target, ...args);",
+      "};",
+      `const storage = require(${JSON.stringify(path.join(ROOT, 'scripts/bootstrap-profile/storage.cjs'))});`,
+      "try { storage.fsyncDirectory(root); } finally { fs.openSync = originalOpen; }",
+      "process.stdout.write(JSON.stringify({ directoryOpenAttempts }));",
+    ].join('\n');
+    try {
+      const result = spawnSync(process.execPath, ['-e', probe], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ directoryOpenAttempts: 0 });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('readbacks the staged descriptor and removes the private temp when publication fails', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-bootstrap-atomic-write-'));
     roots.push(root);

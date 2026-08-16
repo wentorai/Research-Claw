@@ -75,15 +75,23 @@ function writeFixturePackage(
     path.join(dependencyDir, 'index.js'),
     'export const fixtureDependency = true;\n',
   );
-  const packedDependency = spawnSync(
-    process.platform === 'win32' ? 'npm.cmd' : 'npm',
-    [
+  const packArgs = [
       'pack',
       dependencyDir,
       '--pack-destination',
       vendorDir,
       '--json',
-    ],
+    ];
+  const npmCli = path.join(
+    path.dirname(process.execPath),
+    'node_modules',
+    'npm',
+    'bin',
+    'npm-cli.js',
+  );
+  const packedDependency = spawnSync(
+    process.platform === 'win32' ? process.execPath : 'npm',
+    process.platform === 'win32' ? [npmCli, ...packArgs] : packArgs,
     { encoding: 'utf8', env, timeout: 30_000 },
   );
   if (packedDependency.status !== 0) {
@@ -192,6 +200,42 @@ function writeFixturePackage(
     '---\nname: fixture-skill-two\ndescription: Second integration fixture\n---\n',
   );
 }
+
+describe('research-plugins Windows npm invocation', () => {
+  it('executes the npm JavaScript CLI through the pinned Node runtime', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-win-npm-cli-'));
+    const nodeExecutable = path.join(fixtureRoot, 'node.exe');
+    const npmCli = path.join(
+      fixtureRoot,
+      'node_modules',
+      'npm',
+      'bin',
+      'npm-cli.js',
+    );
+    fs.mkdirSync(path.dirname(npmCli), { recursive: true });
+    fs.writeFileSync(nodeExecutable, 'fixture');
+    fs.writeFileSync(npmCli, 'fixture');
+    const probe = [
+      "Object.defineProperty(process, 'platform', { value: 'win32' });",
+      `const installer = require(${JSON.stringify(INSTALLER)});`,
+      `process.stdout.write(JSON.stringify(installer.npmInvocation(['pack', 'fixture'], ${JSON.stringify(nodeExecutable)})));`,
+    ].join('\n');
+    try {
+      const result = spawnSync(process.execPath, ['-e', probe], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const invocation = JSON.parse(result.stdout);
+      expect(invocation).toEqual({
+        executable: nodeExecutable,
+        args: [npmCli, 'pack', 'fixture'],
+      });
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 function currentProcessStartIdentity(): string {
   try {

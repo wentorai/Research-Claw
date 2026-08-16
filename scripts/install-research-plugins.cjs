@@ -139,8 +139,21 @@ function run(executable, args, options) {
   return result;
 }
 
-function npmExecutable() {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+function npmInvocation(args, nodeExecutable = process.execPath) {
+  if (process.platform !== 'win32') {
+    return { executable: 'npm', args };
+  }
+  const npmCli = path.join(
+    path.dirname(nodeExecutable),
+    'node_modules',
+    'npm',
+    'bin',
+    'npm-cli.js',
+  );
+  if (!fs.existsSync(npmCli) || !fs.statSync(npmCli).isFile()) {
+    throw new Error('npm CLI is unavailable next to the active Node.js runtime');
+  }
+  return { executable: nodeExecutable, args: [npmCli, ...args] };
 }
 
 function tarExecutable() {
@@ -418,7 +431,8 @@ function installFromPackage(options, workDir, stageDir) {
     '--json',
   ];
   if (options.registry) packArgs.push('--registry', options.registry);
-  const packed = run(npmExecutable(), packArgs, {
+  const packCommand = npmInvocation(packArgs);
+  const packed = run(packCommand.executable, packCommand.args, {
     cwd: workDir,
     timeoutMs: options.timeoutMs,
     label: 'npm pack',
@@ -462,7 +476,8 @@ function installFromPackage(options, workDir, stageDir) {
     '--no-fund',
   ];
   if (options.registry) installArgs.push('--registry', options.registry);
-  run(npmExecutable(), installArgs, {
+  const installCommand = npmInvocation(installArgs);
+  run(installCommand.executable, installCommand.args, {
     cwd: stageDir,
     timeoutMs: options.timeoutMs,
     label: 'production dependency install',
@@ -669,4 +684,8 @@ function main() {
   }
 }
 
-process.exitCode = main();
+if (require.main === module) {
+  process.exitCode = main();
+} else {
+  module.exports = { npmInvocation };
+}

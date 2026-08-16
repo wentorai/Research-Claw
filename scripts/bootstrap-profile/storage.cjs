@@ -9,6 +9,14 @@ function sha256(value) {
 }
 
 function fsyncDirectory(directory) {
+  const metadata = lstatIfPresent(directory);
+  if (!metadata || metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error('unsafe fsync directory');
+  }
+  // Node cannot open directory handles with fs.openSync on Windows. Files are
+  // still fsynced and read back before publication; validate the directory
+  // identity here and use the platform's atomic rename guarantee.
+  if (process.platform === 'win32') return;
   const fd = fs.openSync(directory, 'r');
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }
