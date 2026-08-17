@@ -1,4 +1,4 @@
-param([string]$AuthToken)
+﻿param([string]$AuthToken)
 
 if ($args.Count -ne 0) {
     throw 'Unknown installer argument.'
