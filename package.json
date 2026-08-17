@@ -15,7 +15,7 @@
     "build": "node scripts/node-runtime.cjs exec -- pnpm build:runtime",
     "build:runtime": "pnpm build:extensions && pnpm build:dashboard",
     "build:dashboard": "pnpm --filter dashboard build",
-    "build:extensions": "pnpm --filter './extensions/*' build",
+    "build:extensions": "pnpm --filter @research-claw/core --filter @research-claw/dual-model-supervisor --filter @research-claw/wentor-connect --filter @tencent-weixin/openclaw-weixin run build && node scripts/verify-extension-build.cjs",
     "test": "vitest run && pnpm --filter dashboard test",
     "test:root": "vitest run",
     "test:watch": "vitest",

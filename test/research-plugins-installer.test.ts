@@ -295,6 +295,11 @@ describe('research-plugins atomic installer', () => {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
     fs.copyFileSync(EXAMPLE_CONFIG, configPath);
+    const homedirHook = path.join(tmpDir, 'test-homedir.cjs');
+    fs.writeFileSync(
+      homedirHook,
+      `require('node:os').homedir = () => ${JSON.stringify(homeDir)};\n`,
+    );
     const fixtureBin = path.join(tmpDir, 'bin');
     fs.mkdirSync(fixtureBin, { recursive: true });
     if (process.platform !== 'win32') {
@@ -316,6 +321,7 @@ describe('research-plugins atomic installer', () => {
       NPM_CONFIG_USERCONFIG: path.join(tmpDir, 'npmrc'),
       OPENCLAW_CONFIG_PATH: configPath,
       OPENCLAW_STATE_DIR: path.join(tmpDir, 'openclaw-state'),
+      NODE_OPTIONS: `--require="${homedirHook.replaceAll('\\', '/')}"`,
       NODE_ENV: 'production',
       PATH: process.platform === 'win32'
         ? process.env.PATH
@@ -771,7 +777,7 @@ fs.renameSync = function injectedRename(from, to) {
     );
 
     const failed = runInstaller(packageDir, {
-      NODE_OPTIONS: `--require=${faultInjector}`,
+      NODE_OPTIONS: `${isolatedEnv.NODE_OPTIONS} --require="${faultInjector.replaceAll('\\', '/')}"`,
     });
 
     expectInstallFailure(failed);

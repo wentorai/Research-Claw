@@ -156,8 +156,45 @@ function npmInvocation(args, nodeExecutable = process.execPath) {
   return { executable: nodeExecutable, args: [npmCli, ...args] };
 }
 
-function tarExecutable() {
-  return process.platform === 'win32' ? 'tar.exe' : 'tar';
+function tarExtractionInvocation(
+  archive,
+  stageDir,
+  workDir,
+  platform = process.platform,
+) {
+  if (platform !== 'win32') {
+    return {
+      executable: 'tar',
+      args: [
+        '-xzf',
+        archive,
+        '--strip-components=1',
+        '-C',
+        stageDir,
+      ],
+      cwd: workDir,
+    };
+  }
+
+  const archiveArg = path.win32.relative(stageDir, archive);
+  if (
+    archiveArg.length === 0
+    || path.win32.isAbsolute(archiveArg)
+    || /^[A-Za-z]:/u.test(archiveArg)
+  ) {
+    throw new Error(
+      'package archive and staging directory must be on the same Windows drive',
+    );
+  }
+  return {
+    executable: 'tar.exe',
+    args: [
+      '-xzf',
+      archiveArg.replaceAll('\\', '/'),
+      '--strip-components=1',
+    ],
+    cwd: stageDir,
+  };
 }
 
 function processIsAlive(pid) {
@@ -458,11 +495,16 @@ function installFromPackage(options, workDir, stageDir) {
   }
 
   fs.mkdirSync(stageDir);
+  const extraction = tarExtractionInvocation(
+    archive,
+    stageDir,
+    workDir,
+  );
   run(
-    tarExecutable(),
-    ['-xzf', archive, '--strip-components=1', '-C', stageDir],
+    extraction.executable,
+    extraction.args,
     {
-      cwd: workDir,
+      cwd: extraction.cwd,
       timeoutMs: options.timeoutMs,
       label: 'package extraction',
     },
@@ -687,5 +729,5 @@ function main() {
 if (require.main === module) {
   process.exitCode = main();
 } else {
-  module.exports = { npmInvocation };
+  module.exports = { npmInvocation, tarExtractionInvocation };
 }

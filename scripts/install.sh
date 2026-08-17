@@ -1906,6 +1906,10 @@ if ! $UPDATE_FAILED; then
       env PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build; then
     die "Build failed. Try: cd $INSTALL_DIR && pnpm build"
   fi
+  if ! PATH="$GW_NODE_DIR:$PATH" "$GW_NODE" \
+      scripts/verify-extension-build.cjs; then
+    die "Extension build verification failed. Try: cd $INSTALL_DIR && pnpm build:extensions"
+  fi
   ok "Build complete"
 
   # --- Verify dashboard build ---
