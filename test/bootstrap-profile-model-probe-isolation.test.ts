@@ -83,6 +83,11 @@ function run(item: ReturnType<typeof harness>) {
 }
 
 describe('isolated Bootstrap Profile credential/model probe', () => {
+  it('budgets for the measured native-Windows OpenClaw cold start', () => {
+    const source = fs.readFileSync(HELPER, 'utf8');
+    expect(source).toContain('const DEFAULT_TIMEOUT_MS = 120_000;');
+  });
+
   it('uses only the target credential and deletes successful runtime state', () => {
     const item = harness();
     const before = tree(item.stateDir);
