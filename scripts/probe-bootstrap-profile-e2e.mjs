@@ -890,7 +890,11 @@ async function main() {
     streamed: record.streamed,
   }));
   invariant(
-    failedProbeRecords.length === 1 && failedProbeRecords[0].credential === 'failed',
+    failedProbeRecords.length === 3
+      && failedProbeRecords.every((record, index) => record.credential === 'failed'
+        && record.retryCount === index
+        && record.isAgentRequest === false
+        && record.streamed === true),
     `failed model probe request boundary mismatch: ${JSON.stringify(failedProbeRecords)}`,
   );
   await applier.rollbackProfile({ ...paths, txId: failedStage.txId });

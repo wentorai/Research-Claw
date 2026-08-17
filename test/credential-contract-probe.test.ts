@@ -103,7 +103,8 @@ describe('OpenClaw 2026.6.1 credential contract probe', () => {
     ]);
     expect(result.failureProbe).toEqual({
       status: expect.not.stringMatching(/^ok$/),
-      requestCount: 1,
+      requestCount: 3,
+      retryCounts: [0, 1, 2],
       credential: 'auth-profile',
     });
   }, 90_000);

@@ -224,7 +224,11 @@ async function main() {
     const configPath = path.join(state, 'openclaw.json');
     const agentDir = path.join(state, 'agents', 'main', 'agent');
     const authPath = path.join(agentDir, 'auth-profiles.json');
-    await Promise.all([mkdir(home), mkdir(state), mkdir(workspace), mkdir(agentDir, { recursive: true })]);
+    // Create the shared state parent before its recursive child. Running both
+    // mkdir calls concurrently lets the child win the race and makes the plain
+    // parent mkdir fail with EEXIST on otherwise healthy hosts.
+    await Promise.all([mkdir(home), mkdir(state), mkdir(workspace)]);
+    await mkdir(agentDir, { recursive: true });
     signalBridge.throwIfInterrupted();
 
     server = createServer(async (request, response) => {
@@ -238,6 +242,8 @@ async function main() {
         for await (const chunk of request) chunks.push(chunk);
         requests.push({
           authorization: request.headers.authorization ?? null,
+          retryCount: /^[0-9]+$/.test(String(request.headers['x-stainless-retry-count'] ?? ''))
+            ? Number(request.headers['x-stainless-retry-count']) : null,
           body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
         });
         if (failProvider) {
@@ -332,9 +338,10 @@ async function main() {
     assert(agent.stdout.includes(REPLY), 'conflict: agent response did not contain fixture reply');
     results.find(result => result.scenario === 'conflict').agentCredential = 'auth-profile';
 
-    // An auth probe is a single credential check, not a provider-availability
-    // retry loop. Run this final because a failed probe intentionally marks the
-    // provider unavailable for later agent turns in the isolated state root.
+    // Run the outage probe last because it intentionally marks the provider
+    // unavailable for later agent turns in the isolated state root. OpenClaw's
+    // current provider client performs the initial request plus two bounded
+    // retries; all three must retain the same locked credential.
     requests.length = 0;
     await writeFile(configPath, `${JSON.stringify(configFor({
       workspace,
@@ -357,13 +364,15 @@ async function main() {
     const failureCredentialLabels = requests.map((request) =>
       request.authorization === `Bearer ${PROFILE_KEY}` ? 'auth-profile'
         : request.authorization === `Bearer ${CONFIG_KEY}` ? 'provider-config' : 'other');
-    assert(requests.length === 1,
-      `failure-path: expected one provider request, observed ${requests.length} (${failureCredentialLabels.join(',')})`);
-    assert(requests[0]?.authorization === `Bearer ${PROFILE_KEY}`,
-      'failure-path: probe did not retain the resolved auth-profile credential');
+    const failureRetryCounts = requests.map(request => request.retryCount);
+    assert(requests.length === 3 && JSON.stringify(failureRetryCounts) === '[0,1,2]',
+      `failure-path: expected retry sequence 0,1,2, observed ${JSON.stringify(failureRetryCounts)} (${failureCredentialLabels.join(',')})`);
+    assert(requests.every(request => request.authorization === `Bearer ${PROFILE_KEY}`),
+      'failure-path: a provider retry did not retain the resolved auth-profile credential');
     const failureResult = {
       status: failureProbe.status,
       requestCount: requests.length,
+      retryCounts: failureRetryCounts,
       credential: 'auth-profile',
     };
 
@@ -372,7 +381,7 @@ async function main() {
       schema: 'research-claw.credential-contract-probe.v1',
       openclawVersion,
       isolatedRoot: '<mktemp>',
-      providerRequests: results.length + 1,
+      providerRequests: results.length + requests.length,
       authStore: {
         relativePath: 'agents/main/agent/auth-profiles.json',
         permissions,
