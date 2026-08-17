@@ -17,18 +17,17 @@ function readVersion(file) {
 }
 
 function readCommit(root) {
-  const fromEnvironment = process.env.RC_BUILD_COMMIT?.trim();
-  if (fromEnvironment && /^[0-9a-f]{7,40}$/i.test(fromEnvironment)) {
-    return fromEnvironment.slice(0, 12).toLowerCase();
-  }
   try {
     return execFileSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim() || 'unknown';
-  } catch {
-    return 'unknown';
+  } catch {}
+  const fromEnvironment = process.env.RC_BUILD_COMMIT?.trim();
+  if (fromEnvironment && /^[0-9a-f]{7,40}$/i.test(fromEnvironment)) {
+    return fromEnvironment.slice(0, 12).toLowerCase();
   }
+  return 'unknown';
 }
 
 function parseArgs(argv) {

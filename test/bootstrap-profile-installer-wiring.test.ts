@@ -121,14 +121,15 @@ describe('Bootstrap Profile installer ABI and secret boundary', () => {
 });
 
 describe('Bootstrap Profile installer transaction ordering', () => {
-  it('Native update falls back to the other official mirror without changing origin', () => {
+  it('Native update fetches exact official authority without trusting or changing origin', () => {
     expect(native).toContain('_ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"');
-    expect(native).toContain('_FALLBACK_REPO="$GITHUB_REPO"');
-    expect(native).toContain('*github.com*wentorai*Research-Claw.git*)');
-    expect(native).toContain('_FALLBACK_REPO="$GITEE_REPO"');
-    expect(native).toContain('git remote set-url "$_FALLBACK_REMOTE" "$_FALLBACK_REPO"');
-    expect(native).toContain('git fetch --depth 1 "$_FALLBACK_REMOTE" "$_BRANCH"');
-    expect(native).toContain('git reset --hard "$_FALLBACK_REMOTE/$_BRANCH"');
+    expect(native).toContain('_PRIMARY_REPO="$GITEE_REPO"');
+    expect(native).toContain('_SECONDARY_REPO="$GITHUB_REPO"');
+    expect(native).toContain('Foreign existing origin ignored');
+    expect(native).toContain('git remote set-url "$_remote" "$_repo"');
+    expect(native).toContain('git fetch --depth 1 "$_remote" "$_SOURCE_BRANCH"');
+    expect(native).toContain('git reset --hard FETCH_HEAD');
+    expect(native).not.toContain('git pull --rebase --autostash');
     expect(native).not.toContain('git remote set-url origin "$GITHUB_REPO"');
     expect(native).not.toContain('git remote set-url origin "$GITEE_REPO"');
   });

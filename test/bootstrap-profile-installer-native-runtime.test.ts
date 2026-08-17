@@ -58,7 +58,7 @@ case "$subcommand" in
     "$RC_TEST_REAL_GIT" "$@"
     touch "$RC_TEST_EVENTS/clean-complete"
     ;;
-  pull)
+  fetch)
     test -f "$RC_TEST_EVENTS/reset-complete"
     test -f "$RC_TEST_EVENTS/clean-complete"
     printf '%s\n' "$$" > "$RC_TEST_EVENTS/pull.pid"
@@ -375,6 +375,8 @@ ${wrapperSection}
 set -euo pipefail
 INSTALL_DIR="$RC_TEST_INSTALL"
 GITHUB_REPO=https://invalid.example/research-claw.git
+GITEE_REPO=https://invalid.example/research-claw-gitee.git
+REPO_OVERRIDE=''
 UPDATE_FAILED=false
 R='' G='' C='' Y='' B='' D='' N=''
 ISSUES_URL=https://invalid.example/issues

@@ -35,6 +35,19 @@ describe('user-visible Research-Claw version', () => {
     expect(line).toMatch(/^Research-Claw v\d+\.\d+\.\d+ · OpenClaw \S+ · commit [0-9a-f]{7,40}$/);
   });
 
+  it('uses the checked-out Git HEAD instead of a stale image environment label', () => {
+    const raw = execFileSync(process.execPath, [VERSION_INFO, '--root', ROOT, '--json'], {
+      encoding: 'utf8',
+      env: { ...process.env, RC_BUILD_COMMIT: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+    });
+    const info = JSON.parse(raw) as { commit: string };
+    const head = execFileSync('git', ['-C', ROOT, 'rev-parse', '--short=12', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+
+    expect(info.commit).toBe(head);
+  });
+
   it('all supported launch/update surfaces consume the shared helper', () => {
     for (const relative of [
       'scripts/install.sh',

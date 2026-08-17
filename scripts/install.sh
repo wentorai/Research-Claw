@@ -1478,38 +1478,74 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   # Remove untracked files that may conflict with incoming changes.
   # Gitignored files (config, data, node_modules, workspace runtime) are preserved.
   git clean -fd 2>/dev/null || true
-  # --- Self-healing dual-remote update ---
-  # Try the existing origin first. If it fails, select the other official
-  # mirror instead of blindly retrying the same host. Do not permanently
-  # re-point origin: each installation keeps its preferred source next time.
-  _BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-  [ "$_BRANCH" = "HEAD" ] && _BRANCH="main"
-  _PULLED=false
-  if run_with_heartbeat "Updating from origin" git pull --rebase --autostash; then
-    _PULLED=true
+  # --- Exact source-authority update ---
+  # A managed installation must never trust an arbitrary pre-existing origin.
+  # Fetch one official main tip and reset to that exact FETCH_HEAD; do not merge,
+  # rebase, or preserve unrelated local commits. An explicit REPO override is
+  # the only supported opt-in to a non-official source.
+  _ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+  _SOURCE_BRANCH=main
+  _PRIMARY_REMOTE=rc-gitee
+  _PRIMARY_REPO="$GITEE_REPO"
+  _PRIMARY_LABEL=Gitee
+  _SECONDARY_REMOTE=rc-github
+  _SECONDARY_REPO="$GITHUB_REPO"
+  _SECONDARY_LABEL=GitHub
+
+  if [ -n "$REPO_OVERRIDE" ]; then
+    _SOURCE_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+    [ "$_SOURCE_BRANCH" = "HEAD" ] && _SOURCE_BRANCH=main
+    _PRIMARY_REMOTE=rc-explicit-source
+    _PRIMARY_REPO="$REPO_OVERRIDE"
+    _PRIMARY_LABEL='explicit REPO'
+    _SECONDARY_REMOTE=''
+    _SECONDARY_REPO=''
+    _SECONDARY_LABEL=''
   else
-    git rebase --abort 2>/dev/null || true
-    git reset --hard HEAD 2>/dev/null || true
-    _ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
-    _FALLBACK_REMOTE=github
-    _FALLBACK_REPO="$GITHUB_REPO"
-    _FALLBACK_LABEL=GitHub
     case "$_ORIGIN_URL" in
-      *github.com*wentorai*Research-Claw.git*)
-        _FALLBACK_REMOTE=gitee
-        _FALLBACK_REPO="$GITEE_REPO"
-        _FALLBACK_LABEL=Gitee
+      "$GITHUB_REPO"|git@github.com:wentorai/Research-Claw.git|ssh://git@github.com/wentorai/Research-Claw.git)
+        _PRIMARY_REMOTE=rc-github
+        _PRIMARY_REPO="$GITHUB_REPO"
+        _PRIMARY_LABEL=GitHub
+        _SECONDARY_REMOTE=rc-gitee
+        _SECONDARY_REPO="$GITEE_REPO"
+        _SECONDARY_LABEL=Gitee
+        ;;
+      "$GITEE_REPO"|git@gitee.com:Ruby_Callipygian_5cb5/ResearchClaw.git|ssh://git@gitee.com/Ruby_Callipygian_5cb5/ResearchClaw.git)
+        ;;
+      '')
+        warn "Existing origin is missing; using the official Gitee/GitHub mirrors."
+        ;;
+      *)
+        warn "Foreign existing origin ignored; using the official Gitee/GitHub mirrors."
         ;;
     esac
-    warn "Update from origin failed — trying $_FALLBACK_LABEL mirror..."
-    git remote set-url "$_FALLBACK_REMOTE" "$_FALLBACK_REPO" 2>/dev/null \
-      || git remote add "$_FALLBACK_REMOTE" "$_FALLBACK_REPO" 2>/dev/null || true
-    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Updating from $_FALLBACK_LABEL mirror" \
-       git fetch --depth 1 "$_FALLBACK_REMOTE" "$_BRANCH" \
-       && (git reset --hard "$_FALLBACK_REMOTE/$_BRANCH" 2>/dev/null \
-         || git reset --hard FETCH_HEAD 2>/dev/null); then
+  fi
+
+  rc_install_fetch_exact_source() {
+    local _remote="$1" _repo="$2" _label="$3"
+    [ -n "$_remote" ] && [ -n "$_repo" ] || return 1
+    git remote set-url "$_remote" "$_repo" 2>/dev/null \
+      || git remote add "$_remote" "$_repo" 2>/dev/null \
+      || return 1
+    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Fetching $_label/$_SOURCE_BRANCH" \
+       git fetch --depth 1 "$_remote" "$_SOURCE_BRANCH" \
+       && git reset --hard FETCH_HEAD; then
+      ok "Updated from $_label"
+      return 0
+    fi
+    return 1
+  }
+
+  _PULLED=false
+  if rc_install_fetch_exact_source \
+      "$_PRIMARY_REMOTE" "$_PRIMARY_REPO" "$_PRIMARY_LABEL"; then
+    _PULLED=true
+  elif [ -n "$_SECONDARY_REMOTE" ]; then
+    warn "Update from $_PRIMARY_LABEL failed — trying $_SECONDARY_LABEL mirror..."
+    if rc_install_fetch_exact_source \
+        "$_SECONDARY_REMOTE" "$_SECONDARY_REPO" "$_SECONDARY_LABEL"; then
       _PULLED=true
-      ok "Updated from $_FALLBACK_LABEL mirror"
     fi
   fi
 
@@ -1530,7 +1566,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
       printf "\n"
       UPDATE_FAILED=true
     else
-      die "Update failed. No runnable installation found. Try: cd $INSTALL_DIR && git pull"
+      die "Update failed. No runnable installation found. Re-run this installer when an official source is reachable."
     fi
   fi
 
