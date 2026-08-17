@@ -154,11 +154,13 @@ const isCandidate = (candidate) => {
     && name.startsWith(prefix + '.') && name.endsWith('.tmp');
 };
 const pause = (actualPhase) => {
-  originalWriteFileSync.call(fs, ready, JSON.stringify({
+  const readyTemp = ready + '.tmp';
+  originalWriteFileSync.call(fs, readyTemp, JSON.stringify({
     phase: actualPhase,
     tempPath,
     target,
   }) + '\n', { flag: 'wx', mode: 0o600 });
+  originalRenameSync.call(fs, readyTemp, ready);
   const signal = new Int32Array(new SharedArrayBuffer(4));
   for (;;) Atomics.wait(signal, 0, 0, 1_000);
 };
@@ -212,17 +214,20 @@ const originalOpenSync = fs.openSync;
 const originalWriteFileSync = fs.writeFileSync;
 const originalWriteSync = fs.writeSync;
 const originalFsyncSync = fs.fsyncSync;
+const originalRenameSync = fs.renameSync;
 let intentFd;
 let intentPath;
 const isIntent = (candidate) => typeof candidate === 'string'
   && [final, staging].includes(path.resolve(candidate));
 const pause = (actualPhase) => {
-  originalWriteFileSync.call(fs, ready, JSON.stringify({
+  const readyTemp = ready + '.tmp';
+  originalWriteFileSync.call(fs, readyTemp, JSON.stringify({
     phase: actualPhase,
     intentPath,
     final,
     staging,
   }) + '\n', { flag: 'wx', mode: 0o600 });
+  originalRenameSync.call(fs, readyTemp, ready);
   const signal = new Int32Array(new SharedArrayBuffer(4));
   for (;;) Atomics.wait(signal, 0, 0, 1_000);
 };

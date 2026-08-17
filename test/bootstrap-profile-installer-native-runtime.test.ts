@@ -318,6 +318,117 @@ ${wrapperSection}
   );
 
   it.skipIf(process.platform === 'win32')(
+    'selects only the exact pinned source commit and restores user bytes on mismatch',
+    () => {
+      const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-source-pin-'));
+      roots.push(sandbox);
+      const source = path.join(sandbox, 'source');
+      const temp = path.join(sandbox, 'tmp');
+      fs.mkdirSync(source, { mode: 0o700 });
+      fs.mkdirSync(temp, { mode: 0o700 });
+      git(source, ['init', '--quiet', '--initial-branch=main']);
+      git(source, ['config', 'user.name', 'RC Source Pin Test']);
+      git(source, ['config', 'user.email', 'rc-source-pin@invalid.example']);
+      fs.writeFileSync(path.join(source, '.gitignore'), 'workspace/\nnode_modules/\n');
+      fs.writeFileSync(path.join(source, 'version.txt'), 'main\n');
+      git(source, ['add', '.gitignore', 'version.txt']);
+      git(source, ['commit', '--quiet', '-m', 'main fixture']);
+      const mainCommit = git(source, ['rev-parse', 'HEAD']).trim();
+      git(source, ['checkout', '--quiet', '-b', 'candidate']);
+      fs.writeFileSync(path.join(source, 'version.txt'), 'candidate\n');
+      git(source, ['add', 'version.txt']);
+      git(source, ['commit', '--quiet', '-m', 'candidate fixture']);
+      const candidateCommit = git(source, ['rev-parse', 'HEAD']).trim();
+
+      const installer = fs.readFileSync(INSTALLER, 'utf8');
+      const heartbeat = extractBetween(
+        installer,
+        'run_with_heartbeat() {',
+        '\n\nensure_ppt_master() {',
+      );
+      const lifecycle = extractBetween(
+        installer,
+        'RC_BOOTSTRAP_REDEEM_URL=',
+        '\nrc_profile_parse_args "$@"',
+      );
+      const update = extractBetween(
+        installer,
+        '# --- [5/8] Clone or update ---',
+        '\nensure_ppt_master\n',
+      );
+      const runner = path.join(sandbox, 'runner.sh');
+      fs.writeFileSync(runner, `#!/usr/bin/env bash
+set -euo pipefail
+INSTALL_DIR="$RC_TEST_INSTALL"
+GITHUB_REPO=https://invalid.example/github.git
+GITEE_REPO=https://invalid.example/gitee.git
+REPO_OVERRIDE="$RC_TEST_SOURCE"
+REPO="$RC_TEST_SOURCE"
+RC_SOURCE_REF=refs/heads/candidate
+RC_SOURCE_COMMIT="$RC_TEST_COMMIT"
+RC_SOURCE_PINNED=true
+UPDATE_FAILED=false
+R='' G='' C='' Y='' B='' D='' N=''
+ISSUES_URL=https://invalid.example/issues
+RC_LOG=/dev/null
+info() { :; }
+ok() { :; }
+warn() { :; }
+step() { :; }
+die() { printf 'fixture-die: %s\n' "$1" >&2; exit 1; }
+${lifecycle}
+${heartbeat}
+trap rc_install_exit_cleanup EXIT
+${update}
+`, { mode: 0o700 });
+
+      const run = (name: string, expectedCommit: string) => {
+        const install = path.join(sandbox, name);
+        git(sandbox, ['clone', '--quiet', '--branch', 'main', source, install]);
+        const userFile = path.join(install, 'workspace', '.ResearchClaw', 'USER.md');
+        fs.mkdirSync(path.dirname(userFile), { recursive: true });
+        fs.writeFileSync(userFile, 'user-owned\n');
+        const result = spawnSync('/bin/bash', [runner], {
+          cwd: install,
+          encoding: 'utf8',
+          env: {
+            PATH: '/usr/bin:/bin',
+            HOME: path.join(sandbox, `${name}-home`),
+            TMPDIR: temp,
+            RC_TEST_INSTALL: install,
+            RC_TEST_SOURCE: source,
+            RC_TEST_COMMIT: expectedCommit,
+          },
+        });
+        return {
+          result,
+          head: git(install, ['rev-parse', 'HEAD']).trim(),
+          user: fs.readFileSync(userFile, 'utf8'),
+          version: fs.readFileSync(path.join(install, 'version.txt'), 'utf8'),
+        };
+      };
+
+      const accepted = run('accepted', candidateCommit);
+      expect(accepted.result.status, `${accepted.result.stdout}\n${accepted.result.stderr}`).toBe(0);
+      expect(accepted).toMatchObject({
+        head: candidateCommit,
+        user: 'user-owned\n',
+        version: 'candidate\n',
+      });
+
+      const rejected = run('rejected', mainCommit);
+      expect(rejected.result.status).not.toBe(0);
+      expect(rejected.result.stderr).toContain('Pinned source identity mismatch.');
+      expect(rejected).toMatchObject({
+        head: mainCommit,
+        user: 'user-owned\n',
+        version: 'main\n',
+      });
+    },
+    30_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'restores legacy user files and reaps heartbeat state after parent-only SIGINT',
     async () => {
       const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-update-interrupt-'));
