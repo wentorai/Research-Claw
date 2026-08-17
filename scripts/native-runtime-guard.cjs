@@ -2,6 +2,7 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
 
 function parseArgs(argv) {
@@ -37,6 +38,35 @@ function statusOf(result) {
 const options = parseArgs(process.argv.slice(2));
 const preflight = path.join(__dirname, 'runtime-preflight.cjs');
 const pnpmRunner = path.join(__dirname, 'run-pnpm.cjs');
+
+function removeStaleNativeBuild() {
+  const nodeModulesRoot = fs.realpathSync(path.join(options.root, 'node_modules'));
+  const openClawReal = fs.realpathSync(path.join(nodeModulesRoot, 'openclaw'));
+  const packageJson = require.resolve('better-sqlite3/package.json', {
+    paths: [path.join(openClawReal, '..')],
+  });
+  const packageMetadata = JSON.parse(fs.readFileSync(packageJson, 'utf8'));
+  if (packageMetadata?.name !== 'better-sqlite3') {
+    throw new Error('resolved package is not better-sqlite3');
+  }
+  const packageRoot = fs.realpathSync(path.dirname(packageJson));
+  const relativePackage = path.relative(nodeModulesRoot, packageRoot);
+  if (
+    !relativePackage
+    || relativePackage === '..'
+    || relativePackage.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePackage)
+  ) {
+    throw new Error('resolved better-sqlite3 package is outside the managed node_modules tree');
+  }
+  const buildRoot = path.join(packageRoot, 'build');
+  if (!fs.existsSync(buildRoot)) return;
+  const buildStat = fs.lstatSync(buildRoot);
+  if (buildStat.isSymbolicLink() || !buildStat.isDirectory()) {
+    throw new Error('better-sqlite3 build path is not a regular directory');
+  }
+  fs.rmSync(buildRoot, { recursive: true, force: true });
+}
 
 function runPreflight() {
   const args = [preflight, '--root', options.root];
@@ -82,19 +112,60 @@ const repair = spawnSync(
   },
 );
 const repairStatus = statusOf(repair);
-if (repairStatus !== 0) {
-  process.stderr.write(`[runtime] Targeted native ABI rebuild failed with exit code ${repairStatus}.\n`);
-  relay(initial);
-  process.exit(repairStatus);
+const targetedVerification = runPreflight();
+const targetedVerificationStatus = statusOf(targetedVerification);
+if (targetedVerificationStatus === 0) {
+  relay(targetedVerification);
+  process.stdout.write('[runtime] Native ABI repaired and verified.\n');
+  process.exit(0);
 }
 
+process.stderr.write(
+  repairStatus === 0
+    ? '[runtime] Targeted rebuild returned success but the native binding is still unusable; forcing a clean dependency lifecycle.\n'
+    : `[runtime] Targeted native ABI rebuild failed with exit code ${repairStatus}; forcing a clean dependency lifecycle.\n`,
+);
+
+try {
+  // pnpm rebuild can return zero without replacing an already-present .node
+  // binary. Bind the package to this managed node_modules tree before removing
+  // only its generated build directory; user config, Profile data, and SQLite
+  // databases are outside this boundary and are never touched here.
+  removeStaleNativeBuild();
+} catch (error) {
+  process.stderr.write(
+    `[runtime] Could not isolate the stale better-sqlite3 build: ${error instanceof Error ? error.message : String(error)}\n`,
+  );
+  relay(targetedVerification);
+  process.exit(78);
+}
+
+const forcedInstall = spawnSync(
+  process.execPath,
+  [pnpmRunner, 'install', '--force', '--reporter=append-only'],
+  {
+    cwd: options.root,
+    env: {
+      ...process.env,
+      CI: '1',
+      PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH || ''}`,
+    },
+    stdio: ['ignore', 'inherit', 'inherit'],
+    timeout: 10 * 60 * 1000,
+  },
+);
+const forcedInstallStatus = statusOf(forcedInstall);
 const verified = runPreflight();
 const verifiedStatus = statusOf(verified);
-if (verifiedStatus !== 0) {
-  process.stderr.write('[runtime] Native ABI rebuild completed, but runtime verification still failed.\n');
+if (forcedInstallStatus !== 0 || verifiedStatus !== 0) {
+  process.stderr.write(
+    forcedInstallStatus !== 0
+      ? `[runtime] Forced dependency lifecycle failed with exit code ${forcedInstallStatus}.\n`
+      : '[runtime] Forced dependency lifecycle completed, but runtime verification still failed.\n',
+  );
   relay(verified);
-  process.exit(verifiedStatus);
+  process.exit(forcedInstallStatus !== 0 ? forcedInstallStatus : verifiedStatus);
 }
 
 relay(verified);
-process.stdout.write('[runtime] Native ABI repaired and verified.\n');
+process.stdout.write('[runtime] Native ABI repaired and verified after a forced dependency lifecycle.\n');

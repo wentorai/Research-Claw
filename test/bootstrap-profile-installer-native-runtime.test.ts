@@ -467,6 +467,64 @@ ${update}
   );
 
   it.skipIf(process.platform === 'win32')(
+    'rejects a better-sqlite3 package whose JavaScript entry resolves but native database open fails',
+    () => {
+      const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-sqlite-smoke-'));
+      roots.push(sandbox);
+      const install = path.join(sandbox, 'install');
+      const packageRoot = path.join(
+        install,
+        'node_modules',
+        '.pnpm',
+        'openclaw@fixture',
+        'node_modules',
+      );
+      const openclawRoot = path.join(packageRoot, 'openclaw');
+      const sqliteRoot = path.join(packageRoot, 'better-sqlite3');
+      fs.mkdirSync(openclawRoot, { recursive: true });
+      fs.mkdirSync(sqliteRoot, { recursive: true });
+      fs.mkdirSync(path.join(install, 'node_modules'), { recursive: true });
+      fs.writeFileSync(path.join(openclawRoot, 'package.json'), '{"name":"openclaw"}\n');
+      fs.writeFileSync(path.join(sqliteRoot, 'package.json'), '{"name":"better-sqlite3"}\n');
+      fs.writeFileSync(
+        path.join(sqliteRoot, 'index.js'),
+        `module.exports = class Database {
+  constructor() { throw new Error('fixture native binding cannot load'); }
+};\n`,
+      );
+      fs.symlinkSync(openclawRoot, path.join(install, 'node_modules', 'openclaw'));
+
+      const installer = fs.readFileSync(INSTALLER, 'utf8');
+      const sqliteSmoke = extractBetween(
+        installer,
+        'test_sqlite3() {',
+        '\nensure_native_modules() {',
+      );
+      const runner = path.join(sandbox, 'sqlite-smoke-runner.sh');
+      fs.writeFileSync(runner, `#!/usr/bin/env bash
+set -euo pipefail
+GW_NODE="$RC_TEST_NODE"
+${sqliteSmoke}
+if test_sqlite3; then
+  printf 'false-green\n' >&2
+  exit 90
+fi
+`, { mode: 0o700 });
+
+      const result = spawnSync('/bin/bash', [runner], {
+        cwd: install,
+        encoding: 'utf8',
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: path.join(sandbox, 'home'),
+          RC_TEST_NODE: process.execPath,
+        },
+      });
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'restores regular, symlink, and absent legacy user-file states without following links',
     () => {
       const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-update-types-'));

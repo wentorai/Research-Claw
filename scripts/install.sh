@@ -1978,7 +1978,10 @@ test_sqlite3() {
   "$GW_NODE" -e "
     const fs = require('fs'), path = require('path');
     const ocReal = fs.realpathSync('node_modules/openclaw');
-    require(require.resolve('better-sqlite3', { paths: [path.join(ocReal, '..')] }));
+    const Database = require(require.resolve('better-sqlite3', { paths: [path.join(ocReal, '..')] }));
+    const smoke = new Database(':memory:');
+    smoke.prepare('SELECT 1 AS ok').get();
+    smoke.close();
   " 2>/dev/null
 }
 
@@ -2004,8 +2007,12 @@ ensure_native_modules() {
   if ! _pnpm_install_with_diagnostics; then
     die "Dependency installation failed. Try: cd $INSTALL_DIR && pnpm install"
   fi
-  # Rebuild dashboard after clean install
-  PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build 2>&1 | tail -3 || true
+  # A successful package install is not enough: build failure must not be
+  # hidden behind a later SQLite-only check.
+  if ! PATH="$GW_NODE_DIR:$PATH" "$PNPM_BIN" build 2>&1 | tail -3; then
+    warn "Project rebuild failed after reinstalling dependencies."
+    return 1
+  fi
 
   if test_sqlite3; then
     ok "Native modules OK (clean install)"
@@ -2054,7 +2061,8 @@ ensure_native_modules() {
 }
 
 if ! $UPDATE_FAILED; then
-  ensure_native_modules || true
+  ensure_native_modules \
+    || die "Native module repair failed. Research-Claw was not started."
 else
   # Quick smoke test — warn if native modules are broken (no rebuild, just diagnostic)
   if ! test_sqlite3; then
@@ -2062,6 +2070,19 @@ else
     warn "Fix: cd $INSTALL_DIR && pnpm install && pnpm build"
   else
     ok "Existing native modules OK"
+  fi
+fi
+
+# The lightweight repair loop above must never be the final success authority.
+# Bind a successfully updated install to the exact Core build, configured user
+# database, pinned Node runtime, and a real SQLite open before Profile work.
+# When both update mirrors are offline, keep the previous runnable checkout and
+# do not require a guard file that may not exist in an older release.
+if ! $UPDATE_FAILED; then
+  if ! "$GW_NODE" scripts/native-runtime-guard.cjs \
+      --root "$INSTALL_DIR" --config "$INSTALL_DIR/config/openclaw.json" \
+      --require-build; then
+    die "Core runtime preflight failed. Research-Claw was not started."
   fi
 fi
 
