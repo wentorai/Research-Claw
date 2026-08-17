@@ -83,8 +83,20 @@ if ! $ORIGIN_PULL_SUCCEEDED && ! $GITHUB_FETCH_SUCCEEDED; then
   exit 1
 fi
 
-node "$ROOT/scripts/run-pnpm.cjs" install
-node "$ROOT/scripts/run-pnpm.cjs" build
+# Resolve the same Node 22 / ABI 127 runtime used by the Gateway before pnpm
+# touches native modules. The updater may be launched by a shell whose `node`
+# is Node 24; using that parent would leave better-sqlite3 unusable on restart.
+if ! _RC_NODE_SHELL="$(node "$ROOT/scripts/node-runtime.cjs" resolve --shell)"; then
+  echo "[update-research-claw] Node 22.16+ (ABI 127) is required; update was not completed." >&2
+  exit 78
+fi
+eval "$_RC_NODE_SHELL"
+unset _RC_NODE_SHELL
+GW_NODE="$RC_NODE_PATH"
+export PATH="$RC_NODE_DIR:$PATH"
+
+"$GW_NODE" "$ROOT/scripts/run-pnpm.cjs" install
+"$GW_NODE" "$ROOT/scripts/run-pnpm.cjs" build
 
 # Finish the same idempotent config migration used by install/startup before
 # claiming the update succeeded. The next restart therefore never sees a
@@ -93,22 +105,28 @@ CONFIG_PATHS=()
 [ -f "$ROOT/config/openclaw.json" ] && CONFIG_PATHS+=("$ROOT/config/openclaw.json")
 [ -f "$HOME/.openclaw/openclaw.json" ] && CONFIG_PATHS+=("$HOME/.openclaw/openclaw.json")
 if [ "${#CONFIG_PATHS[@]}" -gt 0 ]; then
-  node "$ROOT/scripts/ensure-config.cjs" "${CONFIG_PATHS[@]}"
+  "$GW_NODE" "$ROOT/scripts/ensure-config.cjs" "${CONFIG_PATHS[@]}"
 fi
 
-node "$ROOT/scripts/version-info.cjs" --root "$ROOT"
+# Verify and, only for the exact native ABI mismatch, rebuild once under the
+# pinned Gateway Node. Database/config/build failures remain fail-closed.
+"$GW_NODE" "$ROOT/scripts/native-runtime-guard.cjs" \
+  --root "$ROOT" --config "$ROOT/config/openclaw.json" \
+  --require-build --repair-native-abi
+
+"$GW_NODE" "$ROOT/scripts/version-info.cjs" --root "$ROOT"
 
 # Install or update research-plugins (skills + agent tools) in the one
 # canonical directory used by both plugin discovery and SkillSearch.
 PLUGIN_DIR="$HOME/.openclaw/extensions/research-plugins"
 RP_LOG="$(mktemp)"
 echo "[update-research-claw] Updating research plugins..."
-if node "$ROOT/scripts/install-research-plugins.cjs" \
+if "$GW_NODE" "$ROOT/scripts/install-research-plugins.cjs" \
     --target "$PLUGIN_DIR" >"$RP_LOG" 2>&1; then
-  NEW_VER=$(node -e 'console.log(require(process.argv[1]).version)' \
+  NEW_VER=$("$GW_NODE" -e 'console.log(require(process.argv[1]).version)' \
     "$PLUGIN_DIR/package.json" 2>/dev/null || echo "unknown")
   echo "[update-research-claw] Research plugins → v${NEW_VER}"
-elif node "$ROOT/scripts/install-research-plugins.cjs" \
+elif "$GW_NODE" "$ROOT/scripts/install-research-plugins.cjs" \
     --check --quiet --target "$PLUGIN_DIR" 2>/dev/null; then
   echo "[update-research-claw] Research plugins were not updated; the existing version was kept." >&2
   tail -3 "$RP_LOG" >&2
@@ -122,15 +140,15 @@ rm -f "$RP_LOG"
 # Reconcile after the optional plugin update. A failed/partial install must not
 # leave an invalid load path; a usable install is restored on the next pass.
 if [ "${#CONFIG_PATHS[@]}" -gt 0 ]; then
-  node "$ROOT/scripts/ensure-config.cjs" "${CONFIG_PATHS[@]}"
+  "$GW_NODE" "$ROOT/scripts/ensure-config.cjs" "${CONFIG_PATHS[@]}"
 fi
 if [ -f "$ROOT/config/openclaw.json" ]; then
   if ! OPENCLAW_CONFIG_PATH="$ROOT/config/openclaw.json" \
-    "$ROOT/node_modules/.bin/openclaw" config validate --json >/dev/null
+    "$GW_NODE" "$ROOT/node_modules/openclaw/dist/entry.js" config validate --json >/dev/null
   then
     echo "[update-research-claw] Configuration validation failed; update was not completed." >&2
     OPENCLAW_CONFIG_PATH="$ROOT/config/openclaw.json" \
-      "$ROOT/node_modules/.bin/openclaw" config validate --json >&2 || true
+      "$GW_NODE" "$ROOT/node_modules/openclaw/dist/entry.js" config validate --json >&2 || true
     exit 1
   fi
 fi

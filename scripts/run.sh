@@ -200,11 +200,12 @@ export RESEARCH_CLAW_UI_VERSION="$("$GW_NODE" -p "require('./package.json').vers
 
 # Fail before any migration or port binding when the final Gateway runtime
 # cannot load Core's native dependency or read the user's existing database.
-if ! "$GW_NODE" ./scripts/runtime-preflight.cjs \
-    --root "$(pwd)" --config "$OPENCLAW_CONFIG_PATH" >>"$RC_RUN_LOG" 2>&1; then
+if ! "$GW_NODE" ./scripts/native-runtime-guard.cjs \
+    --root "$(pwd)" --config "$OPENCLAW_CONFIG_PATH" \
+    --repair-native-abi >>"$RC_RUN_LOG" 2>&1; then
   say "✗ Research-Claw Core runtime preflight failed. Nothing was started or modified."
   say "  Details: $RC_RUN_LOG"
-  say "  Common fix: fnm use 22 && pnpm rebuild better-sqlite3"
+  say "  Automatic native-module repair did not succeed. Re-run the installer or updater."
   exit 78
 fi
 
@@ -303,7 +304,7 @@ if command -v pnpm >/dev/null 2>&1; then
   rm -f "$_BUILD_LOG" 2>/dev/null || true
 fi
 
-if ! "$GW_NODE" ./scripts/runtime-preflight.cjs \
+if ! "$GW_NODE" ./scripts/native-runtime-guard.cjs \
     --root "$(pwd)" --config "$OPENCLAW_CONFIG_PATH" --require-build \
     >>"$RC_RUN_LOG" 2>&1; then
   say "✗ Research-Claw Core build is not startable. Gateway was not launched."

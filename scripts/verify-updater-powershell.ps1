@@ -42,6 +42,7 @@ function New-UpdaterFixture {
     if ($IsWindows) {
         $GitPath = Join-Path $Root 'bin' 'git.cmd'
         $NodePath = Join-Path $Root 'bin' 'node.cmd'
+        $PinnedNodePath = Join-Path $Root 'bin' 'node22.cmd'
         Set-Content -Path $GitPath -Encoding Ascii -Value @'
 @echo off
 if "%1"=="rev-parse" (echo deadbeef& exit /b 0)
@@ -54,11 +55,18 @@ exit /b 0
         Set-Content -Path $NodePath -Encoding Ascii -Value @'
 @echo off
 echo %*>>"%NODE_CALLS%"
+if "%2"=="resolve" echo %PINNED_NODE_JSON%
+exit /b 0
+'@
+        Set-Content -Path $PinnedNodePath -Encoding Ascii -Value @'
+@echo off
+echo PINNED %*>>"%NODE_CALLS%"
 exit /b 0
 '@
     } else {
         $GitPath = Join-Path $Root 'bin' 'git'
         $NodePath = Join-Path $Root 'bin' 'node'
+        $PinnedNodePath = Join-Path $Root 'bin' 'node22'
         Set-Content -Path $GitPath -NoNewline -Value @'
 #!/bin/sh
 case "$1" in
@@ -73,10 +81,19 @@ exit 0
         Set-Content -Path $NodePath -NoNewline -Value @'
 #!/bin/sh
 printf '%s\n' "$*" >> "$NODE_CALLS"
+case "$*" in
+  *"node-runtime.cjs resolve"*) printf '{"path":"%s","version":"22.22.2","abi":"127","arch":"x64"}\n' "$PINNED_NODE" ;;
+esac
+exit 0
+'@
+        Set-Content -Path $PinnedNodePath -NoNewline -Value @'
+#!/bin/sh
+printf 'PINNED %s\n' "$*" >> "$NODE_CALLS"
 exit 0
 '@
         Set-Executable $GitPath
         Set-Executable $NodePath
+        Set-Executable $PinnedNodePath
     }
 
     return $Root
@@ -100,6 +117,8 @@ function Invoke-UpdaterScenario {
         FAKE_PULL_EXIT = $env:FAKE_PULL_EXIT
         FAKE_FETCH_EXIT = $env:FAKE_FETCH_EXIT
         FAKE_MERGE_EXIT = $env:FAKE_MERGE_EXIT
+        PINNED_NODE = $env:PINNED_NODE
+        PINNED_NODE_JSON = $env:PINNED_NODE_JSON
     }
 
     try {
@@ -110,6 +129,18 @@ function Invoke-UpdaterScenario {
         $env:FAKE_PULL_EXIT = [string]$PullExit
         $env:FAKE_FETCH_EXIT = [string]$FetchExit
         $env:FAKE_MERGE_EXIT = [string]$MergeExit
+        $PinnedNodePath = if ($IsWindows) {
+            Join-Path $Root 'bin' 'node22.cmd'
+        } else {
+            Join-Path $Root 'bin' 'node22'
+        }
+        $env:PINNED_NODE = $PinnedNodePath
+        $env:PINNED_NODE_JSON = (@{
+            path = $PinnedNodePath
+            version = '22.22.2'
+            abi = '127'
+            arch = 'x64'
+        } | ConvertTo-Json -Compress)
 
         $RawOutput = & $PwshPath -NoLogo -NoProfile -File (
             Join-Path $Root 'scripts' 'update-research-claw.ps1'
@@ -175,6 +206,9 @@ Assert-True (
 Assert-True (
     $OriginOnly.NodeCalls -match 'run-pnpm\.cjs build'
 ) 'origin-only success skipped the build'
+Assert-True (
+    $OriginOnly.NodeCalls -match 'PINNED .*native-runtime-guard\.cjs'
+) 'origin-only success skipped pinned native runtime verification'
 
 Write-Output (@{
     ok = $true

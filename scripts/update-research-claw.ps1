@@ -79,15 +79,29 @@ try {
         throw "Update could not be completed because origin reported a failure after changing the working copy."
     }
 
+    # Resolve the one Node 22 / ABI 127 runtime used by the Gateway before
+    # pnpm touches better-sqlite3. The updater's parent shell may expose a
+    # different Node ABI, which must never determine native build outputs.
+    $RuntimeJson = & node (Join-Path $ProjectRoot 'scripts' 'node-runtime.cjs') resolve
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($RuntimeJson)) {
+        throw "Node 22.16+ (ABI 127) is required; update was not completed."
+    }
+    $Runtime = $RuntimeJson | ConvertFrom-Json
+    $GatewayNode = [string]$Runtime.path
+    if ([string]::IsNullOrWhiteSpace($GatewayNode) -or -not (Test-Path $GatewayNode)) {
+        throw "The resolved Gateway Node runtime is unavailable; update was not completed."
+    }
+    $env:PATH = (Split-Path -Parent $GatewayNode) + [IO.Path]::PathSeparator + $env:PATH
+
     Write-Host "[update-research-claw] Installing dependencies..." -ForegroundColor Cyan
-    & node (Join-Path $ProjectRoot 'scripts' 'run-pnpm.cjs') install
+    & $GatewayNode (Join-Path $ProjectRoot 'scripts' 'run-pnpm.cjs') install
 
     if ($LASTEXITCODE -ne 0) {
         throw "pnpm install failed with exit code $LASTEXITCODE"
     }
 
     Write-Host "[update-research-claw] Building project..." -ForegroundColor Cyan
-    & node (Join-Path $ProjectRoot 'scripts' 'run-pnpm.cjs') build
+    & $GatewayNode (Join-Path $ProjectRoot 'scripts' 'run-pnpm.cjs') build
 
     if ($LASTEXITCODE -ne 0) {
         throw "pnpm build failed with exit code $LASTEXITCODE"
@@ -101,13 +115,22 @@ try {
     if (Test-Path $ProjectConfig) { $ConfigPaths += $ProjectConfig }
     if (Test-Path $GlobalConfig) { $ConfigPaths += $GlobalConfig }
     if ($ConfigPaths.Count -gt 0) {
-        & node (Join-Path $ProjectRoot 'scripts' 'ensure-config.cjs') @ConfigPaths
+        & $GatewayNode (Join-Path $ProjectRoot 'scripts' 'ensure-config.cjs') @ConfigPaths
         if ($LASTEXITCODE -ne 0) {
             throw "configuration migration failed with exit code $LASTEXITCODE"
         }
     }
 
-    & node (Join-Path $ProjectRoot 'scripts' 'version-info.cjs') --root $ProjectRoot
+    # Repair exactly one better-sqlite3 ABI mismatch under the pinned runtime,
+    # then require the full build/database preflight. Other failure classes do
+    # not trigger dependency mutation.
+    & $GatewayNode (Join-Path $ProjectRoot 'scripts' 'native-runtime-guard.cjs') `
+        --root $ProjectRoot --config $ProjectConfig --require-build --repair-native-abi
+    if ($LASTEXITCODE -ne 0) {
+        throw "native runtime verification failed with exit code $LASTEXITCODE"
+    }
+
+    & $GatewayNode (Join-Path $ProjectRoot 'scripts' 'version-info.cjs') --root $ProjectRoot
 
     # Install or update research-plugins in the canonical directory shared by
     # plugin discovery and SkillSearch. The Node helper stages and validates the
@@ -117,16 +140,16 @@ try {
     $PreviousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     Write-Host "[update-research-claw] Updating research plugins..." -ForegroundColor Cyan
-    & node $PluginInstaller --target $PluginDir
+    & $GatewayNode $PluginInstaller --target $PluginDir
     $PluginInstallExit = $LASTEXITCODE
     $ErrorActionPreference = $PreviousErrorActionPreference
     if ($PluginInstallExit -eq 0) {
-        $NewVersion = & node -e "console.log(require(process.argv[1]).version)" (Join-Path $PluginDir 'package.json')
+        $NewVersion = & $GatewayNode -e "console.log(require(process.argv[1]).version)" (Join-Path $PluginDir 'package.json')
         Write-Host "[update-research-claw] Research plugins -> v$NewVersion" -ForegroundColor Green
     } else {
         $PreviousErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & node $PluginInstaller --check --quiet --target $PluginDir 2>$null
+        & $GatewayNode $PluginInstaller --check --quiet --target $PluginDir 2>$null
         $PluginStillUsable = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $PreviousErrorActionPreference
         if ($PluginStillUsable) {
@@ -140,7 +163,7 @@ try {
     # Reconcile after the optional plugin update. Missing or partial installs
     # are removed from the load path; complete installs are restored.
     if ($ConfigPaths.Count -gt 0) {
-        & node (Join-Path $ProjectRoot 'scripts' 'ensure-config.cjs') @ConfigPaths
+        & $GatewayNode (Join-Path $ProjectRoot 'scripts' 'ensure-config.cjs') @ConfigPaths
         if ($LASTEXITCODE -ne 0) {
             throw "configuration reconciliation failed with exit code $LASTEXITCODE"
         }
@@ -155,7 +178,7 @@ try {
             $env:OPENCLAW_CONFIG_PATH = $ProjectConfig
             $PreviousErrorActionPreference = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
-            & node (Join-Path $ProjectRoot 'node_modules' 'openclaw' 'dist' 'entry.js') config validate --json | Out-Null
+            & $GatewayNode (Join-Path $ProjectRoot 'node_modules' 'openclaw' 'dist' 'entry.js') config validate --json | Out-Null
             $ValidationExit = $LASTEXITCODE
             $ErrorActionPreference = $PreviousErrorActionPreference
             if ($ValidationExit -ne 0) {

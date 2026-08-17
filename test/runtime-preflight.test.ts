@@ -48,7 +48,8 @@ describe('Core runtime preflight', () => {
 
   it('makes extension build failure fatal in the launcher', () => {
     const launcher = fs.readFileSync(path.join(ROOT, 'scripts', 'run.sh'), 'utf8');
-    expect(launcher).toContain('runtime-preflight.cjs');
+    expect(launcher).toContain('native-runtime-guard.cjs');
+    expect(launcher).toContain('--repair-native-abi');
     expect(launcher).toMatch(/Extension build failed[\s\S]*exit 78/);
     expect(launcher).toContain('--require-build');
   });

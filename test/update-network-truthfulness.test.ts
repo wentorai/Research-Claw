@@ -27,11 +27,13 @@ describe('standalone updater network truthfulness', () => {
   let fixtureRoot: string;
   let binDir: string;
   let nodeCalls: string;
+  let pinnedNode: string;
 
   beforeEach(() => {
     fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'rc-update-network-'));
     binDir = path.join(fixtureRoot, 'bin');
     nodeCalls = path.join(fixtureRoot, 'node-calls.log');
+    pinnedNode = path.join(binDir, 'node22');
     mkdirSync(path.join(fixtureRoot, '.git'));
     mkdirSync(path.join(fixtureRoot, 'scripts'));
     mkdirSync(binDir);
@@ -54,11 +56,24 @@ exit 0
       path.join(binDir, 'node'),
       `#!/bin/sh
 printf '%s\\n' "$*" >> "$NODE_CALLS"
+case "$*" in
+  *"node-runtime.cjs resolve --shell"*)
+    printf "RC_NODE_PATH='%s'\\nRC_NODE_DIR='%s'\\nRC_NODE_VERSION='22.22.2'\\nRC_NODE_ABI='127'\\n" "$PINNED_NODE" "$BIN_DIR"
+    ;;
+esac
+exit 0
+`,
+    );
+    writeFileSync(
+      pinnedNode,
+      `#!/bin/sh
+printf 'PINNED %s\\n' "$*" >> "$NODE_CALLS"
 exit 0
 `,
     );
     chmodSync(path.join(binDir, 'git'), 0o755);
     chmodSync(path.join(binDir, 'node'), 0o755);
+    chmodSync(pinnedNode, 0o755);
   });
 
   afterEach(() => {
@@ -74,6 +89,8 @@ exit 0
         HOME: path.join(fixtureRoot, 'home'),
         PATH: `${binDir}:${process.env.PATH ?? ''}`,
         NODE_CALLS: nodeCalls,
+        PINNED_NODE: pinnedNode,
+        BIN_DIR: binDir,
         ...overrides,
       },
     });
@@ -117,6 +134,8 @@ exit 0
     expect(result.stdout).toContain('[update-research-claw] Done.');
     expect(readFileSync(nodeCalls, 'utf8')).toContain('run-pnpm.cjs install');
     expect(readFileSync(nodeCalls, 'utf8')).toContain('run-pnpm.cjs build');
+    expect(readFileSync(nodeCalls, 'utf8')).toContain('PINNED ');
+    expect(readFileSync(nodeCalls, 'utf8')).toContain('native-runtime-guard.cjs');
   });
 
   it('requires the PowerShell updater to reject double failure and merge failure', () => {
