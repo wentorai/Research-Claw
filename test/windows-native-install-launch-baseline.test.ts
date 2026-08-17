@@ -54,6 +54,20 @@ type OwnershipFixture = {
   expectedAction: 'preserve-and-reject' | 'clear-receipt-only';
 };
 
+type InteractionFixture = {
+  id: string;
+  provenance: 'synthetic';
+  observed: {
+    quickEditEnabled: boolean;
+    progressAdvancedWithoutInput: boolean;
+    http200: boolean;
+    browserDispatchAttempted: boolean;
+    browserDispatchAccepted: boolean;
+    copyableFallbackVisible: boolean;
+  };
+  expectedAction: 'fail-interaction-gate' | 'show-copyable-fallback';
+};
+
 function readJson<T>(file: string): T {
   return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 }
@@ -96,6 +110,22 @@ function ownershipAction(fixture: OwnershipFixture): OwnershipFixture['expectedA
     return 'clear-receipt-only';
   }
   return 'preserve-and-reject';
+}
+
+function interactionAction(fixture: InteractionFixture): InteractionFixture['expectedAction'] | 'accept' {
+  const observed = fixture.observed;
+  if (observed.quickEditEnabled && !observed.progressAdvancedWithoutInput) {
+    return 'fail-interaction-gate';
+  }
+  if (
+    observed.http200
+    && observed.browserDispatchAttempted
+    && !observed.browserDispatchAccepted
+    && observed.copyableFallbackVisible
+  ) {
+    return 'show-copyable-fallback';
+  }
+  return 'accept';
 }
 
 describe('Windows native install and daily-launch frozen baseline', () => {
@@ -185,6 +215,26 @@ describe('Windows native install and daily-launch frozen baseline', () => {
       expect(ownershipAction(fixture), fixture.id).toBe(fixture.expectedAction);
       expect(fixture.expectedAction).not.toBe('stop-process');
     }
+  });
+
+  it('keeps Enter/QuickEdit stalls and browser-dispatch failures as independent negative fixtures', () => {
+    const fixtures = readJson<{ interaction: InteractionFixture[] }>(FIXTURES_PATH);
+    expect(fixtures.interaction.map((fixture) => fixture.id)).toEqual([
+      'quickedit-enter-stall',
+      'browser-dispatch-rejected-with-fallback',
+    ]);
+    for (const fixture of fixtures.interaction) {
+      expect(interactionAction(fixture), fixture.id).toBe(fixture.expectedAction);
+    }
+
+    const quickEditControlledFlip = structuredClone(fixtures.interaction[0]);
+    quickEditControlledFlip.observed.quickEditEnabled = false;
+    quickEditControlledFlip.observed.progressAdvancedWithoutInput = true;
+    expect(interactionAction(quickEditControlledFlip)).toBe('accept');
+
+    const browserControlledFlip = structuredClone(fixtures.interaction[1]);
+    browserControlledFlip.observed.browserDispatchAccepted = true;
+    expect(interactionAction(browserControlledFlip)).toBe('accept');
   });
 
   it('preserves the contaminated macOS ABI fixture as a functional-open failure', () => {

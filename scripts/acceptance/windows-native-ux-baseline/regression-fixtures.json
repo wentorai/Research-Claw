@@ -83,6 +83,34 @@
       "expectedAction": "clear-receipt-only"
     }
   ],
+  "interaction": [
+    {
+      "id": "quickedit-enter-stall",
+      "provenance": "synthetic",
+      "observed": {
+        "quickEditEnabled": true,
+        "progressAdvancedWithoutInput": false,
+        "http200": false,
+        "browserDispatchAttempted": false,
+        "browserDispatchAccepted": false,
+        "copyableFallbackVisible": false
+      },
+      "expectedAction": "fail-interaction-gate"
+    },
+    {
+      "id": "browser-dispatch-rejected-with-fallback",
+      "provenance": "synthetic",
+      "observed": {
+        "quickEditEnabled": false,
+        "progressAdvancedWithoutInput": true,
+        "http200": true,
+        "browserDispatchAttempted": true,
+        "browserDispatchAccepted": false,
+        "copyableFallbackVisible": true
+      },
+      "expectedAction": "show-copyable-fallback"
+    }
+  ],
   "nativeAbi": [
     {
       "id": "macos-node24-binding-under-node22",

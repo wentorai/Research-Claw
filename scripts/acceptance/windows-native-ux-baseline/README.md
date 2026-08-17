@@ -34,10 +34,14 @@ hash.
 
 ## Synthetic fixtures
 
-`foreign-listener-without-receipt` and `stale-owner-receipt` are deliberately
-synthetic. They test conservative ownership decisions; they are not presented
-as real-Windows process evidence. `macos-node24-binding-under-node22` is a
-controlled local reproduction of the ABI 137-to-127 failure.
+`foreign-listener-without-receipt`, `stale-owner-receipt`,
+`quickedit-enter-stall`, and `browser-dispatch-rejected-with-fallback` are
+deliberately synthetic. They test conservative ownership and interaction
+decisions; they are not presented as real-Windows process/browser evidence.
+`macos-node24-binding-under-node22` is a controlled local reproduction of the
+ABI 137-to-127 failure. The interaction test also performs controlled flips:
+disabling QuickEdit while progress advances, or accepting the browser dispatch,
+must leave the corresponding negative classification.
 
 ## Update rule
 
