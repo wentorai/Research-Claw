@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-18T01:30:00+08:00",
+  "productionBaseline": {
+    "commit": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
+    "tree": "4d22e3cfc334c252d5c3e7c8d606b14a0483b1fa",
+    "worktreeStatus": "clean-before-wux-t01"
+  },
+  "remoteAuthorityAtBaseline": {
+    "localMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
+    "giteeMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
+    "githubMain": "5528d9bd43c7d489ddc9a07fe5b15fe1bf15686b",
+    "originMain": "4023c1019730c0296eb5c30839cc1e978423396c"
+  },
+  "lastRealWindowsArtifact": {
+    "packageName": "Wentor-Weifang-RC-0.8.3-Windows-Native-Offline-v18.zip",
+    "packageSha256": "3d8df487f42762334691287b9191d371310bd016996bf7e5000801385d0b5320",
+    "evidenceSourceCommit": "661879c9a4b43833b9c25047e505bb4c3ff4fdc4",
+    "status": "stale-not-release-authority",
+    "reproducibleFromEvidenceCommit": false,
+    "reproducibilityNotes": [
+      "v18 install.sh contains a Windows-native browser-launch delta absent from the installed source commit",
+      "current source changed shared installer/runtime bytes after the evidence commit",
+      "current source removed the profile/runtime probes and bundle-audit tests used during that round"
+    ],
+    "changedPathsToCurrent": [
+      { "status": "M", "path": ".github/workflows/windows-installer-contract.yml" },
+      { "status": "D", "path": "extensions/research-claw-core/src/__tests__/workspace-git-noninteractive.test.ts" },
+      { "status": "M", "path": "extensions/research-claw-core/src/workspace/git-tracker.ts" },
+      { "status": "D", "path": "scripts/acceptance/windows-native-profile-probe/README.txt" },
+      { "status": "D", "path": "scripts/acceptance/windows-native-profile-probe/Run-Wentor-Profile-Probe.cmd" },
+      { "status": "D", "path": "scripts/acceptance/windows-native-profile-probe/Run-Wentor-Profile-Probe.ps1" },
+      { "status": "D", "path": "scripts/acceptance/windows-native-profile-probe/SHA256SUMS.txt" },
+      { "status": "D", "path": "scripts/acceptance/windows-native-profile-probe/candidate/maintenance-lease.cjs" },
+      { "status": "D", "path": "scripts/acceptance/windows-native-profile-probe/candidate/storage.cjs" },
+      { "status": "D", "path": "scripts/acceptance/windows-native-profile-probe/probe-windows-profile.cjs" },
+      { "status": "D", "path": "scripts/acceptance/windows-runtime-probe/Inspect-Wentor-Gateway.ps1" },
+      { "status": "D", "path": "scripts/acceptance/windows-runtime-probe/README.txt" },
+      { "status": "D", "path": "scripts/acceptance/windows-runtime-probe/Run-Wentor-Runtime-Probe.cmd" },
+      { "status": "D", "path": "scripts/acceptance/windows-runtime-probe/Run-Wentor-Runtime-Probe.ps1" },
+      { "status": "D", "path": "scripts/acceptance/windows-runtime-probe/SHA256SUMS.txt" },
+      { "status": "D", "path": "scripts/acceptance/windows-runtime-probe/probe-windows-runtime.cjs" },
+      { "status": "D", "path": "scripts/audit_windows_bundle.py" },
+      { "status": "M", "path": "scripts/bootstrap-profile/maintenance-lease.cjs" },
+      { "status": "M", "path": "scripts/bootstrap-profile/model-probe.cjs" },
+      { "status": "M", "path": "scripts/install-windows.ps1" },
+      { "status": "M", "path": "scripts/install.sh" },
+      { "status": "A", "path": "scripts/native-runtime-guard.cjs" },
+      { "status": "M", "path": "scripts/probe-bootstrap-profile-e2e.mjs" },
+      { "status": "M", "path": "scripts/probe-credential-contract.mjs" },
+      { "status": "M", "path": "scripts/run.sh" },
+      { "status": "M", "path": "scripts/update-research-claw.ps1" },
+      { "status": "M", "path": "scripts/update-research-claw.sh" },
+      { "status": "D", "path": "scripts/verify-native-windows-installer-encoding.ps1" },
+      { "status": "M", "path": "scripts/verify-updater-powershell.ps1" },
+      { "status": "M", "path": "scripts/version-info.cjs" },
+      { "status": "M", "path": "test/bootstrap-profile-installer-native-runtime.test.ts" },
+      { "status": "M", "path": "test/bootstrap-profile-installer-wiring.test.ts" },
+      { "status": "M", "path": "test/bootstrap-profile-live-config-atomic.test.ts" },
+      { "status": "M", "path": "test/bootstrap-profile-maintenance-lease.test.ts" },
+      { "status": "M", "path": "test/bootstrap-profile-model-probe-isolation.test.ts" },
+      { "status": "M", "path": "test/credential-contract-probe.test.ts" },
+      { "status": "A", "path": "test/install-source-authority.test.ts" },
+      { "status": "A", "path": "test/native-runtime-guard.test.ts" },
+      { "status": "M", "path": "test/runtime-preflight.test.ts" },
+      { "status": "M", "path": "test/update-network-truthfulness.test.ts" },
+      { "status": "M", "path": "test/version-info.test.ts" },
+      { "status": "D", "path": "test/windows-native-bundle-audit.test.ts" },
+      { "status": "D", "path": "test/windows-native-installer-encoding.test.ts" },
+      { "status": "D", "path": "test/windows-native-profile-probe-contract.test.ts" },
+      { "status": "D", "path": "test/windows-runtime-probe-contract.test.ts" }
+    ]
+  },
+  "sharedSurfaces": [
+    {
+      "path": "scripts/install-windows.ps1",
+      "sha256": "2f76c8c4307e0cb68e8ed3c8fe51edb7a59ebd50ba4f019e55e88a052b8de93b",
+      "topologies": ["windows-native"]
+    },
+    {
+      "path": "scripts/install.sh",
+      "sha256": "afa18713e02740288e986b8fd1c7b1a6e203c4503ca4f72fd6c501da4a3d5c57",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2"]
+    },
+    {
+      "path": "scripts/run.sh",
+      "sha256": "220d13f82e17cf74d029744915c743f17acf715d701c8861f89b0ebcc9aebc8f",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2"]
+    },
+    {
+      "path": "scripts/ensure-config.cjs",
+      "sha256": "690e576e8bb8d2851170ba1b6f4ae18411c497089081adfd9ccdc1a17bd80c11",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    },
+    {
+      "path": "scripts/node-runtime.cjs",
+      "sha256": "fcabce527048deeb45975cb6170d943dccdf6e9c30930c2c24894f0c05338da2",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2"]
+    },
+    {
+      "path": "scripts/native-runtime-guard.cjs",
+      "sha256": "9d941ae13da32d44a8bf46dff5cff959e44ad8926c4e7dcdda58d467acdf550b",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2"]
+    },
+    {
+      "path": "scripts/runtime-preflight.cjs",
+      "sha256": "c8372de1dc4ec10b74240bbda2f95f274e9e826e50c1bfb79e1208651dddd602",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    },
+    {
+      "path": "scripts/runtime-readiness.mjs",
+      "sha256": "2149c17dabfa9507136a86402676af28f797f6670151d35e8c6c8b21f2d4b354",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    },
+    {
+      "path": "scripts/install-research-plugins.cjs",
+      "sha256": "ae6ce063498847a548a2091987340da7bd30871594f5edd92dec225c29d3a2a4",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2"]
+    },
+    {
+      "path": "scripts/research-plugins-install-utils.cjs",
+      "sha256": "2d2b640382733fa549eb2df5355723ce8e28830b9a117854ca6b399d8d5c5f60",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2"]
+    },
+    {
+      "path": "scripts/bootstrap-profile/maintenance-lease.cjs",
+      "sha256": "b3f60d4ff63c9707ef362b043be9fe81769548ae0ce3c4530e1a0f5673f355cd",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    },
+    {
+      "path": "scripts/bootstrap-profile/model-probe.cjs",
+      "sha256": "278a1bf2eeff574bacf8f17163544f09dacc3df4569bbb18780b9ee822566a91",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    },
+    {
+      "path": "extensions/research-claw-core/src/workspace/git-tracker.ts",
+      "sha256": "f00bb7b36edefd675c898183faab4044c0cf20c440288c509892dde075a2646b",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    },
+    {
+      "path": "package.json",
+      "sha256": "e842dda5f05dddb28b9a51cfa3dff4b2b77d2d67996d31f24fcf1cbd09b06452",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "cfe48a0cf6580f08bf806eeb67bbdd33d76640312b7a616ead399a1d3e760658",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    }
+  ],
+  "currentKnownGaps": {
+    "sourceInstallWindowsHasUtf8Bom": false,
+    "finalV18PackageInstallWindowsHasUtf8Bom": true,
+    "browserLaunch": "msys-cmd-start-failure-swallowed",
+    "brandedLocalhostOrigin": false,
+    "dailyLauncher": false,
+    "trayHost": false,
+    "quickEditGate": "not-present-in-current-source",
+    "packageBuilderAndAudit": "not-present-in-current-source"
+  }
+}

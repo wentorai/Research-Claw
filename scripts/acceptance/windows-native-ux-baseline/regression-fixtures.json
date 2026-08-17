@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "runtime": [
+    {
+      "id": "windows-v16-runtime-red",
+      "provenance": "real-windows-sanitized",
+      "sourceReportSha256": "d2b4bfe70dd0f0993ad1eada0c81c7f3c3db273d157f66dcf271028fcc7f7ab3",
+      "sourceCommit": "8b0e0b4442fa4371a2af51e4f3e0bd10a42a77cc",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "product-runtime-red",
+      "observed": {
+        "installTransactionGreen": true,
+        "http200": false,
+        "configGet": "not-run",
+        "stableTicks": false,
+        "quickEditEnabled": true,
+        "browserAutoOpen": "not-observed",
+        "failureCode": "WS_OPEN_TIMEOUT"
+      }
+    },
+    {
+      "id": "windows-v17-probe-identity-red",
+      "provenance": "real-windows-sanitized",
+      "sourceReportSha256": "69b0b2c5a268d747860981cb7d96ae263936833dc2561ce941c09d69c105e434",
+      "sourceCommit": "661879c9a4b43833b9c25047e505bb4c3ff4fdc4",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "probe-contract-red-product-unknown",
+      "observed": {
+        "installTransactionGreen": true,
+        "http200": true,
+        "configGet": "not-run",
+        "stableTicks": false,
+        "quickEditEnabled": true,
+        "browserAutoOpen": "not-observed",
+        "failureCode": "INVALID_CLIENT_IDENTITY"
+      }
+    },
+    {
+      "id": "windows-v18-runtime-interaction-red",
+      "provenance": "real-windows-sanitized",
+      "sourceReportSha256": "c98ccab82382a00bc264dada6c8e04320671018c7a4919b54ed1d55c5f7d0926",
+      "sourceCommit": "661879c9a4b43833b9c25047e505bb4c3ff4fdc4",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "runtime-protocol-green-interaction-red",
+      "observed": {
+        "installTransactionGreen": true,
+        "http200": true,
+        "configGet": "pass",
+        "stableTicks": true,
+        "quickEditEnabled": true,
+        "browserAutoOpen": "not-observed",
+        "failureCode": null
+      }
+    }
+  ],
+  "ownership": [
+    {
+      "id": "foreign-listener-without-receipt",
+      "provenance": "synthetic",
+      "topology": "foreign-listener",
+      "receipt": {
+        "present": false,
+        "pidExists": true,
+        "creationTimeMatches": false,
+        "executableMatches": false,
+        "managedRootMatches": false,
+        "protocolMatches": false
+      },
+      "expectedAction": "preserve-and-reject"
+    },
+    {
+      "id": "stale-owner-receipt",
+      "provenance": "synthetic",
+      "topology": "managed-native-stale-receipt",
+      "receipt": {
+        "present": true,
+        "pidExists": false,
+        "creationTimeMatches": false,
+        "executableMatches": false,
+        "managedRootMatches": false,
+        "protocolMatches": false
+      },
+      "expectedAction": "clear-receipt-only"
+    }
+  ],
+  "nativeAbi": [
+    {
+      "id": "macos-node24-binding-under-node22",
+      "provenance": "controlled-local",
+      "platform": "darwin-arm64",
+      "buildNodeMajor": 24,
+      "buildAbi": 137,
+      "gatewayNodeMajor": 22,
+      "gatewayAbi": 127,
+      "javascriptRequirePassed": true,
+      "databaseOpenPassed": false,
+      "expectedRepairProof": "in-memory-database-select-one"
+    }
+  ]
+}

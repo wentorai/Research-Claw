@@ -1,0 +1,46 @@
+# Windows native install / daily-launch baseline
+
+This directory is a secret-free WUX-T01 evidence projection. It does not claim
+that the current source is release-ready.
+
+## Authority boundary
+
+- Production source baseline: RC commit
+  `5015be7a72387098f122cb3e7cc4aae32714d4fa`, tree
+  `4d22e3cfc334c252d5c3e7c8d606b14a0483b1fa`.
+- Last user-transported Windows package: v18 ZIP SHA-256
+  `3d8df487f42762334691287b9191d371310bd016996bf7e5000801385d0b5320`.
+- The v18 package installed commit `661879c9a4b43833b9c25047e505bb4c3ff4fdc4`.
+  It is historical evidence only: current source changed, probes/audits were
+  removed, and the v18 `install.sh` also carried a browser-launch delta not
+  present in its installed commit.
+
+## Sanitized real-Windows sources
+
+The runtime projections in `regression-fixtures.json` were manually reduced to
+non-secret booleans, error classes, timing classes, versions, and commit IDs.
+Their source reports were scanned for Setup Token, model-key, and Authorization
+header shapes before projection.
+
+| Fixture | Original report SHA-256 | Meaning |
+|---|---|---|
+| `windows-v16-runtime-red` | `d2b4bfe70dd0f0993ad1eada0c81c7f3c3db273d157f66dcf271028fcc7f7ab3` | listener existed, HTTP/WebSocket timed out; product runtime red |
+| `windows-v17-probe-identity-red` | `69b0b2c5a268d747860981cb7d96ae263936833dc2561ce941c09d69c105e434` | HTTP green; synthetic control-UI identity rejected; probe red, product unknown |
+| `windows-v18-runtime-interaction-red` | `c98ccab82382a00bc264dada6c8e04320671018c7a4919b54ed1d55c5f7d0926` | HTTP, authenticated RPC and ticks green; QuickEdit/browser interaction gate not green |
+
+The original reports remain outside the repository. These projections contain
+no username, absolute Windows path, PID, log body, token, model key, or secret
+hash.
+
+## Synthetic fixtures
+
+`foreign-listener-without-receipt` and `stale-owner-receipt` are deliberately
+synthetic. They test conservative ownership decisions; they are not presented
+as real-Windows process evidence. `macos-node24-binding-under-node22` is a
+controlled local reproduction of the ABI 137-to-127 failure.
+
+## Update rule
+
+Any edit to a `sharedSurfaces` file must update its SHA and invalidate every
+listed topology's downstream evidence. Never update the hash alone: add the new
+red/green evidence that justifies the source change.
