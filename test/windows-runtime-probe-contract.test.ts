@@ -76,7 +76,9 @@ describe('Windows post-install runtime probe package', () => {
     expect(source).toContain("frame.event === 'tick'");
     expect(source).toContain('CONFIG_GET_TIMEOUT_MS = 35_000');
     expect(source).toContain('STABILITY_WINDOW_MS = 75_000');
-    expect(source).toContain("const clientId = 'openclaw-control-ui'");
+    expect(source).toContain("const clientId = 'gateway-client'");
+    expect(source).toContain("mode: 'backend'");
+    expect(source).not.toContain("headers: { Origin:");
     expect(source).toContain("stdio: ['ignore', 'pipe', 'pipe']");
     expect(source).toContain("consoleScope: 'gateway-process-console-direct'");
     expect(source).toContain('gitDescendantCount');
@@ -87,7 +89,10 @@ describe('Windows post-install runtime probe package', () => {
       'utf8',
     );
     expect(helperSource).toContain('AttachConsole');
+    expect(helperSource).toContain('CreateFileW');
+    expect(helperSource).toContain('CONIN$');
     expect(helperSource).toContain('GetConsoleMode');
+    expect(helperSource).toContain('CloseHandle');
     expect(helperSource).toContain('ProcessId, ParentProcessId, Name');
     expect(helperSource).not.toMatch(/CommandLine|EnvironmentVariables/i);
   });

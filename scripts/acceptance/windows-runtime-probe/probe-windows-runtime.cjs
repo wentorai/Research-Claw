@@ -15,7 +15,7 @@ const HTTP_TIMEOUT_MS = 5_000;
 const PORT = 28789;
 const MAX_LOG_BYTES = 256 * 1024;
 const MAX_OUTPUT = 4 * 1024 * 1024;
-const clientId = 'openclaw-control-ui';
+const clientId = 'gateway-client';
 
 const SECRET_PATTERNS = [
   /(^|[^A-Za-z0-9_-])rca_[A-Za-z0-9_-]{43,}/g,
@@ -293,9 +293,7 @@ async function openDashboardSession({ root, port, token, uiVersion, listenerPid,
   const entryPath = path.join(root, 'node_modules', 'openclaw', 'dist', 'entry.js');
   const requireFromOpenClaw = createRequire(fs.realpathSync(entryPath));
   const WebSocket = requireFromOpenClaw('ws');
-  const socket = new WebSocket(`ws://127.0.0.1:${port}`, {
-    headers: { Origin: `http://127.0.0.1:${port}` },
-  });
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`);
   const pending = new Map();
   const eventTimeline = [];
   const openedAt = Date.now();
@@ -388,7 +386,7 @@ async function openDashboardSession({ root, port, token, uiVersion, listenerPid,
       id: clientId,
       version: uiVersion,
       platform: 'node',
-      mode: 'webchat',
+      mode: 'backend',
       displayName: 'Wentor post-install runtime probe',
     },
     caps: [],

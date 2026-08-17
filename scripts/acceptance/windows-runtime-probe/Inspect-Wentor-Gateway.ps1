@@ -21,8 +21,21 @@ public static class WentorGatewayConsole {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern IntPtr GetStdHandle(int nStdHandle);
 
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr CreateFileW(
+        string lpFileName,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        IntPtr lpSecurityAttributes,
+        uint dwCreationDisposition,
+        uint dwFlagsAndAttributes,
+        IntPtr hTemplateFile);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
 }
 '@
 }
@@ -66,14 +79,24 @@ $console = [ordered]@{
     errorCode = $null
 }
 $attached = $false
+$consoleHandle = [IntPtr]::Zero
 try {
     [void][WentorGatewayConsole]::FreeConsole()
     if ([WentorGatewayConsole]::AttachConsole([uint32]$RootPid)) {
         $attached = $true
         $console.attached = $true
         [uint32]$mode = 0
-        $handle = [WentorGatewayConsole]::GetStdHandle(-10)
-        if ([WentorGatewayConsole]::GetConsoleMode($handle, [ref]$mode)) {
+        $consoleHandle = [WentorGatewayConsole]::CreateFileW(
+            'CONIN$',
+            [uint32]0x80000000,
+            [uint32]0x00000003,
+            [IntPtr]::Zero,
+            [uint32]3,
+            [uint32]0,
+            [IntPtr]::Zero)
+        if ($consoleHandle -eq [IntPtr]::Zero -or $consoleHandle -eq [IntPtr](-1)) {
+            $console.errorCode = 'OPEN_CONIN_FAILED'
+        } elseif ([WentorGatewayConsole]::GetConsoleMode($consoleHandle, [ref]$mode)) {
             $console.inputMode = [string]$mode
             $console.quickEditEnabled = (($mode -band 0x40) -ne 0)
         } else {
@@ -83,6 +106,9 @@ try {
         $console.errorCode = 'ATTACH_CONSOLE_FAILED'
     }
 } finally {
+    if ($consoleHandle -ne [IntPtr]::Zero -and $consoleHandle -ne [IntPtr](-1)) {
+        [void][WentorGatewayConsole]::CloseHandle($consoleHandle)
+    }
     if ($attached) { [void][WentorGatewayConsole]::FreeConsole() }
 }
 

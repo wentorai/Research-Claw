@@ -2264,6 +2264,21 @@ else
   fi
 fi
 
+# Git Bash can lose cmd.exe's empty window-title argument when it reconstructs
+# `start "" URL`, causing a silent no-op. Use the Windows Shell through
+# PowerShell instead, with MSYS path conversion disabled for the URL.
+rc_open_windows_dashboard() {
+  local _url="$1"
+  case "$_url" in
+    http://127.0.0.1:*/*) ;;
+    *) return 1 ;;
+  esac
+  command -v powershell.exe >/dev/null 2>&1 || return 1
+  MSYS2_ARG_CONV_EXCL='*' powershell.exe \
+    -NoLogo -NoProfile -NonInteractive -Command \
+    "Start-Process -FilePath '$_url'" </dev/null >/dev/null 2>&1
+}
+
 # --- Done ---
 printf "\n  ${G}${B}Ready!${N}  ${D}(total $(_elapsed))${N}\n\n"
 "$GW_NODE" "$INSTALL_DIR/scripts/version-info.cjs" --root "$INSTALL_DIR" 2>/dev/null \
@@ -2303,7 +2318,8 @@ printf "  ${D}Press Ctrl+C to stop${N}\n\n"
     if [ "$RC_OS" = mac ]; then
       open "$DASHBOARD_URL" 2>/dev/null || true
     elif [ "$RC_OS" = windows ]; then
-      cmd.exe /c start "" "$DASHBOARD_URL" >/dev/null 2>&1 || true
+      rc_open_windows_dashboard "$DASHBOARD_URL" \
+        || warn "Dashboard is ready, but Windows could not open the default browser automatically: $DASHBOARD_URL"
     else
       xdg-open "$DASHBOARD_URL" 2>/dev/null || true
     fi

@@ -12,9 +12,9 @@ Write-Host ''
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $probe = Join-Path $scriptRoot 'probe-windows-runtime.cjs'
-$probeSha256 = '9077d1b6a407b9606882a1648375430a5293fe0b7b20e5370d3812711007029e'
+$probeSha256 = 'bea4d0621bf840cd55412a4db32318cc4e4cb7cfcf4327c05df43169a134b6a2'
 $processHelper = Join-Path $scriptRoot 'Inspect-Wentor-Gateway.ps1'
-$processHelperSha256 = '01424ebd0a65d3acf6b116ffc27c5cf1d83cfac4b18c7c7d85c02a64974cd00e'
+$processHelperSha256 = 'be0484cdc3c1263418d24ff732b27946255db937178fdcaa6c790edf162b7e34'
 $rcRoot = Join-Path $env:USERPROFILE 'research-claw'
 $reportRoot = Join-Path $env:LOCALAPPDATA 'Wentor\ProbeReports'
 

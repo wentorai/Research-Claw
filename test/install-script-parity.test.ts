@@ -37,7 +37,11 @@ describe('release installation surfaces', () => {
 
     expect(native).toMatch(/MINGW\*\|MSYS\*\|CYGWIN\*\).*RC_OS=windows/);
     expect(native).toContain('--auth-token-file');
-    expect(native).toContain('cmd.exe /c start "" "$DASHBOARD_URL"');
+    expect(native).toContain('rc_open_windows_dashboard()');
+    expect(native).toContain("MSYS2_ARG_CONV_EXCL='*' powershell.exe");
+    expect(native).toContain('-NoLogo -NoProfile -NonInteractive -Command');
+    expect(native).toContain("Start-Process -FilePath '$_url'");
+    expect(native).not.toContain('cmd.exe /c start "" "$DASHBOARD_URL"');
     expect(windows).toContain("$NodeVersion = '22.22.2'");
     expect(windows).toContain("$NodeSha256 = '7c93e9d92bf68c07182b471aa187e35ee6cd08ef0f24ab060dfff605fcc1c57c'");
     expect(windows).toContain("$GitVersion = '2.55.0'");
