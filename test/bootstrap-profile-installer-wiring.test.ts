@@ -157,6 +157,15 @@ describe('Bootstrap Profile installer transaction ordering', () => {
     }
   });
 
+  it('keeps the native model verification visibly alive without keyboard input', () => {
+    expect(native).toContain('rc_profile_run_model_probe() {');
+    expect(native).toContain(
+      'run_with_heartbeat "Verifying Bootstrap Profile model access"',
+    );
+    expect(native).toContain('unset -f rc_profile_run_model_probe');
+    expect(native).not.toMatch(/\bread\b[^\n]*(?:Press|Enter|key)/i);
+  });
+
   it('Native recovers under stop proof after the candidate exists, then stages and applies', () => {
     expectOrdered(native, [
       'rc_profile_parse_args "$@"',

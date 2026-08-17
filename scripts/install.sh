@@ -730,19 +730,25 @@ $("$GW_NODE" -e '
   const profile=c.auth?.order?.[provider]?.[0] || "";
   if (!provider || !profile) process.exit(1);
   process.stdout.write(provider+" "+profile);
-' "$INSTALL_DIR/config/openclaw.json")
+  ' "$INSTALL_DIR/config/openclaw.json")
 EOF
   [ -n "$_provider" ] && [ -n "$_profile" ] || die "Bootstrap Profile model identity is incomplete."
   _probe_output="$RC_PROFILE_TEMP_ROOT/model-probe.json"
-  if ! "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
-      --root "$INSTALL_DIR" \
-      --config "$INSTALL_DIR/config/openclaw.json" \
-      --state "$HOME/.openclaw" \
-      --provider "$_provider" \
-      --profile "$_profile" \
-      --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null; then
+  rc_profile_run_model_probe() {
+    "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
+        --root "$INSTALL_DIR" \
+        --config "$INSTALL_DIR/config/openclaw.json" \
+        --state "$HOME/.openclaw" \
+        --provider "$_provider" \
+        --profile "$_profile" \
+        --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null
+  }
+  if ! run_with_heartbeat "Verifying Bootstrap Profile model access" \
+      rc_profile_run_model_probe; then
+    unset -f rc_profile_run_model_probe
     die "Bootstrap Profile credential/model probe failed."
   fi
+  unset -f rc_profile_run_model_probe
   "$GW_NODE" -e '
     const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
     if (value?.ok !== true || value?.status !== "ok") process.exit(1);

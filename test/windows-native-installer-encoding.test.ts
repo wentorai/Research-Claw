@@ -53,4 +53,27 @@ describe('native Windows installer byte encoding', () => {
     );
     expect(workflow).toContain('-ExpectedEdition Core -ExpectedMajorVersion 7');
   });
+
+  it('prevents QuickEdit from suspending the shared installer and gateway console', () => {
+    const installer = fs.readFileSync(INSTALLER, 'utf8');
+
+    expect(installer).toContain('function Disable-ConsoleQuickEdit');
+    expect(installer).toContain('function Restore-ConsoleInputMode');
+    expect(installer).toContain('ENABLE_QUICK_EDIT_MODE = 0x0040');
+    expect(installer).toContain('ENABLE_EXTENDED_FLAGS = 0x0080');
+    expect(installer).toContain('GetConsoleMode');
+    expect(installer).toContain('SetConsoleMode');
+    expect(installer).toContain('$script:ConsoleOriginalMode');
+    expect(installer).toContain('$script:ConsoleModeManaged = Disable-ConsoleQuickEdit');
+    expect(installer).toContain('Restore-ConsoleInputMode');
+
+    const disableIndex = installer.indexOf(
+      '$script:ConsoleModeManaged = Disable-ConsoleQuickEdit',
+    );
+    const bashIndex = installer.indexOf('& $bash @arguments');
+    const restoreIndex = installer.lastIndexOf('Restore-ConsoleInputMode');
+    expect(disableIndex).toBeGreaterThan(0);
+    expect(disableIndex).toBeLessThan(bashIndex);
+    expect(restoreIndex).toBeGreaterThan(bashIndex);
+  });
 });

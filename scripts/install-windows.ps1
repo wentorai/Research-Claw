@@ -19,11 +19,14 @@ $GitArchive = "PortableGit-$GitRelease-64-bit.7z.exe"
 $GitSha256 = '016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5'
 $SevenZipArchive = '7zr.exe'
 $SevenZipSha256 = '56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72'
-$InstallShSha256 = 'e735778621772ea2ba3b1c0ce1b11e0316de57e1c3f27f1b4ece632cc0251b3c'
+$InstallShSha256 = '035acfeec96112ce489300163bab99e8908f30630f0c9bf2e6395dbe69b8a7fc'
 $InstallShUrl = 'https://wentor.ai/install.sh'
 $IssueUrl = 'https://github.com/wentorai/Research-Claw/issues'
 $script:PrivateRoot = $null
 $script:InstallerSourcePath = $MyInvocation.MyCommand.Path
+$script:ConsoleInputHandle = [IntPtr]::Zero
+$script:ConsoleOriginalMode = $null
+$script:ConsoleModeManaged = $false
 
 function Write-Step([string]$Text) {
     Write-Host "`n==> $Text" -ForegroundColor Cyan
@@ -43,6 +46,70 @@ function Add-ProcessPath([string]$PathEntry) {
     if ($parts -notcontains $PathEntry) {
         $env:Path = "$PathEntry;$env:Path"
     }
+}
+
+function Initialize-ConsoleApi {
+    if ('WentorNativeConsole' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class WentorNativeConsole {
+    public const uint ENABLE_QUICK_EDIT_MODE = 0x0040;
+    public const uint ENABLE_EXTENDED_FLAGS = 0x0080;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+}
+'@
+}
+
+function Disable-ConsoleQuickEdit {
+    Initialize-ConsoleApi
+    $handle = [WentorNativeConsole]::GetStdHandle(-10)
+    if ($handle -eq [IntPtr]::Zero) { return $false }
+
+    [uint32]$mode = 0
+    if (-not [WentorNativeConsole]::GetConsoleMode($handle, [ref]$mode)) {
+        return $false
+    }
+    [uint32]$nextMode = ($mode -band (-bnot [WentorNativeConsole]::ENABLE_QUICK_EDIT_MODE)) `
+        -bor [WentorNativeConsole]::ENABLE_EXTENDED_FLAGS
+    if (-not [WentorNativeConsole]::SetConsoleMode($handle, $nextMode)) {
+        throw '无法关闭 Windows 控制台快速编辑模式。'
+    }
+    [uint32]$verifiedMode = 0
+    if (-not [WentorNativeConsole]::GetConsoleMode($handle, [ref]$verifiedMode) `
+        -or (($verifiedMode -band [WentorNativeConsole]::ENABLE_QUICK_EDIT_MODE) -ne 0)) {
+        throw 'Windows 控制台快速编辑模式仍处于启用状态。'
+    }
+
+    $script:ConsoleInputHandle = $handle
+    $script:ConsoleOriginalMode = $mode
+    return $true
+}
+
+function Restore-ConsoleInputMode {
+    if (-not $script:ConsoleModeManaged `
+        -or $script:ConsoleInputHandle -eq [IntPtr]::Zero `
+        -or $null -eq $script:ConsoleOriginalMode) {
+        return
+    }
+    if (-not [WentorNativeConsole]::SetConsoleMode(
+        $script:ConsoleInputHandle,
+        [uint32]$script:ConsoleOriginalMode
+    )) {
+        Write-Warning 'Windows 控制台输入模式未能恢复；关闭此窗口即可恢复。'
+    }
+    $script:ConsoleModeManaged = $false
+    $script:ConsoleInputHandle = [IntPtr]::Zero
+    $script:ConsoleOriginalMode = $null
 }
 
 function New-PrivateRoot {
@@ -348,6 +415,13 @@ function Main {
         throw 'SETUP_TOKEN 格式无效。'
     }
 
+    $script:ConsoleModeManaged = Disable-ConsoleQuickEdit
+    if ($script:ConsoleModeManaged) {
+        Write-Ok 'Windows 快速编辑已关闭；点击窗口或按 Enter 不会暂停安装。'
+    } else {
+        Write-Warning '当前会话没有可管理的 Windows 控制台；安装将继续。'
+    }
+
     $script:PrivateRoot = New-PrivateRoot
     Ensure-Node22
     $bash = Ensure-GitBash
@@ -387,6 +461,7 @@ try {
     Write-Host "请保留非秘密错误信息并提交到：$IssueUrl" -ForegroundColor Yellow
     exit 1
 } finally {
+    Restore-ConsoleInputMode
     if ($script:PrivateRoot -and (Test-Path -LiteralPath $script:PrivateRoot)) {
         Remove-Item -LiteralPath $script:PrivateRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
