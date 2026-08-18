@@ -1,0 +1,16 @@
+econ-image-mcp
+Copyright 2026 Research Craft Skills Contributors
+
+Independently implemented multi-provider image generation MCP.
+Architecture inspired by:
+  - wind-cn-mcp / cn-academic-search-mcp (this repo's existing multi-provider MCPs)
+
+Image model integrations use public APIs/SDKs:
+  - DALL-E 3: OpenAI public API (https://platform.openai.com/docs/api-reference/images)
+  - FLUX.1: Replicate / fal.ai public APIs
+  - Imagen 3: Google Vertex AI public docs
+  - Ideogram v2: Replicate public API
+  - Recraft v3: Replicate public API
+
+No source code copied. Image generation requires user-provided API keys.
+Users must comply with each model provider's terms of service.

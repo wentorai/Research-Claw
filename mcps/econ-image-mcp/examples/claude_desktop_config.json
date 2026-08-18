@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "econ-image": {
+      "command": "/ABSOLUTE/PATH/TO/econ-image-mcp/.venv/bin/econ-image-mcp",
+      "args": [],
+      "env": {
+        "OPENAI_API_KEY": "sk-your-openai-key",
+        "REPLICATE_API_TOKEN": "rpl_your-replicate-token",
+        "FAL_KEY": "fal-your-key",
+        "RECRAFT_API_KEY": "rk-your-recraft-key",
+        "GOOGLE_CLOUD_PROJECT": "your-gcp-project",
+        "GOOGLE_CLOUD_REGION": "us-central1",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/abs/path/to/sa.json"
+      }
+    }
+  }
+}
