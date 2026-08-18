@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 45_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
 const PROVIDER_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/;
 const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,127}:managed$/;
 

@@ -134,6 +134,19 @@ describe('Bootstrap Profile installer transaction ordering', () => {
     expect(native).not.toContain('git remote set-url origin "$GITEE_REPO"');
   });
 
+  it('Native acceptance source pins require an explicit ref and exact commit', () => {
+    expect(native).toContain('RC_SOURCE_REF="${RC_SOURCE_REF:-}"');
+    expect(native).toContain('RC_SOURCE_COMMIT="${RC_SOURCE_COMMIT:-}"');
+    expect(native).toContain('RC_SOURCE_PINNED=false');
+    expect(native).toContain('git check-ref-format "$RC_SOURCE_REF"');
+    expect(native).toContain('git fetch --no-tags --depth 1 "$REPO" "$RC_SOURCE_REF"');
+    expect(native).toContain('git rev-parse --verify "FETCH_HEAD^{commit}"');
+    expect(native).toContain('[ "$_FETCHED_COMMIT" = "$RC_SOURCE_COMMIT" ]');
+    expect(native).toContain('git clone --depth 1 --branch "$_PIN_NAME" "$REPO" "$INSTALL_DIR"');
+    expect(native).toContain('[ "$_CLONED_COMMIT" = "$RC_SOURCE_COMMIT" ]');
+    expect(native).toContain('Pinned source identity mismatch');
+  });
+
   it('runs every credential probe in an isolated scratch state with read-only Docker volumes', () => {
     expect(native).toContain('scripts/bootstrap-profile/model-probe.cjs');
     expect(native).toContain('--scratch-root "$RC_PROFILE_TEMP_ROOT"');
@@ -143,6 +156,15 @@ describe('Bootstrap Profile installer transaction ordering', () => {
       expect(source).toContain('rc-config:/app/config:ro');
       expect(source).toContain('rc-state:/root/.openclaw:ro');
     }
+  });
+
+  it('keeps the native model verification visibly alive without keyboard input', () => {
+    expect(native).toContain('rc_profile_run_model_probe() {');
+    expect(native).toContain(
+      'run_with_heartbeat "Verifying Bootstrap Profile model access"',
+    );
+    expect(native).toContain('unset -f rc_profile_run_model_probe');
+    expect(native).not.toMatch(/\bread\b[^\n]*(?:Press|Enter|key)/i);
   });
 
   it('Native recovers under stop proof after the candidate exists, then stages and applies', () => {

@@ -7,12 +7,9 @@
  * single commit.
  */
 
-import { execFile as execFileCb } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { access, appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFileCb);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,6 +104,8 @@ export class GitTrackerError extends Error {
 // ---------------------------------------------------------------------------
 
 const GIT_EXEC_TIMEOUT_MS = 30_000;
+const GIT_AVAILABILITY_TIMEOUT_MS = 5_000;
+const GIT_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const LOG_MAX_LIMIT = 100;
 const LOG_DEFAULT_LIMIT = 20;
 /**
@@ -263,34 +262,123 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
   // Core helper: run a git command
   // -----------------------------------------------------------------------
 
-  async function execGit(args: string[]): Promise<string> {
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
+  function gitEnvironment(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
       GIT_AUTHOR_NAME: authorName,
       GIT_AUTHOR_EMAIL: authorEmail,
       GIT_COMMITTER_NAME: authorName,
       GIT_COMMITTER_EMAIL: authorEmail,
       GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'Never',
+      GCM_MODAL_PROMPT: 'false',
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
       GIT_EDITOR: 'true',
+      GIT_SEQUENCE_EDITOR: 'true',
       GIT_PAGER: 'cat',
+      PAGER: 'cat',
     };
+  }
 
-    try {
-      const { stdout } = await execFileAsync('git', args, {
+  function hardenedGitArgs(args: string[]): string[] {
+    return [
+      '-c', 'commit.gpgSign=false',
+      '-c', 'tag.gpgSign=false',
+      '-c', `core.hooksPath=${join(root, '.git', 'rc-disabled-hooks')}`,
+      '-c', 'core.fsmonitor=false',
+      ...args,
+    ];
+  }
+
+  function runGit(args: string[], timeoutMs: number): Promise<string> {
+    return new Promise<string>((resolvePromise, rejectPromise) => {
+      const child = spawn('git', hardenedGitArgs(args), {
         cwd: root,
-        timeout: GIT_EXEC_TIMEOUT_MS,
-        maxBuffer: 10 * 1024 * 1024,
-        env,
+        env: gitEnvironment(),
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
-      return stdout ?? '';
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let bufferedBytes = 0;
+      let timedOut = false;
+      let bufferExceeded = false;
+      let settled = false;
+
+      const finish = (error?: Error, value = ''): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) rejectPromise(error);
+        else resolvePromise(value);
+      };
+      const capture = (target: Buffer[], chunk: Buffer): void => {
+        bufferedBytes += chunk.length;
+        if (bufferedBytes > GIT_MAX_BUFFER_BYTES) {
+          bufferExceeded = true;
+          child.kill();
+          return;
+        }
+        target.push(chunk);
+      };
+
+      child.stdout.on('data', (chunk: Buffer) => capture(stdout, chunk));
+      child.stderr.on('data', (chunk: Buffer) => capture(stderr, chunk));
+      child.once('error', (error) => finish(error));
+      child.once('close', (code, signal) => {
+        const stderrText = Buffer.concat(stderr).toString('utf8').trim();
+        if (timedOut) {
+          const error = new Error(`git timed out after ${timeoutMs}ms`) as Error & {
+            code?: string;
+            stderr?: string;
+          };
+          error.code = 'ETIMEDOUT';
+          error.stderr = stderrText;
+          finish(error);
+          return;
+        }
+        if (bufferExceeded) {
+          const error = new Error('git output exceeded the 10 MiB limit') as Error & {
+            code?: string;
+            stderr?: string;
+          };
+          error.code = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+          error.stderr = stderrText;
+          finish(error);
+          return;
+        }
+        if (code !== 0) {
+          const error = new Error(
+            `git exited with code ${String(code)}${signal ? ` (${signal})` : ''}`,
+          ) as Error & { code?: number | null; stderr?: string };
+          error.code = code;
+          error.stderr = stderrText;
+          finish(error);
+          return;
+        }
+        finish(undefined, Buffer.concat(stdout).toString('utf8'));
+      });
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, timeoutMs);
+      timer.unref();
+    });
+  }
+
+  async function execGit(args: string[]): Promise<string> {
+    try {
+      return await runGit(args, GIT_EXEC_TIMEOUT_MS);
     } catch (err: unknown) {
       const execErr = err as {
         code?: string | number;
         stderr?: string;
         message?: string;
       };
+      const detail = execErr.stderr?.trim() || execErr.message || 'unknown error';
       throw new GitTrackerError(
-        `git ${args[0]} failed: ${execErr.stderr?.trim() ?? execErr.message ?? 'unknown error'}`,
+        `git ${args[0]} failed: ${detail}`,
         'GIT_EXEC_FAILED',
         err,
       );
@@ -633,7 +721,7 @@ export function createGitTracker(config: GitTrackerConfig): GitTracker {
     // -------------------------------------------------------------------
     async isAvailable(): Promise<boolean> {
       try {
-        await execFileAsync('git', ['--version'], { timeout: 5_000 });
+        await runGit(['--version'], GIT_AVAILABILITY_TIMEOUT_MS);
         return true;
       } catch {
         return false;

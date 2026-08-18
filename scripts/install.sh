@@ -39,6 +39,9 @@ PPT_MASTER_GITHUB="https://github.com/hugohe3/ppt-master.git"
 PPT_MASTER_ATOMGIT="https://atomgit.com/hugohe3/ppt-master.git"
 REPO_OVERRIDE="${REPO:-}"
 REPO="${REPO:-$GITEE_REPO}"
+RC_SOURCE_REF="${RC_SOURCE_REF:-}"
+RC_SOURCE_COMMIT="${RC_SOURCE_COMMIT:-}"
+RC_SOURCE_PINNED=false
 NODE_MIN=22
 NODE_MAX=22
 PNPM_VERSION=10.34.4
@@ -78,6 +81,22 @@ RC_PROFILE_TX_ID=""
 RC_PROFILE_PENDING_STATE=""
 RC_PROFILE_COMMITTED=false
 RC_PROFILE_COMMIT_ATTEMPTED=false
+
+rc_install_validate_source_pin() {
+  RC_SOURCE_PINNED=false
+  if [ -z "${RC_SOURCE_REF:-}" ] && [ -z "${RC_SOURCE_COMMIT:-}" ]; then return 0; fi
+  [ -n "${RC_SOURCE_REF:-}" ] && [ -n "${RC_SOURCE_COMMIT:-}" ] \
+    || die "Pinned source requires both RC_SOURCE_REF and RC_SOURCE_COMMIT."
+  [ -n "${REPO_OVERRIDE:-}" ] \
+    || die "Pinned source requires an explicit REPO."
+  case "$RC_SOURCE_REF" in
+    refs/heads/*|refs/tags/*) ;;
+    *) die "Pinned source ref must be a full heads or tags ref." ;;
+  esac
+  [[ "$RC_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+    || die "Pinned source commit must be a lowercase 40-character Git object ID."
+  RC_SOURCE_PINNED=true
+}
 
 # ── Installer lifecycle cleanup ────────────────────────────────────────
 # Update snapshots and heartbeat logs may contain user data or subprocess
@@ -733,19 +752,25 @@ $("$GW_NODE" -e '
   const profile=c.auth?.order?.[provider]?.[0] || "";
   if (!provider || !profile) process.exit(1);
   process.stdout.write(provider+" "+profile);
-' "$INSTALL_DIR/config/openclaw.json")
+  ' "$INSTALL_DIR/config/openclaw.json")
 EOF
   [ -n "$_provider" ] && [ -n "$_profile" ] || die "Bootstrap Profile model identity is incomplete."
   _probe_output="$RC_PROFILE_TEMP_ROOT/model-probe.json"
-  if ! "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
-      --root "$INSTALL_DIR" \
-      --config "$INSTALL_DIR/config/openclaw.json" \
-      --state "$HOME/.openclaw" \
-      --provider "$_provider" \
-      --profile "$_profile" \
-      --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null; then
+  rc_profile_run_model_probe() {
+    "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
+        --root "$INSTALL_DIR" \
+        --config "$INSTALL_DIR/config/openclaw.json" \
+        --state "$HOME/.openclaw" \
+        --provider "$_provider" \
+        --profile "$_profile" \
+        --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null
+  }
+  if ! run_with_heartbeat "Verifying Bootstrap Profile model access" \
+      rc_profile_run_model_probe; then
+    unset -f rc_profile_run_model_probe
     die "Bootstrap Profile credential/model probe failed."
   fi
+  unset -f rc_profile_run_model_probe
   "$GW_NODE" -e '
     const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
     if (value?.ok !== true || value?.status !== "ok") process.exit(1);
@@ -776,6 +801,7 @@ rc_profile_commit_native() {
   rc_profile_cleanup_host_secret
 }
 
+rc_install_validate_source_pin
 rc_profile_parse_args "$@"
 trap 'exit 130' INT TERM
 rc_profile_redeem
@@ -1500,74 +1526,92 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   # Remove untracked files that may conflict with incoming changes.
   # Gitignored files (config, data, node_modules, workspace runtime) are preserved.
   git clean -fd 2>/dev/null || true
-  # --- Exact source-authority update ---
-  # A managed installation must never trust an arbitrary pre-existing origin.
-  # Fetch one official main tip and reset to that exact FETCH_HEAD; do not merge,
-  # rebase, or preserve unrelated local commits. An explicit REPO override is
-  # the only supported opt-in to a non-official source.
-  _ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
-  _SOURCE_BRANCH=main
-  _PRIMARY_REMOTE=rc-gitee
-  _PRIMARY_REPO="$GITEE_REPO"
-  _PRIMARY_LABEL=Gitee
-  _SECONDARY_REMOTE=rc-github
-  _SECONDARY_REPO="$GITHUB_REPO"
-  _SECONDARY_LABEL=GitHub
-
-  if [ -n "$REPO_OVERRIDE" ]; then
-    _SOURCE_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-    [ "$_SOURCE_BRANCH" = "HEAD" ] && _SOURCE_BRANCH=main
-    _PRIMARY_REMOTE=rc-explicit-source
-    _PRIMARY_REPO="$REPO_OVERRIDE"
-    _PRIMARY_LABEL='explicit REPO'
-    _SECONDARY_REMOTE=''
-    _SECONDARY_REPO=''
-    _SECONDARY_LABEL=''
-  else
-    case "$_ORIGIN_URL" in
-      "$GITHUB_REPO"|git@github.com:wentorai/Research-Claw.git|ssh://git@github.com/wentorai/Research-Claw.git)
-        _PRIMARY_REMOTE=rc-github
-        _PRIMARY_REPO="$GITHUB_REPO"
-        _PRIMARY_LABEL=GitHub
-        _SECONDARY_REMOTE=rc-gitee
-        _SECONDARY_REPO="$GITEE_REPO"
-        _SECONDARY_LABEL=Gitee
-        ;;
-      "$GITEE_REPO"|git@gitee.com:Ruby_Callipygian_5cb5/ResearchClaw.git|ssh://git@gitee.com/Ruby_Callipygian_5cb5/ResearchClaw.git)
-        ;;
-      '')
-        warn "Existing origin is missing; using the official Gitee/GitHub mirrors."
-        ;;
-      *)
-        warn "Foreign existing origin ignored; using the official Gitee/GitHub mirrors."
-        ;;
-    esac
-  fi
-
-  rc_install_fetch_exact_source() {
-    local _remote="$1" _repo="$2" _label="$3"
-    [ -n "$_remote" ] && [ -n "$_repo" ] || return 1
-    git remote set-url "$_remote" "$_repo" 2>/dev/null \
-      || git remote add "$_remote" "$_repo" 2>/dev/null \
-      || return 1
-    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Fetching $_label/$_SOURCE_BRANCH" \
-       git fetch --depth 1 "$_remote" "$_SOURCE_BRANCH" \
-       && git reset --hard FETCH_HEAD; then
-      ok "Updated from $_label"
-      return 0
-    fi
-    return 1
-  }
-
   _PULLED=false
-  if rc_install_fetch_exact_source \
-      "$_PRIMARY_REMOTE" "$_PRIMARY_REPO" "$_PRIMARY_LABEL"; then
-    _PULLED=true
-  elif [ -n "$_SECONDARY_REMOTE" ]; then
-    warn "Update from $_PRIMARY_LABEL failed — trying $_SECONDARY_LABEL mirror..."
-    if rc_install_fetch_exact_source \
-        "$_SECONDARY_REMOTE" "$_SECONDARY_REPO" "$_SECONDARY_LABEL"; then
+  if ${RC_SOURCE_PINNED:-false}; then
+    git check-ref-format "$RC_SOURCE_REF" >/dev/null 2>&1 \
+      || die "Pinned source ref is not a valid Git ref."
+    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Fetching pinned candidate" \
+        git fetch --no-tags --depth 1 "$REPO" "$RC_SOURCE_REF"; then
+      _FETCHED_COMMIT="$(git rev-parse --verify "FETCH_HEAD^{commit}" 2>/dev/null || true)"
+      [ "$_FETCHED_COMMIT" = "$RC_SOURCE_COMMIT" ] \
+        || die "Pinned source identity mismatch."
+      git reset --hard "$RC_SOURCE_COMMIT" >/dev/null 2>&1 \
+        || die "Pinned source could not be selected."
+      [ "$(git rev-parse HEAD 2>/dev/null || true)" = "$RC_SOURCE_COMMIT" ] \
+        || die "Pinned source identity mismatch."
       _PULLED=true
+      ok "Pinned candidate selected"
+    else
+      die "Pinned source could not be fetched."
+    fi
+  else
+    # A managed installation never trusts an arbitrary pre-existing origin.
+    # Fetch one official main tip and reset to that exact FETCH_HEAD; do not
+    # merge or rebase unrelated local commits. An explicit REPO override is the
+    # only supported opt-in to a non-official source.
+    _ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+    _SOURCE_BRANCH=main
+    _PRIMARY_REMOTE=rc-gitee
+    _PRIMARY_REPO="$GITEE_REPO"
+    _PRIMARY_LABEL=Gitee
+    _SECONDARY_REMOTE=rc-github
+    _SECONDARY_REPO="$GITHUB_REPO"
+    _SECONDARY_LABEL=GitHub
+
+    if [ -n "$REPO_OVERRIDE" ]; then
+      _SOURCE_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+      [ "$_SOURCE_BRANCH" = "HEAD" ] && _SOURCE_BRANCH=main
+      _PRIMARY_REMOTE=rc-explicit-source
+      _PRIMARY_REPO="$REPO_OVERRIDE"
+      _PRIMARY_LABEL='explicit REPO'
+      _SECONDARY_REMOTE=''
+      _SECONDARY_REPO=''
+      _SECONDARY_LABEL=''
+    else
+      case "$_ORIGIN_URL" in
+        "$GITHUB_REPO"|git@github.com:wentorai/Research-Claw.git|ssh://git@github.com/wentorai/Research-Claw.git)
+          _PRIMARY_REMOTE=rc-github
+          _PRIMARY_REPO="$GITHUB_REPO"
+          _PRIMARY_LABEL=GitHub
+          _SECONDARY_REMOTE=rc-gitee
+          _SECONDARY_REPO="$GITEE_REPO"
+          _SECONDARY_LABEL=Gitee
+          ;;
+        "$GITEE_REPO"|git@gitee.com:Ruby_Callipygian_5cb5/ResearchClaw.git|ssh://git@gitee.com/Ruby_Callipygian_5cb5/ResearchClaw.git)
+          ;;
+        '')
+          warn "Existing origin is missing; using the official Gitee/GitHub mirrors."
+          ;;
+        *)
+          warn "Foreign existing origin ignored; using the official Gitee/GitHub mirrors."
+          ;;
+      esac
+    fi
+
+    rc_install_fetch_exact_source() {
+      local _remote="$1" _repo="$2" _label="$3"
+      [ -n "$_remote" ] && [ -n "$_repo" ] || return 1
+      git remote set-url "$_remote" "$_repo" 2>/dev/null \
+        || git remote add "$_remote" "$_repo" 2>/dev/null \
+        || return 1
+      if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Fetching $_label/$_SOURCE_BRANCH" \
+         git fetch --depth 1 "$_remote" "$_SOURCE_BRANCH" \
+         && git reset --hard FETCH_HEAD; then
+        ok "Updated from $_label"
+        return 0
+      fi
+      return 1
+    }
+
+    if rc_install_fetch_exact_source \
+        "$_PRIMARY_REMOTE" "$_PRIMARY_REPO" "$_PRIMARY_LABEL"; then
+      _PULLED=true
+    elif [ -n "$_SECONDARY_REMOTE" ]; then
+      warn "Update from $_PRIMARY_LABEL failed — trying $_SECONDARY_LABEL mirror..."
+      if rc_install_fetch_exact_source \
+          "$_SECONDARY_REMOTE" "$_SECONDARY_REPO" "$_SECONDARY_LABEL"; then
+        _PULLED=true
+      fi
     fi
   fi
 
@@ -1610,7 +1654,18 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   fi
 else
   info "Cloning to $INSTALL_DIR ..."
-  if ! git clone --depth 1 "$REPO" "$INSTALL_DIR" 2>&1; then
+  if ${RC_SOURCE_PINNED:-false}; then
+    git check-ref-format "$RC_SOURCE_REF" >/dev/null 2>&1 \
+      || die "Pinned source ref is not a valid Git ref."
+    _PIN_NAME="${RC_SOURCE_REF#refs/heads/}"
+    _PIN_NAME="${_PIN_NAME#refs/tags/}"
+    if ! git clone --depth 1 --branch "$_PIN_NAME" "$REPO" "$INSTALL_DIR" 2>&1; then
+      die "Pinned source could not be cloned."
+    fi
+    _CLONED_COMMIT="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || true)"
+    [ "$_CLONED_COMMIT" = "$RC_SOURCE_COMMIT" ] \
+      || die "Pinned source identity mismatch."
+  elif ! git clone --depth 1 "$REPO" "$INSTALL_DIR" 2>&1; then
     # If default Gitee failed and user didn't override REPO, try GitHub fallback
     if [ -z "${REPO_OVERRIDE:-}" ] && [ "$REPO" = "$GITEE_REPO" ]; then
       warn "Gitee clone failed — trying GitHub fallback..."
