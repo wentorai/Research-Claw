@@ -1,0 +1,33 @@
+%% DiD 实验设计示意图
+%% 时间轴：Pre-period | Policy shock | Post-period
+%% 处理组与对照组
+flowchart LR
+    subgraph Pre ["Pre-period 政策前"]
+        T0[处理组<br/>Pre 均值 = Y_T0]
+        C0[对照组<br/>Pre 均值 = Y_C0]
+    end
+
+    subgraph Shock ["Policy Shock 政策冲击"]
+        P((政策实施<br/>t = 2020))
+    end
+
+    subgraph Post ["Post-period 政策后"]
+        T1[处理组<br/>Post 均值 = Y_T1]
+        C1[对照组<br/>Post 均值 = Y_C1]
+    end
+
+    T0 -- 时间趋势 --> T1
+    C0 -- 时间趋势 --> C1
+    P -. 仅冲击处理组 .-> T1
+
+    T1 --> ATE["ATE = (Y_T1 − Y_T0) − (Y_C1 − Y_C0)"]
+    C1 --> ATE
+
+    classDef treat fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
+    classDef ctrl fill:#e3f2fd,stroke:#1565c0,stroke-width:2px;
+    classDef shock fill:#fff3c4,stroke:#f9a825,stroke-width:2px;
+    classDef result fill:#c8e6c9,stroke:#2e7d32,stroke-width:3px;
+    class T0,T1 treat;
+    class C0,C1 ctrl;
+    class P shock;
+    class ATE result;
