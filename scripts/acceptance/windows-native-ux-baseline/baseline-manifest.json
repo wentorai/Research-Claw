@@ -1,14 +1,16 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-08-18T10:25:08+08:00",
+  "capturedAt": "2026-08-18T10:45:50+08:00",
   "productionBaseline": {
-    "commit": "f2524bf1234e537873f7550bc38f97f2923939d6",
-    "tree": "b388b3873d7bda22d9b6a37eec16a3a101450071",
-    "worktreeStatus": "clean-after-wux-t01-update-backup-fix"
+    "commit": "6d433849e98d5c34b2d8656c13c4c25f1688ed6b",
+    "tree": "2f77b533b0da9c301368aa799b226049c7ab2894",
+    "worktreeStatus": "clean-integrated-windows-candidate"
   },
   "remoteAuthorityAtBaseline": {
-    "localMain": "f2524bf1234e537873f7550bc38f97f2923939d6",
+    "localMain": "e63679c189c162d623c498a9031b274897cac43d",
+    "localCandidate": "6d433849e98d5c34b2d8656c13c4c25f1688ed6b",
     "giteeMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
+    "giteeCandidate": "661879c9a4b43833b9c25047e505bb4c3ff4fdc4",
     "githubMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
     "originMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa"
   },
@@ -74,12 +76,12 @@
   "sharedSurfaces": [
     {
       "path": "scripts/install-windows.ps1",
-      "sha256": "1e278f439cae7df6ec73ecedabe655c4e5fdd3bdd6355b3ee104474bf92368ac",
+      "sha256": "8e730e24929751362537fd9113e6fb36b07f8f03f8863c41478225527a0c8cd8",
       "topologies": ["windows-native"]
     },
     {
       "path": "scripts/install.sh",
-      "sha256": "feb998f8ae27ba07a6da64730b5a8a189aae854ed6e99f55d379605b04fcd8d3",
+      "sha256": "cb491b9be2c56d38993bbbfe467b0464ee3ac3cc758e897d669727e57e2b4621",
       "topologies": ["windows-native", "macos-native", "linux-wsl2"]
     },
     {
@@ -124,17 +126,17 @@
     },
     {
       "path": "scripts/bootstrap-profile/maintenance-lease.cjs",
-      "sha256": "b3f60d4ff63c9707ef362b043be9fe81769548ae0ce3c4530e1a0f5673f355cd",
+      "sha256": "0f3c4f21d9a99f09025a65b3d2d4d052ed7dd3817ca995667a33b8c7345380ca",
       "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
     },
     {
       "path": "scripts/bootstrap-profile/model-probe.cjs",
-      "sha256": "278a1bf2eeff574bacf8f17163544f09dacc3df4569bbb18780b9ee822566a91",
+      "sha256": "56a904c5dffd968fe8a69bc9eaaa6686fccc7be76d88c9daa124fd2f636d83b6",
       "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
     },
     {
       "path": "extensions/research-claw-core/src/workspace/git-tracker.ts",
-      "sha256": "f00bb7b36edefd675c898183faab4044c0cf20c440288c509892dde075a2646b",
+      "sha256": "22c9ab69784eb427d8c4dcfe5722c6a7f255e0ce4f4f3f19ba5046c63af564d2",
       "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
     },
     {
@@ -149,13 +151,13 @@
     }
   ],
   "currentKnownGaps": {
-    "sourceInstallWindowsHasUtf8Bom": false,
+    "sourceInstallWindowsHasUtf8Bom": true,
     "finalV18PackageInstallWindowsHasUtf8Bom": true,
     "browserLaunch": "msys-cmd-start-failure-swallowed",
     "brandedLocalhostOrigin": false,
     "dailyLauncher": false,
     "trayHost": false,
-    "quickEditGate": "not-present-in-current-source",
-    "packageBuilderAndAudit": "not-present-in-current-source"
+    "quickEditGate": "wrapper-present-real-windows-evidence-required",
+    "packageBuilderAndAudit": "auditor-present-builder-not-yet-reconstructed"
   }
 }

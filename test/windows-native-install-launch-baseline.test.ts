@@ -163,9 +163,9 @@ describe('Windows native install and daily-launch frozen baseline', () => {
     }>(MANIFEST_PATH);
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.productionBaseline).toEqual({
-      commit: 'f2524bf1234e537873f7550bc38f97f2923939d6',
-      tree: 'b388b3873d7bda22d9b6a37eec16a3a101450071',
-      worktreeStatus: 'clean-after-wux-t01-update-backup-fix',
+      commit: '6d433849e98d5c34b2d8656c13c4c25f1688ed6b',
+      tree: '2f77b533b0da9c301368aa799b226049c7ab2894',
+      worktreeStatus: 'clean-integrated-windows-candidate',
     });
     expect(manifest.sharedSurfaces.length).toBeGreaterThanOrEqual(12);
     for (const surface of manifest.sharedSurfaces) {
@@ -208,8 +208,10 @@ describe('Windows native install and daily-launch frozen baseline', () => {
     expect(manifest.lastRealWindowsArtifact.changedPathsToCurrent.length)
       .toBeGreaterThan(20);
     expect(manifest.remoteAuthorityAtBaseline).toEqual({
-      localMain: 'f2524bf1234e537873f7550bc38f97f2923939d6',
+      localMain: 'e63679c189c162d623c498a9031b274897cac43d',
+      localCandidate: '6d433849e98d5c34b2d8656c13c4c25f1688ed6b',
       giteeMain: '5015be7a72387098f122cb3e7cc4aae32714d4fa',
+      giteeCandidate: '661879c9a4b43833b9c25047e505bb4c3ff4fdc4',
       githubMain: '5015be7a72387098f122cb3e7cc4aae32714d4fa',
       originMain: '5015be7a72387098f122cb3e7cc4aae32714d4fa',
     });
@@ -336,8 +338,8 @@ describe('Windows native install and daily-launch frozen baseline', () => {
       path.join(ROOT, 'scripts', 'ensure-config.cjs'),
       'utf8',
     );
-    expect([...installerBytes.subarray(0, 3)]).toEqual([0x70, 0x61, 0x72]);
-    expect(manifest.currentKnownGaps.sourceInstallWindowsHasUtf8Bom).toBe(false);
+    expect([...installerBytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(manifest.currentKnownGaps.sourceInstallWindowsHasUtf8Bom).toBe(true);
     expect(installSh).toContain('cmd.exe /c start "" "$DASHBOARD_URL"');
     expect(installSh).toContain('>/dev/null 2>&1 || true');
     expect(manifest.currentKnownGaps.browserLaunch).toBe(
