@@ -53,9 +53,17 @@ describe('release installation surfaces', () => {
     expect(windows).toContain("$extractArguments = @('x', '-y', \"-o$extract\", $archive)");
     expect(windows).toContain('& $sevenZip @extractArguments | Out-Host');
     expect(windows).toContain("& $stageLauncher '--no-needs-console' '--hide' '--no-cd' '--command=post-install.bat' | Out-Host");
+    expect(windows).toContain('function Assert-PrivateRootAcl');
+    expect(windows).toContain('$acl.AreAccessRulesProtected');
+    expect(windows).toContain('$rule.IsInherited');
+    expect(windows).toContain("$env:RC_WINDOWS_PRIVATE_ROOT = $privatePosix");
+    expect(windows).toContain("$env:RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED = '1'");
     expect(windows).toContain("$env:RC_WINDOWS_NATIVE = '1'");
     expect(windows).toContain("$arguments += @('--auth-token-file', $tokenPosix)");
     expect(windows).not.toMatch(/\bwsl\.exe\b|\bwinget(?:\.exe)?\b|docker\.exe/i);
+    expect(native).toContain('rc_install_private_child_mode_ok');
+    expect(native).toContain('RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED');
+    expect(native).toContain('RC_WINDOWS_PRIVATE_ROOT');
     expect(runtime).toContain("if (process.platform !== 'win32') return value;");
     expect(runtime).toContain('drive[1].toLowerCase()');
     expect(runtime).toContain("process.platform === 'win32' && executable === 'pnpm'");

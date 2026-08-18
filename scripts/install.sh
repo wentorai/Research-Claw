@@ -123,6 +123,7 @@ rc_install_path_mode() {
 }
 
 rc_install_init_temp_parent() {
+  local _windows_private_root=""
   if [ -n "$RC_INSTALL_TEMP_PARENT" ]; then
     [ -d "$RC_INSTALL_TEMP_PARENT" ] && [ ! -L "$RC_INSTALL_TEMP_PARENT" ] \
       && [ "$(rc_install_path_identity "$RC_INSTALL_TEMP_PARENT")" = "$RC_INSTALL_TEMP_PARENT_ID" ] \
@@ -133,7 +134,31 @@ rc_install_init_temp_parent() {
   [ -d "$RC_INSTALL_TEMP_PARENT" ] && [ ! -L "$RC_INSTALL_TEMP_PARENT" ] || return 1
   RC_INSTALL_TEMP_PARENT_ID="$(rc_install_path_identity "$RC_INSTALL_TEMP_PARENT")" \
     || return 1
-  [ -n "$RC_INSTALL_TEMP_PARENT_ID" ]
+  [ -n "$RC_INSTALL_TEMP_PARENT_ID" ] || return 1
+  if [ "${RC_WINDOWS_NATIVE:-}" = 1 ]; then
+    [ "${RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED:-}" = 1 ] \
+      && [ -n "${RC_WINDOWS_PRIVATE_ROOT:-}" ] || return 1
+    _windows_private_root="$(cd -P -- "$RC_WINDOWS_PRIVATE_ROOT" && pwd -P)" \
+      || return 1
+    [ "$RC_INSTALL_TEMP_PARENT" = "$_windows_private_root" ] || return 1
+  fi
+}
+
+rc_install_private_child_mode_ok() {
+  local _path="$1" _kind="$2" _mode
+  _mode="$(rc_install_path_mode "$_path")" || return 1
+  case "$_kind:$_mode" in
+    directory:700|file:600) return 0 ;;
+  esac
+  [ "${RC_WINDOWS_NATIVE:-}" = 1 ] \
+    && [ "${RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED:-}" = 1 ] \
+    && [ -n "${RC_WINDOWS_PRIVATE_ROOT:-}" ] \
+    && [ "$RC_INSTALL_TEMP_PARENT" = "$(cd -P -- "$RC_WINDOWS_PRIVATE_ROOT" && pwd -P)" ] \
+    || return 1
+  case "$_kind:$_mode" in
+    directory:755|file:644) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 rc_install_validate_private_child() {
@@ -151,10 +176,7 @@ rc_install_validate_private_child() {
   esac || return 1
   [ "$(rc_install_path_owner "$_path")" = "$(id -u)" ] || return 1
   [ "$(rc_install_path_identity "$_path")" = "$_identity" ] || return 1
-  case "$_kind" in
-    directory) [ "$(rc_install_path_mode "$_path")" = 700 ] ;;
-    file) [ "$(rc_install_path_mode "$_path")" = 600 ] ;;
-  esac
+  rc_install_private_child_mode_ok "$_path" "$_kind"
 }
 
 rc_install_remove_heartbeat_log() {

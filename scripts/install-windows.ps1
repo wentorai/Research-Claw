@@ -19,7 +19,7 @@ $GitArchive = "PortableGit-$GitRelease-64-bit.7z.exe"
 $GitSha256 = '016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5'
 $SevenZipArchive = '7zr.exe'
 $SevenZipSha256 = '56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72'
-$InstallShSha256 = 'afa18713e02740288e986b8fd1c7b1a6e203c4503ca4f72fd6c501da4a3d5c57'
+$InstallShSha256 = 'feb998f8ae27ba07a6da64730b5a8a189aae854ed6e99f55d379605b04fcd8d3'
 $InstallShUrl = 'https://wentor.ai/install.sh'
 $IssueUrl = 'https://github.com/wentorai/Research-Claw/issues'
 $script:PrivateRoot = $null
@@ -45,6 +45,48 @@ function Add-ProcessPath([string]$PathEntry) {
     }
 }
 
+function Assert-PrivateRootAcl([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force
+    if (-not $item.PSIsContainer `
+        -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'The private installer path is not a concrete directory.'
+    }
+
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $systemSid = 'S-1-5-18'
+    $administratorsSid = 'S-1-5-32-544'
+    $allowedSids = @($currentSid, $systemSid, $administratorsSid)
+    $fullControl = [Security.AccessControl.FileSystemRights]::FullControl
+    $fullControlSids = @{}
+    $acl = Get-Acl -LiteralPath $Path
+    $ownerAccount = New-Object Security.Principal.NTAccount -ArgumentList $acl.Owner
+    $ownerSid = $ownerAccount.Translate([Security.Principal.SecurityIdentifier]).Value
+
+    if ($ownerSid -ne $currentSid -or -not $acl.AreAccessRulesProtected) {
+        throw 'The private installer directory owner or inheritance boundary is invalid.'
+    }
+    foreach ($rule in @($acl.GetAccessRules(
+                $true,
+                $true,
+                [Security.Principal.SecurityIdentifier]
+            ))) {
+        $sid = $rule.IdentityReference.Value
+        if ($rule.IsInherited `
+            -or $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow `
+            -or $allowedSids -notcontains $sid) {
+            throw 'The private installer directory contains an unauthorized ACL entry.'
+        }
+        if (($rule.FileSystemRights -band $fullControl) -eq $fullControl) {
+            $fullControlSids[$sid] = $true
+        }
+    }
+    foreach ($sid in $allowedSids) {
+        if (-not $fullControlSids.ContainsKey($sid)) {
+            throw 'The private installer directory is missing a required full-control ACL.'
+        }
+    }
+}
+
 function New-PrivateRoot {
     $parent = Join-Path $env:LOCALAPPDATA 'Wentor\InstallerTemp'
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -58,6 +100,7 @@ function New-PrivateRoot {
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not create the private installer directory.'
     }
+    Assert-PrivateRootAcl $root
     return $root
 }
 
@@ -365,9 +408,13 @@ function Main {
 
     $previousTmpDir = $env:TMPDIR
     $previousNative = $env:RC_WINDOWS_NATIVE
+    $previousPrivateRoot = $env:RC_WINDOWS_PRIVATE_ROOT
+    $previousPrivateRootAcl = $env:RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED
     try {
         $env:TMPDIR = $privatePosix
         $env:RC_WINDOWS_NATIVE = '1'
+        $env:RC_WINDOWS_PRIVATE_ROOT = $privatePosix
+        $env:RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED = '1'
         Write-Step '安装并启动 Research-Claw'
         & $bash @arguments
         $exitCode = $LASTEXITCODE
@@ -377,6 +424,8 @@ function Main {
     } finally {
         $env:TMPDIR = $previousTmpDir
         $env:RC_WINDOWS_NATIVE = $previousNative
+        $env:RC_WINDOWS_PRIVATE_ROOT = $previousPrivateRoot
+        $env:RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED = $previousPrivateRootAcl
     }
 }
 

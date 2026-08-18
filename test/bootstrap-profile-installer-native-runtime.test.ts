@@ -108,6 +108,26 @@ exit 96
 `, { mode: 0o700 });
 }
 
+function writeWindowsModeProjectionStat(bin: string): void {
+  fs.mkdirSync(bin, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(bin, 'stat'), `#!/usr/bin/env bash
+set -eu
+if [ "$1" = -f ]; then exit 1; fi
+if [ "$1" = -c ]; then
+  exec "$RC_TEST_NODE" -e '
+    const fs = require("fs");
+    const format = process.argv[1];
+    const stat = fs.statSync(process.argv[2]);
+    if (format === "%d:%i") process.stdout.write(String(stat.dev) + ":" + String(stat.ino));
+    else if (format === "%u") process.stdout.write(String(stat.uid));
+    else if (format === "%a") process.stdout.write(stat.isDirectory() ? "755" : "644");
+    else process.exit(97);
+  ' "$2" "$3"
+fi
+exit 96
+`, { mode: 0o700 });
+}
+
 function pidIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -144,6 +164,70 @@ async function stopFixtureChild(pid: number): Promise<void> {
 }
 
 describe('native installer update interruption cleanup', () => {
+  it.skipIf(process.platform === 'win32')(
+    'uses a verified Windows DACL root instead of rejecting the MSYS 0755/0644 projection',
+    () => {
+      const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-windows-mode-'));
+      roots.push(sandbox);
+      const install = path.join(sandbox, 'install');
+      const temp = path.join(sandbox, 'tmp');
+      const bin = path.join(sandbox, 'bin');
+      fs.mkdirSync(path.join(install, 'workspace', '.ResearchClaw'), { recursive: true });
+      fs.mkdirSync(temp, { mode: 0o700 });
+      fs.writeFileSync(path.join(install, 'workspace', '.ResearchClaw', 'SOUL.md'), 'user-bytes\n');
+      writeWindowsModeProjectionStat(bin);
+
+      const installer = fs.readFileSync(INSTALLER, 'utf8');
+      const lifecycle = extractBetween(
+        installer,
+        'RC_BOOTSTRAP_REDEEM_URL=',
+        '\nrc_profile_parse_args "$@"',
+      );
+      const runner = path.join(sandbox, 'windows-mode-runner.sh');
+      fs.writeFileSync(runner, `#!/usr/bin/env bash
+set -euo pipefail
+INSTALL_DIR="$RC_TEST_INSTALL"
+R='' G='' C='' Y='' B='' D='' N=''
+ISSUES_URL=https://invalid.example/issues
+die() { exit 1; }
+${lifecycle}
+trap rc_install_exit_cleanup EXIT
+rc_install_snapshot_update_backup
+heartbeat="$(mktemp "$RC_INSTALL_TEMP_PARENT/rc-install-heartbeat.XXXXXX")"
+chmod 600 "$heartbeat"
+heartbeat_id="$(rc_install_path_identity "$heartbeat")"
+rc_install_validate_private_child "$heartbeat" "$heartbeat_id" rc-install-heartbeat. file
+rm -f "$heartbeat"
+rc_install_discard_update_backup
+trap - EXIT
+test -z "$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -print -quit)"
+`, { mode: 0o700 });
+
+      const baseEnv = {
+        PATH: `${bin}:/usr/bin:/bin`,
+        HOME: path.join(sandbox, 'home'),
+        TMPDIR: temp,
+        RC_TEST_INSTALL: install,
+        RC_TEST_NODE: process.execPath,
+        RC_WINDOWS_NATIVE: '1',
+        RC_WINDOWS_PRIVATE_ROOT: temp,
+      };
+      const withoutAclProof = spawnSync('/bin/bash', [runner], {
+        cwd: install,
+        encoding: 'utf8',
+        env: baseEnv,
+      });
+      expect(withoutAclProof.status).not.toBe(0);
+
+      const verified = spawnSync('/bin/bash', [runner], {
+        cwd: install,
+        encoding: 'utf8',
+        env: { ...baseEnv, RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED: '1' },
+      });
+      expect(verified.status, `${verified.stdout}\n${verified.stderr}`).toBe(0);
+    },
+  );
+
   it.skipIf(process.platform === 'win32')(
     'discards failed BSD stat output before using the GNU stat fallback',
     () => {
