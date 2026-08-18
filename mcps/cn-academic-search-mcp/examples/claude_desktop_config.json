@@ -1,0 +1,14 @@
+{
+  "_comment": "Drop the `cn-academic-search` block into your Claude Desktop config (claude_desktop_config.json). The empty token strings keep the corresponding skeleton providers unavailable, so search() falls through to MockProvider. Set them only after implementing the real provider per docs/setup-*.md.",
+  "mcpServers": {
+    "cn-academic-search": {
+      "command": "python",
+      "args": ["-m", "cn_academic_search_mcp"],
+      "env": {
+        "WANFANG_TOKEN": "",
+        "CQVIP_TOKEN": "",
+        "CNKI_TOKEN": ""
+      }
+    }
+  }
+}

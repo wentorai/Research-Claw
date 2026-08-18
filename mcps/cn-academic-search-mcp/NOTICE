@@ -1,0 +1,11 @@
+cn-academic-search-mcp
+Copyright 2026 Research-Claw Contributors
+
+Independently implemented from a clean-room multi-provider architecture design.
+General concept (multi-provider MCP for Chinese academic search) inspired by:
+  - h-lu/cnki-mcp (https://github.com/h-lu/cnki-mcp)
+  - cookjohn/cnki-skills (https://github.com/cookjohn/cnki-skills)
+  - Multi-provider patterns common in MCP ecosystem.
+
+No source code was copied. Authentication-required providers are intentionally
+left as skeletons; users must implement institutional access per docs/setup-*.md.
