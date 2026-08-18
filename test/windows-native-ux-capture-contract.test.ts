@@ -33,7 +33,7 @@ describe('Windows native UX read-only capture package', () => {
       encoding: 'utf8',
     });
     expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ ok: true, cases: 10 });
+    expect(JSON.parse(result.stdout)).toEqual({ ok: true, cases: 11 });
   });
 
   it('ships an ASCII, no-pause double-click chain with no embedded credential', () => {
@@ -112,6 +112,17 @@ describe('Windows native UX read-only capture package', () => {
     expect(source).toContain("entry.name.startsWith('PortableGit-')");
     expect(source).toContain("'bin', 'git.exe'");
     expect(source).toContain("'cmd', 'git.exe'");
+  });
+
+  it('binds PASS to the frozen production commit, clean status, and shared-file tuple', () => {
+    const source = read('capture-windows-native-ux.cjs');
+    expect(source).toContain("const EXPECTED_SOURCE_COMMIT = '5015be7a72387098f122cb3e7cc4aae32714d4fa'");
+    expect(source).toContain("'scripts/install-windows.ps1': '2f76c8c4307e0cb68e8ed3c8fe51edb7a59ebd50ba4f019e55e88a052b8de93b'");
+    expect(source).toContain("'scripts/install.sh': 'afa18713e02740288e986b8fd1c7b1a6e203c4503ca4f72fd6c501da4a3d5c57'");
+    expect(source).toContain("'scripts/run.sh': '220d13f82e17cf74d029744915c743f17acf715d701c8861f89b0ebcc9aebc8f'");
+    expect(source).toContain("'scripts/ensure-config.cjs': '690e576e8bb8d2851170ba1b6f4ae18411c497089081adfd9ccdc1a17bd80c11'");
+    expect(source).toContain('sourceAuthorityObservation');
+    expect(source).toContain('sourceAuthorityGreen');
   });
 
   it('keeps the live capture read-only and excludes configuration or credential reads', () => {

@@ -12,6 +12,13 @@ const { domainToASCII } = require('node:url');
 const ASCII_ALIAS = 'xn--w8yz0bg0vrjz.localhost';
 const BRAND_ALIAS_URL = `http://${ASCII_ALIAS}:28789/`;
 const DASHBOARD_TITLE_MARKER = 'WentorOS · Research-Claw';
+const EXPECTED_SOURCE_COMMIT = '5015be7a72387098f122cb3e7cc4aae32714d4fa';
+const EXPECTED_SHARED_FILES = Object.freeze({
+  'scripts/install-windows.ps1': '2f76c8c4307e0cb68e8ed3c8fe51edb7a59ebd50ba4f019e55e88a052b8de93b',
+  'scripts/install.sh': 'afa18713e02740288e986b8fd1c7b1a6e203c4503ca4f72fd6c501da4a3d5c57',
+  'scripts/run.sh': '220d13f82e17cf74d029744915c743f17acf715d701c8861f89b0ebcc9aebc8f',
+  'scripts/ensure-config.cjs': '690e576e8bb8d2851170ba1b6f4ae18411c497089081adfd9ccdc1a17bd80c11',
+});
 const URLS = [
   { id: 'ipv4', url: 'http://127.0.0.1:28789/' },
   { id: 'localhost', url: 'http://localhost:28789/' },
@@ -401,6 +408,28 @@ function sourceObservation(rcRoot, environment) {
   return result;
 }
 
+function sourceAuthorityObservation(source) {
+  const sharedFileMatches = Object.fromEntries(
+    Object.entries(EXPECTED_SHARED_FILES).map(([relative, expected]) => [
+      relative,
+      source.sharedFiles?.[relative] === expected,
+    ]),
+  );
+  const commitMatches = source.commit === EXPECTED_SOURCE_COMMIT;
+  const cleanWorktree = source.dirtyEntries === 0;
+  const sourceAuthorityGreen = source.version === '0.8.3'
+    && commitMatches
+    && cleanWorktree
+    && Object.values(sharedFileMatches).every(Boolean);
+  return {
+    expectedCommit: EXPECTED_SOURCE_COMMIT,
+    commitMatches,
+    cleanWorktree,
+    sharedFileMatches,
+    sourceAuthorityGreen,
+  };
+}
+
 function ownershipObservation(snapshot, protocolMatches) {
   const listener = snapshot?.listener || {};
   const exactIdentityCaptured = snapshot?.ok === true
@@ -486,6 +515,14 @@ function selfTest() {
   cases += 1;
   if (!browserDumpMatches(`<title>${DASHBOARD_TITLE_MARKER}</title>`)) throw new Error('browser marker self-test failed');
   cases += 1;
+  const authority = sourceAuthorityObservation({
+    version: '0.8.3',
+    commit: EXPECTED_SOURCE_COMMIT,
+    dirtyEntries: 0,
+    sharedFiles: { ...EXPECTED_SHARED_FILES },
+  });
+  if (!authority.sourceAuthorityGreen) throw new Error('source authority self-test failed');
+  cases += 1;
   process.stdout.write(`${JSON.stringify({ ok: true, cases })}\n`);
 }
 
@@ -536,10 +573,10 @@ async function main() {
     errorCode: ipv4Green ? 'HOST_SNAPSHOT_UNAVAILABLE' : 'DASHBOARD_NOT_HEALTHY',
   };
   const source = sourceObservation(options.rcRoot, safe.environment);
+  const sourceAuthority = sourceAuthorityObservation(source);
+  const sourceAuthorityGreen = sourceAuthority.sourceAuthorityGreen;
   const powershellContractGreen = shellContractGreen(snapshots);
-  const requiredGreen = source.version === '0.8.3'
-    && /^[0-9a-f]{40}$/u.test(source.commit || '')
-    && Number.isInteger(source.dirtyEntries)
+  const requiredGreen = sourceAuthorityGreen
     && powershellContractGreen
     && ownership.exactIdentityCaptured
     && httpChecks.every((item) => item.ok)
@@ -569,6 +606,8 @@ async function main() {
       nodeAbi: process.versions.modules,
     },
     source,
+    sourceAuthority,
+    sourceAuthorityGreen,
     powershellContractGreen,
     powershellSnapshots: snapshots,
     loopback: {
@@ -595,6 +634,7 @@ async function main() {
     `Run: ${runId}`,
     `Overall: ${report.overall}`,
     `Source: version=${source.version || 'unknown'} commit=${source.commit || 'unknown'} dirtyEntries=${String(source.dirtyEntries)}`,
+    `Source authority: ${sourceAuthorityGreen ? 'PASS' : 'FAIL'}`,
     `PowerShell: ${snapshots.map((item) => `${item.id}=${item.ok ? 'PASS' : item.errorCode}`).join(' ')}`,
     `Loopback: ${httpChecks.map((item) => `${item.id}=${item.ok ? 'PASS' : item.errorCode}`).join(' ')}`,
     `Brand alias in ${browserAlias.browserId || 'browser'}: ${browserAliasGreen ? 'PASS' : browserAlias.errorCode}`,

@@ -4,7 +4,9 @@ Wentor Windows native UX read-only capture
 Purpose
 -------
 This small package closes the WUX-T01 evidence gap for an already running
-Research-Claw 0.8.3 native Windows installation. It is not an installer.
+Research-Claw 0.8.3 native Windows installation at the frozen production
+baseline commit 5015be7a72387098f122cb3e7cc4aae32714d4fa. It is not an
+installer. A different commit or shared-script tuple is reported as FAIL.
 
 Run
 ---
