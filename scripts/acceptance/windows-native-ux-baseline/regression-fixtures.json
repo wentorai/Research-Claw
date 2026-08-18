@@ -53,6 +53,33 @@
       }
     }
   ],
+  "uxCapture": [
+    {
+      "id": "windows-wux-v2-host-and-alias-red",
+      "provenance": "real-windows-sanitized",
+      "sourceReportSha256": {
+        "json": "b649f8ad25cbb57aa44c1daa90d3f661d53d681fe4d882e850fd1ef3dff25dfe",
+        "text": "d7108ef8cbe38d6db1e3075020afcfb0ad4f10052b6f6726f8672b5a3ca21652"
+      },
+      "captureCoreSha256": "f07ef8b1fdb53c3fe236f1d1139ad0ba005ffd21c995282c61fc021a161c3d9b",
+      "host": "windows-10-x64-node22-abi127",
+      "sourceCommitObserved": null,
+      "sharedFileTupleMatchesCommit": "661879c9a4b43833b9c25047e505bb4c3ff4fdc4",
+      "observed": {
+        "powershell51": true,
+        "powershell7": false,
+        "ipv4Http200": true,
+        "localhostHttp200": true,
+        "nodeDnsBrandAlias": "ENOTFOUND",
+        "chromiumBrandAlias": "not-run",
+        "browserDispatchAccepted": true,
+        "exactListenerIdentityCaptured": true,
+        "sourceGitDiscovered": false,
+        "secretPatternHits": 0
+      },
+      "expectedClass": "host-prerequisite-red-browser-alias-unresolved"
+    }
+  ],
   "ownership": [
     {
       "id": "foreign-listener-without-receipt",

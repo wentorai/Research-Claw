@@ -27,6 +27,7 @@ header shapes before projection.
 | `windows-v16-runtime-red` | `d2b4bfe70dd0f0993ad1eada0c81c7f3c3db273d157f66dcf271028fcc7f7ab3` | listener existed, HTTP/WebSocket timed out; product runtime red |
 | `windows-v17-probe-identity-red` | `69b0b2c5a268d747860981cb7d96ae263936833dc2561ce941c09d69c105e434` | HTTP green; synthetic control-UI identity rejected; probe red, product unknown |
 | `windows-v18-runtime-interaction-red` | `c98ccab82382a00bc264dada6c8e04320671018c7a4919b54ed1d55c5f7d0926` | HTTP, authenticated RPC and ticks green; QuickEdit/browser interaction gate not green |
+| `windows-wux-v2-host-and-alias-red` | JSON `b649f8ad25cbb57aa44c1daa90d3f661d53d681fe4d882e850fd1ef3dff25dfe`; TXT `d7108ef8cbe38d6db1e3075020afcfb0ad4f10052b6f6726f8672b5a3ca21652` | exact listener identity/IPv4/localhost/dispatch green; PS7 missing; Node DNS alias check was not browser authority; PortableGit discovery missed source commit |
 
 The original reports remain outside the repository. These projections contain
 no username, absolute Windows path, PID, log body, token, model key, or secret

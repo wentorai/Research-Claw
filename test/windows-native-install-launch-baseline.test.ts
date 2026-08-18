@@ -68,6 +68,28 @@ type InteractionFixture = {
   expectedAction: 'fail-interaction-gate' | 'show-copyable-fallback';
 };
 
+type UxCaptureFixture = {
+  id: string;
+  provenance: 'real-windows-sanitized';
+  sourceReportSha256: { json: string; text: string };
+  captureCoreSha256: string;
+  sourceCommitObserved: string | null;
+  sharedFileTupleMatchesCommit: string;
+  observed: {
+    powershell51: boolean;
+    powershell7: boolean;
+    ipv4Http200: boolean;
+    localhostHttp200: boolean;
+    nodeDnsBrandAlias: string;
+    chromiumBrandAlias: string;
+    browserDispatchAccepted: boolean;
+    exactListenerIdentityCaptured: boolean;
+    sourceGitDiscovered: boolean;
+    secretPatternHits: number;
+  };
+  expectedClass: 'host-prerequisite-red-browser-alias-unresolved';
+};
+
 function readJson<T>(file: string): T {
   return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 }
@@ -203,6 +225,37 @@ describe('Windows native install and daily-launch frozen baseline', () => {
     for (const fixture of fixtures.runtime) {
       expect(classifyRuntime(fixture), fixture.id).toBe(fixture.expectedClass);
     }
+  });
+
+  it('freezes the v2 real-Windows red without treating Node DNS as browser evidence', () => {
+    const fixtures = readJson<{ uxCapture: UxCaptureFixture[] }>(FIXTURES_PATH);
+    expect(fixtures.uxCapture).toEqual([
+      expect.objectContaining({
+        id: 'windows-wux-v2-host-and-alias-red',
+        provenance: 'real-windows-sanitized',
+        sourceReportSha256: {
+          json: 'b649f8ad25cbb57aa44c1daa90d3f661d53d681fe4d882e850fd1ef3dff25dfe',
+          text: 'd7108ef8cbe38d6db1e3075020afcfb0ad4f10052b6f6726f8672b5a3ca21652',
+        },
+        captureCoreSha256: 'f07ef8b1fdb53c3fe236f1d1139ad0ba005ffd21c995282c61fc021a161c3d9b',
+        sourceCommitObserved: null,
+        sharedFileTupleMatchesCommit: '661879c9a4b43833b9c25047e505bb4c3ff4fdc4',
+        expectedClass: 'host-prerequisite-red-browser-alias-unresolved',
+      }),
+    ]);
+    const observed = fixtures.uxCapture[0].observed;
+    expect(observed).toMatchObject({
+      powershell51: true,
+      powershell7: false,
+      ipv4Http200: true,
+      localhostHttp200: true,
+      nodeDnsBrandAlias: 'ENOTFOUND',
+      chromiumBrandAlias: 'not-run',
+      browserDispatchAccepted: true,
+      exactListenerIdentityCaptured: true,
+      sourceGitDiscovered: false,
+      secretPatternHits: 0,
+    });
   });
 
   it('never authorizes a kill from a foreign listener or stale receipt', () => {

@@ -9,12 +9,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { domainToASCII } = require('node:url');
 
-const PORT = 28789;
 const ASCII_ALIAS = 'xn--w8yz0bg0vrjz.localhost';
+const BRAND_ALIAS_URL = `http://${ASCII_ALIAS}:28789/`;
+const DASHBOARD_TITLE_MARKER = 'WentorOS · Research-Claw';
 const URLS = [
   { id: 'ipv4', url: 'http://127.0.0.1:28789/' },
   { id: 'localhost', url: 'http://localhost:28789/' },
-  { id: 'brand-alias', url: 'http://xn--w8yz0bg0vrjz.localhost:28789/' },
 ];
 const SECRET_PATTERNS = [
   /(^|[^A-Za-z0-9_-])rca_[A-Za-z0-9_-]{43,}/g,
@@ -138,6 +138,113 @@ function findExecutable(name, environment) {
     .split(/\r?\n/u)
     .map((candidate) => candidate.trim())
     .find((candidate) => candidate && fs.existsSync(candidate)) || null;
+}
+
+function findGitExecutable(environment) {
+  const candidates = [];
+  if (process.env.LOCALAPPDATA) {
+    const runtimesRoot = path.join(process.env.LOCALAPPDATA, 'Wentor', 'Runtimes');
+    try {
+      const portableRoots = fs.readdirSync(runtimesRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith('PortableGit-'))
+        .map((entry) => path.join(runtimesRoot, entry.name))
+        .sort((left, right) => right.localeCompare(left));
+      for (const portableRoot of portableRoots) {
+        candidates.push(
+          path.join(portableRoot, 'cmd', 'git.exe'),
+          path.join(portableRoot, 'bin', 'git.exe'),
+        );
+      }
+    } catch {
+      // A missing Wentor runtime root is represented by the null result below.
+    }
+  }
+  candidates.push(findExecutable('git.exe', environment));
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
+}
+
+function findChromiumBrowser(environment) {
+  const candidates = [
+    process.env['ProgramFiles(x86)'] && {
+      id: 'edge',
+      executable: path.join(process.env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    },
+    process.env.ProgramFiles && {
+      id: 'edge',
+      executable: path.join(process.env.ProgramFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    },
+    process.env.LOCALAPPDATA && {
+      id: 'edge',
+      executable: path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    },
+    process.env.ProgramFiles && {
+      id: 'chrome',
+      executable: path.join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    },
+    process.env['ProgramFiles(x86)'] && {
+      id: 'chrome',
+      executable: path.join(process.env['ProgramFiles(x86)'], 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    },
+    process.env.LOCALAPPDATA && {
+      id: 'chrome',
+      executable: path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    },
+    { id: 'edge', executable: findExecutable('msedge.exe', environment) },
+    { id: 'chrome', executable: findExecutable('chrome.exe', environment) },
+  ].filter(Boolean);
+  return candidates.find((candidate) => candidate.executable && fs.existsSync(candidate.executable)) || null;
+}
+
+function browserDumpMatches(stdout) {
+  return String(stdout).includes(DASHBOARD_TITLE_MARKER);
+}
+
+function browserAliasObservation(environment, outputRoot) {
+  const browser = findChromiumBrowser(environment);
+  if (!browser) {
+    return {
+      attempted: false,
+      browserId: null,
+      ok: false,
+      markerMatched: false,
+      cleanupSucceeded: true,
+      errorCode: 'CHROMIUM_BROWSER_NOT_FOUND',
+    };
+  }
+  const browserProbeRoot = fs.mkdtempSync(path.join(outputRoot, '.browser-alias-'));
+  let result;
+  let cleanupSucceeded = false;
+  let cleanupErrorCode = null;
+  try {
+    result = runCommand(browser.executable, [
+      '--headless=new',
+      '--disable-gpu',
+      '--disable-background-networking',
+      '--disable-component-update',
+      '--no-first-run',
+      '--no-default-browser-check',
+      `--user-data-dir=${browserProbeRoot}`,
+      '--dump-dom',
+      BRAND_ALIAS_URL,
+    ], { env: environment, timeoutMs: 30_000 });
+  } finally {
+    try {
+      fs.rmSync(browserProbeRoot, { recursive: true, force: false });
+      cleanupSucceeded = !fs.existsSync(browserProbeRoot);
+    } catch (error) {
+      cleanupErrorCode = error?.code || 'BROWSER_PROBE_CLEANUP_FAILED';
+    }
+  }
+  const markerMatched = result?.ok === true && browserDumpMatches(result.stdout);
+  return {
+    attempted: true,
+    browserId: browser.id,
+    ok: markerMatched && cleanupSucceeded,
+    markerMatched,
+    cleanupSucceeded,
+    errorCode: cleanupErrorCode
+      || (result?.ok ? (markerMatched ? null : 'DASHBOARD_MARKER_NOT_FOUND') : result?.errorCode || `EXIT_${String(result?.status)}`),
+  };
 }
 
 function powershellExecutables(environment) {
@@ -265,7 +372,7 @@ function sourceObservation(rcRoot, environment) {
   } catch {
     // The report remains explicit about missing source metadata.
   }
-  const git = findExecutable('git.exe', environment);
+  const git = findGitExecutable(environment);
   if (git && fs.existsSync(path.join(rcRoot, '.git'))) {
     const head = runCommand(git, ['-c', 'credential.helper=', 'rev-parse', 'HEAD'], {
       cwd: rcRoot,
@@ -377,6 +484,8 @@ function selfTest() {
   const sample = JSON.stringify({ exact, dispatch, displayUrl: 'http://科研龙虾.localhost:28789/' });
   if (containsSecret(sample)) throw new Error('sample evidence secret scan failed');
   cases += 1;
+  if (!browserDumpMatches(`<title>${DASHBOARD_TITLE_MARKER}</title>`)) throw new Error('browser marker self-test failed');
+  cases += 1;
   process.stdout.write(`${JSON.stringify({ ok: true, cases })}\n`);
 }
 
@@ -397,8 +506,20 @@ async function main() {
   const startedAt = new Date();
   const runId = `${startedAt.toISOString().replace(/[-:.TZ]/g, '')}-${crypto.randomBytes(4).toString('hex')}`;
   const safe = safeEnvironment();
+  const outputRoot = ensureEvidenceRoot(options.outputDir);
   const httpChecks = await Promise.all(URLS.map((target) => httpObservation(target)));
   const ipv4Green = httpChecks.find((item) => item.id === 'ipv4')?.ok === true;
+  const browserAlias = ipv4Green
+    ? browserAliasObservation(safe.environment, outputRoot)
+    : {
+      attempted: false,
+      browserId: null,
+      ok: false,
+      markerMatched: false,
+      cleanupSucceeded: true,
+      errorCode: 'DASHBOARD_NOT_HEALTHY',
+    };
+  const browserAliasGreen = browserAlias.ok === true;
   const shells = powershellExecutables(safe.environment);
   const snapshots = shells.map((shell, index) => runHostSnapshot(
     shell.executable,
@@ -417,9 +538,12 @@ async function main() {
   const source = sourceObservation(options.rcRoot, safe.environment);
   const powershellContractGreen = shellContractGreen(snapshots);
   const requiredGreen = source.version === '0.8.3'
+    && /^[0-9a-f]{40}$/u.test(source.commit || '')
+    && Number.isInteger(source.dirtyEntries)
     && powershellContractGreen
     && ownership.exactIdentityCaptured
     && httpChecks.every((item) => item.ok)
+    && browserAliasGreen
     && (!options.dispatchBrowser || browserDispatch.dispatchAccepted === true);
   const report = {
     schemaVersion: 1,
@@ -433,7 +557,7 @@ async function main() {
       processStopped: false,
       configurationRead: false,
       privateValueRead: false,
-      browserObservation: 'shell-dispatch-acceptance-only',
+      browserObservation: 'shell-dispatch-plus-headless-chromium-alias',
       ownershipObservation: 'identity-only-never-stop-authority',
       withheldEnvironmentValueCount: safe.withheld,
     },
@@ -451,6 +575,8 @@ async function main() {
       displayUrl: 'http://科研龙虾.localhost:28789/',
       asciiAlias: ASCII_ALIAS,
       checks: httpChecks,
+      browserAlias,
+      browserAliasGreen,
     },
     browserDispatch,
     ownership,
@@ -461,7 +587,6 @@ async function main() {
   };
   const jsonBytes = Buffer.from(`${JSON.stringify(report, null, 2)}\n`);
   if (containsSecret(jsonBytes.toString('utf8'))) throw new Error('Refusing to publish private evidence');
-  const outputRoot = ensureEvidenceRoot(options.outputDir);
   const jsonName = `Wentor-UX-Capture-${runId}.json`;
   const textName = `Wentor-UX-Capture-${runId}.txt`;
   const jsonPath = writeEvidenceExclusive(outputRoot, jsonName, jsonBytes);
@@ -472,6 +597,7 @@ async function main() {
     `Source: version=${source.version || 'unknown'} commit=${source.commit || 'unknown'} dirtyEntries=${String(source.dirtyEntries)}`,
     `PowerShell: ${snapshots.map((item) => `${item.id}=${item.ok ? 'PASS' : item.errorCode}`).join(' ')}`,
     `Loopback: ${httpChecks.map((item) => `${item.id}=${item.ok ? 'PASS' : item.errorCode}`).join(' ')}`,
+    `Brand alias in ${browserAlias.browserId || 'browser'}: ${browserAliasGreen ? 'PASS' : browserAlias.errorCode}`,
     `Browser dispatch accepted: ${String(browserDispatch.dispatchAccepted === true)}`,
     `Exact listener identity captured: ${String(ownership.exactIdentityCaptured)}`,
     'Safety: observation only; no configuration or private value was read; no product process was stopped.',

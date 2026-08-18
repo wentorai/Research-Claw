@@ -33,7 +33,7 @@ describe('Windows native UX read-only capture package', () => {
       encoding: 'utf8',
     });
     expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ ok: true, cases: 9 });
+    expect(JSON.parse(result.stdout)).toEqual({ ok: true, cases: 10 });
   });
 
   it('ships an ASCII, no-pause double-click chain with no embedded credential', () => {
@@ -86,18 +86,41 @@ describe('Windows native UX read-only capture package', () => {
     const source = read('capture-windows-native-ux.cjs');
     expect(source).toContain('http://127.0.0.1:28789/');
     expect(source).toContain('http://localhost:28789/');
-    expect(source).toContain('http://xn--w8yz0bg0vrjz.localhost:28789/');
+    expect(source).toContain("const ASCII_ALIAS = 'xn--w8yz0bg0vrjz.localhost'");
+    expect(source).toContain('const BRAND_ALIAS_URL = `http://${ASCII_ALIAS}:28789/`');
     expect(source).toContain("displayUrl: 'http://科研龙虾.localhost:28789/'");
     expect(source).toContain('dispatchAccepted');
     expect(source).not.toContain('browserOpened');
     expect(read('Capture-Wentor-UX-Host.ps1')).toContain('Start-Process');
   });
 
+  it('uses a real Chromium browser for the brand alias instead of treating Node DNS as browser authority', () => {
+    const source = read('capture-windows-native-ux.cjs');
+    expect(source).toContain('browserAliasObservation');
+    expect(source).toContain("'--headless=new'");
+    expect(source).toContain("'--dump-dom'");
+    expect(source).toContain('WentorOS · Research-Claw');
+    expect(source).toContain('browserAliasGreen');
+    expect(source).toContain('fs.mkdtempSync');
+    expect(source).toContain('fs.rmSync(browserProbeRoot');
+  });
+
+  it('finds the user-level Wentor PortableGit before declaring source authority unavailable', () => {
+    const source = read('capture-windows-native-ux.cjs');
+    expect(source).toContain('findGitExecutable');
+    expect(source).toContain("'Wentor', 'Runtimes'");
+    expect(source).toContain("entry.name.startsWith('PortableGit-')");
+    expect(source).toContain("'bin', 'git.exe'");
+    expect(source).toContain("'cmd', 'git.exe'");
+  });
+
   it('keeps the live capture read-only and excludes configuration or credential reads', () => {
     const source = [read('capture-windows-native-ux.cjs'), read('Capture-Wentor-UX-Host.ps1')].join('\n');
     expect(source).not.toMatch(/openclaw\.json|auth-profiles|credentials|setup.?token|model.?key/i);
     expect(source).toContain('writeEvidenceExclusive');
-    expect(source).not.toMatch(/unlinkSync|rmSync|renameSync|copyFileSync/);
+    expect(source).not.toMatch(/unlinkSync|renameSync|copyFileSync/);
+    expect(source.match(/fs\.rmSync\(/g)).toHaveLength(1);
+    expect(source).toContain('fs.rmSync(browserProbeRoot');
     expect(source).not.toMatch(/Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item/i);
   });
 
