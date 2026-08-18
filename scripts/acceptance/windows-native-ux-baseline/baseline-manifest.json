@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-08-18T01:30:00+08:00",
+  "capturedAt": "2026-08-18T10:25:08+08:00",
   "productionBaseline": {
-    "commit": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
-    "tree": "4d22e3cfc334c252d5c3e7c8d606b14a0483b1fa",
-    "worktreeStatus": "clean-before-wux-t01"
+    "commit": "f2524bf1234e537873f7550bc38f97f2923939d6",
+    "tree": "b388b3873d7bda22d9b6a37eec16a3a101450071",
+    "worktreeStatus": "clean-after-wux-t01-update-backup-fix"
   },
   "remoteAuthorityAtBaseline": {
-    "localMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
+    "localMain": "f2524bf1234e537873f7550bc38f97f2923939d6",
     "giteeMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
-    "githubMain": "5528d9bd43c7d489ddc9a07fe5b15fe1bf15686b",
-    "originMain": "4023c1019730c0296eb5c30839cc1e978423396c"
+    "githubMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa",
+    "originMain": "5015be7a72387098f122cb3e7cc4aae32714d4fa"
   },
   "lastRealWindowsArtifact": {
     "packageName": "Wentor-Weifang-RC-0.8.3-Windows-Native-Offline-v18.zip",
@@ -74,12 +74,12 @@
   "sharedSurfaces": [
     {
       "path": "scripts/install-windows.ps1",
-      "sha256": "2f76c8c4307e0cb68e8ed3c8fe51edb7a59ebd50ba4f019e55e88a052b8de93b",
+      "sha256": "1e278f439cae7df6ec73ecedabe655c4e5fdd3bdd6355b3ee104474bf92368ac",
       "topologies": ["windows-native"]
     },
     {
       "path": "scripts/install.sh",
-      "sha256": "afa18713e02740288e986b8fd1c7b1a6e203c4503ca4f72fd6c501da4a3d5c57",
+      "sha256": "feb998f8ae27ba07a6da64730b5a8a189aae854ed6e99f55d379605b04fcd8d3",
       "topologies": ["windows-native", "macos-native", "linux-wsl2"]
     },
     {

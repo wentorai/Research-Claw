@@ -163,9 +163,9 @@ describe('Windows native install and daily-launch frozen baseline', () => {
     }>(MANIFEST_PATH);
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.productionBaseline).toEqual({
-      commit: '5015be7a72387098f122cb3e7cc4aae32714d4fa',
-      tree: '4d22e3cfc334c252d5c3e7c8d606b14a0483b1fa',
-      worktreeStatus: 'clean-before-wux-t01',
+      commit: 'f2524bf1234e537873f7550bc38f97f2923939d6',
+      tree: 'b388b3873d7bda22d9b6a37eec16a3a101450071',
+      worktreeStatus: 'clean-after-wux-t01-update-backup-fix',
     });
     expect(manifest.sharedSurfaces.length).toBeGreaterThanOrEqual(12);
     for (const surface of manifest.sharedSurfaces) {
@@ -208,10 +208,10 @@ describe('Windows native install and daily-launch frozen baseline', () => {
     expect(manifest.lastRealWindowsArtifact.changedPathsToCurrent.length)
       .toBeGreaterThan(20);
     expect(manifest.remoteAuthorityAtBaseline).toEqual({
-      localMain: '5015be7a72387098f122cb3e7cc4aae32714d4fa',
+      localMain: 'f2524bf1234e537873f7550bc38f97f2923939d6',
       giteeMain: '5015be7a72387098f122cb3e7cc4aae32714d4fa',
-      githubMain: '5528d9bd43c7d489ddc9a07fe5b15fe1bf15686b',
-      originMain: '4023c1019730c0296eb5c30839cc1e978423396c',
+      githubMain: '5015be7a72387098f122cb3e7cc4aae32714d4fa',
+      originMain: '5015be7a72387098f122cb3e7cc4aae32714d4fa',
     });
   });
 
