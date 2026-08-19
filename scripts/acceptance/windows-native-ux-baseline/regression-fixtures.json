@@ -51,6 +51,23 @@
         "browserAutoOpen": "not-observed",
         "failureCode": null
       }
+    },
+    {
+      "id": "windows-v19-plugin-cron-red",
+      "provenance": "real-windows-sanitized",
+      "packageSha256": "504d4a305a6e5cf7bf9307f24a5e4db80a072aa2fdf9f635328b9af4d0000479",
+      "sourceCommit": "374cba5525c7667ff94d3bb0591991cfd441c548",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "product-runtime-red",
+      "observed": {
+        "installTransactionGreen": false,
+        "http200": false,
+        "configGet": "not-run",
+        "stableTicks": false,
+        "quickEditEnabled": false,
+        "browserAutoOpen": "not-observed",
+        "failureCode": "CRON_WORKER_FAILED"
+      }
     }
   ],
   "uxCapture": [

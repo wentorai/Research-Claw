@@ -223,6 +223,7 @@ describe('Windows native install and daily-launch frozen baseline', () => {
       'windows-v16-runtime-red',
       'windows-v17-probe-identity-red',
       'windows-v18-runtime-interaction-red',
+      'windows-v19-plugin-cron-red',
     ]);
     for (const fixture of fixtures.runtime) {
       expect(classifyRuntime(fixture), fixture.id).toBe(fixture.expectedClass);

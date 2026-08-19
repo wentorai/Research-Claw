@@ -210,13 +210,15 @@ rc_install_remove_heartbeat_log() {
 }
 
 rc_install_cleanup_heartbeat() {
-  local _pid="${RC_HEARTBEAT_PID:-}" _ppid="" _failed=0 _attempt
+  local _pid="${RC_HEARTBEAT_PID:-}" _failed=0 _attempt _child _is_child=false
   if [ -n "$_pid" ]; then
     case "$_pid" in *[!0-9]*|'') _failed=1 ;;
       *)
         if kill -0 "$_pid" 2>/dev/null; then
-          _ppid="$(ps -o ppid= -p "$_pid" 2>/dev/null | tr -d '[:space:]')"
-          if [ "$_ppid" = "$$" ]; then
+          for _child in $(jobs -pr); do
+            if [ "$_child" = "$_pid" ]; then _is_child=true; break; fi
+          done
+          if $_is_child; then
             kill -TERM "$_pid" 2>/dev/null || true
             _attempt=0
             while kill -0 "$_pid" 2>/dev/null && [ "$_attempt" -lt 20 ]; do
@@ -718,11 +720,19 @@ rc_profile_recover_native() {
 }
 
 rc_profile_stage_native() {
-  local _result
-  if ! _result="$(rc_profile_native_cli stage --capsule-file "$RC_PROFILE_CAPSULE")"; then
+  local _result _result_file="$RC_PROFILE_TEMP_ROOT/stage-result.json"
+  rc_profile_run_stage() {
+    rc_profile_native_cli stage --capsule-file "$RC_PROFILE_CAPSULE" >"$_result_file"
+  }
+  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Preparing Bootstrap Profile" \
+      rc_profile_run_stage; then
+    unset -f rc_profile_run_stage
     rc_profile_load_pending_native >/dev/null 2>&1 || true
     return 1
   fi
+  unset -f rc_profile_run_stage
+  _result="$(cat "$_result_file")" || return 1
+  rm -f -- "$_result_file" || return 1
   RC_PROFILE_TX_ID="$(printf '%s' "$_result" | "$GW_NODE" -e '
     let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
       const value=JSON.parse(raw); if (!/^tx-[0-9a-f-]{36}$/.test(value.txId || "")) process.exit(1);
@@ -733,11 +743,27 @@ rc_profile_stage_native() {
 }
 
 rc_profile_apply_native() {
-  rc_profile_native_cli apply --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+  rc_profile_run_apply() {
+    rc_profile_native_cli apply --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+  }
+  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Applying Bootstrap Profile" \
+      rc_profile_run_apply; then
+    unset -f rc_profile_run_apply
+    return 1
+  fi
+  unset -f rc_profile_run_apply
 }
 
 rc_profile_verify_native() {
-  rc_profile_native_cli verify --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+  rc_profile_run_verify() {
+    rc_profile_native_cli verify --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+  }
+  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Verifying Bootstrap Profile files" \
+      rc_profile_run_verify; then
+    unset -f rc_profile_run_verify
+    return 1
+  fi
+  unset -f rc_profile_run_verify
 }
 
 rc_profile_probe_native() {
@@ -819,9 +845,13 @@ trap rc_install_exit_cleanup EXIT
 trap rc_install_on_interrupt INT TERM
 
 INSTALL_START_TS=$(date +%s)
+_format_duration() {
+  local _s="$1"
+  printf '%dm%02ds' $((_s / 60)) $((_s % 60))
+}
 _elapsed() {
   local _s=$(( $(date +%s) - INSTALL_START_TS ))
-  printf '%dm%02ds' $((_s / 60)) $((_s % 60))
+  _format_duration "$_s"
 }
 
 step() { printf "\n${C}  ▸ [%s/8]${N} ${B}%s${N}\n" "$1" "$2"; rclog "step $1/8: $2"; }
@@ -833,7 +863,7 @@ step() { printf "\n${C}  ▸ [%s/8]${N} ${B}%s${N}\n" "$1" "$2"; rclog "step $1/
 # that have a quieter fallback path).
 run_with_heartbeat() {
   local _label="$1"; shift
-  local _pid _rc=0 _cleanup_rc=0 _t=0 _old_umask
+  local _pid _rc=0 _t=0 _old_umask
   [ -z "$RC_HEARTBEAT_PID" ] && [ -z "$RC_HEARTBEAT_LOG" ] || return 125
   rc_install_init_temp_parent || return 1
   _old_umask="$(umask)"
@@ -860,14 +890,24 @@ run_with_heartbeat() {
   wait "$_pid" || _rc=$?
   RC_HEARTBEAT_PID=""
   if [ -t 1 ] && [ "$_t" -gt 0 ]; then printf "\r\033[2K"; fi
-  if [ "$_rc" -ne 0 ] && [ "${HB_SHOW_FAIL_LOG:-0}" = "1" ] \
-      && [ -s "$RC_HEARTBEAT_LOG" ]; then
-    warn "$_label failed (exit $_rc). Last output:"
-    tail -5 "$RC_HEARTBEAT_LOG" | sed 's/^/      /' >&2
+  if [ "$_rc" -ne 0 ]; then
+    warn "$_label failed after $(_format_duration "$_t") (exit $_rc)."
+    rclog "heartbeat failed: $_label duration=$(_format_duration "$_t") exit=$_rc"
+    if [ "${HB_SHOW_FAIL_LOG:-0}" = "1" ] && [ -s "$RC_HEARTBEAT_LOG" ]; then
+      warn "$_label last output:"
+      tail -5 "$RC_HEARTBEAT_LOG" | sed 's/^/      /' >&2
+    fi
+    rc_install_remove_heartbeat_log || true
+    return "$_rc"
   fi
-  rc_install_remove_heartbeat_log || _cleanup_rc=1
-  [ "$_rc" -ne 0 ] && return "$_rc"
-  return "$_cleanup_rc"
+  if ! rc_install_remove_heartbeat_log; then
+    warn "$_label completed, but installer cleanup failed after $(_format_duration "$_t")."
+    rclog "heartbeat cleanup failed: $_label duration=$(_format_duration "$_t")"
+    return 1
+  fi
+  ok "$_label ($(_format_duration "$_t"))"
+  rclog "heartbeat complete: $_label duration=$(_format_duration "$_t")"
+  return 0
 }
 
 ensure_ppt_master() {
@@ -2202,8 +2242,12 @@ info "Installing research plugins (network stages can each take up to 2 min)..."
 RP_LOG="$(mktemp)"
 CURRENT_VER=$(node -e 'console.log(require(process.argv[1]).version)' \
   "$PLUGIN_DIR/package.json" 2>/dev/null || echo "none")
-if node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
-    --target "$PLUGIN_DIR" >>"$RP_LOG" 2>&1; then
+rp_install_command() {
+  node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
+    --target "$PLUGIN_DIR" >>"$RP_LOG" 2>&1
+}
+if run_with_heartbeat "Preparing research plugins" rp_install_command; then
+  unset -f rp_install_command
   rp_cleanup_oc_managed
   NEW_VER=$(node -e 'console.log(require(process.argv[1]).version)' \
     "$PLUGIN_DIR/package.json" 2>/dev/null || echo "unknown")
@@ -2215,6 +2259,7 @@ if node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
     ok "Research-plugins updated: v${CURRENT_VER} → v${NEW_VER}"
   fi
 else
+  unset -f rp_install_command
   warn "Research plugins could not be downloaded or prepared."
   warn "Error details (last 5 lines):"
   tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
@@ -2250,9 +2295,12 @@ if [ -n "$RC_PROFILE_CAPSULE" ]; then
   $UPDATE_FAILED && die "The 0.8.3 candidate was not installed; refusing to apply a new Bootstrap Profile."
   rc_profile_assert_gateway_stopped
   rc_profile_prepare_native_data_root
-  rc_profile_recover_native
-  rc_profile_stage_native
-  rc_profile_apply_native
+  rc_profile_recover_native \
+    || die "Bootstrap Profile recovery failed. Existing user files were kept."
+  rc_profile_stage_native \
+    || die "Bootstrap Profile staging failed. Existing user files were kept."
+  rc_profile_apply_native \
+    || die "Bootstrap Profile apply failed. The transaction will be rolled back."
 fi
 
 # Reconcile plugin configuration only after the optional download has reached a
@@ -2278,7 +2326,8 @@ if [ -f "$INSTALL_DIR/config/openclaw.json" ]; then
 fi
 
 if [ -n "$RC_PROFILE_TX_ID" ]; then
-  rc_profile_verify_native
+  rc_profile_verify_native \
+    || die "Bootstrap Profile verification failed. The transaction will be rolled back."
   rc_profile_probe_native
   rc_profile_commit_native
 fi

@@ -159,6 +159,28 @@ describe('Bootstrap Profile installer transaction ordering', () => {
   });
 
   it('keeps the native model verification visibly alive without keyboard input', () => {
+    expect(native).toContain('ok "$_label ($(_format_duration "$_t"))"');
+    expect(native).toContain(
+      'warn "$_label failed after $(_format_duration "$_t") (exit $_rc)."',
+    );
+    expect(native).toContain('heartbeat complete: $_label duration=');
+    expect(native).toContain('heartbeat failed: $_label duration=');
+    expect(native).toContain('rp_install_command() {');
+    expect(native).toContain(
+      'run_with_heartbeat "Preparing research plugins" rp_install_command',
+    );
+    expect(native).toContain('rc_profile_run_stage() {');
+    expect(native).toContain(
+      'run_with_heartbeat "Preparing Bootstrap Profile"',
+    );
+    expect(native).toContain('rc_profile_run_apply() {');
+    expect(native).toContain(
+      'run_with_heartbeat "Applying Bootstrap Profile"',
+    );
+    expect(native).toContain('rc_profile_run_verify() {');
+    expect(native).toContain(
+      'run_with_heartbeat "Verifying Bootstrap Profile files"',
+    );
     expect(native).toContain('rc_profile_run_model_probe() {');
     expect(native).toContain(
       'run_with_heartbeat "Verifying Bootstrap Profile model access"',

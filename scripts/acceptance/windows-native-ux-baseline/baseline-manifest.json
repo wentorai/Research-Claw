@@ -76,12 +76,12 @@
   "sharedSurfaces": [
     {
       "path": "scripts/install-windows.ps1",
-      "sha256": "8e730e24929751362537fd9113e6fb36b07f8f03f8863c41478225527a0c8cd8",
+      "sha256": "246f7c7c87cbde7125749ab42dbe0b5b94755d761e2fdd030e4c9cd4e09529c2",
       "topologies": ["windows-native"]
     },
     {
       "path": "scripts/install.sh",
-      "sha256": "cb491b9be2c56d38993bbbfe467b0464ee3ac3cc758e897d669727e57e2b4621",
+      "sha256": "97bbffe3d0ecb2b384a14d49cb5606db7d86daeb67a0bb02887bc4145a3a8751",
       "topologies": ["windows-native", "macos-native", "linux-wsl2"]
     },
     {
@@ -116,12 +116,12 @@
     },
     {
       "path": "scripts/install-research-plugins.cjs",
-      "sha256": "ae6ce063498847a548a2091987340da7bd30871594f5edd92dec225c29d3a2a4",
+      "sha256": "2a249908b2c6698089fed052575b274ddd31407c0e0dbf83ba1ad0d4076e0969",
       "topologies": ["windows-native", "macos-native", "linux-wsl2"]
     },
     {
       "path": "scripts/research-plugins-install-utils.cjs",
-      "sha256": "2d2b640382733fa549eb2df5355723ce8e28830b9a117854ca6b399d8d5c5f60",
+      "sha256": "e2fda45fc539956ac5bd74f0a0cad1075a7b58d5ce8ede365cd5083718f3ab01",
       "topologies": ["windows-native", "macos-native", "linux-wsl2"]
     },
     {
@@ -132,6 +132,11 @@
     {
       "path": "scripts/bootstrap-profile/model-probe.cjs",
       "sha256": "56a904c5dffd968fe8a69bc9eaaa6686fccc7be76d88c9daa124fd2f636d83b6",
+      "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
+    },
+    {
+      "path": "scripts/bootstrap-profile/applier.cjs",
+      "sha256": "ca990e8f7ebbd25ea040c8fc987ba968b4be98b5696f07b663b138ba05ef73e8",
       "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
     },
     {

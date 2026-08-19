@@ -37,7 +37,10 @@ const AUTH_LOCK_OPTIONS = {
   stale: 30_000,
 };
 const CRON_WORKER_LIMIT = 10 * 1024 * 1024;
-const CRON_WORKER_TIMEOUT_MS = 30_000;
+function cronWorkerTimeoutMs(platform = process.platform) {
+  return platform === 'win32' ? 120_000 : 30_000;
+}
+const CRON_WORKER_TIMEOUT_MS = cronWorkerTimeoutMs();
 const CRON_WORKER_EXIT_TIMEOUT_MS = 30_000;
 const CRON_WORKER_LIFECYCLE_MAX_BYTES = 2 * 1024 * 1024;
 const CRON_WORKER_LIFECYCLE_CREATE_SQL = `CREATE TABLE rc_cron_worker_epoch (
@@ -5472,6 +5475,7 @@ function runCronWorker(paths, action, stateDir, payload, target, controls = {}) 
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let failed = false;
+    let timedOut = false;
     let settled = false;
     const finish = (callback) => {
       if (settled) return;
@@ -5486,6 +5490,7 @@ function runCronWorker(paths, action, stateDir, payload, target, controls = {}) 
     };
     const deadline = setTimeout(() => {
       failed = true;
+      timedOut = true;
       child.kill('SIGKILL');
     }, timeoutMs);
     deadline.unref();
@@ -5518,7 +5523,9 @@ function runCronWorker(paths, action, stateDir, payload, target, controls = {}) 
     child.once('close', (code) => {
       finish(() => {
         if (failed || code !== 0 || stderrBytes > CRON_WORKER_LIMIT) {
-          reject(new BootstrapProfileTransactionError('CRON_WORKER_FAILED'));
+          reject(new BootstrapProfileTransactionError(
+            timedOut ? 'CRON_WORKER_TIMEOUT' : 'CRON_WORKER_FAILED',
+          ));
           return;
         }
         try {
@@ -7214,5 +7221,6 @@ module.exports = {
       return { home: scratch.home, tmp: scratch.tmp };
     },
     activeCronWorkerPids: () => [...activeCronWorkers].map((record) => record.child.pid),
+    cronWorkerTimeoutMs,
   } : undefined,
 };

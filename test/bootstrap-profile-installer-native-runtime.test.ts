@@ -639,7 +639,11 @@ ${update}
           ordinaryUntrackedRemoved: !fs.existsSync(ordinaryUntracked),
           exit: result,
           restored,
-          tempEntries: fs.readdirSync(temp).sort(),
+          // macOS may create its own xcrun_db cache under an overridden TMPDIR.
+          // The installer contract owns only its rc-* task artifacts.
+          tempEntries: fs.readdirSync(temp)
+            .filter((entry) => entry.startsWith('rc-'))
+            .sort(),
           heartbeatAliveAtParentExit: pidIsAlive(pullPid),
           heartbeatStoppedAtParentExit: fs.existsSync(path.join(events, 'pull-stopped')),
         };
