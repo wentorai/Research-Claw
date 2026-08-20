@@ -183,7 +183,10 @@ describe('Bootstrap Profile installer transaction ordering', () => {
     );
     expect(native).toContain('rc_profile_run_model_probe() {');
     expect(native).toContain(
-      'run_with_heartbeat "Verifying Bootstrap Profile model access"',
+      'run_with_heartbeat "Verifying Bootstrap Profile model access (attempt 1/2)"',
+    );
+    expect(native).toContain(
+      'run_with_heartbeat "Verifying Bootstrap Profile model access (retry 2/2)"',
     );
     expect(native).toContain('unset -f rc_profile_run_model_probe');
     expect(native).not.toMatch(/\bread\b[^\n]*(?:Press|Enter|key)/i);

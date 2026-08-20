@@ -83,6 +83,72 @@ function run(item: ReturnType<typeof harness>) {
   ], { cwd: ROOT, encoding: 'utf8', timeout: 30_000 });
 }
 
+function installerProbeFunction(): string {
+  const source = fs.readFileSync(path.join(ROOT, 'scripts/install.sh'), 'utf8');
+  const start = source.indexOf('rc_profile_probe_native() {');
+  const end = source.indexOf('\nrc_profile_commit_native() {', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+}
+
+function runInstallerRetryFixture(code: string, alwaysFail = false) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-model-probe-retry-'));
+  roots.push(root);
+  const candidate = path.join(root, 'candidate');
+  const scratch = path.join(root, 'scratch');
+  const counter = path.join(root, 'counter');
+  fs.mkdirSync(path.join(candidate, 'scripts/bootstrap-profile'), { recursive: true });
+  fs.mkdirSync(path.join(candidate, 'config'), { recursive: true });
+  fs.mkdirSync(scratch, { mode: 0o700 });
+  writeJson(path.join(candidate, 'config/openclaw.json'), {
+    agents: { defaults: { model: { primary: `${PROVIDER}/fixture` } } },
+    auth: { order: { [PROVIDER]: [PROFILE] } },
+  });
+  fs.writeFileSync(path.join(candidate, 'scripts/bootstrap-profile/model-probe.cjs'), `
+const fs = require('fs');
+const count = fs.existsSync(process.env.RC_TEST_COUNTER)
+  ? Number(fs.readFileSync(process.env.RC_TEST_COUNTER, 'utf8')) + 1 : 1;
+fs.writeFileSync(process.env.RC_TEST_COUNTER, String(count));
+if (count === 1 || process.env.RC_TEST_ALWAYS_FAIL === '1') {
+  process.stderr.write('Bootstrap Profile isolated model probe failed (' + process.env.RC_TEST_CODE + ')\\n');
+  process.exit(1);
+}
+process.stdout.write(JSON.stringify({ ok: true, status: 'ok' }) + '\\n');
+`);
+  const runner = path.join(root, 'runner.sh');
+  fs.writeFileSync(runner, `#!/usr/bin/env bash
+set -euo pipefail
+GW_NODE="$RC_TEST_NODE"
+INSTALL_DIR="$RC_TEST_ROOT"
+RC_PROFILE_TEMP_ROOT="$RC_TEST_SCRATCH"
+R='' G='' C='' Y='' B='' D='' N=''
+warn() { printf 'WARN %s\\n' "$1"; }
+die() { printf 'DIE %s\\n' "$1" >&2; exit 1; }
+run_with_heartbeat() { local label="$1"; shift; printf 'RUN %s\\n' "$label"; "$@"; }
+sleep() { :; }
+${installerProbeFunction()}
+rc_profile_probe_native
+`, { mode: 0o700 });
+  const result = spawnSync('/bin/bash', [runner], {
+    cwd: candidate,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      RC_TEST_NODE: process.execPath,
+      RC_TEST_ROOT: candidate,
+      RC_TEST_SCRATCH: scratch,
+      RC_TEST_COUNTER: counter,
+      RC_TEST_CODE: code,
+      RC_TEST_ALWAYS_FAIL: alwaysFail ? '1' : '0',
+    },
+  });
+  return {
+    result,
+    count: Number(fs.readFileSync(counter, 'utf8')),
+  };
+}
+
 describe('isolated Bootstrap Profile credential/model probe', () => {
   it('budgets for the measured native-Windows OpenClaw cold start', () => {
     const source = fs.readFileSync(HELPER, 'utf8');
@@ -134,7 +200,34 @@ describe('isolated Bootstrap Profile credential/model probe', () => {
   it('keeps the installer-visible error channel constant and disables raw debug output', () => {
     const source = fs.readFileSync(path.join(ROOT, 'scripts/install.sh'), 'utf8');
     expect(source).toContain('RC_MODEL_PROBE_DEBUG=0 "$GW_NODE"');
-    expect(source).toContain('HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Verifying Bootstrap Profile model access"');
-    expect(source).not.toContain('--scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null');
+    expect(source).toContain('run_with_heartbeat "Verifying Bootstrap Profile model access (attempt 1/2)"');
+    expect(source).toContain('--scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>"$_probe_error"');
+  });
+
+  it('retries only a bounded allowlist of transient model classifications', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'scripts/install.sh'), 'utf8');
+    expect(source).toContain('Verifying Bootstrap Profile model access (attempt 1/2)');
+    expect(source).toContain('Verifying Bootstrap Profile model access (retry 2/2)');
+    expect(source).toContain('MODEL_PROBE_TIMEOUT|PROBE_TIMEOUT|MODEL_PROBE_FAILED|MODEL_PROBE_RATE_LIMIT|MODEL_PROBE_UNKNOWN)');
+    const retryCase = source.match(/case "\$_probe_code" in([\s\S]*?)esac/)?.[1] ?? '';
+    expect(retryCase).not.toContain('MODEL_PROBE_AUTH');
+    expect(retryCase).not.toContain('MODEL_PROBE_BILLING');
+    expect(retryCase).not.toContain('MODEL_PROBE_FORMAT');
+    expect(retryCase).not.toContain('MODEL_PROBE_NO_MODEL');
+  });
+
+  it('retries one transient failure exactly once and then accepts success', () => {
+    const fixture = runInstallerRetryFixture('MODEL_PROBE_TIMEOUT');
+    expect(fixture.result.status, `${fixture.result.stdout}\n${fixture.result.stderr}`).toBe(0);
+    expect(fixture.count).toBe(2);
+    expect(fixture.result.stdout).toContain('attempt 1/2');
+    expect(fixture.result.stdout).toContain('retry 2/2');
+  });
+
+  it('does not retry a permanent authentication failure', () => {
+    const fixture = runInstallerRetryFixture('MODEL_PROBE_AUTH', true);
+    expect(fixture.result.status).not.toBe(0);
+    expect(fixture.count).toBe(1);
+    expect(`${fixture.result.stdout}${fixture.result.stderr}`).not.toContain('retry 2/2');
   });
 });

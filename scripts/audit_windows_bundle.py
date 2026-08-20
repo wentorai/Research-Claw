@@ -22,6 +22,8 @@ RUNTIME_SHA256 = {
         "016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5",
     "runtime/7zr.exe":
         "56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72",
+    "runtime/ffmpeg-release-essentials-9.0.1.7z":
+        "49a73bdf0850092a252ac4641d922f3048d63ed113e196cc65ce1e4f7fb33e85",
 }
 TEXT_MEMBERS = {
     "Wentor-Weifang-OneClick.cmd",

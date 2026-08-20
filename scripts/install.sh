@@ -767,7 +767,7 @@ rc_profile_verify_native() {
 }
 
 rc_profile_probe_native() {
-  local _provider _profile _probe_output
+  local _provider _profile _probe_output _probe_error _probe_code
   read -r _provider _profile <<EOF
 $("$GW_NODE" -e '
   const fs=require("fs");
@@ -782,6 +782,7 @@ $("$GW_NODE" -e '
 EOF
   [ -n "$_provider" ] && [ -n "$_profile" ] || die "Bootstrap Profile model identity is incomplete."
   _probe_output="$RC_PROFILE_TEMP_ROOT/model-probe.json"
+  _probe_error="$RC_PROFILE_TEMP_ROOT/model-probe.stderr"
   rc_profile_run_model_probe() {
     RC_MODEL_PROBE_DEBUG=0 "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
         --root "$INSTALL_DIR" \
@@ -789,14 +790,35 @@ EOF
         --state "$HOME/.openclaw" \
         --provider "$_provider" \
         --profile "$_profile" \
-        --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output"
+        --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>"$_probe_error"
   }
-  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Verifying Bootstrap Profile model access" \
+  if ! run_with_heartbeat "Verifying Bootstrap Profile model access (attempt 1/2)" \
       rc_profile_run_model_probe; then
-    unset -f rc_profile_run_model_probe
-    die "Bootstrap Profile credential/model probe failed."
+    _probe_code="$(sed -n \
+      's/^Bootstrap Profile isolated model probe failed (\([A-Z0-9_]*\))$/\1/p' \
+      "$_probe_error" | tail -1)"
+    case "$_probe_code" in
+      MODEL_PROBE_TIMEOUT|PROBE_TIMEOUT|MODEL_PROBE_FAILED|MODEL_PROBE_RATE_LIMIT|MODEL_PROBE_UNKNOWN)
+        warn "Bootstrap Profile model access had a transient failure ($_probe_code); retrying once."
+        rm -f -- "$_probe_output" "$_probe_error" \
+          || die "Bootstrap Profile model retry cleanup failed."
+        sleep 5
+        if ! run_with_heartbeat "Verifying Bootstrap Profile model access (retry 2/2)" \
+            rc_profile_run_model_probe; then
+          tail -5 "$_probe_error" 2>/dev/null >&2 || true
+          unset -f rc_profile_run_model_probe
+          die "Bootstrap Profile credential/model probe failed after one retry."
+        fi
+        ;;
+      *)
+        tail -5 "$_probe_error" 2>/dev/null >&2 || true
+        unset -f rc_profile_run_model_probe
+        die "Bootstrap Profile credential/model probe failed."
+        ;;
+    esac
   fi
   unset -f rc_profile_run_model_probe
+  rm -f -- "$_probe_error" || die "Bootstrap Profile model probe cleanup failed."
   "$GW_NODE" -e '
     const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
     if (value?.ok !== true || value?.status !== "ok") process.exit(1);
