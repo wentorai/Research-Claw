@@ -783,15 +783,15 @@ EOF
   [ -n "$_provider" ] && [ -n "$_profile" ] || die "Bootstrap Profile model identity is incomplete."
   _probe_output="$RC_PROFILE_TEMP_ROOT/model-probe.json"
   rc_profile_run_model_probe() {
-    "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
+    RC_MODEL_PROBE_DEBUG=0 "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
         --root "$INSTALL_DIR" \
         --config "$INSTALL_DIR/config/openclaw.json" \
         --state "$HOME/.openclaw" \
         --provider "$_provider" \
         --profile "$_profile" \
-        --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null
+        --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output"
   }
-  if ! run_with_heartbeat "Verifying Bootstrap Profile model access" \
+  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Verifying Bootstrap Profile model access" \
       rc_profile_run_model_probe; then
     unset -f rc_profile_run_model_probe
     die "Bootstrap Profile credential/model probe failed."

@@ -68,6 +68,30 @@
         "browserAutoOpen": "not-observed",
         "failureCode": "CRON_WORKER_FAILED"
       }
+    },
+    {
+      "id": "windows-v20-model-probe-red",
+      "provenance": "real-windows-sanitized",
+      "packageSha256": "11e122bba2016d2b3f319239839bd050948870cedddcad7b57c9fafa60fbe35c",
+      "sourceCommit": "0fbda5eac478457a721ce500a2b7b04de9027190",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "product-runtime-red",
+      "observed": {
+        "fetchElapsedSeconds": 1,
+        "buildElapsedSeconds": 142,
+        "pluginsElapsedSeconds": 5,
+        "profilePrepareElapsedSeconds": 1,
+        "profileApplyElapsedSeconds": 7,
+        "profileVerifyElapsedSeconds": 6,
+        "profileModelProbeElapsedSeconds": 111,
+        "installTransactionGreen": false,
+        "http200": false,
+        "configGet": "not-run",
+        "stableTicks": false,
+        "quickEditEnabled": false,
+        "browserAutoOpen": "not-observed",
+        "failureCode": "MODEL_PROBE_UNCLASSIFIED_V20"
+      }
     }
   ],
   "uxCapture": [

@@ -11,6 +11,15 @@ const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const PROVIDER_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/;
 const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,127}:managed$/;
+const PROBE_STATUS_FAILURE_CODES = Object.freeze({
+  auth: 'MODEL_PROBE_AUTH',
+  billing: 'MODEL_PROBE_BILLING',
+  rate_limit: 'MODEL_PROBE_RATE_LIMIT',
+  timeout: 'MODEL_PROBE_TIMEOUT',
+  format: 'MODEL_PROBE_FORMAT',
+  no_model: 'MODEL_PROBE_NO_MODEL',
+  unknown: 'MODEL_PROBE_UNKNOWN',
+});
 
 class ModelProbeError extends Error {
   constructor(code) {
@@ -283,7 +292,13 @@ async function main() {
     && probes.some((probe) => probe?.status === 'ok'
       && (probe.provider === undefined || probe.provider === provider)
       && (probe.profileId === undefined || probe.profileId === profileId));
-  if (!accepted) fail('MODEL_PROBE_REJECTED');
+  if (!accepted) {
+    const selected = Array.isArray(probes)
+      ? probes.find((probe) => (probe?.provider === undefined || probe.provider === provider)
+        && (probe?.profileId === undefined || probe.profileId === profileId))
+      : undefined;
+    fail(PROBE_STATUS_FAILURE_CODES[selected?.status] ?? 'MODEL_PROBE_REJECTED');
+  }
   return { ok: true, provider, profileId, status: 'ok' };
 }
 

@@ -73,15 +73,24 @@
       { "status": "D", "path": "test/windows-runtime-probe-contract.test.ts" }
     ]
   },
+  "latestRealWindowsAttempt": {
+    "packageName": "Wentor-Weifang-RC-0.8.3-Windows-Native-Offline-v20.zip",
+    "packageSha256": "11e122bba2016d2b3f319239839bd050948870cedddcad7b57c9fafa60fbe35c",
+    "evidenceSourceCommit": "0fbda5eac478457a721ce500a2b7b04de9027190",
+    "host": "windows-10-x64-node22-abi127",
+    "status": "red-model-probe-cause-unclassified",
+    "profileModelProbeElapsedSeconds": 111,
+    "releaseAuthority": false
+  },
   "sharedSurfaces": [
     {
       "path": "scripts/install-windows.ps1",
-      "sha256": "246f7c7c87cbde7125749ab42dbe0b5b94755d761e2fdd030e4c9cd4e09529c2",
+      "sha256": "abc3059e9c1ad37e369f893260b3f6ac924ee0b9ad7e078ea6109484fd3a8f86",
       "topologies": ["windows-native"]
     },
     {
       "path": "scripts/install.sh",
-      "sha256": "97bbffe3d0ecb2b384a14d49cb5606db7d86daeb67a0bb02887bc4145a3a8751",
+      "sha256": "549b0e6cc8276b746442041e05aaa0c76d54fc346c22170ef35380bb23d474a5",
       "topologies": ["windows-native", "macos-native", "linux-wsl2"]
     },
     {
@@ -131,7 +140,7 @@
     },
     {
       "path": "scripts/bootstrap-profile/model-probe.cjs",
-      "sha256": "56a904c5dffd968fe8a69bc9eaaa6686fccc7be76d88c9daa124fd2f636d83b6",
+      "sha256": "f359f2c5e7443d60653541c252f091c03b1f93a6c1897e51017e024a1f67c7c7",
       "topologies": ["windows-native", "macos-native", "linux-wsl2", "docker"]
     },
     {

@@ -197,6 +197,13 @@ describe('Windows native install and daily-launch frozen baseline', () => {
         status: string;
         changedPathsToCurrent: Array<{ status: string; path: string }>;
       };
+      latestRealWindowsAttempt: {
+        packageName: string;
+        packageSha256: string;
+        evidenceSourceCommit: string;
+        status: string;
+        releaseAuthority: boolean;
+      };
       remoteAuthorityAtBaseline: Record<string, string>;
     }>(MANIFEST_PATH);
     expect(manifest.lastRealWindowsArtifact).toMatchObject({
@@ -207,6 +214,13 @@ describe('Windows native install and daily-launch frozen baseline', () => {
     });
     expect(manifest.lastRealWindowsArtifact.changedPathsToCurrent.length)
       .toBeGreaterThan(20);
+    expect(manifest.latestRealWindowsAttempt).toEqual(expect.objectContaining({
+      packageName: 'Wentor-Weifang-RC-0.8.3-Windows-Native-Offline-v20.zip',
+      packageSha256: '11e122bba2016d2b3f319239839bd050948870cedddcad7b57c9fafa60fbe35c',
+      evidenceSourceCommit: '0fbda5eac478457a721ce500a2b7b04de9027190',
+      status: 'red-model-probe-cause-unclassified',
+      releaseAuthority: false,
+    }));
     expect(manifest.remoteAuthorityAtBaseline).toEqual({
       localMain: 'e63679c189c162d623c498a9031b274897cac43d',
       localCandidate: '6d433849e98d5c34b2d8656c13c4c25f1688ed6b',
@@ -224,6 +238,7 @@ describe('Windows native install and daily-launch frozen baseline', () => {
       'windows-v17-probe-identity-red',
       'windows-v18-runtime-interaction-red',
       'windows-v19-plugin-cron-red',
+      'windows-v20-model-probe-red',
     ]);
     for (const fixture of fixtures.runtime) {
       expect(classifyRuntime(fixture), fixture.id).toBe(fixture.expectedClass);

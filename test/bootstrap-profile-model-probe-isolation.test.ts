@@ -23,7 +23,7 @@ function writeJson(file: string, value: unknown): void {
   if (process.platform !== 'win32') fs.chmodSync(file, 0o600);
 }
 
-function harness(failure = false) {
+function harness(failure: boolean | string = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-model-probe-isolation-'));
   roots.push(root);
   const fakeRoot = path.join(root, 'candidate');
@@ -36,7 +36,8 @@ function harness(failure = false) {
   const scratchParent = path.join(root, 'scratch-parent');
   fs.mkdirSync(scratchParent, { mode: 0o700 });
   writeJson(configPath, {
-    fixtureProbeFailure: failure,
+    fixtureProbeFailure: failure === true,
+    ...(typeof failure === 'string' ? { fixtureProbeStatus: failure } : {}),
     agents: { defaults: { model: { primary: `${PROVIDER}/fixture` } } },
     models: { providers: { [PROVIDER]: { apiKey: PROFILE } } },
     auth: { order: { [PROVIDER]: [PROFILE] } },
@@ -111,5 +112,29 @@ describe('isolated Bootstrap Profile credential/model probe', () => {
     expect(tree(item.stateDir)).toEqual(before);
     expect(fs.readdirSync(item.scratchParent)).toEqual([]);
     expect(`${result.stdout}${result.stderr}`).not.toContain(SECRET);
+  });
+
+  it.each([
+    ['auth', 'MODEL_PROBE_AUTH'],
+    ['billing', 'MODEL_PROBE_BILLING'],
+    ['rate_limit', 'MODEL_PROBE_RATE_LIMIT'],
+    ['timeout', 'MODEL_PROBE_TIMEOUT'],
+    ['format', 'MODEL_PROBE_FORMAT'],
+    ['no_model', 'MODEL_PROBE_NO_MODEL'],
+    ['unknown', 'MODEL_PROBE_UNKNOWN'],
+  ])('reports the safe %s classification without provider error text', (status, code) => {
+    const item = harness(status);
+    const result = run(item);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`(${code})`);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(SECRET);
+    expect(fs.readdirSync(item.scratchParent)).toEqual([]);
+  });
+
+  it('keeps the installer-visible error channel constant and disables raw debug output', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'scripts/install.sh'), 'utf8');
+    expect(source).toContain('RC_MODEL_PROBE_DEBUG=0 "$GW_NODE"');
+    expect(source).toContain('HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Verifying Bootstrap Profile model access"');
+    expect(source).not.toContain('--scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null');
   });
 });
