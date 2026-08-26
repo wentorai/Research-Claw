@@ -95,6 +95,25 @@ function requirePrivateFile(target, code = 'INVALID_LOCK_FILE') {
   return metadata;
 }
 
+function fsyncPrivateFile(file, code = 'INVALID_LOCK_FILE') {
+  const before = requirePrivateFile(file, code);
+  const descriptor = fs.openSync(file, 'r+');
+  try {
+    const opened = fs.fstatSync(descriptor);
+    if (opened.dev !== before.dev || opened.ino !== before.ino
+        || opened.nlink !== 1 || opened.size !== before.size) fail(code);
+    fs.fsyncSync(descriptor);
+    const flushed = fs.fstatSync(descriptor);
+    if (flushed.dev !== opened.dev || flushed.ino !== opened.ino
+        || flushed.nlink !== 1 || flushed.size !== opened.size) fail(code);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  const after = requirePrivateFile(file, code);
+  if (after.dev !== before.dev || after.ino !== before.ino
+      || after.nlink !== 1 || after.size !== before.size) fail(code);
+}
+
 function completeCanonicalEmptyFile(file, bytes, parent, code) {
   const before = requirePrivateFile(file, code);
   if (before.size !== 0) return false;
@@ -386,8 +405,7 @@ function initializeDatabase(Database, file, identity) {
   database.close();
   if (process.platform !== 'win32') fs.chmodSync(file, 0o600);
   rejectWalSidecars(file);
-  const descriptor = fs.openSync(file, 'r');
-  try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+  fsyncPrivateFile(file, 'INVALID_LOCK_DATABASE');
   fsyncDirectory(path.dirname(file));
 }
 

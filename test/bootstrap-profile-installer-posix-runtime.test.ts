@@ -647,8 +647,10 @@ INSTALL_DIR="$RC_TEST_ROOT/install"
 GW_NODE="$RC_TEST_NODE"
 PORT=28789
 die() { exit 64; }
+run_with_heartbeat() { shift; "$@"; }
 ${block}
 RC_PROFILE_CAPSULE="$RC_TEST_CAPSULE"
+RC_PROFILE_TEMP_ROOT="$RC_TEST_ROOT/tmp"
 trap rc_profile_exit_cleanup EXIT
 rc_profile_stage_native
 `, { mode: 0o700 });
@@ -663,6 +665,10 @@ rc_profile_stage_native
     });
     expect(result.status).not.toBe(0);
     expect(fs.existsSync(state)).toBe(false);
+    expect(
+      fs.existsSync(`${state}.rolled-back`),
+      [result.stdout, result.stderr].filter(Boolean).join('\n'),
+    ).toBe(true);
     expect(fs.readFileSync(`${state}.rolled-back`, 'utf8')).toBe('yes');
   });
 

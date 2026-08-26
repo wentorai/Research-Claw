@@ -152,6 +152,12 @@ function recoveryRoots(h: ReturnType<typeof harness>, txId: string): string[] {
 }
 
 describe('applier process, secret, and crash contract', () => {
+  it('budgets Windows cron worker cold starts without widening other platforms', () => {
+    expect(applier.__testing.cronWorkerTimeoutMs('win32')).toBe(120_000);
+    expect(applier.__testing.cronWorkerTimeoutMs('darwin')).toBe(30_000);
+    expect(applier.__testing.cronWorkerTimeoutMs('linux')).toBe(30_000);
+  });
+
   it('initializes lock authority explicitly and idempotently before any profile command', () => {
     const h = harness(false);
     const first = parse(run('initialize-locks', h));
@@ -216,7 +222,7 @@ describe('applier process, secret, and crash contract', () => {
       await expect(applier.__testing.inspectCronState(h.paths, staged.txId, {
         workerFile: hangingWorker,
         timeoutMs: 50,
-      })).rejects.toMatchObject({ code: 'CRON_WORKER_FAILED' });
+      })).rejects.toMatchObject({ code: 'CRON_WORKER_TIMEOUT' });
       expect(applier.__testing.activeCronWorkerPids()).toEqual([]);
       expect(fs.existsSync(path.join(
         path.dirname(h.paths.configPath), '.rc-bootstrap', 'transactions', staged.txId, 'cron-clone',

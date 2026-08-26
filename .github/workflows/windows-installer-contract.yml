@@ -18,6 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - name: Native installer encoding and parser on Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\verify-native-windows-installer-encoding.ps1 -InstallerPath .\scripts\install-windows.ps1 -ExpectedEdition Desktop -ExpectedMajorVersion 5
+
+      - name: Native installer encoding and parser on PowerShell 7
+        shell: pwsh
+        run: .\scripts\verify-native-windows-installer-encoding.ps1 -InstallerPath .\scripts\install-windows.ps1 -ExpectedEdition Core -ExpectedMajorVersion 7
+
       - name: Windows PowerShell 5.1 parser and error behavior
         shell: powershell
         run: .\scripts\verify-installer-powershell.ps1 -ExpectedEdition Desktop -ExpectedMajorVersion 5 -AcceptanceHarnessPath .\scripts\acceptance\windows-bootstrap-docker.ps1

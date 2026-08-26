@@ -1,4 +1,4 @@
-param([string]$AuthToken)
+﻿param([string]$AuthToken)
 
 if ($args.Count -ne 0) {
     throw 'Unknown installer argument.'
@@ -19,11 +19,19 @@ $GitArchive = "PortableGit-$GitRelease-64-bit.7z.exe"
 $GitSha256 = '016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5'
 $SevenZipArchive = '7zr.exe'
 $SevenZipSha256 = '56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72'
-$InstallShSha256 = 'afa18713e02740288e986b8fd1c7b1a6e203c4503ca4f72fd6c501da4a3d5c57'
+$FfmpegVersion = '9.0.1'
+$FfmpegArchive = 'ffmpeg-release-essentials-9.0.1.7z'
+$FfmpegSha256 = '49a73bdf0850092a252ac4641d922f3048d63ed113e196cc65ce1e4f7fb33e85'
+$FfmpegExeSha256 = '72a489eccd008c2ec2c0a5856c5c75bc3d8bbfa90166c4566865c246445e6aa3'
+$FfprobeExeSha256 = '19202b23c0043f15ad1b7bce2344f406fd52bd6efd8f995ce02e7392a1cec52f'
+$InstallShSha256 = 'd0aeecca38e0bbcf12c526ba447e845ebe7e74ef6727fa83d33db17e15fe0a79'
 $InstallShUrl = 'https://wentor.ai/install.sh'
 $IssueUrl = 'https://github.com/wentorai/Research-Claw/issues'
 $script:PrivateRoot = $null
 $script:InstallerSourcePath = $MyInvocation.MyCommand.Path
+$script:ConsoleInputHandle = [IntPtr]::Zero
+$script:ConsoleOriginalMode = $null
+$script:ConsoleModeManaged = $false
 
 function Write-Step([string]$Text) {
     Write-Host "`n==> $Text" -ForegroundColor Cyan
@@ -45,6 +53,112 @@ function Add-ProcessPath([string]$PathEntry) {
     }
 }
 
+function Assert-PrivateRootAcl([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force
+    if (-not $item.PSIsContainer `
+        -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'The private installer path is not a concrete directory.'
+    }
+
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $systemSid = 'S-1-5-18'
+    $administratorsSid = 'S-1-5-32-544'
+    $allowedSids = @($currentSid, $systemSid, $administratorsSid)
+    $fullControl = [Security.AccessControl.FileSystemRights]::FullControl
+    $fullControlSids = @{}
+    $acl = Get-Acl -LiteralPath $Path
+    $ownerAccount = New-Object Security.Principal.NTAccount -ArgumentList $acl.Owner
+    $ownerSid = $ownerAccount.Translate([Security.Principal.SecurityIdentifier]).Value
+
+    if ($ownerSid -ne $currentSid -or -not $acl.AreAccessRulesProtected) {
+        throw 'The private installer directory owner or inheritance boundary is invalid.'
+    }
+    foreach ($rule in @($acl.GetAccessRules(
+                $true,
+                $true,
+                [Security.Principal.SecurityIdentifier]
+            ))) {
+        $sid = $rule.IdentityReference.Value
+        if ($rule.IsInherited `
+            -or $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow `
+            -or $allowedSids -notcontains $sid) {
+            throw 'The private installer directory contains an unauthorized ACL entry.'
+        }
+        if (($rule.FileSystemRights -band $fullControl) -eq $fullControl) {
+            $fullControlSids[$sid] = $true
+        }
+    }
+    foreach ($sid in $allowedSids) {
+        if (-not $fullControlSids.ContainsKey($sid)) {
+            throw 'The private installer directory is missing a required full-control ACL.'
+        }
+    }
+}
+
+function Initialize-ConsoleApi {
+    if ('WentorNativeConsole' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class WentorNativeConsole {
+    public const uint ENABLE_QUICK_EDIT_MODE = 0x0040;
+    public const uint ENABLE_EXTENDED_FLAGS = 0x0080;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+}
+'@
+}
+
+function Disable-ConsoleQuickEdit {
+    Initialize-ConsoleApi
+    $handle = [WentorNativeConsole]::GetStdHandle(-10)
+    if ($handle -eq [IntPtr]::Zero) { return $false }
+
+    [uint32]$mode = 0
+    if (-not [WentorNativeConsole]::GetConsoleMode($handle, [ref]$mode)) {
+        return $false
+    }
+    [uint32]$nextMode = ($mode -band (-bnot [WentorNativeConsole]::ENABLE_QUICK_EDIT_MODE)) `
+        -bor [WentorNativeConsole]::ENABLE_EXTENDED_FLAGS
+    if (-not [WentorNativeConsole]::SetConsoleMode($handle, $nextMode)) {
+        throw '无法关闭 Windows 控制台快速编辑模式。'
+    }
+    [uint32]$verifiedMode = 0
+    if (-not [WentorNativeConsole]::GetConsoleMode($handle, [ref]$verifiedMode) `
+        -or (($verifiedMode -band [WentorNativeConsole]::ENABLE_QUICK_EDIT_MODE) -ne 0)) {
+        throw 'Windows 控制台快速编辑模式仍处于启用状态。'
+    }
+
+    $script:ConsoleInputHandle = $handle
+    $script:ConsoleOriginalMode = $mode
+    return $true
+}
+
+function Restore-ConsoleInputMode {
+    if (-not $script:ConsoleModeManaged `
+        -or $script:ConsoleInputHandle -eq [IntPtr]::Zero `
+        -or $null -eq $script:ConsoleOriginalMode) {
+        return
+    }
+    if (-not [WentorNativeConsole]::SetConsoleMode(
+        $script:ConsoleInputHandle,
+        [uint32]$script:ConsoleOriginalMode
+    )) {
+        Write-Warning 'Windows 控制台输入模式未能恢复；关闭此窗口即可恢复。'
+    }
+    $script:ConsoleModeManaged = $false
+    $script:ConsoleInputHandle = [IntPtr]::Zero
+    $script:ConsoleOriginalMode = $null
+}
+
 function New-PrivateRoot {
     $parent = Join-Path $env:LOCALAPPDATA 'Wentor\InstallerTemp'
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -58,6 +172,7 @@ function New-PrivateRoot {
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not create the private installer directory.'
     }
+    Assert-PrivateRootAcl $root
     return $root
 }
 
@@ -146,6 +261,20 @@ function Resolve-BundledAsset {
     return $candidate
 }
 
+function Resolve-SevenZip {
+    $sevenZip = Resolve-BundledAsset -Name $SevenZipArchive `
+        -ExpectedSha256 $SevenZipSha256 -Label '7-Zip 提取器 26.02'
+    if (-not $sevenZip) {
+        $sevenZip = Join-Path $script:PrivateRoot $SevenZipArchive
+        Download-VerifiedFile -Urls @(
+            'https://www.7-zip.org/a/7zr.exe',
+            'https://github.com/ip7z/7zip/releases/download/26.02/7zr.exe'
+        ) -Destination $sevenZip -ExpectedSha256 $SevenZipSha256 `
+            -Label '7-Zip 提取器 26.02'
+    }
+    return $sevenZip
+}
+
 function Test-Node22 {
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { return $false }
@@ -227,14 +356,7 @@ function Ensure-GitBash {
             "https://github.com/git-for-windows/git/releases/download/$GitTag/$GitArchive"
         ) -Destination $archive -ExpectedSha256 $GitSha256 -Label "PortableGit $GitVersion"
     }
-    $sevenZip = Resolve-BundledAsset -Name $SevenZipArchive -ExpectedSha256 $SevenZipSha256 -Label '7-Zip 提取器 26.02'
-    if (-not $sevenZip) {
-        $sevenZip = Join-Path $script:PrivateRoot $SevenZipArchive
-        Download-VerifiedFile -Urls @(
-            'https://www.7-zip.org/a/7zr.exe',
-            'https://github.com/ip7z/7zip/releases/download/26.02/7zr.exe'
-        ) -Destination $sevenZip -ExpectedSha256 $SevenZipSha256 -Label '7-Zip 提取器 26.02'
-    }
+    $sevenZip = Resolve-SevenZip
 
     $extract = Join-Path $script:PrivateRoot 'portable-git-extract'
     $extractArguments = @('x', '-y', "-o$extract", $archive)
@@ -282,6 +404,107 @@ function Ensure-GitBash {
     Add-ProcessPath (Join-Path (Split-Path -Parent (Split-Path -Parent $bash)) 'cmd')
     Write-Ok "PortableGit $GitVersion 已就绪（无需管理员权限）"
     return $bash
+}
+
+function Test-FfmpegRuntime([string]$RuntimeRoot) {
+    $binRoot = Join-Path $RuntimeRoot 'bin'
+    $ffmpegExe = Join-Path $binRoot 'ffmpeg.exe'
+    $ffprobeExe = Join-Path $binRoot 'ffprobe.exe'
+    if (-not (Test-Path -LiteralPath $ffmpegExe -PathType Leaf) `
+        -or -not (Test-Path -LiteralPath $ffprobeExe -PathType Leaf)) {
+        return $false
+    }
+    if ((Get-Sha256 $ffmpegExe) -ne $FfmpegExeSha256 `
+        -or (Get-Sha256 $ffprobeExe) -ne $FfprobeExeSha256) {
+        return $false
+    }
+
+    $versionOutput = @(& $ffmpegExe '-hide_banner' '-version' 2>&1)
+    if ($LASTEXITCODE -ne 0 `
+        -or $versionOutput.Count -eq 0 `
+        -or ([string]$versionOutput[0]) -notmatch '^ffmpeg version 9\.0\.1(?:-|\s|$)') {
+        return $false
+    }
+    $probeVersionOutput = @(& $ffprobeExe '-hide_banner' '-version' 2>&1)
+    if ($LASTEXITCODE -ne 0 `
+        -or $probeVersionOutput.Count -eq 0 `
+        -or ([string]$probeVersionOutput[0]) -notmatch '^ffprobe version 9\.0\.1(?:-|\s|$)') {
+        return $false
+    }
+
+    $fixture = Join-Path $script:PrivateRoot 'ffmpeg-runtime-probe.wav'
+    & $ffmpegExe @(
+        '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+        '-i', 'anullsrc=r=8000:cl=mono', '-t', '0.10',
+        '-c:a', 'pcm_s16le', '-y', $fixture
+    ) 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $fixture -PathType Leaf)) {
+        return $false
+    }
+    $probeOutput = @(& $ffprobeExe @(
+        '-v', 'error', '-select_streams', 'a:0',
+        '-show_entries', 'stream=codec_name,sample_rate',
+        '-of', 'default=nw=1', $fixture
+    ) 2>&1)
+    if ($LASTEXITCODE -ne 0 `
+        -or $probeOutput -notcontains 'codec_name=pcm_s16le' `
+        -or $probeOutput -notcontains 'sample_rate=8000') {
+        return $false
+    }
+    return $true
+}
+
+function Ensure-Ffmpeg {
+    Write-Step '检查 FFmpeg 摄像头与 RTSP 运行时'
+    $runtimeRoot = Join-Path $env:LOCALAPPDATA `
+        'Wentor\Runtimes\ffmpeg-9.0.1-49a73bdf'
+    if (Test-Path -LiteralPath $runtimeRoot) {
+        if (-not (Test-FfmpegRuntime $runtimeRoot)) {
+            throw "FFmpeg 目标目录已存在但字节或功能验证失败：$runtimeRoot"
+        }
+        $binRoot = Join-Path $runtimeRoot 'bin'
+        Add-ProcessPath $binRoot
+        Write-Ok "FFmpeg $FfmpegVersion 已就绪（Wentor 用户级运行时）"
+        return $binRoot
+    }
+
+    $archive = Resolve-BundledAsset -Name $FfmpegArchive `
+        -ExpectedSha256 $FfmpegSha256 -Label "FFmpeg $FfmpegVersion"
+    if (-not $archive) {
+        $archive = Join-Path $script:PrivateRoot $FfmpegArchive
+        Download-VerifiedFile -Urls @(
+            'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z',
+            'https://github.com/GyanD/codexffmpeg/releases/download/9.0.1/ffmpeg-9.0.1-essentials_build.7z'
+        ) -Destination $archive -ExpectedSha256 $FfmpegSha256 `
+            -Label "FFmpeg $FfmpegVersion"
+    }
+    $sevenZip = Resolve-SevenZip
+    $extract = Join-Path $script:PrivateRoot 'ffmpeg-extract'
+    & $sevenZip @('x', '-y', "-o$extract", $archive) | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "FFmpeg 解压失败，退出码：$LASTEXITCODE"
+    }
+
+    $source = Join-Path $extract 'ffmpeg-9.0.1-essentials_build'
+    $sourceFfmpeg = Join-Path $extract `
+        'ffmpeg-9.0.1-essentials_build\bin\ffmpeg.exe'
+    $sourceFfprobe = Join-Path $extract `
+        'ffmpeg-9.0.1-essentials_build\bin\ffprobe.exe'
+    if (-not (Test-Path -LiteralPath $sourceFfmpeg -PathType Leaf) `
+        -or -not (Test-Path -LiteralPath $sourceFfprobe -PathType Leaf) `
+        -or (Get-Sha256 $sourceFfmpeg) -ne $FfmpegExeSha256 `
+        -or (Get-Sha256 $sourceFfprobe) -ne $FfprobeExeSha256) {
+        throw 'FFmpeg 压缩包结构或可执行文件 SHA256 无效。'
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $runtimeRoot) | Out-Null
+    Move-Item -LiteralPath $source -Destination $runtimeRoot
+    if (-not (Test-FfmpegRuntime $runtimeRoot)) {
+        throw 'FFmpeg 安装完成，但版本或最小媒体探测失败。'
+    }
+    $binRoot = Join-Path $runtimeRoot 'bin'
+    Add-ProcessPath $binRoot
+    Write-Ok "FFmpeg $FfmpegVersion 已安装并通过媒体探测"
+    return $binRoot
 }
 
 function Convert-ToPosixPath([string]$WindowsPath, [string]$BashExe) {
@@ -348,9 +571,17 @@ function Main {
         throw 'SETUP_TOKEN 格式无效。'
     }
 
+    $script:ConsoleModeManaged = Disable-ConsoleQuickEdit
+    if ($script:ConsoleModeManaged) {
+        Write-Ok 'Windows 快速编辑已关闭；点击窗口或按 Enter 不会暂停安装。'
+    } else {
+        Write-Warning '当前会话没有可管理的 Windows 控制台；安装将继续。'
+    }
+
     $script:PrivateRoot = New-PrivateRoot
     Ensure-Node22
     $bash = Ensure-GitBash
+    $ffmpegBin = Ensure-Ffmpeg
     Write-Step '准备 Research-Claw 0.8.3 安装入口'
     $installSh = Resolve-InstallSh
     $installPosix = Convert-ToPosixPath $installSh $bash
@@ -365,9 +596,13 @@ function Main {
 
     $previousTmpDir = $env:TMPDIR
     $previousNative = $env:RC_WINDOWS_NATIVE
+    $previousPrivateRoot = $env:RC_WINDOWS_PRIVATE_ROOT
+    $previousPrivateRootAcl = $env:RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED
     try {
         $env:TMPDIR = $privatePosix
         $env:RC_WINDOWS_NATIVE = '1'
+        $env:RC_WINDOWS_PRIVATE_ROOT = $privatePosix
+        $env:RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED = '1'
         Write-Step '安装并启动 Research-Claw'
         & $bash @arguments
         $exitCode = $LASTEXITCODE
@@ -377,6 +612,8 @@ function Main {
     } finally {
         $env:TMPDIR = $previousTmpDir
         $env:RC_WINDOWS_NATIVE = $previousNative
+        $env:RC_WINDOWS_PRIVATE_ROOT = $previousPrivateRoot
+        $env:RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED = $previousPrivateRootAcl
     }
 }
 
@@ -387,6 +624,7 @@ try {
     Write-Host "请保留非秘密错误信息并提交到：$IssueUrl" -ForegroundColor Yellow
     exit 1
 } finally {
+    Restore-ConsoleInputMode
     if ($script:PrivateRoot -and (Test-Path -LiteralPath $script:PrivateRoot)) {
         Remove-Item -LiteralPath $script:PrivateRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

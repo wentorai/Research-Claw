@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const ROOT = path.resolve(__dirname, '..');
 const require = createRequire(import.meta.url);
@@ -37,6 +37,30 @@ function initialize(item: ReturnType<typeof fixture>) {
 }
 
 describe('SQLite bootstrap operation/runtime locks', () => {
+  it('reopens initialized lock databases read-write before the final durability flush', () => {
+    const item = fixture();
+    const observed: Array<{ file: string; flags: unknown }> = [];
+    const originalOpen = fs.openSync;
+    const openSpy = vi.spyOn(fs, 'openSync').mockImplementation(((file, flags, ...rest) => {
+      observed.push({ file: String(file), flags });
+      return (originalOpen as any)(file, flags, ...rest);
+    }) as typeof fs.openSync);
+    try {
+      initialize(item);
+    } finally {
+      openSpy.mockRestore();
+    }
+    const durableReopens = observed.filter(
+      ({ file, flags }) => file.endsWith('.sqlite') && flags !== 'wx',
+    );
+    expect(durableReopens.map(({ file, flags }) => ({
+      name: path.basename(file), flags,
+    }))).toEqual([
+      { name: 'operation.sqlite', flags: 'r+' },
+      { name: 'runtime.sqlite', flags: 'r+' },
+    ]);
+  });
+
   it('creates permanent private rollback-journal lock databases under the canonical config root', () => {
     const item = fixture();
     initialize(item);

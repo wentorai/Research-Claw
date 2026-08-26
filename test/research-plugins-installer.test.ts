@@ -434,6 +434,38 @@ describe('research-plugins atomic installer', () => {
     );
   }, 60_000);
 
+  it('reuses the complete pinned 1.4.8 install without touching the network toolchain', () => {
+    writeFixturePackage(packageDir, '1.4.8', isolatedEnv);
+    expectSuccess(runInstaller(packageDir));
+    const before = treeDigest(pluginDir);
+    const forbiddenBin = path.join(tmpDir, 'forbidden-network-bin');
+    const networkMarker = path.join(tmpDir, 'network-tool-invoked');
+    fs.mkdirSync(forbiddenBin);
+    if (process.platform !== 'win32') {
+      const npm = path.join(forbiddenBin, 'npm');
+      fs.writeFileSync(
+        npm,
+        `#!/bin/sh\nprintf forbidden > ${JSON.stringify(networkMarker)}\nexit 97\n`,
+        { mode: 0o755 },
+      );
+    }
+
+    const reused = command(process.execPath, [
+      INSTALLER,
+      '--target',
+      pluginDir,
+    ], {
+      ...isolatedEnv,
+      PATH: process.platform === 'win32' ? isolatedEnv.PATH : forbiddenBin,
+    });
+
+    expectSuccess(reused);
+    expect(String(reused.stdout)).toContain('already ready (v1.4.8)');
+    expect(fs.existsSync(networkMarker)).toBe(false);
+    expect(treeDigest(pluginDir)).toBe(before);
+    expectNoInstallerDebris();
+  }, 60_000);
+
   it('preserves the complete old install when a later package attempt fails', () => {
     expectSuccess(runInstaller(packageDir));
     const before = treeDigest(pluginDir);

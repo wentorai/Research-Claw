@@ -8,7 +8,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  RESEARCH_PLUGINS_PACKAGE,
+  RESEARCH_PLUGINS_PACKAGE_SPEC,
+  RESEARCH_PLUGINS_RELEASE_VERSION,
   inspectResearchPluginsInstall,
   isManagedResearchPluginsPath,
   writeResearchPluginsIntegrityRecord,
@@ -29,7 +30,8 @@ function usage() {
 
 function parseArgs(argv) {
   const options = {
-    packageSpec: RESEARCH_PLUGINS_PACKAGE,
+    packageSpec: RESEARCH_PLUGINS_PACKAGE_SPEC,
+    releaseDefault: true,
     sourceDir: null,
     target: path.join(
       os.homedir(),
@@ -56,8 +58,10 @@ function parseArgs(argv) {
     if (argument === '--package') {
       options.packageSpec = value();
       packageWasExplicit = true;
+      options.releaseDefault = false;
     } else if (argument === '--source-dir') {
       options.sourceDir = value();
+      options.releaseDefault = false;
     } else if (argument === '--target') {
       options.target = value();
     } else if (argument === '--registry') {
@@ -609,6 +613,29 @@ function main() {
       process.stdout.write(
         'Recovered the previous research plugins after an interrupted update.\n',
       );
+    }
+    if (options.releaseDefault) {
+      const ready = inspectResearchPluginsInstall(options.target);
+      if (ready.usable && ready.version === RESEARCH_PLUGINS_RELEASE_VERSION) {
+        if (ready.integrityStatus === 'legacy') {
+          writeResearchPluginsIntegrityRecord(options.target);
+          const adopted = inspectResearchPluginsInstall(
+            options.target,
+            { requireIntegrity: true },
+          );
+          if (!adopted.usable || adopted.version !== RESEARCH_PLUGINS_RELEASE_VERSION) {
+            throw new Error(
+              `legacy integrity adoption failed (${adopted.reason})`,
+            );
+          }
+        }
+        if (!options.quiet) {
+          process.stdout.write(
+            `Research plugins already ready (v${RESEARCH_PLUGINS_RELEASE_VERSION}).\n`,
+          );
+        }
+        return 0;
+      }
     }
     if (options.sourceDir) {
       const sourceState = inspectResearchPluginsInstall(

@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "runtime": [
+    {
+      "id": "windows-v16-runtime-red",
+      "provenance": "real-windows-sanitized",
+      "sourceReportSha256": "d2b4bfe70dd0f0993ad1eada0c81c7f3c3db273d157f66dcf271028fcc7f7ab3",
+      "sourceCommit": "8b0e0b4442fa4371a2af51e4f3e0bd10a42a77cc",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "product-runtime-red",
+      "observed": {
+        "installTransactionGreen": true,
+        "http200": false,
+        "configGet": "not-run",
+        "stableTicks": false,
+        "quickEditEnabled": true,
+        "browserAutoOpen": "not-observed",
+        "failureCode": "WS_OPEN_TIMEOUT"
+      }
+    },
+    {
+      "id": "windows-v17-probe-identity-red",
+      "provenance": "real-windows-sanitized",
+      "sourceReportSha256": "69b0b2c5a268d747860981cb7d96ae263936833dc2561ce941c09d69c105e434",
+      "sourceCommit": "661879c9a4b43833b9c25047e505bb4c3ff4fdc4",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "probe-contract-red-product-unknown",
+      "observed": {
+        "installTransactionGreen": true,
+        "http200": true,
+        "configGet": "not-run",
+        "stableTicks": false,
+        "quickEditEnabled": true,
+        "browserAutoOpen": "not-observed",
+        "failureCode": "INVALID_CLIENT_IDENTITY"
+      }
+    },
+    {
+      "id": "windows-v18-runtime-interaction-red",
+      "provenance": "real-windows-sanitized",
+      "sourceReportSha256": "c98ccab82382a00bc264dada6c8e04320671018c7a4919b54ed1d55c5f7d0926",
+      "sourceCommit": "661879c9a4b43833b9c25047e505bb4c3ff4fdc4",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "runtime-protocol-green-interaction-red",
+      "observed": {
+        "installTransactionGreen": true,
+        "http200": true,
+        "configGet": "pass",
+        "stableTicks": true,
+        "quickEditEnabled": true,
+        "browserAutoOpen": "not-observed",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "windows-v19-plugin-cron-red",
+      "provenance": "real-windows-sanitized",
+      "packageSha256": "504d4a305a6e5cf7bf9307f24a5e4db80a072aa2fdf9f635328b9af4d0000479",
+      "sourceCommit": "374cba5525c7667ff94d3bb0591991cfd441c548",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "product-runtime-red",
+      "observed": {
+        "installTransactionGreen": false,
+        "http200": false,
+        "configGet": "not-run",
+        "stableTicks": false,
+        "quickEditEnabled": false,
+        "browserAutoOpen": "not-observed",
+        "failureCode": "CRON_WORKER_FAILED"
+      }
+    },
+    {
+      "id": "windows-v20-model-probe-red",
+      "provenance": "real-windows-sanitized",
+      "packageSha256": "11e122bba2016d2b3f319239839bd050948870cedddcad7b57c9fafa60fbe35c",
+      "sourceCommit": "0fbda5eac478457a721ce500a2b7b04de9027190",
+      "host": "windows-10-x64-node22-abi127",
+      "expectedClass": "product-runtime-red",
+      "observed": {
+        "fetchElapsedSeconds": 1,
+        "buildElapsedSeconds": 142,
+        "pluginsElapsedSeconds": 5,
+        "profilePrepareElapsedSeconds": 1,
+        "profileApplyElapsedSeconds": 7,
+        "profileVerifyElapsedSeconds": 6,
+        "profileModelProbeElapsedSeconds": 111,
+        "installTransactionGreen": false,
+        "http200": false,
+        "configGet": "not-run",
+        "stableTicks": false,
+        "quickEditEnabled": false,
+        "browserAutoOpen": "not-observed",
+        "failureCode": "MODEL_PROBE_UNCLASSIFIED_V20"
+      }
+    }
+  ],
+  "uxCapture": [
+    {
+      "id": "windows-wux-v2-host-and-alias-red",
+      "provenance": "real-windows-sanitized",
+      "sourceReportSha256": {
+        "json": "b649f8ad25cbb57aa44c1daa90d3f661d53d681fe4d882e850fd1ef3dff25dfe",
+        "text": "d7108ef8cbe38d6db1e3075020afcfb0ad4f10052b6f6726f8672b5a3ca21652"
+      },
+      "captureCoreSha256": "f07ef8b1fdb53c3fe236f1d1139ad0ba005ffd21c995282c61fc021a161c3d9b",
+      "host": "windows-10-x64-node22-abi127",
+      "sourceCommitObserved": null,
+      "sharedFileTupleMatchesCommit": "661879c9a4b43833b9c25047e505bb4c3ff4fdc4",
+      "observed": {
+        "powershell51": true,
+        "powershell7": false,
+        "ipv4Http200": true,
+        "localhostHttp200": true,
+        "nodeDnsBrandAlias": "ENOTFOUND",
+        "chromiumBrandAlias": "not-run",
+        "browserDispatchAccepted": true,
+        "exactListenerIdentityCaptured": true,
+        "sourceGitDiscovered": false,
+        "secretPatternHits": 0
+      },
+      "expectedClass": "host-prerequisite-red-browser-alias-unresolved"
+    }
+  ],
+  "ownership": [
+    {
+      "id": "foreign-listener-without-receipt",
+      "provenance": "synthetic",
+      "topology": "foreign-listener",
+      "receipt": {
+        "present": false,
+        "pidExists": true,
+        "creationTimeMatches": false,
+        "executableMatches": false,
+        "managedRootMatches": false,
+        "protocolMatches": false
+      },
+      "expectedAction": "preserve-and-reject"
+    },
+    {
+      "id": "stale-owner-receipt",
+      "provenance": "synthetic",
+      "topology": "managed-native-stale-receipt",
+      "receipt": {
+        "present": true,
+        "pidExists": false,
+        "creationTimeMatches": false,
+        "executableMatches": false,
+        "managedRootMatches": false,
+        "protocolMatches": false
+      },
+      "expectedAction": "clear-receipt-only"
+    }
+  ],
+  "interaction": [
+    {
+      "id": "quickedit-enter-stall",
+      "provenance": "synthetic",
+      "observed": {
+        "quickEditEnabled": true,
+        "progressAdvancedWithoutInput": false,
+        "http200": false,
+        "browserDispatchAttempted": false,
+        "browserDispatchAccepted": false,
+        "copyableFallbackVisible": false
+      },
+      "expectedAction": "fail-interaction-gate"
+    },
+    {
+      "id": "browser-dispatch-rejected-with-fallback",
+      "provenance": "synthetic",
+      "observed": {
+        "quickEditEnabled": false,
+        "progressAdvancedWithoutInput": true,
+        "http200": true,
+        "browserDispatchAttempted": true,
+        "browserDispatchAccepted": false,
+        "copyableFallbackVisible": true
+      },
+      "expectedAction": "show-copyable-fallback"
+    }
+  ],
+  "nativeAbi": [
+    {
+      "id": "macos-node24-binding-under-node22",
+      "provenance": "controlled-local",
+      "platform": "darwin-arm64",
+      "buildNodeMajor": 24,
+      "buildAbi": 137,
+      "gatewayNodeMajor": 22,
+      "gatewayAbi": 127,
+      "javascriptRequirePassed": true,
+      "databaseOpenPassed": false,
+      "expectedRepairProof": "in-memory-database-select-one"
+    }
+  ]
+}

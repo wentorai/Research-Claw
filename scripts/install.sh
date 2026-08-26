@@ -39,6 +39,9 @@ PPT_MASTER_GITHUB="https://github.com/hugohe3/ppt-master.git"
 PPT_MASTER_ATOMGIT="https://atomgit.com/hugohe3/ppt-master.git"
 REPO_OVERRIDE="${REPO:-}"
 REPO="${REPO:-$GITEE_REPO}"
+RC_SOURCE_REF="${RC_SOURCE_REF:-}"
+RC_SOURCE_COMMIT="${RC_SOURCE_COMMIT:-}"
+RC_SOURCE_PINNED=false
 NODE_MIN=22
 NODE_MAX=22
 PNPM_VERSION=10.34.4
@@ -78,6 +81,22 @@ RC_PROFILE_TX_ID=""
 RC_PROFILE_PENDING_STATE=""
 RC_PROFILE_COMMITTED=false
 RC_PROFILE_COMMIT_ATTEMPTED=false
+
+rc_install_validate_source_pin() {
+  RC_SOURCE_PINNED=false
+  if [ -z "${RC_SOURCE_REF:-}" ] && [ -z "${RC_SOURCE_COMMIT:-}" ]; then return 0; fi
+  [ -n "${RC_SOURCE_REF:-}" ] && [ -n "${RC_SOURCE_COMMIT:-}" ] \
+    || die "Pinned source requires both RC_SOURCE_REF and RC_SOURCE_COMMIT."
+  [ -n "${REPO_OVERRIDE:-}" ] \
+    || die "Pinned source requires an explicit REPO."
+  case "$RC_SOURCE_REF" in
+    refs/heads/*|refs/tags/*) ;;
+    *) die "Pinned source ref must be a full heads or tags ref." ;;
+  esac
+  [[ "$RC_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+    || die "Pinned source commit must be a lowercase 40-character Git object ID."
+  RC_SOURCE_PINNED=true
+}
 
 # ── Installer lifecycle cleanup ────────────────────────────────────────
 # Update snapshots and heartbeat logs may contain user data or subprocess
@@ -123,6 +142,7 @@ rc_install_path_mode() {
 }
 
 rc_install_init_temp_parent() {
+  local _windows_private_root=""
   if [ -n "$RC_INSTALL_TEMP_PARENT" ]; then
     [ -d "$RC_INSTALL_TEMP_PARENT" ] && [ ! -L "$RC_INSTALL_TEMP_PARENT" ] \
       && [ "$(rc_install_path_identity "$RC_INSTALL_TEMP_PARENT")" = "$RC_INSTALL_TEMP_PARENT_ID" ] \
@@ -133,7 +153,31 @@ rc_install_init_temp_parent() {
   [ -d "$RC_INSTALL_TEMP_PARENT" ] && [ ! -L "$RC_INSTALL_TEMP_PARENT" ] || return 1
   RC_INSTALL_TEMP_PARENT_ID="$(rc_install_path_identity "$RC_INSTALL_TEMP_PARENT")" \
     || return 1
-  [ -n "$RC_INSTALL_TEMP_PARENT_ID" ]
+  [ -n "$RC_INSTALL_TEMP_PARENT_ID" ] || return 1
+  if [ "${RC_WINDOWS_NATIVE:-}" = 1 ]; then
+    [ "${RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED:-}" = 1 ] \
+      && [ -n "${RC_WINDOWS_PRIVATE_ROOT:-}" ] || return 1
+    _windows_private_root="$(cd -P -- "$RC_WINDOWS_PRIVATE_ROOT" && pwd -P)" \
+      || return 1
+    [ "$RC_INSTALL_TEMP_PARENT" = "$_windows_private_root" ] || return 1
+  fi
+}
+
+rc_install_private_child_mode_ok() {
+  local _path="$1" _kind="$2" _mode
+  _mode="$(rc_install_path_mode "$_path")" || return 1
+  case "$_kind:$_mode" in
+    directory:700|file:600) return 0 ;;
+  esac
+  [ "${RC_WINDOWS_NATIVE:-}" = 1 ] \
+    && [ "${RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED:-}" = 1 ] \
+    && [ -n "${RC_WINDOWS_PRIVATE_ROOT:-}" ] \
+    && [ "$RC_INSTALL_TEMP_PARENT" = "$(cd -P -- "$RC_WINDOWS_PRIVATE_ROOT" && pwd -P)" ] \
+    || return 1
+  case "$_kind:$_mode" in
+    directory:755|file:644) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 rc_install_validate_private_child() {
@@ -151,10 +195,7 @@ rc_install_validate_private_child() {
   esac || return 1
   [ "$(rc_install_path_owner "$_path")" = "$(id -u)" ] || return 1
   [ "$(rc_install_path_identity "$_path")" = "$_identity" ] || return 1
-  case "$_kind" in
-    directory) [ "$(rc_install_path_mode "$_path")" = 700 ] ;;
-    file) [ "$(rc_install_path_mode "$_path")" = 600 ] ;;
-  esac
+  rc_install_private_child_mode_ok "$_path" "$_kind"
 }
 
 rc_install_remove_heartbeat_log() {
@@ -169,13 +210,15 @@ rc_install_remove_heartbeat_log() {
 }
 
 rc_install_cleanup_heartbeat() {
-  local _pid="${RC_HEARTBEAT_PID:-}" _ppid="" _failed=0 _attempt
+  local _pid="${RC_HEARTBEAT_PID:-}" _failed=0 _attempt _child _is_child=false
   if [ -n "$_pid" ]; then
     case "$_pid" in *[!0-9]*|'') _failed=1 ;;
       *)
         if kill -0 "$_pid" 2>/dev/null; then
-          _ppid="$(ps -o ppid= -p "$_pid" 2>/dev/null | tr -d '[:space:]')"
-          if [ "$_ppid" = "$$" ]; then
+          for _child in $(jobs -pr); do
+            if [ "$_child" = "$_pid" ]; then _is_child=true; break; fi
+          done
+          if $_is_child; then
             kill -TERM "$_pid" 2>/dev/null || true
             _attempt=0
             while kill -0 "$_pid" 2>/dev/null && [ "$_attempt" -lt 20 ]; do
@@ -677,11 +720,19 @@ rc_profile_recover_native() {
 }
 
 rc_profile_stage_native() {
-  local _result
-  if ! _result="$(rc_profile_native_cli stage --capsule-file "$RC_PROFILE_CAPSULE")"; then
+  local _result _result_file="$RC_PROFILE_TEMP_ROOT/stage-result.json"
+  rc_profile_run_stage() {
+    rc_profile_native_cli stage --capsule-file "$RC_PROFILE_CAPSULE" >"$_result_file"
+  }
+  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Preparing Bootstrap Profile" \
+      rc_profile_run_stage; then
+    unset -f rc_profile_run_stage
     rc_profile_load_pending_native >/dev/null 2>&1 || true
     return 1
   fi
+  unset -f rc_profile_run_stage
+  _result="$(cat "$_result_file")" || return 1
+  rm -f -- "$_result_file" || return 1
   RC_PROFILE_TX_ID="$(printf '%s' "$_result" | "$GW_NODE" -e '
     let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
       const value=JSON.parse(raw); if (!/^tx-[0-9a-f-]{36}$/.test(value.txId || "")) process.exit(1);
@@ -692,15 +743,31 @@ rc_profile_stage_native() {
 }
 
 rc_profile_apply_native() {
-  rc_profile_native_cli apply --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+  rc_profile_run_apply() {
+    rc_profile_native_cli apply --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+  }
+  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Applying Bootstrap Profile" \
+      rc_profile_run_apply; then
+    unset -f rc_profile_run_apply
+    return 1
+  fi
+  unset -f rc_profile_run_apply
 }
 
 rc_profile_verify_native() {
-  rc_profile_native_cli verify --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+  rc_profile_run_verify() {
+    rc_profile_native_cli verify --tx-id "$RC_PROFILE_TX_ID" >/dev/null
+  }
+  if ! HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Verifying Bootstrap Profile files" \
+      rc_profile_run_verify; then
+    unset -f rc_profile_run_verify
+    return 1
+  fi
+  unset -f rc_profile_run_verify
 }
 
 rc_profile_probe_native() {
-  local _provider _profile _probe_output
+  local _provider _profile _probe_output _probe_error _probe_code
   read -r _provider _profile <<EOF
 $("$GW_NODE" -e '
   const fs=require("fs");
@@ -711,19 +778,47 @@ $("$GW_NODE" -e '
   const profile=c.auth?.order?.[provider]?.[0] || "";
   if (!provider || !profile) process.exit(1);
   process.stdout.write(provider+" "+profile);
-' "$INSTALL_DIR/config/openclaw.json")
+  ' "$INSTALL_DIR/config/openclaw.json")
 EOF
   [ -n "$_provider" ] && [ -n "$_profile" ] || die "Bootstrap Profile model identity is incomplete."
   _probe_output="$RC_PROFILE_TEMP_ROOT/model-probe.json"
-  if ! "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
-      --root "$INSTALL_DIR" \
-      --config "$INSTALL_DIR/config/openclaw.json" \
-      --state "$HOME/.openclaw" \
-      --provider "$_provider" \
-      --profile "$_profile" \
-      --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>/dev/null; then
-    die "Bootstrap Profile credential/model probe failed."
+  _probe_error="$RC_PROFILE_TEMP_ROOT/model-probe.stderr"
+  rc_profile_run_model_probe() {
+    RC_MODEL_PROBE_DEBUG=0 "$GW_NODE" "$INSTALL_DIR/scripts/bootstrap-profile/model-probe.cjs" \
+        --root "$INSTALL_DIR" \
+        --config "$INSTALL_DIR/config/openclaw.json" \
+        --state "$HOME/.openclaw" \
+        --provider "$_provider" \
+        --profile "$_profile" \
+        --scratch-root "$RC_PROFILE_TEMP_ROOT" >"$_probe_output" 2>"$_probe_error"
+  }
+  if ! run_with_heartbeat "Verifying Bootstrap Profile model access (attempt 1/2)" \
+      rc_profile_run_model_probe; then
+    _probe_code="$(sed -n \
+      's/^Bootstrap Profile isolated model probe failed (\([A-Z0-9_]*\))$/\1/p' \
+      "$_probe_error" | tail -1)"
+    case "$_probe_code" in
+      MODEL_PROBE_TIMEOUT|PROBE_TIMEOUT|MODEL_PROBE_FAILED|MODEL_PROBE_RATE_LIMIT|MODEL_PROBE_UNKNOWN)
+        warn "Bootstrap Profile model access had a transient failure ($_probe_code); retrying once."
+        rm -f -- "$_probe_output" "$_probe_error" \
+          || die "Bootstrap Profile model retry cleanup failed."
+        sleep 5
+        if ! run_with_heartbeat "Verifying Bootstrap Profile model access (retry 2/2)" \
+            rc_profile_run_model_probe; then
+          tail -5 "$_probe_error" 2>/dev/null >&2 || true
+          unset -f rc_profile_run_model_probe
+          die "Bootstrap Profile credential/model probe failed after one retry."
+        fi
+        ;;
+      *)
+        tail -5 "$_probe_error" 2>/dev/null >&2 || true
+        unset -f rc_profile_run_model_probe
+        die "Bootstrap Profile credential/model probe failed."
+        ;;
+    esac
   fi
+  unset -f rc_profile_run_model_probe
+  rm -f -- "$_probe_error" || die "Bootstrap Profile model probe cleanup failed."
   "$GW_NODE" -e '
     const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
     if (value?.ok !== true || value?.status !== "ok") process.exit(1);
@@ -754,6 +849,7 @@ rc_profile_commit_native() {
   rc_profile_cleanup_host_secret
 }
 
+rc_install_validate_source_pin
 rc_profile_parse_args "$@"
 trap 'exit 130' INT TERM
 rc_profile_redeem
@@ -771,9 +867,13 @@ trap rc_install_exit_cleanup EXIT
 trap rc_install_on_interrupt INT TERM
 
 INSTALL_START_TS=$(date +%s)
+_format_duration() {
+  local _s="$1"
+  printf '%dm%02ds' $((_s / 60)) $((_s % 60))
+}
 _elapsed() {
   local _s=$(( $(date +%s) - INSTALL_START_TS ))
-  printf '%dm%02ds' $((_s / 60)) $((_s % 60))
+  _format_duration "$_s"
 }
 
 step() { printf "\n${C}  ▸ [%s/8]${N} ${B}%s${N}\n" "$1" "$2"; rclog "step $1/8: $2"; }
@@ -785,7 +885,7 @@ step() { printf "\n${C}  ▸ [%s/8]${N} ${B}%s${N}\n" "$1" "$2"; rclog "step $1/
 # that have a quieter fallback path).
 run_with_heartbeat() {
   local _label="$1"; shift
-  local _pid _rc=0 _cleanup_rc=0 _t=0 _old_umask
+  local _pid _rc=0 _t=0 _old_umask
   [ -z "$RC_HEARTBEAT_PID" ] && [ -z "$RC_HEARTBEAT_LOG" ] || return 125
   rc_install_init_temp_parent || return 1
   _old_umask="$(umask)"
@@ -812,14 +912,24 @@ run_with_heartbeat() {
   wait "$_pid" || _rc=$?
   RC_HEARTBEAT_PID=""
   if [ -t 1 ] && [ "$_t" -gt 0 ]; then printf "\r\033[2K"; fi
-  if [ "$_rc" -ne 0 ] && [ "${HB_SHOW_FAIL_LOG:-0}" = "1" ] \
-      && [ -s "$RC_HEARTBEAT_LOG" ]; then
-    warn "$_label failed (exit $_rc). Last output:"
-    tail -5 "$RC_HEARTBEAT_LOG" | sed 's/^/      /' >&2
+  if [ "$_rc" -ne 0 ]; then
+    warn "$_label failed after $(_format_duration "$_t") (exit $_rc)."
+    rclog "heartbeat failed: $_label duration=$(_format_duration "$_t") exit=$_rc"
+    if [ "${HB_SHOW_FAIL_LOG:-0}" = "1" ] && [ -s "$RC_HEARTBEAT_LOG" ]; then
+      warn "$_label last output:"
+      tail -5 "$RC_HEARTBEAT_LOG" | sed 's/^/      /' >&2
+    fi
+    rc_install_remove_heartbeat_log || true
+    return "$_rc"
   fi
-  rc_install_remove_heartbeat_log || _cleanup_rc=1
-  [ "$_rc" -ne 0 ] && return "$_rc"
-  return "$_cleanup_rc"
+  if ! rc_install_remove_heartbeat_log; then
+    warn "$_label completed, but installer cleanup failed after $(_format_duration "$_t")."
+    rclog "heartbeat cleanup failed: $_label duration=$(_format_duration "$_t")"
+    return 1
+  fi
+  ok "$_label ($(_format_duration "$_t"))"
+  rclog "heartbeat complete: $_label duration=$(_format_duration "$_t")"
+  return 0
 }
 
 ensure_ppt_master() {
@@ -1478,74 +1588,92 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   # Remove untracked files that may conflict with incoming changes.
   # Gitignored files (config, data, node_modules, workspace runtime) are preserved.
   git clean -fd 2>/dev/null || true
-  # --- Exact source-authority update ---
-  # A managed installation must never trust an arbitrary pre-existing origin.
-  # Fetch one official main tip and reset to that exact FETCH_HEAD; do not merge,
-  # rebase, or preserve unrelated local commits. An explicit REPO override is
-  # the only supported opt-in to a non-official source.
-  _ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
-  _SOURCE_BRANCH=main
-  _PRIMARY_REMOTE=rc-gitee
-  _PRIMARY_REPO="$GITEE_REPO"
-  _PRIMARY_LABEL=Gitee
-  _SECONDARY_REMOTE=rc-github
-  _SECONDARY_REPO="$GITHUB_REPO"
-  _SECONDARY_LABEL=GitHub
-
-  if [ -n "$REPO_OVERRIDE" ]; then
-    _SOURCE_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-    [ "$_SOURCE_BRANCH" = "HEAD" ] && _SOURCE_BRANCH=main
-    _PRIMARY_REMOTE=rc-explicit-source
-    _PRIMARY_REPO="$REPO_OVERRIDE"
-    _PRIMARY_LABEL='explicit REPO'
-    _SECONDARY_REMOTE=''
-    _SECONDARY_REPO=''
-    _SECONDARY_LABEL=''
-  else
-    case "$_ORIGIN_URL" in
-      "$GITHUB_REPO"|git@github.com:wentorai/Research-Claw.git|ssh://git@github.com/wentorai/Research-Claw.git)
-        _PRIMARY_REMOTE=rc-github
-        _PRIMARY_REPO="$GITHUB_REPO"
-        _PRIMARY_LABEL=GitHub
-        _SECONDARY_REMOTE=rc-gitee
-        _SECONDARY_REPO="$GITEE_REPO"
-        _SECONDARY_LABEL=Gitee
-        ;;
-      "$GITEE_REPO"|git@gitee.com:Ruby_Callipygian_5cb5/ResearchClaw.git|ssh://git@gitee.com/Ruby_Callipygian_5cb5/ResearchClaw.git)
-        ;;
-      '')
-        warn "Existing origin is missing; using the official Gitee/GitHub mirrors."
-        ;;
-      *)
-        warn "Foreign existing origin ignored; using the official Gitee/GitHub mirrors."
-        ;;
-    esac
-  fi
-
-  rc_install_fetch_exact_source() {
-    local _remote="$1" _repo="$2" _label="$3"
-    [ -n "$_remote" ] && [ -n "$_repo" ] || return 1
-    git remote set-url "$_remote" "$_repo" 2>/dev/null \
-      || git remote add "$_remote" "$_repo" 2>/dev/null \
-      || return 1
-    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Fetching $_label/$_SOURCE_BRANCH" \
-       git fetch --depth 1 "$_remote" "$_SOURCE_BRANCH" \
-       && git reset --hard FETCH_HEAD; then
-      ok "Updated from $_label"
-      return 0
-    fi
-    return 1
-  }
-
   _PULLED=false
-  if rc_install_fetch_exact_source \
-      "$_PRIMARY_REMOTE" "$_PRIMARY_REPO" "$_PRIMARY_LABEL"; then
-    _PULLED=true
-  elif [ -n "$_SECONDARY_REMOTE" ]; then
-    warn "Update from $_PRIMARY_LABEL failed — trying $_SECONDARY_LABEL mirror..."
-    if rc_install_fetch_exact_source \
-        "$_SECONDARY_REMOTE" "$_SECONDARY_REPO" "$_SECONDARY_LABEL"; then
+  if ${RC_SOURCE_PINNED:-false}; then
+    git check-ref-format "$RC_SOURCE_REF" >/dev/null 2>&1 \
+      || die "Pinned source ref is not a valid Git ref."
+    if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Fetching pinned candidate" \
+        git fetch --no-tags --depth 1 "$REPO" "$RC_SOURCE_REF"; then
+      _FETCHED_COMMIT="$(git rev-parse --verify "FETCH_HEAD^{commit}" 2>/dev/null || true)"
+      [ "$_FETCHED_COMMIT" = "$RC_SOURCE_COMMIT" ] \
+        || die "Pinned source identity mismatch."
+      git reset --hard "$RC_SOURCE_COMMIT" >/dev/null 2>&1 \
+        || die "Pinned source could not be selected."
+      [ "$(git rev-parse HEAD 2>/dev/null || true)" = "$RC_SOURCE_COMMIT" ] \
+        || die "Pinned source identity mismatch."
       _PULLED=true
+      ok "Pinned candidate selected"
+    else
+      die "Pinned source could not be fetched."
+    fi
+  else
+    # A managed installation never trusts an arbitrary pre-existing origin.
+    # Fetch one official main tip and reset to that exact FETCH_HEAD; do not
+    # merge or rebase unrelated local commits. An explicit REPO override is the
+    # only supported opt-in to a non-official source.
+    _ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+    _SOURCE_BRANCH=main
+    _PRIMARY_REMOTE=rc-gitee
+    _PRIMARY_REPO="$GITEE_REPO"
+    _PRIMARY_LABEL=Gitee
+    _SECONDARY_REMOTE=rc-github
+    _SECONDARY_REPO="$GITHUB_REPO"
+    _SECONDARY_LABEL=GitHub
+
+    if [ -n "$REPO_OVERRIDE" ]; then
+      _SOURCE_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+      [ "$_SOURCE_BRANCH" = "HEAD" ] && _SOURCE_BRANCH=main
+      _PRIMARY_REMOTE=rc-explicit-source
+      _PRIMARY_REPO="$REPO_OVERRIDE"
+      _PRIMARY_LABEL='explicit REPO'
+      _SECONDARY_REMOTE=''
+      _SECONDARY_REPO=''
+      _SECONDARY_LABEL=''
+    else
+      case "$_ORIGIN_URL" in
+        "$GITHUB_REPO"|git@github.com:wentorai/Research-Claw.git|ssh://git@github.com/wentorai/Research-Claw.git)
+          _PRIMARY_REMOTE=rc-github
+          _PRIMARY_REPO="$GITHUB_REPO"
+          _PRIMARY_LABEL=GitHub
+          _SECONDARY_REMOTE=rc-gitee
+          _SECONDARY_REPO="$GITEE_REPO"
+          _SECONDARY_LABEL=Gitee
+          ;;
+        "$GITEE_REPO"|git@gitee.com:Ruby_Callipygian_5cb5/ResearchClaw.git|ssh://git@gitee.com/Ruby_Callipygian_5cb5/ResearchClaw.git)
+          ;;
+        '')
+          warn "Existing origin is missing; using the official Gitee/GitHub mirrors."
+          ;;
+        *)
+          warn "Foreign existing origin ignored; using the official Gitee/GitHub mirrors."
+          ;;
+      esac
+    fi
+
+    rc_install_fetch_exact_source() {
+      local _remote="$1" _repo="$2" _label="$3"
+      [ -n "$_remote" ] && [ -n "$_repo" ] || return 1
+      git remote set-url "$_remote" "$_repo" 2>/dev/null \
+        || git remote add "$_remote" "$_repo" 2>/dev/null \
+        || return 1
+      if HB_SHOW_FAIL_LOG=1 run_with_heartbeat "Fetching $_label/$_SOURCE_BRANCH" \
+         git fetch --depth 1 "$_remote" "$_SOURCE_BRANCH" \
+         && git reset --hard FETCH_HEAD; then
+        ok "Updated from $_label"
+        return 0
+      fi
+      return 1
+    }
+
+    if rc_install_fetch_exact_source \
+        "$_PRIMARY_REMOTE" "$_PRIMARY_REPO" "$_PRIMARY_LABEL"; then
+      _PULLED=true
+    elif [ -n "$_SECONDARY_REMOTE" ]; then
+      warn "Update from $_PRIMARY_LABEL failed — trying $_SECONDARY_LABEL mirror..."
+      if rc_install_fetch_exact_source \
+          "$_SECONDARY_REMOTE" "$_SECONDARY_REPO" "$_SECONDARY_LABEL"; then
+        _PULLED=true
+      fi
     fi
   fi
 
@@ -1588,7 +1716,18 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   fi
 else
   info "Cloning to $INSTALL_DIR ..."
-  if ! git clone --depth 1 "$REPO" "$INSTALL_DIR" 2>&1; then
+  if ${RC_SOURCE_PINNED:-false}; then
+    git check-ref-format "$RC_SOURCE_REF" >/dev/null 2>&1 \
+      || die "Pinned source ref is not a valid Git ref."
+    _PIN_NAME="${RC_SOURCE_REF#refs/heads/}"
+    _PIN_NAME="${_PIN_NAME#refs/tags/}"
+    if ! git clone --depth 1 --branch "$_PIN_NAME" "$REPO" "$INSTALL_DIR" 2>&1; then
+      die "Pinned source could not be cloned."
+    fi
+    _CLONED_COMMIT="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || true)"
+    [ "$_CLONED_COMMIT" = "$RC_SOURCE_COMMIT" ] \
+      || die "Pinned source identity mismatch."
+  elif ! git clone --depth 1 "$REPO" "$INSTALL_DIR" 2>&1; then
     # If default Gitee failed and user didn't override REPO, try GitHub fallback
     if [ -z "${REPO_OVERRIDE:-}" ] && [ "$REPO" = "$GITEE_REPO" ]; then
       warn "Gitee clone failed — trying GitHub fallback..."
@@ -2125,8 +2264,12 @@ info "Installing research plugins (network stages can each take up to 2 min)..."
 RP_LOG="$(mktemp)"
 CURRENT_VER=$(node -e 'console.log(require(process.argv[1]).version)' \
   "$PLUGIN_DIR/package.json" 2>/dev/null || echo "none")
-if node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
-    --target "$PLUGIN_DIR" >>"$RP_LOG" 2>&1; then
+rp_install_command() {
+  node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
+    --target "$PLUGIN_DIR" >>"$RP_LOG" 2>&1
+}
+if run_with_heartbeat "Preparing research plugins" rp_install_command; then
+  unset -f rp_install_command
   rp_cleanup_oc_managed
   NEW_VER=$(node -e 'console.log(require(process.argv[1]).version)' \
     "$PLUGIN_DIR/package.json" 2>/dev/null || echo "unknown")
@@ -2138,6 +2281,7 @@ if node "$INSTALL_DIR/scripts/install-research-plugins.cjs" \
     ok "Research-plugins updated: v${CURRENT_VER} → v${NEW_VER}"
   fi
 else
+  unset -f rp_install_command
   warn "Research plugins could not be downloaded or prepared."
   warn "Error details (last 5 lines):"
   tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
@@ -2173,9 +2317,12 @@ if [ -n "$RC_PROFILE_CAPSULE" ]; then
   $UPDATE_FAILED && die "The 0.8.3 candidate was not installed; refusing to apply a new Bootstrap Profile."
   rc_profile_assert_gateway_stopped
   rc_profile_prepare_native_data_root
-  rc_profile_recover_native
-  rc_profile_stage_native
-  rc_profile_apply_native
+  rc_profile_recover_native \
+    || die "Bootstrap Profile recovery failed. Existing user files were kept."
+  rc_profile_stage_native \
+    || die "Bootstrap Profile staging failed. Existing user files were kept."
+  rc_profile_apply_native \
+    || die "Bootstrap Profile apply failed. The transaction will be rolled back."
 fi
 
 # Reconcile plugin configuration only after the optional download has reached a
@@ -2201,7 +2348,8 @@ if [ -f "$INSTALL_DIR/config/openclaw.json" ]; then
 fi
 
 if [ -n "$RC_PROFILE_TX_ID" ]; then
-  rc_profile_verify_native
+  rc_profile_verify_native \
+    || die "Bootstrap Profile verification failed. The transaction will be rolled back."
   rc_profile_probe_native
   rc_profile_commit_native
 fi

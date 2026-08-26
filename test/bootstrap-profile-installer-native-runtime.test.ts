@@ -108,6 +108,26 @@ exit 96
 `, { mode: 0o700 });
 }
 
+function writeWindowsModeProjectionStat(bin: string): void {
+  fs.mkdirSync(bin, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(bin, 'stat'), `#!/usr/bin/env bash
+set -eu
+if [ "$1" = -f ]; then exit 1; fi
+if [ "$1" = -c ]; then
+  exec "$RC_TEST_NODE" -e '
+    const fs = require("fs");
+    const format = process.argv[1];
+    const stat = fs.statSync(process.argv[2]);
+    if (format === "%d:%i") process.stdout.write(String(stat.dev) + ":" + String(stat.ino));
+    else if (format === "%u") process.stdout.write(String(stat.uid));
+    else if (format === "%a") process.stdout.write(stat.isDirectory() ? "755" : "644");
+    else process.exit(97);
+  ' "$2" "$3"
+fi
+exit 96
+`, { mode: 0o700 });
+}
+
 function pidIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -144,6 +164,70 @@ async function stopFixtureChild(pid: number): Promise<void> {
 }
 
 describe('native installer update interruption cleanup', () => {
+  it.skipIf(process.platform === 'win32')(
+    'uses a verified Windows DACL root instead of rejecting the MSYS 0755/0644 projection',
+    () => {
+      const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-windows-mode-'));
+      roots.push(sandbox);
+      const install = path.join(sandbox, 'install');
+      const temp = path.join(sandbox, 'tmp');
+      const bin = path.join(sandbox, 'bin');
+      fs.mkdirSync(path.join(install, 'workspace', '.ResearchClaw'), { recursive: true });
+      fs.mkdirSync(temp, { mode: 0o700 });
+      fs.writeFileSync(path.join(install, 'workspace', '.ResearchClaw', 'SOUL.md'), 'user-bytes\n');
+      writeWindowsModeProjectionStat(bin);
+
+      const installer = fs.readFileSync(INSTALLER, 'utf8');
+      const lifecycle = extractBetween(
+        installer,
+        'RC_BOOTSTRAP_REDEEM_URL=',
+        '\nrc_profile_parse_args "$@"',
+      );
+      const runner = path.join(sandbox, 'windows-mode-runner.sh');
+      fs.writeFileSync(runner, `#!/usr/bin/env bash
+set -euo pipefail
+INSTALL_DIR="$RC_TEST_INSTALL"
+R='' G='' C='' Y='' B='' D='' N=''
+ISSUES_URL=https://invalid.example/issues
+die() { exit 1; }
+${lifecycle}
+trap rc_install_exit_cleanup EXIT
+rc_install_snapshot_update_backup
+heartbeat="$(mktemp "$RC_INSTALL_TEMP_PARENT/rc-install-heartbeat.XXXXXX")"
+chmod 600 "$heartbeat"
+heartbeat_id="$(rc_install_path_identity "$heartbeat")"
+rc_install_validate_private_child "$heartbeat" "$heartbeat_id" rc-install-heartbeat. file
+rm -f "$heartbeat"
+rc_install_discard_update_backup
+trap - EXIT
+test -z "$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -print -quit)"
+`, { mode: 0o700 });
+
+      const baseEnv = {
+        PATH: `${bin}:/usr/bin:/bin`,
+        HOME: path.join(sandbox, 'home'),
+        TMPDIR: temp,
+        RC_TEST_INSTALL: install,
+        RC_TEST_NODE: process.execPath,
+        RC_WINDOWS_NATIVE: '1',
+        RC_WINDOWS_PRIVATE_ROOT: temp,
+      };
+      const withoutAclProof = spawnSync('/bin/bash', [runner], {
+        cwd: install,
+        encoding: 'utf8',
+        env: baseEnv,
+      });
+      expect(withoutAclProof.status).not.toBe(0);
+
+      const verified = spawnSync('/bin/bash', [runner], {
+        cwd: install,
+        encoding: 'utf8',
+        env: { ...baseEnv, RC_WINDOWS_PRIVATE_ROOT_ACL_VERIFIED: '1' },
+      });
+      expect(verified.status, `${verified.stdout}\n${verified.stderr}`).toBe(0);
+    },
+  );
+
   it.skipIf(process.platform === 'win32')(
     'discards failed BSD stat output before using the GNU stat fallback',
     () => {
@@ -318,6 +402,117 @@ ${wrapperSection}
   );
 
   it.skipIf(process.platform === 'win32')(
+    'selects only the exact pinned source commit and restores user bytes on mismatch',
+    () => {
+      const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-source-pin-'));
+      roots.push(sandbox);
+      const source = path.join(sandbox, 'source');
+      const temp = path.join(sandbox, 'tmp');
+      fs.mkdirSync(source, { mode: 0o700 });
+      fs.mkdirSync(temp, { mode: 0o700 });
+      git(source, ['init', '--quiet', '--initial-branch=main']);
+      git(source, ['config', 'user.name', 'RC Source Pin Test']);
+      git(source, ['config', 'user.email', 'rc-source-pin@invalid.example']);
+      fs.writeFileSync(path.join(source, '.gitignore'), 'workspace/\nnode_modules/\n');
+      fs.writeFileSync(path.join(source, 'version.txt'), 'main\n');
+      git(source, ['add', '.gitignore', 'version.txt']);
+      git(source, ['commit', '--quiet', '-m', 'main fixture']);
+      const mainCommit = git(source, ['rev-parse', 'HEAD']).trim();
+      git(source, ['checkout', '--quiet', '-b', 'candidate']);
+      fs.writeFileSync(path.join(source, 'version.txt'), 'candidate\n');
+      git(source, ['add', 'version.txt']);
+      git(source, ['commit', '--quiet', '-m', 'candidate fixture']);
+      const candidateCommit = git(source, ['rev-parse', 'HEAD']).trim();
+
+      const installer = fs.readFileSync(INSTALLER, 'utf8');
+      const heartbeat = extractBetween(
+        installer,
+        'run_with_heartbeat() {',
+        '\n\nensure_ppt_master() {',
+      );
+      const lifecycle = extractBetween(
+        installer,
+        'RC_BOOTSTRAP_REDEEM_URL=',
+        '\nrc_profile_parse_args "$@"',
+      );
+      const update = extractBetween(
+        installer,
+        '# --- [5/8] Clone or update ---',
+        '\nensure_ppt_master\n',
+      );
+      const runner = path.join(sandbox, 'runner.sh');
+      fs.writeFileSync(runner, `#!/usr/bin/env bash
+set -euo pipefail
+INSTALL_DIR="$RC_TEST_INSTALL"
+GITHUB_REPO=https://invalid.example/github.git
+GITEE_REPO=https://invalid.example/gitee.git
+REPO_OVERRIDE="$RC_TEST_SOURCE"
+REPO="$RC_TEST_SOURCE"
+RC_SOURCE_REF=refs/heads/candidate
+RC_SOURCE_COMMIT="$RC_TEST_COMMIT"
+RC_SOURCE_PINNED=true
+UPDATE_FAILED=false
+R='' G='' C='' Y='' B='' D='' N=''
+ISSUES_URL=https://invalid.example/issues
+RC_LOG=/dev/null
+info() { :; }
+ok() { :; }
+warn() { :; }
+step() { :; }
+die() { printf 'fixture-die: %s\n' "$1" >&2; exit 1; }
+${lifecycle}
+${heartbeat}
+trap rc_install_exit_cleanup EXIT
+${update}
+`, { mode: 0o700 });
+
+      const run = (name: string, expectedCommit: string) => {
+        const install = path.join(sandbox, name);
+        git(sandbox, ['clone', '--quiet', '--branch', 'main', source, install]);
+        const userFile = path.join(install, 'workspace', '.ResearchClaw', 'USER.md');
+        fs.mkdirSync(path.dirname(userFile), { recursive: true });
+        fs.writeFileSync(userFile, 'user-owned\n');
+        const result = spawnSync('/bin/bash', [runner], {
+          cwd: install,
+          encoding: 'utf8',
+          env: {
+            PATH: '/usr/bin:/bin',
+            HOME: path.join(sandbox, `${name}-home`),
+            TMPDIR: temp,
+            RC_TEST_INSTALL: install,
+            RC_TEST_SOURCE: source,
+            RC_TEST_COMMIT: expectedCommit,
+          },
+        });
+        return {
+          result,
+          head: git(install, ['rev-parse', 'HEAD']).trim(),
+          user: fs.readFileSync(userFile, 'utf8'),
+          version: fs.readFileSync(path.join(install, 'version.txt'), 'utf8'),
+        };
+      };
+
+      const accepted = run('accepted', candidateCommit);
+      expect(accepted.result.status, `${accepted.result.stdout}\n${accepted.result.stderr}`).toBe(0);
+      expect(accepted).toMatchObject({
+        head: candidateCommit,
+        user: 'user-owned\n',
+        version: 'candidate\n',
+      });
+
+      const rejected = run('rejected', mainCommit);
+      expect(rejected.result.status).not.toBe(0);
+      expect(rejected.result.stderr).toContain('Pinned source identity mismatch.');
+      expect(rejected).toMatchObject({
+        head: mainCommit,
+        user: 'user-owned\n',
+        version: 'main\n',
+      });
+    },
+    30_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'restores legacy user files and reaps heartbeat state after parent-only SIGINT',
     async () => {
       const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-native-update-interrupt-'));
@@ -444,7 +639,11 @@ ${update}
           ordinaryUntrackedRemoved: !fs.existsSync(ordinaryUntracked),
           exit: result,
           restored,
-          tempEntries: fs.readdirSync(temp).sort(),
+          // macOS may create its own xcrun_db cache under an overridden TMPDIR.
+          // The installer contract owns only its rc-* task artifacts.
+          tempEntries: fs.readdirSync(temp)
+            .filter((entry) => entry.startsWith('rc-'))
+            .sort(),
           heartbeatAliveAtParentExit: pidIsAlive(pullPid),
           heartbeatStoppedAtParentExit: fs.existsSync(path.join(events, 'pull-stopped')),
         };

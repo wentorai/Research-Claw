@@ -6,6 +6,9 @@ const path = require('node:path');
 
 const RESEARCH_PLUGINS_ID = 'research-plugins';
 const RESEARCH_PLUGINS_PACKAGE = '@wentorai/research-plugins';
+const RESEARCH_PLUGINS_RELEASE_VERSION = '1.4.8';
+const RESEARCH_PLUGINS_PACKAGE_SPEC =
+  `${RESEARCH_PLUGINS_PACKAGE}@${RESEARCH_PLUGINS_RELEASE_VERSION}`;
 const RESEARCH_PLUGINS_INTEGRITY_FILE =
   '.research-claw-integrity.json';
 
@@ -325,6 +328,8 @@ module.exports = {
   RESEARCH_PLUGINS_ID,
   RESEARCH_PLUGINS_INTEGRITY_FILE,
   RESEARCH_PLUGINS_PACKAGE,
+  RESEARCH_PLUGINS_PACKAGE_SPEC,
+  RESEARCH_PLUGINS_RELEASE_VERSION,
   computeResearchPluginsIntegrity,
   inspectResearchPluginsInstall,
   isManagedResearchPluginsPath,

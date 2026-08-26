@@ -25,6 +25,12 @@ fs.writeFileSync(path.join(agentDir, 'auth-state.json'), `${JSON.stringify({
 fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
 fs.writeFileSync(path.join(stateDir, 'logs', 'probe-runtime.log'), 'fixture runtime residue\n');
 if (config.fixtureProbeFailure === true) process.exit(93);
+const probeStatus = typeof config.fixtureProbeStatus === 'string'
+  ? config.fixtureProbeStatus : 'ok';
 process.stdout.write(`${JSON.stringify({
-  auth: { probes: { results: [{ provider: auth.profiles[profileIds[0]].provider, profileId: profileIds[0], status: 'ok' }] } },
+  auth: { probes: { results: [{
+    provider: auth.profiles[profileIds[0]].provider,
+    profileId: profileIds[0],
+    status: probeStatus,
+  }] } },
 })}\n`);
