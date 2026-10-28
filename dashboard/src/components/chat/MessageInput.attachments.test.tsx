@@ -545,4 +545,72 @@ describe('MessageInput attachment picker', () => {
     }
     expect(peak).toBeLessThanOrEqual(5);
   });
+
+  function installSpeech() {
+    const recognition = {
+      lang: '', continuous: false, interimResults: true,
+      onstart: null as (() => void) | null,
+      onresult: null as ((event: { results: Array<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null,
+      onend: null as (() => void) | null,
+      onerror: null as ((event: { error: string }) => void) | null,
+      start: vi.fn(), stop: vi.fn(), abort: vi.fn(),
+    };
+    vi.stubGlobal('SpeechRecognition', class { constructor() { return recognition; } });
+    return recognition;
+  }
+
+  function startDictation() {
+    fireEvent.click(screen.getByRole('button', { name: 'chat.voice.start' }));
+    act(() => mocks.confirm.mock.calls.at(-1)![0].onOk());
+  }
+
+  it('appends dictation to the latest edited draft only after ending and blocks keyboard send', () => {
+    const recognition = installSpeech();
+    const request = vi.fn(async () => ({}));
+    useGatewayStore.setState({ client: { isConnected: true, request } as never });
+    renderComposer();
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '原稿' } });
+    startDictation();
+    act(() => recognition.onresult?.({ results: [{ isFinal: true, 0: { transcript: '语音结果' } }] }));
+    fireEvent.change(input, { target: { value: '编辑后的原稿' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(request.mock.calls.filter((call) => (call as unknown[])[0] === 'chat.send')).toHaveLength(0);
+    expect(input).toHaveValue('编辑后的原稿');
+    fireEvent.click(screen.getByRole('button', { name: 'chat.voice.stop' }));
+    act(() => recognition.onend?.());
+    expect(input).toHaveValue('编辑后的原稿\n语音结果');
+    expect(localStorage.getItem('rc-chat-draft:main')).toBe('编辑后的原稿\n语音结果');
+  });
+
+  it('preserves both session drafts and discards results when switching sessions', () => {
+    const recognition = installSpeech();
+    localStorage.setItem('rc-chat-draft:other', '另一会话草稿');
+    renderComposer();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '当前草稿' } });
+    startDictation();
+    const lateResult = recognition.onresult;
+    const lateEnd = recognition.onend;
+    act(() => useChatStore.setState({ sessionKey: 'other' }));
+    act(() => {
+      lateResult?.({ results: [{ isFinal: true, 0: { transcript: '不能写入' } }] });
+      lateEnd?.();
+    });
+    expect(screen.getByRole('textbox')).toHaveValue('另一会话草稿');
+    expect(localStorage.getItem('rc-chat-draft:main')).toBe('当前草稿');
+    expect(localStorage.getItem('rc-chat-draft:other')).toBe('另一会话草稿');
+  });
+
+  it('cancels pending dictation without changing the draft', () => {
+    const recognition = installSpeech();
+    renderComposer();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '保留草稿' } });
+    startDictation();
+    act(() => recognition.onresult?.({ results: [{ isFinal: true, 0: { transcript: '取消结果' } }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'chat.voice.cancel' }));
+    expect(screen.getByRole('textbox')).toHaveValue('保留草稿');
+    expect(recognition.abort).toHaveBeenCalled();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
 });

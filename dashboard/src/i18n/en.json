@@ -128,6 +128,24 @@
     "footerHint": "You can also start by typing any question"
   },
   "chat": {
+    "voice": {
+      "start": "Voice input (Mandarin)",
+      "stop": "Stop voice input",
+      "cancel": "Cancel dictation",
+      "starting": "Starting microphone…",
+      "listening": "Listening · Mandarin",
+      "stopping": "Finishing recognition…",
+      "privacyTitle": "Browser voice input",
+      "privacy": "Speech is recognized in Mandarin by your browser. Audio may be sent to the browser provider’s online recognition service. Recognized text is added to your draft only; review it before sending. No Research-Claw API key is required.",
+      "errors": {
+        "permission": "Microphone or speech recognition permission was denied. Check browser and system permissions before retrying.",
+        "microphone": "No usable microphone was found. Check your audio input device.",
+        "noSpeech": "No speech was recognized. Try speaking again.",
+        "network": "Speech recognition could not connect. Check your network or try another browser.",
+        "timeout": "Speech recognition timed out. Your existing draft is unchanged; please retry.",
+        "unavailable": "Speech recognition is unavailable. Try another browser or use text input."
+      }
+    },
     "longTask": {
       "confirmTitle": "Run as a background job?",
       "confirmBody": "Research-Claw can run this long task in the background or continue in the current session.",

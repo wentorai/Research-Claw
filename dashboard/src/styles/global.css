@@ -998,6 +998,23 @@ html, body {
   flex-shrink: 0;
 }
 
+.chat-composer-voice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chat-composer-voice-preview {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* --- File reference chip tray --- */
 .chat-composer-references {
   display: flex;

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { App, Button, Dropdown, Tooltip, message, Image } from 'antd';
-import { SendOutlined, PaperClipOutlined, ReloadOutlined, HistoryOutlined } from '@ant-design/icons';
+import { SendOutlined, PaperClipOutlined, ReloadOutlined, HistoryOutlined, AudioOutlined, StopOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
@@ -14,6 +14,7 @@ import ReferenceMenu, { useReferenceMenu } from './ReferenceMenu';
 import InputHistoryPopup from './InputHistoryPopup';
 import QuickCommands from './QuickCommands';
 import { useInputHistory } from '../../hooks/useInputHistory';
+import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { abortChatShortcutLabel } from '../../utils/keyboard-shortcut';
 import { useUiStore } from '../../stores/ui';
 import { useSessionsStore } from '../../stores/sessions';
@@ -100,6 +101,34 @@ export default function MessageInput() {
   const lastSelectionRef = useRef<TextSelection>({ start: 0, end: 0 });
 
   const isConnected = connState === 'connected';
+  const speech = useSpeechRecognition(sessionKey, (transcript) => {
+    if (useChatStore.getState().sessionKey !== sessionKey) return;
+    setText((previous) => `${previous}${previous && !/\s$/.test(previous) ? '\n' : ''}${transcript}`);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) resizeComposerInput(el);
+    });
+  }, !isConnected || sending || sessionRun.isBusy);
+  const speechNoticeAccepted = useRef(false);
+  const startSpeech = () => {
+    if (speechNoticeAccepted.current) { speech.start(); return; }
+    const requestedSession = sessionKey;
+    modal.confirm({
+      title: t('chat.voice.privacyTitle'),
+      content: t('chat.voice.privacy'),
+      okText: t('chat.voice.start'),
+      cancelText: t('common.cancel'),
+      onOk: () => {
+        if (useChatStore.getState().sessionKey !== requestedSession) return;
+        speechNoticeAccepted.current = true;
+        speech.start();
+      },
+    });
+  };
+  const speechErrorKey = speech.error === 'not-allowed' || speech.error === 'service-not-allowed'
+    ? 'permission' : speech.error === 'audio-capture' ? 'microphone'
+      : speech.error === 'no-speech' ? 'noSpeech' : speech.error === 'network' ? 'network'
+        : speech.error === 'timeout' ? 'timeout' : 'unavailable';
   const hasReadyReference = references.some((r) => r.status === 'ready');
   const hasUploadingReference = references.some((r) => r.status === 'uploading');
 
@@ -126,10 +155,13 @@ export default function MessageInput() {
     (text.trim().length > 0 || attachments.length > 0 || hasReadyReference)
     && !hasUploadingReference
     && isConnected
+    && !speech.active
     && !sessionRun.isBusy;
 
   // Persist draft to localStorage (session-isolated)
+  const draftSessionRef = useRef(sessionKey);
   useEffect(() => {
+    if (draftSessionRef.current !== sessionKey) return;
     try {
       if (text) {
         localStorage.setItem(DRAFT_STORAGE_PREFIX + sessionKey, text);
@@ -141,6 +173,7 @@ export default function MessageInput() {
 
   // Restore draft when session changes
   useEffect(() => {
+    draftSessionRef.current = sessionKey;
     // Reset history navigation state for the new session
     inputHistory.reset();
     draftRef.current = null;
@@ -645,6 +678,7 @@ export default function MessageInput() {
   }, []);
 
   const handleSend = useCallback(() => {
+    if (speech.active) return;
     const msg = text.trim();
     const readyRefs = references.filter((r) => r.status === 'ready');
     if ((!msg && attachments.length === 0 && readyRefs.length === 0) || !isConnected || sessionRun.isBusy) return;
@@ -699,7 +733,7 @@ export default function MessageInput() {
     }
 
     doSend();
-  }, [text, attachments, references, isConnected, sessionRun.isBusy, send, sessionKey, inputHistory, t, modal]);
+  }, [text, attachments, references, isConnected, sessionRun.isBusy, send, sessionKey, inputHistory, t, modal, speech.active]);
 
   const abortShortcut = abortChatShortcutLabel();
   const abortTooltip = t('chat.abortWithShortcut', {
@@ -825,6 +859,18 @@ export default function MessageInput() {
       onDrop={handleDrop}
     >
       <div className="chat-composer-panel">
+      {speech.supported && (
+        <>
+          {speech.active && (
+            <div className="chat-composer-voice" role="status" aria-live="polite">
+              <span>{t(`chat.voice.${speech.phase}`)}</span>
+              {speech.preview && <span className="chat-composer-voice-preview">{speech.preview}</span>}
+              <Button size="small" type="text" onClick={speech.cancel}>{t('chat.voice.cancel')}</Button>
+            </div>
+          )}
+          {speech.error && <div className="chat-composer-voice" role="alert">{t(`chat.voice.errors.${speechErrorKey}`)}</div>}
+        </>
+      )}
       {attachments.length > 0 && (
         <div className="chat-composer-attachments">
           <Image.PreviewGroup>
@@ -951,6 +997,20 @@ export default function MessageInput() {
         />
 
         <div className="chat-composer-toolbar">
+          {speech.supported && (
+            <Tooltip title={t(speech.active ? 'chat.voice.stop' : 'chat.voice.start')}>
+              <Button
+                type="text"
+                size="small"
+                aria-label={t(speech.active ? 'chat.voice.stop' : 'chat.voice.start')}
+                aria-pressed={speech.active}
+                icon={speech.active ? <StopOutlined /> : <AudioOutlined />}
+                onClick={speech.active ? speech.stop : startSpeech}
+                disabled={speech.phase === 'stopping' || !isConnected || sending || sessionRun.isBusy}
+                style={{ color: speech.active ? 'var(--accent-primary)' : undefined }}
+              />
+            </Tooltip>
+          )}
           <Tooltip title={t('chat.refresh')}>
             <Button
               type="text"
