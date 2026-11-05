@@ -1,82 +1,61 @@
 import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-describe('OpenClaw 2026.6.1 Skill install security patch', () => {
+describe('OpenClaw 2026.9.2 Skill install security patch', () => {
   it('routes ClawHub archives through the same before_install scan as other sources', () => {
-    const patchPath = path.resolve(process.cwd(), 'patches/openclaw@2026.6.1.patch');
+    const patchPath = path.resolve(process.cwd(), 'patches/openclaw@2026.9.2.patch');
     const patch = fs.readFileSync(patchPath, 'utf8');
-    const hunk = patch.match(
-      /diff --git a\/dist\/status-BeKxEZi4\.js b\/dist\/status-BeKxEZi4\.js[\s\S]*?(?=\ndiff --git|\s*$)/,
-    )?.[0];
-
-    expect(hunk).toBeDefined();
-    expect(hunk).toMatch(
-      /-\s*scan:\s*false,[\s\S]{0,200}\+\s*scan:\s*\{[\s\S]{0,200}installId:\s*"clawhub"[\s\S]{0,200}origin:\s*"clawhub"/,
-    );
+    expect(patch).toContain('const scanResult = await scanSkillInstallSource({');
+    expect(patch).toContain('async function assertSkillProposalInstallScan(params)');
+    expect(patch).toContain('origin: "skill-workshop"');
+    expect(patch).toContain('skill-install-native-artifact');
+    expect(patch).toContain('skill-install-trusted-scanner-required');
   });
 
   it('has a live scan handoff for ClawHub, upload, path/Git, and dependency installs', () => {
     const dist = path.resolve(process.cwd(), 'node_modules/openclaw/dist');
-    const commandPolicy = fs.readFileSync(
-      path.join(dist, 'command-path-policy-YVod7apR.js'),
-      'utf8',
-    );
-    const programBootstrap = fs.readFileSync(
-      path.join(dist, 'program-GRZ2W39w.js'),
-      'utf8',
-    );
-    const commandStartup = fs.readFileSync(
-      path.join(dist, 'command-execution-startup-vDv7YBAw.js'),
-      'utf8',
-    );
-    const hookRunner = fs.readFileSync(
-      path.join(dist, 'hook-runner-global-CBGmN_LW.js'),
-      'utf8',
-    );
-    const subcliRegistration = fs.readFileSync(
-      path.join(dist, 'register.subclis-core-D0EOSNz5.js'),
-      'utf8',
-    );
-    const clawhub = fs.readFileSync(path.join(dist, 'status-BeKxEZi4.js'), 'utf8');
-    const upload = fs.readFileSync(path.join(dist, 'skills-QRm24alg.js'), 'utf8');
-    const source = fs.readFileSync(path.join(dist, 'skills-cli-CraGU_bJ.js'), 'utf8');
-    const dependency = fs.readFileSync(path.join(dist, 'install-BtcnuNBK.js'), 'utf8');
-    const workshop = fs.readFileSync(path.join(dist, 'service-yYn6i75I.js'), 'utf8');
-    const migration = fs.readFileSync(
-      path.join(dist, 'migration-runtime-D-5vGkaP.js'),
-      'utf8',
-    );
+    const readChunk = (name: string) => fs.readFileSync(path.join(dist, name), 'utf8');
+    const commandPolicy = readChunk('command-path-policy-CYBY98jZ.js');
+    const programBootstrap = readChunk('program-q2OpIjWI.js');
+    const commandStartup = readChunk('command-execution-startup-DGi7CCGi.js');
+    const hookRunner = readChunk('hook-runner-global-0kfmMG4T.js');
+    const subcliRegistration = readChunk('register.subclis-core-4L9HlrD9.js');
+    const clawhubInstall = readChunk('clawhub-D-1bbvLO.js');
+    const clawhubUninstall = readChunk('clawhub-uninstall-Dg6VF3Pf.js');
+    const upload = readChunk('skills-BnlEnM0m.js');
+    const source = readChunk('skills-cli-vlwGRAOo.js');
+    const dependency = readChunk('install-DWkSYC4k.js');
+    const workshop = readChunk('service-BrQv9Q2Z.js');
+    const workshopTransition = readChunk('service-query-BE6QjUM_.js');
+    const migration = readChunk('migration-runtime-C428wS8a.js');
+    const generatedMigration = readChunk('skills-DhGKzAj7.js');
+    const scannerRuntime = readChunk('install-security-scan.runtime-DefQR--w.js');
 
-    expect(clawhub).toMatch(
-      /performClawHubSkillInstall[\s\S]*?scan:\s*\{[\s\S]*?installId:\s*"clawhub"[\s\S]*?origin:\s*"clawhub"/,
+    expect(clawhubInstall).toMatch(
+      /installExtractedSkillRoot\([\s\S]{0,900}installId:\s*"clawhub"[\s\S]{0,200}type:\s*"clawhub"/,
     );
-    const stagedInstallStart = clawhub.indexOf('async function installExtractedSkillRoot(params)');
-    const stagedCopyIndex = clawhub.indexOf(
-      'const install = await installPackageDir({',
-      stagedInstallStart,
-    );
-    const stagedScanIndex = clawhub.indexOf(
-      'const scanResult = await scanSkillInstallSource({',
-      stagedCopyIndex,
-    );
-    expect(stagedCopyIndex).toBeGreaterThan(stagedInstallStart);
-    expect(stagedScanIndex).toBeGreaterThan(stagedCopyIndex);
-    expect(clawhub.slice(stagedCopyIndex, stagedScanIndex + 800)).toContain(
-      'sourceDir: stageDir',
-    );
+    const scanIndex = clawhubUninstall.indexOf('const scanResult = await evaluateSkillInstallPolicy({');
+    const installIndex = clawhubUninstall.indexOf('const install = await installPackageDir({', scanIndex);
+    expect(scanIndex).toBeGreaterThan(0);
+    expect(installIndex).toBeGreaterThan(scanIndex);
+    expect(clawhubUninstall.slice(scanIndex, installIndex)).toContain('sourceDir: params.extractedRoot');
     expect(upload).toMatch(
-      /installSkillArchiveFromPath[\s\S]*?scan:\s*\{[\s\S]*?installId:\s*"upload"[\s\S]*?origin:\s*"skill-upload"/,
+      /installSkillArchiveFromPath\([\s\S]{0,900}installId:\s*"upload"[\s\S]{0,200}type:\s*"upload"/,
     );
     expect(source).toMatch(
-      /installLocalSkillDir[\s\S]*?installExtractedSkillRoot[\s\S]*?scan:\s*\{[\s\S]*?installId:\s*params\.source/,
+      /installLocalSkillDir[\s\S]*?installExtractedSkillRoot[\s\S]*?installId:\s*params\.source/,
     );
     expect(dependency).toMatch(
-      /const scanResult = await scanSkillInstallSource\(\{[\s\S]*?installId:\s*params\.installId/,
+      /const scanResult = await evaluateSkillInstallPolicy\(\{[\s\S]*?installId:\s*params\.installId/,
     );
-    for (const command of ['install', 'update']) {
+    expect(scannerRuntime).toContain('async function scanSkillInstallEnvelope(sourceDir, trustedExecutableScanner)');
+    expect(scannerRuntime).toContain('skill-install-native-artifact');
+    expect(scannerRuntime).toContain('skill-install-trusted-scanner-required');
+    for (const command of ['install', 'update', 'workshop']) {
       expect(commandPolicy).toMatch(
         new RegExp(
           `commandPath: \\["skills", "${command}"\\],[\\s\\S]{0,160}loadPlugins: "always"[\\s\\S]{0,100}scope: "all"`,
@@ -94,65 +73,34 @@ describe('OpenClaw 2026.6.1 Skill install security patch', () => {
         ),
       );
     }
-    expect(programBootstrap).toContain(
-      '&& !startupPolicy.loadPlugins) return;',
-    );
-    expect(programBootstrap).toContain(
-      'skipConfigGuard: bypassConfigGuard',
-    );
-    expect(commandStartup).toContain(
-      'onlyPluginIds: pluginRegistry.onlyPluginIds',
-    );
-    expect(hookRunner).toMatch(
-      /before_agent_run: "fail-closed",\s*before_install: "fail-closed"/,
-    );
-    expect(subcliRegistration).toContain(
-      '!commandPolicy.pluginRegistry.onlyPluginIds',
-    );
-    expect(commandPolicy).toMatch(
-      /commandPath: \["skills", "workshop"\],[\s\S]{0,160}loadPlugins: "always"[\s\S]{0,100}scope: "all"/,
-    );
+    expect(programBootstrap).toContain('&& !startupPolicy.loadPlugins) return;');
+    expect(programBootstrap).toContain('skipConfigGuard: bypassConfigGuard');
+    expect(commandStartup).toContain('onlyPluginIds: pluginRegistry.onlyPluginIds');
+    expect(hookRunner).toMatch(/before_agent_run: "fail-closed",\s*before_install: "fail-closed"/);
+    expect(subcliRegistration).toContain('!commandPolicy.pluginRegistry.onlyPluginIds');
 
-    const workshopScanIndex = workshop.indexOf(
-      'await assertSkillProposalInstallScan({ record, skillContent })',
-    );
-    const workshopPublishIndex = workshop.indexOf(
-      'await publishProposalTarget({',
-      workshopScanIndex,
-    );
-    expect(workshop).toContain(
-      'import { a as scanSkillInstallSource } from "./install-security-scan-jlzAVrl9.js"',
-    );
-    expect(workshop).toContain('origin: "skill-workshop"');
-    expect(workshop).toContain('fs.cp(resolveProposalDir(params.record.id), sourceDir');
+    const workshopScanIndex = workshop.indexOf('async function assertSkillProposalInstallScan(params)');
     expect(workshopScanIndex).toBeGreaterThan(0);
-    expect(workshopPublishIndex).toBeGreaterThan(workshopScanIndex);
+    expect(workshop).toContain('origin: "skill-workshop"');
+    expect(workshop).toContain('openclaw-skill-workshop-scan-');
+    expect(workshop).toContain('status: "quarantined"');
+    expect(workshopTransition).toContain('await dependencies.assertSkillProposalInstallScan({');
+    const transitionScanIndex = workshopTransition.indexOf('await dependencies.assertSkillProposalInstallScan({');
+    const transitionWriteIndex = workshopTransition.indexOf('await applyWorkspaceSkillMutation(mutation);', transitionScanIndex);
+    expect(transitionScanIndex).toBeGreaterThan(0);
+    expect(transitionWriteIndex).toBeGreaterThan(transitionScanIndex);
 
-    const migrationStageIndex = migration.indexOf(
-      'const install = await installPackageDir({',
-    );
-    const migrationScanIndex = migration.indexOf(
-      'const scanResult = await scanSkillInstallSource({',
-      migrationStageIndex,
-    );
-    expect(migration).toContain(
-      'import { a as scanSkillInstallSource } from "./install-security-scan-jlzAVrl9.js"',
-    );
+    const migrationStageIndex = migration.indexOf('const install = await installPackageDir({');
+    const migrationScanIndex = migration.indexOf('const scanResult = await scanSkillInstallSource({', migrationStageIndex);
     expect(migration).toContain('origin: "migration"');
     expect(migrationStageIndex).toBeGreaterThan(0);
     expect(migrationScanIndex).toBeGreaterThan(migrationStageIndex);
     expect(migration).toContain('sourceDir: stageDir');
 
-    const generatedMigration = fs.readFileSync(
-      path.join(dist, 'skills-CBjrx14I.js'),
-      'utf8',
-    );
-    const generatedCopyIndex = generatedMigration.indexOf(
-      'const migrated = await copyMigrationFileItem({',
-    );
+    const generatedCopyIndex = generatedMigration.indexOf('const migrated = await copyMigrationFileItem({');
     expect(generatedMigration).toContain('openclaw-migration-skill-');
     expect(generatedMigration).toContain('source: sourceDir');
-    expect(generatedMigration).toContain('opts.reportDir');
+    expect(generatedMigration).toContain('reportDir ?? path.join(stagingRoot, "report")');
     expect(generatedCopyIndex).toBeGreaterThan(0);
   });
 
@@ -223,7 +171,7 @@ describe('OpenClaw 2026.6.1 Skill install security patch', () => {
             child.stderr.on('data', (chunk: string) => {
               stderr += chunk;
             });
-            const timeout = setTimeout(() => child.kill('SIGKILL'), 20_000);
+            const timeout = setTimeout(() => child.kill('SIGKILL'), 60_000);
             child.once('error', (error) => {
               clearTimeout(timeout);
               reject(error);
@@ -361,24 +309,23 @@ describe('OpenClaw 2026.6.1 Skill install security patch', () => {
           path.join(workspaceDir, 'skills', 'blocked-workshop-fixture', 'SKILL.md'),
         ),
       ).toBe(false);
-      const record = JSON.parse(
-        fs.readFileSync(
-          path.join(
-            stateDir,
-            'skill-workshop',
-            'proposals',
-            proposalId,
-            'proposal.json',
-          ),
-          'utf8',
-        ),
-      ) as { status?: string; statusReason?: string };
-      expect(record.status).toBe('quarantined');
-      expect(record.statusReason).toContain('rc-python-shell-exec');
+      const workshopDb = new DatabaseSync(
+        path.join(stateDir, 'state', 'openclaw.sqlite'),
+      );
+      const storedRow = workshopDb
+        .prepare('SELECT record_json FROM skill_workshop_proposals WHERE proposal_id = ?')
+        .get(proposalId) as { record_json?: string } | undefined;
+      workshopDb.close();
+      const storedRecord = JSON.parse(storedRow?.record_json ?? '{}') as {
+        status?: string;
+        statusReason?: string;
+      };
+      expect(storedRecord.status).toBe('quarantined');
+      expect(storedRecord.statusReason).toContain('rc-python-shell-exec');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
-  }, 150_000);
+  }, 300_000);
 
   it('blocks copied and generated Skills during a real Claude migration', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-openclaw-skill-migration-e2e-'));
@@ -811,8 +758,8 @@ describe('OpenClaw 2026.6.1 Skill install security patch', () => {
   }, 45_000);
 
   it('keeps official bundled dependency recipes usable during hookless guided setup', async () => {
-    const { a: scanSkillInstallSource } = await import(
-      '../node_modules/openclaw/dist/install-security-scan-jlzAVrl9.js'
+    const { c: scanSkillInstallSource } = await import(
+      '../node_modules/openclaw/dist/install-security-scan-DYLR970X.js'
     ) as {
       a: (params: Record<string, unknown>) => Promise<
         { blocked?: { reason: string } } | undefined

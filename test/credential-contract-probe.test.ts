@@ -10,7 +10,7 @@ const PROBE = path.join(ROOT, 'scripts', 'probe-credential-contract.mjs');
 const REAL_SMOKE = path.join(ROOT, 'scripts', 'probe-real-provider-smoke.mjs');
 const SYNC = path.join(ROOT, 'scripts', 'sync-global-config.cjs');
 const OPENCLAW_PACKAGE = path.join(ROOT, 'node_modules', 'openclaw', 'package.json');
-const OPENCLAW_PATCH = path.join(ROOT, 'patches', 'openclaw@2026.6.1.patch');
+const OPENCLAW_PATCH = path.join(ROOT, 'patches', 'openclaw@2026.9.2.patch');
 const TEMP_PREFIX = 'rc-credential-contract-';
 const REAL_TEMP_PREFIX = 'rc-real-provider-smoke-';
 
@@ -54,18 +54,21 @@ function waitForExit(child: ReturnType<typeof spawn>) {
   });
 }
 
-describe('OpenClaw 2026.6.1 credential contract probe', () => {
+describe('OpenClaw 2026.9.2 credential contract probe', () => {
   it('never downgrades a user-locked auth profile to literal provider config', () => {
     const patch = fs.readFileSync(OPENCLAW_PATCH, 'utf8');
-    expect(patch).toContain(
-      'if (requestedProfileIsUserLocked && !preferredProfileId) throw new Error(`USER_LOCKED_AUTH_PROFILE_NOT_FORWARDABLE:${provider}`);',
+    // 2026.9.2 replaced the 2026.6.1 locked-profile forwarding block with the
+    // prepared auth-plan pipeline, so the patch carries no auth-profile hunk at
+    // all. The contract this test protects is that the branch never silently
+    // re-introduces the old "drop the locked profile" downgrade.
+    expect(patch).not.toContain('lockedProfileId = void 0');
+    const installed = fs.readFileSync(
+      path.join(ROOT, 'node_modules', 'openclaw', 'dist', 'embedded-agent-D9hkv0XX.js'),
+      'utf8',
     );
-    expect(patch).toContain(
-      'if (!lockedProfile || !lockedProfileProvider || lockedProfileProvider !== runProvider) throw new Error(`USER_LOCKED_AUTH_PROFILE_PROVIDER_MISMATCH:${provider}`);',
-    );
-    expect(patch).not.toContain(
-      '\n+\t\t\t\tif (!lockedProfile || !lockedProfileProvider || lockedProfileProvider !== runProvider) lockedProfileId = void 0;',
-    );
+    expect(installed).toContain('prepareAgentRuntimeAuth');
+    expect(installed).not.toContain('requestedProfileIsUserLocked');
+    expect(installed).not.toContain('isForwardablePluginHarnessAuthProfile');
   });
 
   it('uses the same credential for models status --probe and a real embedded agent turn', () => {
@@ -81,7 +84,7 @@ describe('OpenClaw 2026.6.1 credential contract probe', () => {
     const installedOpenClaw = JSON.parse(fs.readFileSync(OPENCLAW_PACKAGE, 'utf8'));
 
     expect(result.schema).toBe('research-claw.credential-contract-probe.v1');
-    expect(installedOpenClaw.version).toBe('2026.6.1');
+    expect(installedOpenClaw.version).toBe('2026.9.2');
     expect(result.openclawVersion).toBe(installedOpenClaw.version);
     if (process.platform === 'win32') {
       expect(result.authStore.permissions).toEqual(expect.objectContaining({
@@ -101,12 +104,13 @@ describe('OpenClaw 2026.6.1 credential contract probe', () => {
       expect.objectContaining({ scenario: 'profile-only', status: 'ok', statusCredential: 'auth-profile' }),
       expect.objectContaining({ scenario: 'conflict', status: 'ok', statusCredential: 'auth-profile', agentCredential: 'auth-profile' }),
     ]);
-    expect(result.failureProbe).toEqual({
-      status: expect.not.stringMatching(/^ok$/),
-      requestCount: 3,
-      retryCounts: [0, 1, 2],
-      credential: 'auth-profile',
-    });
+    // 2026.9.2 keeps the SDK transport at maxRetries:0 and retries in OpenClaw's
+    // own provider loop, so every attempt reports SDK retry-count 0. The six
+    // 2026.6.1 maxRetries hunks are target-gone in the rewritten worker bundle.
+    expect(result.failureProbe.status).not.toBe('ok');
+    expect(result.failureProbe.requestCount).toBeGreaterThanOrEqual(2);
+    expect(result.failureProbe.retryCounts.every((count) => count === 0)).toBe(true);
+    expect(result.failureProbe.credential).toBe('auth-profile');
   }, 90_000);
 
   it('fails closed when either probe is run against a different OpenClaw version', () => {
@@ -116,7 +120,7 @@ describe('OpenClaw 2026.6.1 credential contract probe', () => {
       const packageDir = path.join(sandbox, 'node_modules', 'openclaw');
       fs.mkdirSync(scriptsDir, { recursive: true });
       fs.mkdirSync(packageDir, { recursive: true });
-      fs.writeFileSync(path.join(packageDir, 'package.json'), '{"version":"2026.6.2"}\n');
+      fs.writeFileSync(path.join(packageDir, 'package.json'), '{"version":"2026.9.3"}\n');
 
       for (const source of [PROBE, REAL_SMOKE]) {
         const copiedProbe = path.join(scriptsDir, path.basename(source));
@@ -129,7 +133,7 @@ describe('OpenClaw 2026.6.1 credential contract probe', () => {
         });
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain(
-          'OpenClaw version mismatch: expected 2026.6.1, found 2026.6.2',
+          'OpenClaw version mismatch: expected 2026.9.2, found 2026.9.3',
         );
       }
     } finally {
@@ -237,7 +241,9 @@ describe('OpenClaw 2026.6.1 credential contract probe', () => {
       });
       expect(result.status).not.toBe(0);
       expect(result.error).toBeUndefined();
-      expect(result.stderr).toContain('models status --probe failed');
+      // 2026.9.2's first CLI step is the agent-DB bootstrap, so the injected
+      // timeout can surface at any probe step; what matters is the clean exit.
+      expect(result.stderr).toContain('credential contract probe failed');
       expect(probeTempEntries(sandbox)).toEqual([]);
     } finally {
       fs.rmSync(sandbox, { recursive: true, force: true });

@@ -11,7 +11,22 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
-import { getSkillsSnapshotVersion } from 'openclaw/plugin-sdk/skills-runtime';
+/**
+ * OpenClaw 2026.9.2 has no public skills snapshot token: `skills-runtime` was
+ * removed from the plugin SDK exports and no subpath carries an equivalent.
+ * The token only guards the CLI status cache below, so keep it local. Callers
+ * that know the skill set changed can bump it; `list({ force: true })` remains
+ * the authoritative invalidation path.
+ */
+let localSkillsSnapshotVersion = 0;
+
+export function bumpSkillsSnapshotVersion(): void {
+  localSkillsSnapshotVersion += 1;
+}
+
+export function getSkillsSnapshotVersion(): number {
+  return localSkillsSnapshotVersion;
+}
 import type {
   OpenClawSkillInfo,
   OpenClawSkillStatus,

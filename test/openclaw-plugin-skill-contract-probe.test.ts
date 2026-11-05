@@ -4,10 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = path.resolve(__dirname, '..');
-const FIXTURE = JSON.parse(fs.readFileSync(
-  path.join(ROOT, 'test', 'fixtures', 'openclaw-plugin-skill-contract-2026.6.1.json'),
-  'utf8',
-)) as {
+type ContractFixture = {
   conditionalPlugin: {
     manifestDeclaredTools: string[];
     runtimeModelInventory: string[];
@@ -23,8 +20,12 @@ const FIXTURE = JSON.parse(fs.readFileSync(
     stableCapsuleContract: string;
   };
 };
+const FIXTURE = JSON.parse(fs.readFileSync(
+  path.join(ROOT, 'test', 'fixtures', 'openclaw-plugin-skill-contract-2026.9.2.json'),
+  'utf8',
+)) as ContractFixture;
 
-describe('OpenClaw 2026.6.1 conditional-plugin and Profile Skill contracts', () => {
+describe('OpenClaw 2026.9.2 conditional-plugin and Profile Skill contracts', () => {
   it('replays the real isolated Gateway probe', () => {
     const raw = execFileSync(
       process.execPath,
@@ -32,7 +33,10 @@ describe('OpenClaw 2026.6.1 conditional-plugin and Profile Skill contracts', () 
       {
         cwd: ROOT,
         encoding: 'utf8',
-        timeout: 60_000,
+        // The probe spawns four OpenClaw CLI processes (each bounded by its own
+        // 30 s timeout) and a real Gateway before it reads the run's persisted
+        // prompt report; 60 s truncated it on a loaded runner.
+        timeout: 180_000,
         maxBuffer: 5 * 1024 * 1024,
       },
     );
@@ -56,7 +60,7 @@ describe('OpenClaw 2026.6.1 conditional-plugin and Profile Skill contracts', () 
       };
     };
 
-    expect(result.openClawVersion).toBe('2026.6.1');
+    expect(result.openClawVersion).toBe('2026.9.2');
     expect(result.isolation.configuredNetworkEndpoints).toBe('loopback-only');
     expect(result.conditionalPlugin).toMatchObject({
       manifestDeclaredTools: FIXTURE.conditionalPlugin.manifestDeclaredTools,
@@ -84,5 +88,5 @@ describe('OpenClaw 2026.6.1 conditional-plugin and Profile Skill contracts', () 
     expect(Boolean(result.skillDiscovery.observedGroupedRecursiveSkill)).toBe(
       FIXTURE.skillDiscovery.groupedRecursiveObserved,
     );
-  }, 65_000);
+  }, 185_000);
 });

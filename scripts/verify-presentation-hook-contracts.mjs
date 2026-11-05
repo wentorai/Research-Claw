@@ -3,7 +3,7 @@
 /**
  * Real OpenClaw presentation-hook contract probe.
  *
- * This starts an isolated OpenClaw 2026.6.1 gateway with the real RC, RP,
+ * This starts an isolated OpenClaw 2026.9.2 gateway with the real RC, RP,
  * research-superpower and configured Wentor MCP plugins. A deterministic local
  * OpenAI-compatible provider requests one real tool call per run. A temporary
  * capture plugin records the public hook payloads without changing them.
@@ -840,7 +840,7 @@ async function main() {
     const report = {
       gatewayPort,
       node: process.version,
-      openClaw: '2026.6.1',
+      openClaw: '2026.9.2',
       tempRoot: process.env.RC_KEEP_TEST_ARTIFACTS === '1' ? tempRoot : undefined,
       event: { captured, emittedCapture, deliveredFrame },
     };
@@ -862,7 +862,7 @@ async function main() {
     const report = {
       gatewayPort,
       node: process.version,
-      openClaw: '2026.6.1',
+      openClaw: '2026.9.2',
       tempRoot: process.env.RC_KEEP_TEST_ARTIFACTS === '1' ? tempRoot : undefined,
       lifecycle,
     };
@@ -929,7 +929,7 @@ async function main() {
   const report = {
     gatewayPort,
     node: process.version,
-    openClaw: '2026.6.1',
+    openClaw: '2026.9.2',
     tempRoot: process.env.RC_KEEP_TEST_ARTIFACTS === '1' ? tempRoot : undefined,
     cases: summaries,
     customFramesObserved: frames.filter(frame =>

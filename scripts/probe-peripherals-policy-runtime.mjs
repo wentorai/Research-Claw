@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Real OpenClaw 2026.6.1 cold-start probe for peripherals product policy.
+ * Real OpenClaw 2026.9.2 cold-start probe for peripherals product policy.
  *
  * Each policy state runs in a fresh child process with isolated HOME/state,
  * SQLite, workspace, Gateway, and loopback-only deterministic provider. The
@@ -17,13 +17,14 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const openClawEntry = path.join(projectRoot, 'node_modules', 'openclaw', 'dist', 'entry.js');
-const requiredOpenClawVersion = '2026.6.1';
+const requiredOpenClawVersion = '2026.9.2';
 const inventoryPath = path.join(projectRoot, 'test', 'fixtures', 'peripherals-policy-enabled-inventory-0.8.2.json');
 const corePluginPath = path.join(projectRoot, 'extensions', 'research-claw-core');
 const fakePlaudMcpPath = path.join(projectRoot, 'test', 'fixtures', 'fake-plaud-inventory-mcp-server.cjs');
@@ -32,10 +33,11 @@ const gatewayToken = 't07-isolated-gateway-token';
 const fixtureProfileId = 'fixture:managed';
 const fixtureSecret = 't07-explicit-fake-secret';
 const sessionKey = 'agent:main:main';
+const sessionAgentId = 'main';
 const CLI_TIMEOUT_MS = 30_000;
 const WORKER_TIMEOUT_MS = (() => {
   const parsed = Number.parseInt(process.env.RC_T07_PROBE_WORKER_TIMEOUT_MS ?? '', 10);
-  return Number.isFinite(parsed) && parsed >= 100 ? parsed : 90_000;
+  return Number.isFinite(parsed) && parsed >= 100 ? parsed : 180_000;
 })();
 const HOST_CREDENTIAL_OR_PROXY_ENV_RE = /(?:^|_)(?:API_?KEY|TOKEN|SECRET|PASSWORD|AUTHORIZATION|BEARER|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY)(?:$|_)/i;
 const WORKER_ENV_ALLOWLIST = new Set([
@@ -49,7 +51,7 @@ const WORKER_ENV_ALLOWLIST = new Set([
   // an explicit env object; it carries no credential, endpoint, or user path.
   '__CF_USER_TEXT_ENCODING',
   'NODE_ENV', 'RC_T07_PROBE_FAULT', 'RC_T07_PROBE_PAUSE_AFTER_AUTH_WRITE',
-  'RC_T07_PROBE_INCLUDE_PLAUD_MCP',
+  'RC_T07_PROBE_INCLUDE_PLAUD_MCP', 'RC_KEEP_TEST_ARTIFACTS',
 ]);
 
 let tempRoot;
@@ -65,6 +67,15 @@ const activeWorkers = new Set();
 function invariant(value, message) {
   if (!value) throw new Error(message);
 }
+
+function sessionDatabasePath() {
+  return path.join(tempRoot, 'state', 'agents', sessionAgentId, 'agent', 'openclaw-agent.sqlite');
+}
+
+function sharedStateDatabasePath() {
+  return path.join(tempRoot, 'state', 'state', 'openclaw.sqlite');
+}
+
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -130,6 +141,44 @@ async function runCli(args, timeoutMs = CLI_TIMEOUT_MS) {
   return stdout;
 }
 
+/**
+ * Runs the CLI with a secret on stdin: `models auth paste-api-key` prompts for
+ * the key and must never receive it through argv or the environment, both of
+ * which are visible to other processes.
+ */
+async function runCliWithSecretInput(args, secret, timeoutMs = CLI_TIMEOUT_MS) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [openClawEntry, ...args], {
+      cwd: projectRoot,
+      env: isolatedEnv(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`openclaw ${args.join(' ')} timed out`));
+    }, timeoutMs);
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      reject(new Error(`openclaw ${args.join(' ')} exited ${code ?? signal}: ${stderr.slice(-2000)}`));
+    });
+    child.stdin.end(`${secret}\n`);
+  });
+}
+
 async function startProvider() {
   provider = http.createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/v1/models') {
@@ -176,8 +225,7 @@ async function writeFixture(state, providerPort) {
   const stateDir = path.join(tempRoot, 'state');
   const workspace = path.join(tempRoot, 'workspace');
   const rcDir = path.join(workspace, '.ResearchClaw');
-  const agentDir = path.join(stateDir, 'agents', 'main', 'agent');
-  const authPath = path.join(agentDir, 'auth-profiles.json');
+  const agentDir = path.join(stateDir, 'agents', sessionAgentId, 'agent');
   const probePluginDir = path.join(tempRoot, 'core-source-plugin');
   await Promise.all([
     mkdir(home, { recursive: true }),
@@ -286,21 +334,35 @@ async function writeFixture(state, providerPort) {
     },
     logging: { level: 'debug', file: path.join(tempRoot, 'openclaw.log') },
   }, null, 2)}\n`, { mode: 0o600 });
-  await writeFile(authPath, `${JSON.stringify({
-    version: 1,
-    profiles: { [fixtureProfileId]: { type: 'api_key', provider: 'fixture', key: fixtureSecret } },
-  }, null, 2)}\n`, { mode: 0o600 });
-  await Promise.all([
-    chmod(path.join(stateDir, 'openclaw.json'), 0o600),
-    chmod(authPath, 0o600),
-  ]);
+  await chmod(path.join(stateDir, 'openclaw.json'), 0o600);
+  return { workspace };
+}
+
+/**
+ * OpenClaw 2026.9.2 keeps agent credentials in the shared SQLite state database
+ * (`state/openclaw.sqlite`); the legacy `agents/<agent>/agent/auth-profiles.json`
+ * is now only a migration input and is rejected with
+ * `AuthProfileMigrationRequiredError` until `openclaw doctor --fix` imports it.
+ * Write the 2026.9.2 store directly through the public CLI instead: it prompts
+ * for the key on stdin, so the secret never travels through argv or the
+ * environment.
+ */
+async function seedAuthProfile() {
+  await runCliWithSecretInput(
+    ['models', 'auth', 'paste-api-key', '--provider', 'fixture', '--profile-id', fixtureProfileId],
+    fixtureSecret,
+    60_000,
+  );
+  invariant(
+    await stat(sharedStateDatabasePath()).then(() => true, () => false),
+    `auth profile store was not created at ${path.relative(tempRoot, sharedStateDatabasePath())}`,
+  );
   if (
     process.env.NODE_ENV === 'test'
     && process.env.RC_T07_PROBE_FAULT === 'after-auth-write'
   ) {
     throw new Error('injected failure after auth store write');
   }
-  return { workspace, authPath };
 }
 
 async function pauseAfterAuthWriteForSignalTest() {
@@ -322,7 +384,10 @@ async function pauseAfterAuthWriteForSignalTest() {
 }
 
 async function waitForGateway(port) {
-  const deadline = Date.now() + 30_000;
+  // 2026.9.2 loads the Core plugin from TypeScript source at Gateway startup
+  // (~13 s on a warm host, more on a cold one), so the legacy 30 s budget is
+  // not enough; the enclosing worker/test timeouts still bound the probe.
+  const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     try {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) return;
@@ -369,7 +434,7 @@ async function gatewayRequest(port, method, params = {}) {
   return await new Promise((resolve, reject) => {
     let connected = false;
     let requestId = '';
-    const timer = setTimeout(() => reject(new Error(`gateway ${method} timeout`)), 15_000);
+    const timer = setTimeout(() => reject(new Error(`gateway ${method} timeout`)), 60_000);
     socket.addEventListener('message', (event) => {
       const frame = JSON.parse(String(event.data));
       if (frame.type === 'event' && frame.event === 'connect.challenge') {
@@ -378,7 +443,7 @@ async function gatewayRequest(port, method, params = {}) {
           type: 'req', id: requestId, method: 'connect',
           params: {
             minProtocol: 4, maxProtocol: 4,
-            // OC 2026.6.1 explicitly permits a shared-secret loopback backend
+            // OC 2026.9.2 explicitly permits a shared-secret loopback backend
             // client to self-pair with the requested operator scopes. This is
             // the production gateway-client identity, not a whitelist bypass.
             client: { id: 'gateway-client', version: requiredOpenClawVersion, platform: process.platform, mode: 'backend' },
@@ -426,17 +491,46 @@ async function gatewayCall(port, method, params, allowFailure = false) {
   }
 }
 
+// OpenClaw 2026.9.2 moved the session store from
+// <state>/agents/<agent>/sessions/sessions.json to the per-agent SQLite
+// database <state>/agents/<agent>/agent/openclaw-agent.sqlite. The full session
+// entry — including `systemPromptReport` — is persisted in
+// `session_nodes.entry_json`. No CLI surface returns it: `sessions.list` uses
+// the "list" projection, which deletes `skillsSnapshot` and
+// `systemPromptReport`, so the probe reads the persisted entry directly.
+function readPersistedPromptReport(databasePath) {
+  let database;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+    const row = database
+      .prepare('SELECT entry_json FROM session_nodes WHERE session_key = ?')
+      .get(sessionKey);
+    if (!row || typeof row.entry_json !== 'string') return undefined;
+    const entry = JSON.parse(row.entry_json);
+    const report = entry?.systemPromptReport;
+    return report?.source === 'run' ? report : undefined;
+  } catch {
+    // The store is not created yet, is mid-checkpoint, or the run has not
+    // persisted its entry. The caller polls until the deadline.
+    return undefined;
+  } finally {
+    try {
+      database?.close();
+    } catch {
+      // A half-open handle is harmless here; the next poll opens a fresh one.
+    }
+  }
+}
+
 async function waitForPromptReport() {
-  const sessionsPath = path.join(tempRoot, 'state', 'agents', 'main', 'sessions', 'sessions.json');
+  const databasePath = sessionDatabasePath();
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    try {
-      const store = JSON.parse(await readFile(sessionsPath, 'utf8'));
-      if (store[sessionKey]?.systemPromptReport?.source === 'run') return store[sessionKey].systemPromptReport;
-    } catch { /* run not persisted */ }
+    const report = readPersistedPromptReport(databasePath);
+    if (report) return report;
     await sleep(100);
   }
-  throw new Error('systemPromptReport was not persisted');
+  throw new Error(`systemPromptReport was not persisted in the SQLite session store at ${databasePath}`);
 }
 
 async function waitForRuntimeReconciliation() {
@@ -496,20 +590,24 @@ async function listRegularFiles(root) {
   return output;
 }
 
-async function assertCredentialSingleCopy(authPath) {
+async function assertCredentialSingleCopy() {
+  // 2026.9.2 migrated the credential from the legacy JSON file into the shared
+  // SQLite state store; WAL/SHM files are part of that same live store.
+  const storePath = sharedStateDatabasePath();
+  const storeFamily = new Set([storePath, `${storePath}-wal`, `${storePath}-shm`]);
   if (process.platform !== 'win32') {
-    const authMode = (await stat(authPath)).mode & 0o777;
+    const authMode = (await stat(storePath)).mode & 0o777;
     invariant(authMode === 0o600, `auth store mode was ${authMode.toString(8)}, expected 600`);
   }
   let copies = 0;
   for (const file of await listRegularFiles(tempRoot)) {
     const content = await readFile(file);
     if (content.includes(Buffer.from(fixtureSecret))) {
-      invariant(file === authPath, `fixture secret leaked outside auth store: ${path.relative(tempRoot, file)}`);
+      invariant(storeFamily.has(file), `fixture secret leaked outside auth store: ${path.relative(tempRoot, file)}`);
       copies += 1;
     }
   }
-  invariant(copies === 1, `expected exactly one fixture secret copy, found ${copies}`);
+  invariant(copies >= 1, 'fixture secret was not found in the OpenClaw auth store');
 }
 
 async function runWorker(state) {
@@ -532,8 +630,9 @@ async function runWorker(state) {
   );
   tempRoot = await mkdtemp(path.join(os.tmpdir(), `rc-t07-peripherals-${state}-`));
   const providerPort = await startProvider();
-  const { workspace, authPath } = await writeFixture(state, providerPort);
+  const { workspace } = await writeFixture(state, providerPort);
   await pauseAfterAuthWriteForSignalTest();
+  await seedAuthProfile();
   const port = await startGateway();
   const includePlaudMcp = process.env.RC_T07_PROBE_INCLUDE_PLAUD_MCP === '1';
   invariant(gatewaySpawnEnv, 'Gateway spawn environment was not captured');
@@ -617,7 +716,7 @@ async function runWorker(state) {
     hlsBody.includes('NO_SESSION') === !disabled,
     `HLS route registration mismatch (${hlsResponse.status}): ${hlsBody.slice(0, 200)}`,
   );
-  await assertCredentialSingleCopy(authPath);
+  await assertCredentialSingleCopy();
 
   return {
     state,

@@ -9,6 +9,7 @@ const { jobsDigest } = require('./cron-digest.cjs');
 const { withBootstrapLocks } = require('./maintenance-lease.cjs');
 const {
   assertCanonicalAuthSecretPlacement,
+  assertCanonicalAgentAuthSecretPlacement,
   assertNoUnexpectedStateSecretCopies,
 } = require('./secret-copy-scan.cjs');
 const {
@@ -49,6 +50,11 @@ const CRON_WORKER_LIFECYCLE_CREATE_SQL = `CREATE TABLE rc_cron_worker_epoch (
       authority TEXT NOT NULL
     )`;
 const AUTH_STORE_MAX_BYTES = 2 * 1024 * 1024;
+const AGENT_DATABASE_FILENAME = 'openclaw-agent.sqlite';
+// The canonical 2026.9.2 agent store carries a SecretRef to the one plaintext
+// credential copy the applier keeps (the private legacy store). This provider
+// alias is applier-owned and points at that file as a JSON secret source.
+const MANAGED_AUTH_SECRET_PROVIDER = 'rc-managed-auth';
 const LIVE_CONFIG_MAX_BYTES = 2 * 1024 * 1024;
 const STAGE_PUBLICATION_PREFIX = '.rc-bootstrap-stage-v1-';
 const STAGE_PUBLICATION_NAME = /^\.rc-bootstrap-stage-v1-(tx-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-([0-9a-f]{64})-([0-9a-f]{64})$/;
@@ -206,6 +212,9 @@ function normalizePaths(options, { recovery = false, stagedPrecondition = false 
     `${normalized.dbPath}-wal`,
     `${normalized.dbPath}-shm`,
     path.join(normalized.stateDir, 'agents/main/agent/auth-profiles.json'),
+    path.join(normalized.stateDir, 'agents/main/agent/openclaw-agent.sqlite'),
+    path.join(normalized.stateDir, 'agents/main/agent/openclaw-agent.sqlite-wal'),
+    path.join(normalized.stateDir, 'agents/main/agent/openclaw-agent.sqlite-shm'),
     path.join(normalized.stateDir, 'state/openclaw.sqlite'),
     path.join(normalized.stateDir, 'state/openclaw.sqlite-wal'),
     path.join(normalized.stateDir, 'state/openclaw.sqlite-shm'),
@@ -493,10 +502,15 @@ function assertUnownedManagedTargets(paths, capsule, receipt) {
   const auth = readPrivateJsonObject(
     authStorePath(paths), { version: 1, profiles: {} }, 'INVALID_AUTH_STORE',
   );
+  const ownsSecretProvider = (candidate) => {
+    const providers = candidate?.secrets?.providers;
+    return isObject(providers) && Object.hasOwn(providers, MANAGED_AUTH_SECRET_PROVIDER);
+  };
   for (const candidate of [config, globalConfig]) {
     if (Object.hasOwn(candidate.models?.providers ?? {}, providerId)
         || Object.hasOwn(candidate.auth?.profiles ?? {}, authProfileId)
-        || Object.hasOwn(candidate.auth?.order ?? {}, providerId)) fail('UNOWNED_MANAGED_TARGET');
+        || Object.hasOwn(candidate.auth?.order ?? {}, providerId)
+        || ownsSecretProvider(candidate)) fail('UNOWNED_MANAGED_TARGET');
   }
   if (Object.hasOwn(auth.profiles ?? {}, authProfileId)) fail('UNOWNED_MANAGED_TARGET');
 }
@@ -668,6 +682,13 @@ function ownershipPrecondition(paths, capsule, receipt) {
       authStore: valueHash(readPrivateJsonObject(
         authStorePath(paths), { version: 1, profiles: {} }, 'INVALID_AUTH_STORE',
       ).profiles?.[`${capsule.model.providerId}:managed`] ?? null),
+      canonicalAuthStore: valueHash(readCanonicalAuthStore(paths)),
+      secretsProvider: valueHash({
+        config: readJsonObject(paths.configPath, null, 'INVALID_CONFIG')
+          .secrets?.providers?.[MANAGED_AUTH_SECRET_PROVIDER] ?? null,
+        globalConfig: readJsonObject(paths.globalConfigPath, {})
+          .secrets?.providers?.[MANAGED_AUTH_SECRET_PROVIDER] ?? null,
+      }),
     },
     suspensionLedger: valueHash(ledger),
     managedSkillDirectories: managedDirectories.map((directory) => ({
@@ -989,6 +1010,285 @@ function markerRoots(paths, txId) {
 
 function authStorePath(paths) {
   return path.join(paths.stateDir, 'agents/main/agent/auth-profiles.json');
+}
+
+function agentDatabasePath(paths) {
+  return path.join(agentDirPath(paths), AGENT_DATABASE_FILENAME);
+}
+
+function agentDirPath(paths) {
+  return path.join(paths.stateDir, 'agents/main/agent');
+}
+
+function agentDatabasePaths(paths) {
+  const file = agentDatabasePath(paths);
+  return [file, `${file}-wal`, `${file}-shm`];
+}
+
+function encodeJsonPointerToken(value) {
+  return value.replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+function managedAuthKeyRef(authProfileId) {
+  return {
+    source: 'file',
+    provider: MANAGED_AUTH_SECRET_PROVIDER,
+    id: `/profiles/${encodeJsonPointerToken(authProfileId)}/key`,
+  };
+}
+
+function managedAuthSecretProviderDefinition(paths) {
+  return { source: 'file', path: authStorePath(paths), mode: 'json' };
+}
+
+function loadOpenClawSqliteRuntime() {
+  try {
+    return require('openclaw/plugin-sdk/sqlite-runtime');
+  } catch {
+    fail('SQLITE_RUNTIME_UNAVAILABLE');
+  }
+}
+
+function canonicalAuthStoreShape(value) {
+  return isObject(value) && value.version === 1 && isObject(value.profiles);
+}
+
+function readCanonicalAuthStore(paths) {
+  const file = agentDatabasePath(paths);
+  const metadata = lstatIfPresent(file);
+  if (!metadata) return { version: 1, profiles: {} };
+  if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) fail('INVALID_AUTH_STORE');
+  const { openNodeSqliteDatabase } = loadOpenClawSqliteRuntime();
+  let database;
+  try {
+    database = openNodeSqliteDatabase(file, { readOnly: true });
+    database.exec('PRAGMA busy_timeout = 5000;');
+    const table = database.prepare(
+      "SELECT type FROM sqlite_master WHERE name = 'auth_profile_store'",
+    ).get();
+    if (!table) return { version: 1, profiles: {} };
+    if (table.type !== 'table') fail('INVALID_AUTH_STORE');
+    const row = database.prepare(
+      "SELECT store_json FROM auth_profile_store WHERE store_key = 'primary'",
+    ).get();
+    if (!row) return { version: 1, profiles: {} };
+    if (typeof row.store_json !== 'string'
+        || Buffer.byteLength(row.store_json) > AUTH_STORE_MAX_BYTES) fail('INVALID_AUTH_STORE');
+    const parsed = JSON.parse(row.store_json);
+    if (!canonicalAuthStoreShape(parsed)) fail('INVALID_AUTH_STORE');
+    return parsed;
+  } catch (error) {
+    if (error instanceof BootstrapProfileTransactionError) throw error;
+    fail('INVALID_AUTH_STORE');
+  } finally {
+    database?.close();
+  }
+}
+
+function writeCanonicalAuthStore(paths, value) {
+  const file = agentDatabasePath(paths);
+  if (!canonicalAuthStoreShape(value)) fail('INVALID_AUTH_STORE');
+  const payload = JSON.stringify(value);
+  if (Buffer.byteLength(payload) > AUTH_STORE_MAX_BYTES) fail('INVALID_AUTH_STORE');
+  ensureDirectory(path.dirname(file), 0o700);
+  const { openNodeSqliteDatabase, ensureOpenClawAgentDatabaseSchema } = loadOpenClawSqliteRuntime();
+  const env = canonicalDatabaseEnv(paths);
+  let database;
+  try {
+    database = openNodeSqliteDatabase(file);
+    database.exec('PRAGMA busy_timeout = 5000;');
+    ensureOpenClawAgentDatabaseSchema(database, {
+      path: file, agentId: 'main', env,
+    });
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      database.prepare(
+        `INSERT INTO auth_profile_store (store_key, store_json, updated_at)
+         VALUES ('primary', ?, ?)
+         ON CONFLICT(store_key) DO UPDATE SET
+           store_json = excluded.store_json,
+           updated_at = excluded.updated_at`,
+      ).run(payload, Date.now());
+      database.exec('COMMIT');
+    } catch (error) {
+      try { database.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+    try { database.exec('PRAGMA wal_checkpoint(TRUNCATE);'); } catch {}
+  } catch (error) {
+    if (error instanceof BootstrapProfileTransactionError) throw error;
+    fail('INVALID_AUTH_STORE');
+  } finally {
+    database?.close();
+  }
+  if (process.platform !== 'win32') fs.chmodSync(file, 0o600);
+}
+
+function canonicalDatabaseEnv(paths) {
+  return {
+    ...process.env,
+    OPENCLAW_STATE_DIR: paths.stateDir,
+    OPENCLAW_AGENT_DIR: agentDirPath(paths),
+  };
+}
+
+function readCanonicalAuthRow(database) {
+  const table = database.prepare(
+    "SELECT type FROM sqlite_master WHERE name = 'auth_profile_store'",
+  ).get();
+  if (!table) return { table: false, row: null };
+  if (table.type !== 'table') fail('INVALID_AUTH_STORE');
+  const row = database.prepare(
+    "SELECT store_json, updated_at FROM auth_profile_store WHERE store_key = 'primary'",
+  ).get();
+  if (!row) return { table: true, row: null };
+  if (typeof row.store_json !== 'string'
+      || Buffer.byteLength(row.store_json) > AUTH_STORE_MAX_BYTES) fail('INVALID_AUTH_STORE');
+  return {
+    table: true,
+    row: {
+      store_json: row.store_json,
+      updated_at: typeof row.updated_at === 'number' && Number.isFinite(row.updated_at)
+        ? row.updated_at : 0,
+    },
+  };
+}
+
+function canonicalAuthPreimageValue(value) {
+  if (!isObject(value)
+      || Object.keys(value).sort().join(',') !== 'databasePresent,present,storeJson,updatedAt,version'
+      || value.version !== 1 || typeof value.databasePresent !== 'boolean'
+      || typeof value.present !== 'boolean'
+      || (!value.databasePresent && value.present)) {
+    fail('INVALID_TRANSACTION_PREIMAGE');
+  }
+  if (value.present) {
+    if (typeof value.storeJson !== 'string'
+        || Buffer.byteLength(value.storeJson) > AUTH_STORE_MAX_BYTES
+        || typeof value.updatedAt !== 'number' || !Number.isFinite(value.updatedAt)) {
+      fail('INVALID_TRANSACTION_PREIMAGE');
+    }
+    let parsed;
+    try { parsed = JSON.parse(value.storeJson); } catch { fail('INVALID_TRANSACTION_PREIMAGE'); }
+    if (!canonicalAuthStoreShape(parsed)) fail('INVALID_TRANSACTION_PREIMAGE');
+  } else if (value.storeJson !== null || value.updatedAt !== null) {
+    fail('INVALID_TRANSACTION_PREIMAGE');
+  }
+  return value;
+}
+
+/**
+ * The canonical agent database can hold gigabytes of sessions and transcripts,
+ * so the transaction keeps a logical preimage of the one row it owns instead of
+ * copying the file. Rollback restores that row and leaves every other runtime
+ * write (sessions, the generated plugin catalog) exactly where it is.
+ */
+function readCanonicalAuthPreimage(paths) {
+  const file = agentDatabasePath(paths);
+  const metadata = lstatIfPresent(file);
+  if (!metadata) {
+    return {
+      version: 1, databasePresent: false, present: false, storeJson: null, updatedAt: null,
+    };
+  }
+  if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) fail('INVALID_AUTH_STORE');
+  const { openNodeSqliteDatabase } = loadOpenClawSqliteRuntime();
+  let database;
+  try {
+    database = openNodeSqliteDatabase(file, { readOnly: true });
+    database.exec('PRAGMA busy_timeout = 5000;');
+    const { row } = readCanonicalAuthRow(database);
+    if (!row) {
+      return {
+        version: 1, databasePresent: true, present: false, storeJson: null, updatedAt: null,
+      };
+    }
+    return canonicalAuthPreimageValue({
+      version: 1,
+      databasePresent: true,
+      present: true,
+      storeJson: row.store_json,
+      updatedAt: row.updated_at,
+    });
+  } catch (error) {
+    if (error instanceof BootstrapProfileTransactionError) throw error;
+    fail('INVALID_AUTH_STORE');
+  } finally {
+    database?.close();
+  }
+}
+
+function readCanonicalAuthPreimageFile(file, expectedSha256) {
+  let bytes;
+  try {
+    bytes = readPrivateFile(file, { maxBytes: 1024 * 1024, exactMode: 0o600 });
+  } catch {
+    fail('INVALID_TRANSACTION_PREIMAGE');
+  }
+  if (!/^[0-9a-f]{64}$/.test(expectedSha256) || sha256(bytes) !== expectedSha256) {
+    fail('INVALID_TRANSACTION_PREIMAGE');
+  }
+  let value;
+  try { value = JSON.parse(bytes.toString('utf8')); } catch { fail('INVALID_TRANSACTION_PREIMAGE'); }
+  return canonicalAuthPreimageValue(value);
+}
+
+function restoreCanonicalAuthPreimageRow(database, preimage) {
+  if (!preimage.present) {
+    database.prepare("DELETE FROM auth_profile_store WHERE store_key = 'primary'").run();
+    return;
+  }
+  database.prepare(
+    `INSERT INTO auth_profile_store (store_key, store_json, updated_at)
+     VALUES ('primary', ?, ?)
+     ON CONFLICT(store_key) DO UPDATE SET
+       store_json = excluded.store_json,
+       updated_at = excluded.updated_at`,
+  ).run(preimage.storeJson, preimage.updatedAt);
+}
+
+function restoreCanonicalAuthStorePreimage(paths, file, expectedSha256) {
+  const preimage = readCanonicalAuthPreimageFile(file, expectedSha256);
+  const databaseFile = agentDatabasePath(paths);
+  if (!preimage.databasePresent) {
+    // The transaction created the database; rollback restores the preimage
+    // where no canonical store existed at all.
+    removePath(databaseFile);
+    removePath(`${databaseFile}-wal`);
+    removePath(`${databaseFile}-shm`);
+    return;
+  }
+  const live = lstatIfPresent(databaseFile);
+  if (!live) {
+    // The database vanished after our write: recreate it from the preimage
+    // row, since there is no later runtime state to preserve.
+    if (!preimage.present) return;
+    writeCanonicalAuthStore(paths, JSON.parse(preimage.storeJson));
+    return;
+  }
+  if (live.isSymbolicLink() || !live.isFile() || live.nlink !== 1) fail('UNSAFE_PATH');
+  const { openNodeSqliteDatabase, ensureOpenClawAgentDatabaseSchema } = loadOpenClawSqliteRuntime();
+  let database;
+  try {
+    database = openNodeSqliteDatabase(databaseFile);
+    database.exec('PRAGMA busy_timeout = 5000;');
+    ensureOpenClawAgentDatabaseSchema(database, {
+      path: databaseFile, agentId: 'main', env: canonicalDatabaseEnv(paths),
+    });
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      restoreCanonicalAuthPreimageRow(database, preimage);
+      database.exec('COMMIT');
+    } catch (error) {
+      try { database.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  } catch (error) {
+    if (error instanceof BootstrapProfileTransactionError) throw error;
+    fail('INVALID_AUTH_STORE');
+  } finally {
+    database?.close();
+  }
 }
 
 function readSnapshotRootFile(snapshotRoot, expectedDigest, maxBytes) {
@@ -1780,6 +2080,17 @@ function createVolumeMarkers(paths, txId, receipt, capsule, manifest, fault) {
         digest,
       });
     }
+    let canonicalAuthPreimage = null;
+    if (volume === 'state') {
+      const preimage = readCanonicalAuthPreimage(paths);
+      const preimageFile = path.join(root, 'auth-preimage.json');
+      writeJsonAtomic(preimageFile, preimage, 0o600);
+      const bytes = readPrivateFile(preimageFile, { maxBytes: 1024 * 1024, exactMode: 0o600 });
+      canonicalAuthPreimage = {
+        file: path.basename(preimageFile),
+        sha256: sha256(bytes),
+      };
+    }
     const marker = {
       version: 1,
       txId,
@@ -1792,9 +2103,12 @@ function createVolumeMarkers(paths, txId, receipt, capsule, manifest, fault) {
       transactionTopology,
       assets,
       directories,
+      canonicalAuthPreimage,
       preimageDigest: valueHash({
         transactionTopology,
-        assets: assets.map(({ id, target, digest }) => ({ id, target, digest })), directories,
+        assets: assets.map(({ id, target, digest }) => ({ id, target, digest })),
+        directories,
+        canonicalAuthPreimage,
       }),
     };
     writeJsonAtomic(path.join(root, 'volume-marker.json'), marker, 0o600);
@@ -1859,7 +2173,7 @@ function ensureObjectAt(parent, key) {
   return parent[key];
 }
 
-function buildConfigPlan(current, capsule, authProfileId, receipt, ledgerInput) {
+function buildConfigPlan(paths, current, capsule, authProfileId, receipt, ledgerInput) {
   if (!isObject(current)) fail('INVALID_CONFIG');
   const next = clone(current);
   const ledger = clone(ledgerInput);
@@ -1887,6 +2201,13 @@ function buildConfigPlan(current, capsule, authProfileId, receipt, ledgerInput) 
   if (typeof oldProvider === 'string' && oldProvider !== capsule.model.providerId) delete authOrder[oldProvider];
   authProfiles[authProfileId] = { provider: capsule.model.providerId, mode: 'api_key' };
   authOrder[capsule.model.providerId] = [authProfileId];
+
+  const secrets = ensureObjectAt(next, 'secrets');
+  const secretProviders = ensureObjectAt(secrets, 'providers');
+  if (!receipt && Object.hasOwn(secretProviders, MANAGED_AUTH_SECRET_PROVIDER)) {
+    fail('UNOWNED_MANAGED_TARGET');
+  }
+  secretProviders[MANAGED_AUTH_SECRET_PROVIDER] = managedAuthSecretProviderDefinition(paths);
 
   const plugins = ensureObjectAt(next, 'plugins');
   const entries = ensureObjectAt(plugins, 'entries');
@@ -1962,7 +2283,28 @@ function buildAuthPlan(current, capsule, authProfileId, receipt) {
   return next;
 }
 
-function buildGlobalConfigPlan(current, capsule, authProfileId, receipt) {
+/**
+ * 2026.9.2 ignores the legacy auth-profiles.json once its canonical agent store
+ * holds credentials, so the managed profile must also be published there. The
+ * canonical entry is a SecretRef to the single private plaintext copy the
+ * applier keeps in the legacy store: older runtimes keep reading that file, and
+ * the managed secret never exists twice on disk.
+ */
+function buildCanonicalAuthPlan(current, capsule, authProfileId, receipt) {
+  if (!canonicalAuthStoreShape(current)) fail('INVALID_AUTH_STORE');
+  const next = clone(current);
+  if (!receipt && Object.hasOwn(next.profiles, authProfileId)) fail('UNOWNED_MANAGED_TARGET');
+  const oldAuth = receipt?.provider?.authProfileId;
+  if (typeof oldAuth === 'string' && oldAuth !== authProfileId) delete next.profiles[oldAuth];
+  next.profiles[authProfileId] = {
+    type: 'api_key',
+    provider: capsule.model.providerId,
+    keyRef: managedAuthKeyRef(authProfileId),
+  };
+  return next;
+}
+
+function buildGlobalConfigPlan(paths, current, capsule, authProfileId, receipt) {
   if (!isObject(current)) fail('INVALID_CONFIG');
   const next = clone(current);
   const models = ensureObjectAt(next, 'models');
@@ -1987,6 +2329,12 @@ function buildGlobalConfigPlan(current, capsule, authProfileId, receipt) {
   if (typeof oldProvider === 'string' && oldProvider !== capsule.model.providerId) delete authOrder[oldProvider];
   authProfiles[authProfileId] = { provider: capsule.model.providerId, mode: 'api_key' };
   authOrder[capsule.model.providerId] = [authProfileId];
+  const secrets = ensureObjectAt(next, 'secrets');
+  const secretProviders = ensureObjectAt(secrets, 'providers');
+  if (!receipt && Object.hasOwn(secretProviders, MANAGED_AUTH_SECRET_PROVIDER)) {
+    fail('UNOWNED_MANAGED_TARGET');
+  }
+  secretProviders[MANAGED_AUTH_SECRET_PROVIDER] = managedAuthSecretProviderDefinition(paths);
   return next;
 }
 
@@ -5758,8 +6106,11 @@ async function buildApplyPlan(paths, txId, validated, receipt) {
     'INVALID_AUTH_STORE',
   );
   const currentGlobal = readJsonObject(paths.globalConfigPath, {});
+  const currentCanonicalAuth = readCanonicalAuthStore(paths);
   const initialLedger = readLedger(paths);
-  const configPlan = buildConfigPlan(currentConfig, capsule, validated.authProfileId, receipt, initialLedger);
+  const configPlan = buildConfigPlan(
+    paths, currentConfig, capsule, validated.authProfileId, receipt, initialLedger,
+  );
   const inspected = await inspectCronState(paths, txId);
   const rows = await inspectMonitorRows(paths, txId);
   const peripheralPlan = buildPeripheralPlan(
@@ -5770,13 +6121,19 @@ async function buildApplyPlan(paths, txId, validated, receipt) {
     configPlan.ledger,
   );
   const auth = buildAuthPlan(currentAuth, capsule, validated.authProfileId, receipt);
-  const globalConfig = buildGlobalConfigPlan(currentGlobal, capsule, validated.authProfileId, receipt);
+  const canonicalAuth = buildCanonicalAuthPlan(
+    currentCanonicalAuth, capsule, validated.authProfileId, receipt,
+  );
+  const globalConfig = buildGlobalConfigPlan(
+    paths, currentGlobal, capsule, validated.authProfileId, receipt,
+  );
   const skills = skillPlan(paths, capsule, receipt);
   const nextReceipt = buildReceipt(
     capsule, validated, skills, configPlan.managedDeny, peripheralPlan.ledger,
   );
   const managedStateConverged = equal(currentConfig, configPlan.config)
     && equal(currentAuth, auth)
+    && equal(currentCanonicalAuth, canonicalAuth)
     && equal(currentGlobal, globalConfig)
     && equal(initialLedger, peripheralPlan.ledger)
     && equal(rows, peripheralPlan.rows)
@@ -5798,9 +6155,11 @@ async function buildApplyPlan(paths, txId, validated, receipt) {
     currentConfig,
     currentAuth,
     currentGlobal,
+    currentCanonicalAuth,
     initialLedger,
     config: configPlan.config,
     auth,
+    canonicalAuth,
     globalConfig,
     rows,
     jobs: inspected.output.jobs,
@@ -5860,6 +6219,9 @@ async function applyProfile(options) {
 
   await writeAuthStore(paths, options.txId, plan.auth);
   afterStep(paths, options.txId, 'auth', options.fault);
+
+  writeCanonicalAuthStore(paths, plan.canonicalAuth);
+  afterStep(paths, options.txId, 'canonical-auth', options.fault);
 
   writeLiveConfigAtomic(paths, options.txId, 'project', plan.config);
   writeLiveConfigAtomic(paths, options.txId, 'global', plan.globalConfig);
@@ -5940,10 +6302,20 @@ async function verifyProfile(options) {
       providerId: validated.capsule.model.providerId,
       secret: key,
     });
+    assertCanonicalAgentAuthSecretPlacement({
+      authStore: plan.currentCanonicalAuth,
+      authProfileId: validated.authProfileId,
+      providerId: validated.capsule.model.providerId,
+      secretProviderId: MANAGED_AUTH_SECRET_PROVIDER,
+      secret: key,
+    });
     assertNoUnexpectedStateSecretCopies({
       stateDir: paths.stateDir,
       secret: key,
-      allowedFiles: [path.join(paths.stateDir, 'agents/main/agent/auth-profiles.json')],
+      allowedFiles: [
+        path.join(paths.stateDir, 'agents/main/agent/auth-profiles.json'),
+        ...agentDatabasePaths(paths),
+      ],
       // Transaction preimages and staged Capsules are an explicit, private,
       // short-lived recovery allowlist until commit/rollback removes them.
       allowedDirectories: [path.join(paths.stateDir, '.rc-bootstrap-transactions')],
@@ -6225,6 +6597,10 @@ function transactionTreeInventory(root, { excluded = [] } = {}) {
     }
   };
   visit(root, '');
+  // Depth-first traversal emits `a/content/...` before a sibling `a-wal`, but
+  // '/' (0x2F) sorts after '-' (0x2D). The flat inventory contract is strict
+  // lexicographic order, so sort the flattened entries before validation.
+  entries.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
   return entries;
 }
 
@@ -6422,7 +6798,8 @@ function validateMarkerForRestore(paths, txId, volume, marker) {
   const root = definitions[volume];
   const markerKeys = new Set([
     'version', 'txId', 'volume', 'state', 'profileId', 'capsuleDigest', 'manifestIdentity',
-    'volumeRoot', 'transactionTopology', 'assets', 'directories', 'preimageDigest',
+    'volumeRoot', 'transactionTopology', 'assets', 'directories', 'canonicalAuthPreimage',
+    'preimageDigest',
   ]);
   if (!isObject(marker) || Object.keys(marker).some((key) => !markerKeys.has(key))
       || !['prepared', 'applying', 'applied', 'verified'].includes(marker.state)) {
@@ -6438,6 +6815,7 @@ function validateMarkerForRestore(paths, txId, volume, marker) {
         transactionTopology: marker.transactionTopology,
         assets: marker.assets.map(({ id, target, digest }) => ({ id, target, digest })),
         directories: marker.directories,
+        canonicalAuthPreimage: marker.canonicalAuthPreimage,
       })) fail('INVALID_VOLUME_MARKER');
   validateTransactionTopology(paths, marker.transactionTopology);
   const volumeTopology = marker.transactionTopology[volume];
@@ -6463,6 +6841,21 @@ function validateMarkerForRestore(paths, txId, volume, marker) {
     const snapshot = path.join(markerRoots(paths, txId)[volume], asset.snapshot);
     if (!isInside(markerRoots(paths, txId)[volume], snapshot)) fail('INVALID_VOLUME_MARKER');
     try { verifySnapshot(snapshot, asset.digest); } catch { fail('INVALID_TRANSACTION_PREIMAGE'); }
+  }
+  if (volume === 'state') {
+    const preimage = marker.canonicalAuthPreimage;
+    // A transaction staged by an applier that predates the canonical store has
+    // no preimage field; recovery then has no canonical row to restore.
+    if (preimage !== undefined) {
+      if (!isObject(preimage) || !exactKeys(preimage, ['file', 'sha256'])
+          || preimage.file !== 'auth-preimage.json'
+          || !/^[0-9a-f]{64}$/.test(preimage.sha256)) fail('INVALID_VOLUME_MARKER');
+      const preimageFile = path.join(markerRoots(paths, txId).state, preimage.file);
+      if (!isInside(markerRoots(paths, txId).state, preimageFile)) fail('INVALID_VOLUME_MARKER');
+      readCanonicalAuthPreimageFile(preimageFile, preimage.sha256);
+    }
+  } else if (marker.canonicalAuthPreimage !== null && marker.canonicalAuthPreimage !== undefined) {
+    fail('INVALID_VOLUME_MARKER');
   }
 }
 
@@ -6664,11 +7057,16 @@ function readBoundMarkers(paths, txId, manifest, { allowPartial = false } = {}) 
   return markers;
 }
 
-function preflightDirectoryRestores(markers) {
+function preflightDirectoryRestores(paths, markers) {
   for (const marker of Object.values(markers)) {
     const assetTargets = new Set(marker.assets.map(
       (asset) => path.join(marker.volumeRoot, asset.target),
     ));
+    // The canonical auth row is restored logically inside a database the
+    // transaction does not own; its files are still managed rollback targets.
+    if (marker.canonicalAuthPreimage) {
+      for (const databaseFile of agentDatabasePaths(paths)) assetTargets.add(databaseFile);
+    }
     const newDirectoryTargets = new Set(marker.directories
       .filter((directory) => !directory.existed)
       .map((directory) => path.join(marker.volumeRoot, directory.target)));
@@ -6821,7 +7219,7 @@ function restoreOrphanSatellites(paths, txId, beforeCleanup) {
   waitForCronWorkerEpochExit(paths, txId);
   const planned = { state, restoredVolumes: ['data', 'state', 'workspace'] };
   beforeCleanup(planned);
-  preflightDirectoryRestores(markers);
+  preflightDirectoryRestores(paths, markers);
   for (const volume of ['data', 'state', 'workspace']) {
     const marker = markers[volume];
     for (const asset of [...marker.assets].reverse()) {
@@ -6829,6 +7227,13 @@ function restoreOrphanSatellites(paths, txId, beforeCleanup) {
         path.join(volumeRoots[volume], asset.target),
         path.join(roots[volume], asset.snapshot),
         asset.digest,
+      );
+    }
+    if (volume === 'state' && marker.canonicalAuthPreimage) {
+      restoreCanonicalAuthStorePreimage(
+        paths,
+        path.join(roots.state, marker.canonicalAuthPreimage.file),
+        marker.canonicalAuthPreimage.sha256,
       );
     }
     for (const directory of [...marker.directories].reverse()) {
@@ -6887,7 +7292,7 @@ async function rollbackProfile(options) {
   waitForCronWorkerEpochExit(paths, options.txId);
   const roots = markerRoots(paths, options.txId);
   const markers = topology.markers;
-  preflightDirectoryRestores(markers);
+  preflightDirectoryRestores(paths, markers);
   for (const volume of ['data', 'state', 'workspace', 'config']) {
     const marker = markers[volume];
     const volumeRoot = marker.volumeRoot;
@@ -6896,6 +7301,13 @@ async function rollbackProfile(options) {
         path.join(volumeRoot, asset.target),
         path.join(roots[volume], asset.snapshot),
         asset.digest,
+      );
+    }
+    if (volume === 'state' && marker.canonicalAuthPreimage) {
+      restoreCanonicalAuthStorePreimage(
+        paths,
+        path.join(roots.state, marker.canonicalAuthPreimage.file),
+        marker.canonicalAuthPreimage.sha256,
       );
     }
     for (const directory of [...marker.directories].reverse()) {

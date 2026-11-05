@@ -49,7 +49,7 @@ async function signalLifecycle(signal: 'SIGINT' | 'SIGTERM') {
   return { ready: ready!, result, stderr, workerAlive };
 }
 
-describe('OpenClaw 2026.6.1 cron persistence probe', () => {
+describe('OpenClaw 2026.9.2 cron persistence probe', () => {
   it('locks the SQLite-backed contract and the safe offline device cleanup boundary', () => {
     const report = JSON.parse(execFileSync(process.execPath, [PROBE], {
       cwd: ROOT,
@@ -57,7 +57,7 @@ describe('OpenClaw 2026.6.1 cron persistence probe', () => {
       timeout: 60_000,
     }));
 
-    expect(report.openclawVersion).toBe('2026.6.1');
+    expect(report.openclawVersion).toBe('2026.9.2');
     expect(report.storePathLabel).toMatch(/cron[/\\]jobs\.json$/);
     expect(report.canonicalBackend).toBe('sqlite');
     expect(report.canonicalStateDb).toMatch(/state[/\\]openclaw\.sqlite$/);

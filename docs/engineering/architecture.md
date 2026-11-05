@@ -3,7 +3,7 @@ doc: engineering/architecture.md
 audience: 开发者 — 渠道 B(仓库按需阅读,不注入运行时)
 status: 现行 · 2026-06-09 依代码重建
 source-of-truth: 代码优先。本文以"为什么这样设计(why)"为主;"是什么/怎么做(what/how)"一律指向代码路径,易变数字不写死(见 §9)
-baseline: OpenClaw 2026.6.1(pinned) · DB SCHEMA_VERSION 14
+baseline: OpenClaw 2026.9.2(pinned) · DB SCHEMA_VERSION 14
 ---
 
 # Research-Claw 工程架构
@@ -27,7 +27,7 @@ RC = **OpenClaw 基座** + **dashboard 前端** + **core 插件(服务层 + 数�
 └───────────────┬────────────────────────────────┘
                 │  ws://127.0.0.1:28789  (loopback)
 ┌───────────────▼────────────────────────────────┐
-│  OpenClaw 基座 (2026.6.1, pinned)               │
+│  OpenClaw 基座 (2026.9.2, pinned)               │
 │  会话 / 工具调用 / 审批 / WS 网关 / skill 装载    │
 │   ├─ L1 插件: research-claw-core ── 注册 rc.* 方法/工具/hook
 │   └─ L0 overlay: config + 提示词 + skills extraDirs
@@ -55,7 +55,7 @@ RC 是 OpenClaw 的"卫星仓":既要深度定制,又要能跟随上游升级。
 
 为什么这样排:L3 是唯一会因上游升级而硬性返工的层,所以 patch 必须小到"一眼能看懂、失败会响"——pnpm 在 patch 无法应用时会硬报错,不会静默吞掉。能用 L0 config 或 L1 插件解决的,绝不下沉到 L3。
 
-> patch 文件版本锁定为 `patches/openclaw@2026.6.1.patch`,随 OC 版本号绑定。升级 OC = 重新生成该 patch + 跑测试。
+> patch 文件版本锁定为 `patches/openclaw@2026.9.2.patch`,随 OC 版本号绑定。升级 OC = 重新生成该 patch + 跑测试。
 
 ## 4. 运行时数据流
 

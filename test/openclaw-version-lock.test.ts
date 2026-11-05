@@ -32,7 +32,7 @@ describe('OpenClaw release lock', () => {
     const expected = rootPackage.dependencies.openclaw;
     const openClawImporters = discoverOpenClawExtensionImporters();
 
-    expect(expected).toBe('2026.6.1');
+    expect(expected).toBe('2026.9.2');
     expect(openClawImporters.length).toBeGreaterThan(0);
     for (const importer of openClawImporters) {
       const extensionPackage = readJson(`${importer}/package.json`);
@@ -58,15 +58,15 @@ describe('OpenClaw release lock', () => {
     const openClawSnapshots = Object.keys(lockfile.snapshots)
       .filter((key) => key.startsWith('openclaw@'));
 
-    expect(openClawPackages).toEqual(['openclaw@2026.6.1']);
+    expect(openClawPackages).toEqual(['openclaw@2026.9.2']);
     expect(openClawSnapshots.length).toBeGreaterThan(0);
     for (const snapshot of openClawSnapshots) {
-      expect(snapshot).toMatch(/^openclaw@2026\.6\.1\(patch_hash=/);
+      expect(snapshot).toMatch(/^openclaw@2026\.9\.2\(patch_hash=/);
     }
     for (const importer of openClawImporters) {
       expect(
         lockfile.importers[importer]?.devDependencies?.openclaw?.specifier,
-      ).toBe('2026.6.1');
+      ).toBe('2026.9.2');
     }
   });
 
@@ -76,12 +76,12 @@ describe('OpenClaw release lock', () => {
     const runtime = fs.readFileSync(
       path.join(
         ROOT,
-        'node_modules/openclaw/dist/http-common-DuE8kH2j.js',
+        'node_modules/openclaw/dist/http-common-BaZaosnr.js',
       ),
       'utf8',
     );
     const patch = fs.readFileSync(
-      path.join(ROOT, 'patches/openclaw@2026.6.1.patch'),
+      path.join(ROOT, 'patches/openclaw@2026.9.2.patch'),
       'utf8',
     );
 

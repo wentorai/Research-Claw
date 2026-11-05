@@ -110,6 +110,46 @@ function canonicalApiKeyProfile(profile, providerId, secret) {
     && profile.key === secret;
 }
 
+function encodeJsonPointerToken(value) {
+  return value.replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+function canonicalSecretRefProfile(profile, providerId, secretProviderId, authProfileId) {
+  if (!exactKeys(profile, ['type', 'provider', 'keyRef'])) return false;
+  if (profile.type !== 'api_key' || profile.provider !== providerId) return false;
+  const ref = profile.keyRef;
+  return exactKeys(ref, ['source', 'provider', 'id'])
+    && ref.source === 'file'
+    && ref.provider === secretProviderId
+    && ref.id === `/profiles/${encodeJsonPointerToken(authProfileId)}/key`;
+}
+
+/**
+ * 2026.9.2 keeps credentials in the canonical agent SQLite store. The applier
+ * publishes the managed profile there as a SecretRef to the one private
+ * plaintext copy it keeps in the legacy store, so older runtimes keep working
+ * and the managed secret still exists exactly once on disk. The canonical
+ * store must carry that exact reference and no literal copy of the key.
+ */
+function assertCanonicalAgentAuthSecretPlacement({
+  authStore, authProfileId, providerId, secretProviderId, secret,
+}) {
+  validatedSecretBytes(secret);
+  if (typeof authProfileId !== 'string' || authProfileId.length === 0
+      || typeof providerId !== 'string' || providerId.length === 0
+      || typeof secretProviderId !== 'string'
+      || !/^[a-z][a-z0-9_-]{0,63}$/.test(secretProviderId)
+      || authProfileId !== `${providerId}:managed`
+      || !validateAuthStoreShape(authStore)) fail('SECRET_SCAN_FAILED');
+  const profile = Object.hasOwn(authStore.profiles, authProfileId)
+    ? authStore.profiles[authProfileId] : null;
+  if (!canonicalSecretRefProfile(profile, providerId, secretProviderId, authProfileId)) {
+    fail('SECRET_COPY_DETECTED');
+  }
+  if (secretValuePaths(authStore, secret).length !== 0) fail('SECRET_COPY_DETECTED');
+  return { occurrences: 0, keyRef: true };
+}
+
 /**
  * The credential file is excluded from the raw tree scan because it is the one
  * allowed long-lived plaintext location. Compensate with a provenance-aware
@@ -321,6 +361,7 @@ function assertNoUnexpectedStateSecretCopies({ stateDir, secret, allowedFiles = 
 
 module.exports = {
   SecretCopyScanError,
+  assertCanonicalAgentAuthSecretPlacement,
   assertCanonicalAuthSecretPlacement,
   assertNoUnexpectedStateSecretCopies,
 };

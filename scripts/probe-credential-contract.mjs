@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * OpenClaw 2026.6.1 credential contract probe.
+ * OpenClaw 2026.9.2 credential contract probe.
  *
  * The probe is deliberately offline and hermetic: it creates a temporary HOME,
  * state directory, config and auth store, then points the real OpenClaw CLI and
@@ -9,17 +9,18 @@
  */
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, '..');
 const ENTRY = path.join(ROOT, 'node_modules', 'openclaw', 'dist', 'entry.js');
 const OPENCLAW_PACKAGE = path.join(ROOT, 'node_modules', 'openclaw', 'package.json');
-const EXPECTED_OPENCLAW_VERSION = '2026.6.1';
+const EXPECTED_OPENCLAW_VERSION = '2026.9.2';
 const PROVIDER = 'custom-rc-profile-probe';
 const MODEL = 'deterministic';
 const PROFILE_ID = `${PROVIDER}:managed`;
@@ -50,7 +51,7 @@ async function assertOpenClawVersion() {
   return actual;
 }
 
-async function authStorePermissionEvidence(authPath) {
+async function authStorePermissionEvidence(authStorePath) {
   if (process.platform === 'win32') {
     return {
       model: 'windows-acl',
@@ -58,9 +59,32 @@ async function authStorePermissionEvidence(authPath) {
       reason: 'This offline probe does not claim POSIX 0600 semantics on Windows.',
     };
   }
-  const mode = (await stat(authPath)).mode & 0o777;
-  assert(mode === 0o600, `auth-profiles.json mode was ${mode.toString(8)}, expected 600`);
+  const mode = (await stat(authStorePath)).mode & 0o777;
+  assert(mode === 0o600, `agent auth store mode was ${mode.toString(8)}, expected 600`);
   return { model: 'posix-mode', verified: true, mode: '0600' };
+}
+
+
+/**
+ * 2026.9.2 reads auth profiles from the canonical agent SQLite store; a leftover
+ * legacy auth-profiles.json makes the CLI demand `openclaw doctor --fix`. The
+ * probe therefore lets `doctor --fix` create the canonical schema once and then
+ * injects the scenario's profile row directly (the CLI runs with the store
+ * marked read-only). The mode 0600 assertion is made against that store file.
+ */
+async function writeAuthStoreSqlite(agentDir, profiles) {
+  const dbPath = path.join(agentDir, 'openclaw-agent.sqlite');
+  const db = new DatabaseSync(dbPath);
+  try {
+    const now = Date.now();
+    db.prepare(`INSERT INTO auth_profile_store (store_key, store_json, updated_at)
+      VALUES ('primary', ?, ?)
+      ON CONFLICT(store_key) DO UPDATE SET store_json = excluded.store_json, updated_at = excluded.updated_at`)
+      .run(JSON.stringify({ version: 1, profiles }), now);
+  } finally {
+    db.close();
+  }
+  await chmod(dbPath, 0o600);
 }
 
 function createSignalBridge() {
@@ -223,7 +247,7 @@ async function main() {
     const workspace = path.join(tempRoot, 'workspace');
     const configPath = path.join(state, 'openclaw.json');
     const agentDir = path.join(state, 'agents', 'main', 'agent');
-    const authPath = path.join(agentDir, 'auth-profiles.json');
+    const authPath = path.join(agentDir, 'openclaw-agent.sqlite');
     // Create the shared state parent before its recursive child. Running both
     // mkdir calls concurrently lets the child win the race and makes the plain
     // parent mkdir fail with EEXIST on otherwise healthy hosts.
@@ -277,6 +301,22 @@ async function main() {
       no_proxy: '127.0.0.1,localhost',
     };
 
+    // `doctor --fix` is the only supported way to create the canonical agent DB
+    // schema in 2026.9.2; it exits non-zero when unrelated config fixes are
+    // skipped, so only the resulting store is checked.
+    await writeFile(configPath, `${JSON.stringify(configFor({
+      workspace,
+      baseUrl,
+      apiKey: undefined,
+      withProfile: false,
+    }), null, 2)}\n`, { mode: 0o600 });
+    const { OPENCLAW_AUTH_STORE_READONLY: _readOnlyStore, ...doctorEnv } = env;
+    const agentDbPath = path.join(agentDir, 'openclaw-agent.sqlite');
+    // An existing (even empty) agent DB is what doctor migrates into the
+    // canonical schema; creating the file first is the supported bootstrap.
+    new DatabaseSync(agentDbPath).close();
+    await runCli(['doctor', '--fix'], doctorEnv, { signal: signalBridge.signal, timeoutMs: cliTimeoutMs });
+
     const scenarios = [
       { name: 'config-only', apiKey: CONFIG_KEY, withProfile: false, profile: false, expected: CONFIG_KEY },
       { name: 'profile-only', apiKey: undefined, withProfile: true, profile: true, expected: PROFILE_KEY },
@@ -291,12 +331,10 @@ async function main() {
         apiKey: scenario.apiKey,
         withProfile: scenario.withProfile,
       }), null, 2)}\n`, { mode: 0o600 });
-      await writeFile(authPath, `${JSON.stringify({
-        version: 1,
-        profiles: scenario.profile ? {
-          [PROFILE_ID]: { type: 'api_key', provider: PROVIDER, key: PROFILE_KEY },
-        } : {},
-      }, null, 2)}\n`, { mode: 0o600 });
+      const profiles = scenario.profile ? {
+        [PROFILE_ID]: { type: 'api_key', provider: PROVIDER, key: PROFILE_KEY },
+      } : {};
+      await writeAuthStoreSqlite(agentDir, profiles);
 
       const status = await runCli([
         'models', 'status', '--json', '--probe', '--probe-provider', PROVIDER,
@@ -365,8 +403,13 @@ async function main() {
       request.authorization === `Bearer ${PROFILE_KEY}` ? 'auth-profile'
         : request.authorization === `Bearer ${CONFIG_KEY}` ? 'provider-config' : 'other');
     const failureRetryCounts = requests.map(request => request.retryCount);
-    assert(requests.length === 3 && JSON.stringify(failureRetryCounts) === '[0,1,2]',
-      `failure-path: expected retry sequence 0,1,2, observed ${JSON.stringify(failureRetryCounts)} (${failureCredentialLabels.join(',')})`);
+    // 2026.9.2 pins the SDK transport at maxRetries:0; OpenClaw's own provider
+    // retry loop performs the bounded retries, so every attempt carries SDK
+    // retry-count 0. What this probe protects is that retries still happen and
+    // keep the resolved profile credential (the six 2026.6.1 maxRetries hunks
+    // have no target in the rewritten worker bundle).
+    assert(requests.length >= 2 && failureRetryCounts.every((count) => count === 0),
+      `failure-path: expected retrying attempts with SDK retry-count 0, observed ${requests.length} request(s) ${JSON.stringify(failureRetryCounts)} (${failureCredentialLabels.join(',')})`);
     assert(requests.every(request => request.authorization === `Bearer ${PROFILE_KEY}`),
       'failure-path: a provider retry did not retain the resolved auth-profile credential');
     const failureResult = {
@@ -383,7 +426,7 @@ async function main() {
       isolatedRoot: '<mktemp>',
       providerRequests: results.length + requests.length,
       authStore: {
-        relativePath: 'agents/main/agent/auth-profiles.json',
+        relativePath: 'agents/main/agent/openclaw-agent.sqlite',
         permissions,
         schema: { version: 1, credentialType: 'api_key', keyField: 'key' },
       },

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * OpenClaw 2026.6.1 contract probe for two Bootstrap Capsule assumptions:
+ * OpenClaw 2026.9.2 contract probe for two Bootstrap Capsule assumptions:
  *
  * 1. contracts.tools is an allowlist, not a synthetic runtime inventory. A
  *    manifest-declared tool deliberately omitted by register() must not reach
@@ -28,6 +28,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -35,7 +36,7 @@ const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const openClawPackage = path.join(projectRoot, 'node_modules', 'openclaw', 'package.json');
 const openClawEntry = path.join(projectRoot, 'node_modules', 'openclaw', 'dist', 'entry.js');
-const requiredOpenClawVersion = '2026.6.1';
+const requiredOpenClawVersion = '2026.9.2';
 const gatewayToken = 't01-isolated-gateway-token';
 const sessionKey = 'agent:main:main';
 const profileSkill = 'rc-profile-contract-probe';
@@ -178,7 +179,7 @@ async function writeFixture({ gatewayPort, providerPort }) {
       'WORKSPACE highest-precedence Profile Skill sentinel.',
       'WORKSPACE_PROFILE_SENTINEL',
     ),
-    // OC 2026.6.1 currently scans grouped directories recursively. This is an
+    // OC 2026.9.2 currently scans grouped directories recursively. This is an
     // observation only: Capsule Skills themselves remain exactly one level deep.
     writeSkill(
       path.join(workspaceDir, 'skills', 'group'),
@@ -435,7 +436,7 @@ async function readHelloMethods(gatewayPort) {
             params: {
               minProtocol: 4,
               maxProtocol: 4,
-              client: { id: 'cli', version: '2026.6.1', platform: process.platform, mode: 'cli' },
+              client: { id: 'cli', version: '2026.9.2', platform: process.platform, mode: 'cli' },
               role: 'operator',
               scopes: ['operator.admin', 'operator.read', 'operator.write'],
               auth: { token: gatewayToken },
@@ -465,20 +466,62 @@ async function gatewayCall(gatewayPort, method, params) {
   ], CLI_TIMEOUT_MS + 5000));
 }
 
+// OpenClaw 2026.9.2 moved the session store from
+// <state>/agents/<agent>/sessions/sessions.json to the per-agent SQLite
+// database <state>/agents/<agent>/agent/openclaw-agent.sqlite. The full
+// session entry (the same object the legacy store held, including
+// systemPromptReport) is persisted in session_nodes.entry_json. No CLI surface
+// returns it: `openclaw sessions --json` uses the "list" projection, which
+// deliberately deletes skillsSnapshot and systemPromptReport, so the probe
+// reads the persisted entry directly.
+const systemSessionAgentId = 'main';
+
+function sessionDatabasePath() {
+  return path.join(
+    tempRoot,
+    'state',
+    'agents',
+    systemSessionAgentId,
+    'agent',
+    'openclaw-agent.sqlite',
+  );
+}
+
+function readPersistedPromptReport(databasePath) {
+  let database;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+    const row = database
+      .prepare('SELECT entry_json FROM session_nodes WHERE session_key = ?')
+      .get(sessionKey);
+    if (!row || typeof row.entry_json !== 'string') return undefined;
+    const entry = JSON.parse(row.entry_json);
+    const report = entry?.systemPromptReport;
+    return report?.source === 'run' ? report : undefined;
+  } catch {
+    // The store is not created yet, is mid-checkpoint, or the run has not
+    // persisted its entry. The caller polls until the deadline.
+    return undefined;
+  } finally {
+    try {
+      database?.close();
+    } catch {
+      // A half-open handle is harmless here; the next poll opens a fresh one.
+    }
+  }
+}
+
 async function waitForPromptReport() {
-  const filePath = path.join(tempRoot, 'state', 'agents', 'main', 'sessions', 'sessions.json');
+  const databasePath = sessionDatabasePath();
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    try {
-      const store = JSON.parse(await readFile(filePath, 'utf8'));
-      const report = store[sessionKey]?.systemPromptReport;
-      if (report?.source === 'run') return report;
-    } catch {
-      // Run has not persisted its report yet.
-    }
+    const report = readPersistedPromptReport(databasePath);
+    if (report) return report;
     await sleep(100);
   }
-  throw new Error('real run did not persist systemPromptReport');
+  throw new Error(
+    `real run did not persist systemPromptReport in the SQLite session store at ${databasePath}`,
+  );
 }
 
 function selectPluginInspection(raw) {

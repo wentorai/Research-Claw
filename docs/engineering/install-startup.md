@@ -3,7 +3,7 @@ doc: engineering/install-startup.md
 audience: 开发者 — 渠道 B(仓库按需阅读,不注入运行时)
 status: 现行 · 2026-07-31
 source-of-truth: 安装流程以根 docs/sop/INSTALL_SOP.md(v2.5)为准;本文只补 RC 特有设计取舍
-baseline: OpenClaw 2026.6.1 · DB SCHEMA_VERSION 16
+baseline: OpenClaw 2026.9.2 · DB SCHEMA_VERSION 16
 ---
 
 # 安装与启动(RC 特有设计)
@@ -20,7 +20,7 @@ RC 把 OpenClaw 当 **npm 依赖**消费,**不是 fork**。全部定制走 confi
 
 ## 2. pnpm patch 生命周期(核心 why)
 
-- patch 文件 **版本锁定**:`patches/openclaw@2026.6.1.patch`,随 OC 版本号绑定。
+- patch 文件 **版本锁定**:`patches/openclaw@2026.9.2.patch`,随 OC 版本号绑定。
 - patch **随 git 提交**:fresh clone `pnpm install` 时 pnpm 自动应用 → 全新克隆即带 branding,无需额外步骤。
 - **失败即响**:OC 版本与 patch 不匹配时 pnpm 硬报错,绝不静默吞掉(避免"装上了但 branding 没生效"的隐性坏状态)。
 - 升级 OC = 跑 `sync-upstream.sh`(更新依赖)+ `apply-branding.sh`(重生成 patch)+ 测试。patch 只改字符串字面量、不改逻辑,所以重打成本可控(耦合层 L3,见 [architecture.md](./architecture.md) §3)。

@@ -373,6 +373,19 @@ async function abortable(promise) {
 }
 
 async function workerMain(action) {
+  if (action === 'hang') {
+    // This fixture only has to occupy a registry slot and outlive its timeout;
+    // it never reads the store. Signal readiness before importing
+    // openclaw/plugin-sdk/cron-store-runtime and loading the store: under
+    // OpenClaw 2026.9.2 that import, plus loadCronStore's open/migration of the
+    // shared SQLite state database, takes seconds in a fresh worker process —
+    // far longer than the 300 ms timeout this fixture exercises, so the worker
+    // was killed before it could write the ready file.
+    fs.writeFileSync(process.env.RC_CRON_PROBE_READY, 'hanging\n');
+    await new Promise(() => { setInterval(() => {}, 1_000); });
+    return;
+  }
+
   const { loadCronStore, resolveCronStorePath, saveCronStore } = await import(
     'openclaw/plugin-sdk/cron-store-runtime'
   );
@@ -425,12 +438,6 @@ async function workerMain(action) {
     return;
   }
 
-  if (action === 'hang') {
-    fs.writeFileSync(process.env.RC_CRON_PROBE_READY, 'hanging\n');
-    await new Promise(() => { setInterval(() => {}, 1_000); });
-    return;
-  }
-
   throw new Error(`unknown cron probe worker action: ${action}`);
 }
 
@@ -472,8 +479,8 @@ async function signalLifecycleProbeMain() {
 
 async function main() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules/openclaw/package.json'), 'utf8'));
-  if (packageJson.version !== '2026.6.1') {
-    throw new Error(`probe requires locked OpenClaw 2026.6.1, found ${packageJson.version}`);
+  if (packageJson.version !== '2026.9.2') {
+    throw new Error(`probe requires locked OpenClaw 2026.9.2, found ${packageJson.version}`);
   }
 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-oc-cron-probe-'));

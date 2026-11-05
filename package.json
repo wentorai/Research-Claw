@@ -35,7 +35,7 @@
     "sync-upstream": "bash scripts/sync-upstream.sh"
   },
   "dependencies": {
-    "openclaw": "2026.6.1"
+    "openclaw": "2026.9.2"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
@@ -45,7 +45,7 @@
   },
   "pnpm": {
     "patchedDependencies": {
-      "openclaw@2026.6.1": "patches/openclaw@2026.6.1.patch"
+      "openclaw@2026.9.2": "patches/openclaw@2026.9.2.patch"
     },
     "overrides": {
       "sass-embedded": "npm:sass@^1.77.0",

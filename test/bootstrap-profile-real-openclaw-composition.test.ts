@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -12,8 +14,24 @@ const FIXTURE = path.join(ROOT, 'profiles/fixtures/thermoelectric-user-a/capsule
 const SYNC_SOURCE = path.join(ROOT, 'scripts/sync-global-config.cjs');
 const OPENCLAW_PACKAGE = path.join(ROOT, 'node_modules/openclaw/package.json');
 const OPENCLAW_ENTRY = path.join(ROOT, 'node_modules/openclaw/dist/entry.js');
-const EXPECTED_OPENCLAW_VERSION = '2026.6.1';
+// The runtime entry that materializes models.json and the generated plugin
+// catalog. 2026.9.2 still ships it as a stable, unhashed module.
+const MODELS_CONFIG_MODULE = path.join(ROOT, 'node_modules/openclaw/dist/agents/models-config.runtime.js');
+const EXPECTED_OPENCLAW_VERSION = '2026.9.2';
 const OWNER_PLUGIN_ID = 'rc-profile-catalog-owner';
+const AGENT_DATABASE_FILENAME = 'openclaw-agent.sqlite';
+// A credential a machine already holds in the canonical 2026.9.2 agent store.
+// It is deliberately not the Capsule key: the applier owns the Capsule profile
+// and writes it once, to the legacy store, and the composition probe asserts
+// that placement.
+const PREEXISTING_AUTH_PROFILE = {
+  id: 'fixture-preexisting:default',
+  store: {
+    type: 'api_key',
+    provider: 'fixture-preexisting',
+    key: 'fixture-preexisting-placeholder-key',
+  },
+};
 
 const require = createRequire(import.meta.url);
 const applier = require('../scripts/bootstrap-profile/applier.cjs');
@@ -98,7 +116,144 @@ function writeMetadataOnlyPlugin(
   if (process.platform !== 'win32') fs.chmodSync(path.join(directory, 'index.js'), 0o600);
 }
 
-function makeHarness(): Harness {
+const SQLITE_RUNTIME_MODULE = 'openclaw/plugin-sdk/sqlite-runtime';
+
+type SqliteRuntime = {
+  openNodeSqliteDatabase: (target: string) => {
+    prepare: (sql: string) => { run: (...parameters: unknown[]) => unknown };
+    close: () => void;
+  };
+  ensureOpenClawAgentDatabaseSchema: (
+    database: { prepare: (sql: string) => { run: (...parameters: unknown[]) => unknown } },
+    options: { path: string; agentId: string; env: NodeJS.ProcessEnv },
+  ) => void;
+};
+
+/**
+ * 2026.9.2 reads agent credentials from the canonical `openclaw-agent.sqlite`
+ * and refuses to start while a legacy `auth-profiles.json` exists beside an
+ * empty canonical store. The fixture models an already-upgraded install: the
+ * runtime creates its own canonical agent database, one pre-existing profile
+ * is seeded into it, and only then does the applier write its legacy store.
+ * The schema comes from OpenClaw's own SQLite runtime, so the fixture does not
+ * hand-copy a schema that belongs to the runtime.
+ */
+async function seedCanonicalAgentAuthStore(
+  agentDir: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const runtime = await import(SQLITE_RUNTIME_MODULE) as SqliteRuntime;
+  expect(typeof runtime.openNodeSqliteDatabase).toBe('function');
+  expect(typeof runtime.ensureOpenClawAgentDatabaseSchema).toBe('function');
+  makePrivateDirectory(agentDir);
+  const databasePath = path.join(agentDir, AGENT_DATABASE_FILENAME);
+  const database = runtime.openNodeSqliteDatabase(databasePath);
+  try {
+    runtime.ensureOpenClawAgentDatabaseSchema(database, {
+      path: databasePath,
+      agentId: 'main',
+      env,
+    });
+    database.prepare(
+      `INSERT INTO auth_profile_store (store_key, store_json, updated_at)
+       VALUES ('primary', ?, ?)
+       ON CONFLICT(store_key) DO UPDATE SET
+         store_json = excluded.store_json,
+         updated_at = excluded.updated_at`,
+    ).run(
+      JSON.stringify({
+        version: 1,
+        profiles: { [PREEXISTING_AUTH_PROFILE.id]: PREEXISTING_AUTH_PROFILE.store },
+      }),
+      Date.now(),
+    );
+  } finally {
+    database.close();
+  }
+}
+
+type ModelsConfigRuntime = {
+  ensureOpenClawModelsJson: (
+    config: Record<string, unknown>,
+    agentDirOverride: string,
+    options?: { env?: NodeJS.ProcessEnv },
+  ) => Promise<{ agentDir: string; wrote: boolean }>;
+};
+
+type GeneratedPluginCatalog = {
+  pluginId: string;
+  catalog: { generatedBy: string; providers: Record<string, { apiKey?: string }> };
+  raw: string;
+};
+
+/**
+ * 2026.9.2 turns `infer model list` into a read-only catalog inspection: it no
+ * longer materializes models.json or the generated plugin catalog on the way
+ * through. The runtime still ships the materializer the 2026.6.1 command called,
+ * so invoke it directly — the catalog is produced by OpenClaw's own code from
+ * the composed config, not written by this fixture.
+ */
+async function materializeOpenClawCatalog(harness: Harness): Promise<void> {
+  const isolated = isolatedChildEnv(harness);
+  // The materializer resolves some agent paths from the process environment,
+  // not from the options object, so scope it to the fixture while it runs.
+  const scopedKeys = ['HOME', 'USERPROFILE', 'OPENCLAW_STATE_DIR', 'OPENCLAW_CONFIG_PATH', 'OPENCLAW_AGENT_DIR'];
+  const previous = new Map(scopedKeys.map((key) => [key, process.env[key]]));
+  for (const key of scopedKeys) {
+    const value = isolated[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    const runtime = await import(pathToFileURL(MODELS_CONFIG_MODULE).href) as ModelsConfigRuntime;
+    expect(typeof runtime.ensureOpenClawModelsJson).toBe('function');
+    const result = await runtime.ensureOpenClawModelsJson(
+      readJson(harness.paths.configPath),
+      harness.agentDir,
+      { env: isolated },
+    );
+    expect(result.wrote).toBe(true);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+/**
+ * 2026.9.2 keeps the generated plugin model catalog in the agent SQLite cache
+ * (`cache_entries`) instead of the retired `plugins/<id>/catalog.json` file.
+ */
+function readGeneratedPluginCatalog(
+  agentDir: string,
+  pluginId: string,
+): GeneratedPluginCatalog | null {
+  const database = new DatabaseSync(path.join(agentDir, AGENT_DATABASE_FILENAME), {
+    readOnly: true,
+  });
+  try {
+    const rows = database.prepare('SELECT key, value_json FROM cache_entries')
+      .all() as Array<{ key: string; value_json: string | null }>;
+    for (const row of rows) {
+      if (row.key !== pluginId || typeof row.value_json !== 'string') continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(row.value_json);
+      } catch {
+        continue;
+      }
+      if (parsed?.generatedBy === 'openclaw-plugin-model-catalog-v1') {
+        return { pluginId: row.key, catalog: parsed, raw: row.value_json };
+      }
+    }
+    return null;
+  } finally {
+    database.close();
+  }
+}
+
+async function makeHarness(): Promise<Harness> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-bootstrap-real-oc-composition-'));
   roots.push(root);
   if (process.platform !== 'win32') fs.chmodSync(root, 0o700);
@@ -184,6 +339,20 @@ function makeHarness(): Harness {
     userGlobalFixture: { preserve: true },
     models: { mode: 'merge', providers: {} },
   });
+  // Seed the canonical 2026.9.2 agent store before the applier publishes its
+  // legacy auth-profiles.json: the CLI refuses to start when that legacy file
+  // exists beside an empty canonical store.
+  await seedCanonicalAgentAuthStore(agentDir, {
+    PATH: process.env.PATH ?? '',
+    HOME: home,
+    USERPROFILE: home,
+    TMPDIR: temp,
+    TMP: temp,
+    TEMP: temp,
+    OPENCLAW_STATE_DIR: stateDir,
+    OPENCLAW_CONFIG_PATH: paths.configPath,
+    OPENCLAW_AGENT_DIR: agentDir,
+  });
   writeJson(authPath, { version: 1, profiles: {} });
 
   ensureInitialized({ ...paths, externalStopVerified: true });
@@ -247,8 +416,9 @@ function runRealOpenClawDerivation(harness: Harness) {
   const entry = fs.realpathSync(OPENCLAW_ENTRY);
   expect(entry.startsWith(`${packageRoot}${path.sep}`)).toBe(true);
   expect(readJson(OPENCLAW_PACKAGE).version).toBe(EXPECTED_OPENCLAW_VERSION);
-  // Unlike `models status`, the real capability catalog command calls
-  // loadModelCatalog in write mode, which invokes ensureOpenClawModelsJson.
+  // The real capability catalog command proves the composed config and auth
+  // store load in the 2026.9.2 CLI. Catalog materialization is a separate step
+  // (see materializeOpenClawCatalog): 2026.9.2 made this command read-only.
   const result = spawnSync(process.execPath, [entry, 'infer', 'model', 'list', '--json'], {
     cwd: ROOT,
     env: isolatedChildEnv(harness),
@@ -379,7 +549,7 @@ describe('current applier + native sync + real OpenClaw catalog composition', ()
   it.skipIf(process.platform === 'win32')(
     'keeps the committed model key exactly once after real global sync and catalog derivation',
     async () => {
-      const harness = makeHarness();
+      const harness = await makeHarness();
       const capsuleBytes = fs.readFileSync(FIXTURE);
       const capsule = JSON.parse(capsuleBytes.toString('utf8'));
       const key = capsule.secrets.modelApiKey as string;
@@ -394,6 +564,7 @@ describe('current applier + native sync + real OpenClaw catalog composition', ()
 
       const syncResult = runSync(harness);
       const openClawResult = runRealOpenClawDerivation(harness);
+      await materializeOpenClawCatalog(harness);
       expect(`${syncResult.stdout}${syncResult.stderr}${openClawResult.stdout}${openClawResult.stderr}`)
         .not.toContain(key);
 
@@ -411,20 +582,15 @@ describe('current applier + native sync + real OpenClaw catalog composition', ()
       });
 
       const modelsPath = path.join(harness.agentDir, 'models.json');
-      const catalogPath = path.join(
-        harness.agentDir,
-        'plugins',
-        encodeURIComponent(OWNER_PLUGIN_ID),
-        'catalog.json',
-      );
+      const catalog = readGeneratedPluginCatalog(harness.agentDir, OWNER_PLUGIN_ID);
       expect(fs.existsSync(modelsPath)).toBe(true);
-      expect(fs.existsSync(catalogPath)).toBe(true);
-      const catalog = readJson(catalogPath);
       expect(readJson(modelsPath).providers ?? {}).not.toHaveProperty(providerId);
       expect(fs.readFileSync(modelsPath, 'utf8')).not.toContain(key);
-      expect(catalog.generatedBy).toBe('openclaw-plugin-model-catalog-v1');
-      expect(catalog.providers[providerId].apiKey).toBe(authProfileId);
-      expect(fs.readFileSync(catalogPath, 'utf8')).not.toContain(key);
+      expect(catalog).not.toBeNull();
+      expect(catalog?.pluginId).toBe(OWNER_PLUGIN_ID);
+      expect(catalog?.catalog.generatedBy).toBe('openclaw-plugin-model-catalog-v1');
+      expect(catalog?.catalog.providers[providerId].apiKey).toBe(authProfileId);
+      expect(catalog?.raw).not.toContain(key);
 
       await applier.verifyProfile({ ...harness.paths, txId: staged.txId });
       const txRoots = transactionRoots(harness, staged.txId);
@@ -449,7 +615,7 @@ describe('current applier + native sync + real OpenClaw catalog composition', ()
   );
 
   it('restores the declared write-set byte-for-byte after real sync and catalog derivation', async () => {
-    const harness = makeHarness();
+    const harness = await makeHarness();
     const capsuleBytes = fs.readFileSync(FIXTURE);
     const capsule = JSON.parse(capsuleBytes.toString('utf8'));
     const key = capsule.secrets.modelApiKey as string;
@@ -465,29 +631,27 @@ describe('current applier + native sync + real OpenClaw catalog composition', ()
 
     const syncResult = runSync(harness);
     const openClawResult = runRealOpenClawDerivation(harness);
+    await materializeOpenClawCatalog(harness);
     expect(`${syncResult.stdout}${syncResult.stderr}${openClawResult.stdout}${openClawResult.stderr}`)
       .not.toContain(key);
     const modelsPath = path.join(harness.agentDir, 'models.json');
-    const catalogPath = path.join(
-      harness.agentDir,
-      'plugins',
-      encodeURIComponent(OWNER_PLUGIN_ID),
-      'catalog.json',
-    );
+    const catalog = readGeneratedPluginCatalog(harness.agentDir, OWNER_PLUGIN_ID);
     expect(fs.existsSync(modelsPath)).toBe(true);
-    expect(fs.existsSync(catalogPath)).toBe(true);
     expect(readJson(modelsPath).providers ?? {}).not.toHaveProperty(providerId);
     expect(fs.readFileSync(modelsPath, 'utf8')).not.toContain(key);
-    expect(readJson(catalogPath).providers[providerId].apiKey).toBe(`${providerId}:managed`);
-    expect(fs.readFileSync(catalogPath, 'utf8')).not.toContain(key);
+    expect(catalog).not.toBeNull();
+    expect(catalog?.catalog.providers[providerId].apiKey).toBe(`${providerId}:managed`);
+    expect(catalog?.raw).not.toContain(key);
     expectAppliedSecretCopies(harness, staged.txId, key);
 
     await applier.rollbackProfile({ ...harness.paths, txId: staged.txId });
     expect(targets.map((target) => pathState(target))).toEqual(before);
+    const restoredCatalog = readGeneratedPluginCatalog(harness.agentDir, OWNER_PLUGIN_ID);
     expect(fs.existsSync(modelsPath)).toBe(true);
-    expect(fs.existsSync(catalogPath)).toBe(true);
     expect(fs.readFileSync(modelsPath, 'utf8')).not.toContain(key);
-    expect(fs.readFileSync(catalogPath, 'utf8')).not.toContain(key);
+    expect(restoredCatalog).not.toBeNull();
+    expect(restoredCatalog?.catalog.providers[providerId].apiKey).toBe(`${providerId}:managed`);
+    expect(restoredCatalog?.raw).not.toContain(key);
     expect(secretOccurrences(harness.root, key)).toEqual([]);
     expect(transactionRoots(harness, staged.txId).map((root) => fs.existsSync(root)))
       .toEqual([false, false, false, false]);
