@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ProbeInput } from '../self-check/activation-probe.js';
 import {
@@ -295,25 +296,46 @@ describe('persisted session report reader', () => {
     return dir;
   }
 
-  it('reads the requested session from the real object-backed sessions.json shape', () => {
+  function defaultStorePath(stateDir: string, agentId = 'main'): string {
+    return path.join(stateDir, 'agents', agentId, 'agent', 'openclaw-agent.sqlite');
+  }
+
+  // Mirrors the 2026.9.2 per-agent SQLite store: `session_nodes.entry_json`
+  // holds the whole session entry (the same object the legacy sessions.json
+  // held), including `systemPromptReport`. Only the columns the reader touches
+  // are created; the production DDL carries many more.
+  function writeSessionStore(databasePath: string, entries: Record<string, unknown>): void {
+    fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+    const database = new DatabaseSync(databasePath);
+    try {
+      database.exec(
+        'CREATE TABLE session_nodes (session_key TEXT NOT NULL PRIMARY KEY, entry_json TEXT NOT NULL)',
+      );
+      const insert = database.prepare(
+        'INSERT INTO session_nodes (session_key, entry_json) VALUES (?, ?)',
+      );
+      for (const [sessionKey, entry] of Object.entries(entries)) {
+        insert.run(sessionKey, JSON.stringify(entry));
+      }
+    } finally {
+      database.close();
+    }
+  }
+
+  it('reads the requested session from session_nodes.entry_json in the 2026.9.2 SQLite store', () => {
     const stateDir = tempDir();
-    const storePath = path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json');
-    fs.mkdirSync(path.dirname(storePath), { recursive: true });
-    fs.writeFileSync(
-      storePath,
-      JSON.stringify({
-        'agent:main:older': {
-          sessionId: 'older',
-          updatedAt: 1,
-          systemPromptReport: report({ generatedAt: 10, sessionKey: 'agent:main:older' }),
-        },
-        'agent:main:main': {
-          sessionId: 'current',
-          updatedAt: 2,
-          systemPromptReport: report({ generatedAt: 20 }),
-        },
-      }),
-    );
+    writeSessionStore(defaultStorePath(stateDir), {
+      'agent:main:older': {
+        sessionId: 'older',
+        updatedAt: 1,
+        systemPromptReport: report({ generatedAt: 10, sessionKey: 'agent:main:older' }),
+      },
+      'agent:main:main': {
+        sessionId: 'current',
+        updatedAt: 2,
+        systemPromptReport: report({ generatedAt: 20 }),
+      },
+    });
 
     expect(
       readSessionPromptReport({
@@ -328,21 +350,16 @@ describe('persisted session report reader', () => {
   // the newest report. Falling back to it would audit an unrelated tool policy.
   it('returns null rather than another session report when the requested one is absent', () => {
     const stateDir = tempDir();
-    const storePath = path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json');
-    fs.mkdirSync(path.dirname(storePath), { recursive: true });
-    fs.writeFileSync(
-      storePath,
-      JSON.stringify({
-        'agent:main:cron:0fd87fdc': {
-          sessionId: 'cron',
-          updatedAt: 9,
-          systemPromptReport: report({
-            generatedAt: 90,
-            sessionKey: 'agent:main:cron:0fd87fdc',
-          }),
-        },
-      }),
-    );
+    writeSessionStore(defaultStorePath(stateDir), {
+      'agent:main:cron:0fd87fdc': {
+        sessionId: 'cron',
+        updatedAt: 9,
+        systemPromptReport: report({
+          generatedAt: 90,
+          sessionKey: 'agent:main:cron:0fd87fdc',
+        }),
+      },
+    });
 
     expect(
       readSessionPromptReport({
@@ -356,18 +373,17 @@ describe('persisted session report reader', () => {
   it('supports a configured store path with the {agentId} placeholder', () => {
     const root = tempDir();
     const storeTemplate = path.join(root, 'stores', '{agentId}', 'sessions.json');
-    const storePath = path.join(root, 'stores', 'main', 'sessions.json');
-    fs.mkdirSync(path.dirname(storePath), { recursive: true });
-    fs.writeFileSync(
-      storePath,
-      JSON.stringify({
-        'agent:main:main': {
-          sessionId: 'current',
-          updatedAt: 2,
-          systemPromptReport: report({ generatedAt: 30 }),
-        },
-      }),
-    );
+    // 2026.9.2 maps a configured legacy sessions.json path to the SQLite
+    // database it actually writes (session-sqlite-target.ts), so that is the
+    // store the configured placeholder must resolve to.
+    const storePath = path.join(root, 'stores', 'main', 'openclaw-agent.sqlite');
+    writeSessionStore(storePath, {
+      'agent:main:main': {
+        sessionId: 'current',
+        updatedAt: 2,
+        systemPromptReport: report({ generatedAt: 30 }),
+      },
+    });
 
     expect(
       readSessionPromptReport({
@@ -377,5 +393,94 @@ describe('persisted session report reader', () => {
         configuredStore: storeTemplate,
       })?.generatedAt,
     ).toBe(30);
+  });
+
+  it('uses a configured .sqlite store path unchanged', () => {
+    const root = tempDir();
+    const storePath = path.join(root, 'custom', 'sessions.sqlite');
+    writeSessionStore(storePath, {
+      'agent:main:main': {
+        sessionId: 'current',
+        updatedAt: 2,
+        systemPromptReport: report({ generatedAt: 31 }),
+      },
+    });
+
+    expect(
+      readSessionPromptReport({
+        stateDir: path.join(root, 'unused-state'),
+        agentId: 'main',
+        sessionKey: 'agent:main:main',
+        configuredStore: storePath,
+      })?.generatedAt,
+    ).toBe(31);
+  });
+
+  // The gateway may not have created the per-agent database yet when the first
+  // poll runs; the caller keeps polling on null.
+  it('returns null while the SQLite store does not exist yet', () => {
+    expect(
+      readSessionPromptReport({
+        stateDir: tempDir(),
+        agentId: 'main',
+        sessionKey: 'agent:main:main',
+      }),
+    ).toBeNull();
+  });
+
+  it('ignores a session entry whose entry_json is not valid JSON', () => {
+    const stateDir = tempDir();
+    const databasePath = defaultStorePath(stateDir);
+    fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+    const database = new DatabaseSync(databasePath);
+    try {
+      database.exec(
+        'CREATE TABLE session_nodes (session_key TEXT NOT NULL PRIMARY KEY, entry_json TEXT NOT NULL)',
+      );
+      database
+        .prepare('INSERT INTO session_nodes (session_key, entry_json) VALUES (?, ?)')
+        .run('agent:main:main', '{not json');
+    } finally {
+      database.close();
+    }
+
+    expect(
+      readSessionPromptReport({
+        stateDir,
+        agentId: 'main',
+        sessionKey: 'agent:main:main',
+      }),
+    ).toBeNull();
+  });
+
+  it('returns the newest run report when no session key is requested', () => {
+    const stateDir = tempDir();
+    writeSessionStore(defaultStorePath(stateDir), {
+      'agent:main:older': {
+        sessionId: 'older',
+        updatedAt: 1,
+        systemPromptReport: report({ generatedAt: 10, sessionKey: 'agent:main:older' }),
+      },
+      'agent:main:main': {
+        sessionId: 'current',
+        updatedAt: 2,
+        systemPromptReport: report({ generatedAt: 40 }),
+      },
+    });
+
+    expect(readSessionPromptReport({ stateDir, agentId: 'main' })?.generatedAt).toBe(40);
+  });
+
+  it('ignores estimate-only reports when no session key is requested', () => {
+    const stateDir = tempDir();
+    writeSessionStore(defaultStorePath(stateDir), {
+      'agent:main:main': {
+        sessionId: 'current',
+        updatedAt: 2,
+        systemPromptReport: report({ generatedAt: 50, source: 'estimate' }),
+      },
+    });
+
+    expect(readSessionPromptReport({ stateDir, agentId: 'main' })).toBeNull();
   });
 });

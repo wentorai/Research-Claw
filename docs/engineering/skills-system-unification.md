@@ -2,7 +2,7 @@
 
 > 分支：`codex/skills-system-unification`
 >
-> 基线：Research-Claw Core 0.8.1、OpenClaw 2026.6.1、research-plugins 1.4.8。
+> 基线：Research-Claw Core 0.8.1、OpenClaw 2026.9.2、research-plugins 1.4.8。
 >
 > 产品边界：Skills 是本地化科研操作系统的可执行能力，不是一个只负责展示数量的插件目录。所有改动必须保证人在回路、来源可溯、过程可审计，并且不能把路线规划表述成已经交付。
 
@@ -67,7 +67,7 @@
 **风险与应对**
 
 - 风险：依赖目录在 worktree 中重复安装或版本漂移。
-- 应对：使用相同 lockfile 与 OpenClaw 6.1 patch；最终在干净安装环境再验证。
+- 应对：使用相同 lockfile 与 OpenClaw 9.2 patch；最终在干净安装环境再验证。
 
 **验收**
 
@@ -421,7 +421,7 @@ Extensions 不能正确解释来源和真实可用性，也没有统一安装流
 
 ### T1/T2 执行记录
 
-- 先复现两套发现孤岛和旧 `skill_search` 多正文注入，再基于 OpenClaw 2026.6.1 的公开 `skills list/info --json` 状态合同实现 adapter。
+- 先复现两套发现孤岛和旧 `skill_search` 多正文注入，再基于 OpenClaw 2026.9.2 的公开 `skills list/info --json` 状态合同实现 adapter。
 - Registry 统一发现 RP leaves/routers 与 OpenClaw workspace、managed、bundled、extra；稳定 ID 带来源 namespace，Agent 结果不返回本地路径。
 - `skill_search` v2 只返回候选元数据，默认 4,000、最高 8,000 字符，最多 8 项；`skill_load` 只接受稳定 ID 或唯一精确名称，单正文上限 40,000 UTF-8 bytes，超限拒绝而不截断。
 - 路径同时做 lexical 与 realpath containment；symlink 逃逸测试通过。
@@ -460,7 +460,7 @@ Extensions 不能正确解释来源和真实可用性，也没有统一安装流
 
 - RC Core `before_install` 统一扫描 Skill 根和支持文件，检测 Python/shell/PowerShell/CMD、prompt injection、compiled/native payload、symlink、嵌套归档和不支持的可执行格式；诊断携带规则、文件和可行动原因。
 - 扫描设置总字节、文件/目录数量、目录深度、单文件大小等资源预算；读取失败、配置访问异常、内容截断或预算溢出均 fail closed。
-- OpenClaw 2026.6.1 patch 将 CLI install/update、ClawHub、archive/local/Git、依赖安装、Workshop 和 migration 的最终写入都置于 staging scan 之后，并保证阻断时不覆盖既有目标、不留下 staging。
+- OpenClaw 2026.9.2 patch 将 CLI install/update、ClawHub、archive/local/Git、依赖安装、Workshop 和 migration 的最终写入都置于 staging scan 之后，并保证阻断时不覆盖既有目标、不留下 staging。
 - 无 RC Core 的边界经过单独测试：文档型安全 Skill 可以继续安装；Python 等需要 RC 深度扫描的源代码会因缺少扫描器而拒绝；native、不支持格式和中英文 prompt injection 仍由 OpenClaw 最小防线阻断。插件 target 仍交给 OpenClaw 自己处理，RC Skill scanner 不越权接管 plugin 安装。
 
 **预期收益**
@@ -477,7 +477,7 @@ Extensions 不能正确解释来源和真实可用性，也没有统一安装流
 **测试、验收、提交与状态**
 
 - 最新专项结果：RC Core 安全合同 31/31；真实 OpenClaw 安装安全合同 7/7；版本锁与安装安全联合合同 10/10。
-- OpenClaw 6.1 patch 已通过 frozen-lockfile 安装，并在官方 `openclaw@2026.6.1` tarball 上完成 apply check、实际 apply 和 reverse check；25 个 patched 文件与当前 runtime 逐文件一致，既有 `camera=(self)` 权限 hunk 由版本合同保护。
+- OpenClaw 9.2 patch 已通过 frozen-lockfile 安装，并在官方 `openclaw@2026.9.2` tarball 上完成 apply check、实际 apply 和 reverse check；25 个 patched 文件与当前 runtime 逐文件一致，既有 `camera=(self)` 权限 hunk 由版本合同保护。
 - 官方 bundled 依赖安装采用窄例外：仅 `origin=openclaw-bundled` 且存在 OpenClaw `installSpec` 时允许脚本进入官方依赖配方；同一目录改为 managed 来源仍 fail closed，native、opaque archive、不支持格式、资源超限和 prompt injection 不受例外影响。42 个带安装配方的 bundled Skills 全部通过回归。
 - RP 433 个叶子 Skill 安全矩阵为 0 blocked、0 critical；只有两个用于安全/沙箱说明的预期 warning。外部医学 ZIP 的 3 个阻断项仍被准确阻断。
 - 独立安全复核结论为 PASS，无 P0/P1 阻断项。实现提交为 `8c877dd` 和 `6fab94d`；T4 已完成。

@@ -89,25 +89,25 @@ describe('ensure-config scientific compaction migration', () => {
     });
   }
 
-  it('fits OpenClaw 2026.6.1 custom-instruction delivery without truncation', () => {
+  it('keeps the Docker-shipped scientific prompt complete and within the 800-char delivery budget', () => {
     expect(Array.from(EXPECTED_PROMPT).length).toBeLessThanOrEqual(800);
     expect(EXPECTED_PROMPT).toContain(
       'Remove greetings, repetition, and process noise; do not drop conditions or qualifiers needed for scientific conclusions.',
     );
+    expectScientificDefault(EXPECTED_PROMPT);
   });
 
-  it('adds the scientific default when customInstructions is absent', () => {
+  it('seeds compaction.mode and writes no retired customInstructions when compaction is absent', () => {
     fs.writeFileSync(configPath, JSON.stringify({ agents: { defaults: {} } }));
 
     runEnsure(configPath);
 
     const compaction = compactionOf(configPath);
     expect(compaction.mode).toBe('safeguard');
-    expect(compaction.customInstructions).toBe(EXPECTED_PROMPT);
-    expectScientificDefault(compaction.customInstructions);
+    expect(compaction).not.toHaveProperty('customInstructions');
   });
 
-  it('replaces whitespace-only customInstructions with the scientific default', () => {
+  it('strips whitespace-only customInstructions like any other retired prompt', () => {
     fs.writeFileSync(
       configPath,
       JSON.stringify({
@@ -121,12 +121,12 @@ describe('ensure-config scientific compaction migration', () => {
 
     runEnsure(configPath);
 
-    const customInstructions = compactionOf(configPath).customInstructions;
-    expect(customInstructions).toBe(EXPECTED_PROMPT);
-    expectScientificDefault(customInstructions);
+    const compaction = compactionOf(configPath);
+    expect(compaction.mode).toBe('safeguard');
+    expect(compaction).not.toHaveProperty('customInstructions');
   });
 
-  it('preserves a user-provided non-empty instruction byte-for-byte and is idempotent', () => {
+  it('strips a user-provided legacy instruction and is idempotent', () => {
     const customInstructions = '  Preserve MY ΔT shorthand exactly.  ';
     fs.writeFileSync(
       configPath,
@@ -141,15 +141,21 @@ describe('ensure-config scientific compaction migration', () => {
 
     runEnsure(configPath);
     const afterFirst = fs.readFileSync(configPath, 'utf8');
-    expect(compactionOf(configPath).customInstructions).toBe(customInstructions);
+    expect(compactionOf(configPath)).not.toHaveProperty('customInstructions');
 
     runEnsure(configPath);
     expect(fs.readFileSync(configPath, 'utf8')).toBe(afterFirst);
-    expect(compactionOf(configPath).customInstructions).toBe(customInstructions);
+    expect(compactionOf(configPath)).not.toHaveProperty('customInstructions');
   });
 
-  it('inherits a pre-existing global user instruction during install migration', () => {
-    const globalConfigPath = path.join(tmpDir, 'global-openclaw.json');
+  it('accepts --inherit-global-compaction without copying the retired prompt into either config', () => {
+    const globalConfigPath = path.join(
+      tmpDir,
+      'home',
+      '.openclaw',
+      'openclaw.json',
+    );
+    fs.mkdirSync(path.dirname(globalConfigPath), { recursive: true });
     const customInstructions =
       '  Preserve my established lab compaction protocol ΔT exactly.  ';
     fs.writeFileSync(
@@ -182,12 +188,18 @@ describe('ensure-config scientific compaction migration', () => {
       globalConfigPath,
     );
 
-    expect(compactionOf(configPath).customInstructions).toBe(customInstructions);
+    expect(compactionOf(configPath)).not.toHaveProperty('customInstructions');
     expect(compactionOf(globalConfigPath).customInstructions).toBe(customInstructions);
   });
 
-  it('does not overwrite an explicit project instruction during install migration', () => {
-    const globalConfigPath = path.join(tmpDir, 'global-openclaw.json');
+  it('strips an explicit project instruction during install migration without consulting the global prompt', () => {
+    const globalConfigPath = path.join(
+      tmpDir,
+      'home',
+      '.openclaw',
+      'openclaw.json',
+    );
+    fs.mkdirSync(path.dirname(globalConfigPath), { recursive: true });
     const projectInstructions = '  Project-specific protocol must win.  ';
     const globalInstructions = '  Existing global protocol.  ';
     fs.writeFileSync(
@@ -217,7 +229,8 @@ describe('ensure-config scientific compaction migration', () => {
       globalConfigPath,
     );
 
-    expect(compactionOf(configPath).customInstructions).toBe(projectInstructions);
+    expect(compactionOf(configPath)).not.toHaveProperty('customInstructions');
+    expect(compactionOf(globalConfigPath).customInstructions).toBe(globalInstructions);
   });
 
   it('wires the global-inheritance mode only into the install migration', () => {
@@ -229,12 +242,12 @@ describe('ensure-config scientific compaction migration', () => {
     expect(runScript).not.toContain('--inherit-global-compaction');
   });
 
-  it('ships the same scientific default in the example config', () => {
+  it('ships 2026.9.2-valid compaction defaults in the example config', () => {
     const example = JSON.parse(fs.readFileSync(EXAMPLE_CONFIG, 'utf8'));
-    const customInstructions =
-      example.agents?.defaults?.compaction?.customInstructions;
-    expect(customInstructions).toBe(EXPECTED_PROMPT);
-    expectScientificDefault(customInstructions);
+    expect(example.agents?.defaults?.compaction?.mode).toBe('safeguard');
+    expect(example.agents?.defaults?.compaction).not.toHaveProperty(
+      'customInstructions',
+    );
   });
 
   it('seeds the scientific prompt before Docker config reconciliation', () => {
@@ -255,7 +268,7 @@ describe('ensure-config scientific compaction migration', () => {
   });
 
   it(
-    'is accepted by the installed OpenClaw 2026.6.1 config schema',
+    'is accepted by the installed OpenClaw 2026.9.2 config schema',
     () => {
       fs.copyFileSync(EXAMPLE_CONFIG, configPath);
       runEnsure(configPath);
@@ -274,9 +287,16 @@ describe('ensure-config scientific compaction migration', () => {
         encoding: 'utf8',
         env: cliEnv,
       });
-      const result = JSON.parse(raw) as { valid: boolean; path: string };
+      const result = JSON.parse(raw) as {
+        valid: boolean;
+        path: string;
+        issues?: unknown[];
+        warnings?: unknown[];
+      };
 
       expect(result.valid).toBe(true);
+      expect(result.issues ?? []).toEqual([]);
+      expect(result.warnings ?? []).toEqual([]);
       expect(path.resolve(result.path)).toBe(path.resolve(configPath));
     },
     30_000,

@@ -14,7 +14,7 @@ describe('stale Dashboard cannot reconnect after an upgrade', () => {
   });
 
   it('the OpenClaw patch rejects only mismatched control-ui clients with an actionable message', () => {
-    const patch = fs.readFileSync(path.join(ROOT, 'patches', 'openclaw@2026.6.1.patch'), 'utf8');
+    const patch = fs.readFileSync(path.join(ROOT, 'patches', 'openclaw@2026.9.2.patch'), 'utf8');
 
     expect(patch).toContain('process.env.RESEARCH_CLAW_UI_VERSION');
     expect(patch).toContain('GATEWAY_CLIENT_IDS.CONTROL_UI');

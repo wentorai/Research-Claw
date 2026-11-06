@@ -24,7 +24,8 @@ function migrate(config: Record<string, unknown>) {
 
   return {
     config: JSON.parse(secondBytes) as {
-      agents?: { defaults?: { memorySearch?: { enabled?: boolean; [key: string]: unknown } } };
+      agents?: { defaults?: { memorySearch?: unknown } };
+      memory?: { search?: { enabled?: boolean; [key: string]: unknown } };
     },
     firstBytes,
     secondBytes,
@@ -44,6 +45,7 @@ function migrateGlobal(config: Record<string, unknown>) {
   });
   return JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
     agents?: { defaults?: { memorySearch?: unknown } };
+    memory?: unknown;
   };
 }
 
@@ -53,13 +55,14 @@ afterEach(() => {
   }
 });
 
-describe('shared memorySearch migration', () => {
+describe('shared memory.search migration (OpenClaw 2026.9.2)', () => {
   it('fresh-install template disables semantic memory until an embeddings provider is configured', () => {
     const example = JSON.parse(fs.readFileSync(EXAMPLE_CONFIG, 'utf8'));
-    expect(example.agents?.defaults?.memorySearch).toEqual({ enabled: false });
+    expect(example.memory?.search).toEqual({ enabled: false });
+    expect(example.agents?.defaults).not.toHaveProperty('memorySearch');
   });
 
-  it('adds the safe default to an upgraded project that never chose a memorySearch policy', () => {
+  it('adds the safe default to an upgraded project that never chose a memory search policy', () => {
     const { config, firstBytes, secondBytes } = migrate({
       agents: {
         defaults: {
@@ -68,11 +71,11 @@ describe('shared memorySearch migration', () => {
       },
     });
 
-    expect(config.agents?.defaults?.memorySearch).toEqual({ enabled: false });
+    expect(config.memory?.search).toEqual({ enabled: false });
     expect(secondBytes).toBe(firstBytes);
   });
 
-  it.each([true, false])('preserves an explicit operator choice enabled=%s', (enabled) => {
+  it.each([true, false])('migrates a legacy agents.defaults.memorySearch choice into memory.search enabled=%s', (enabled) => {
     const { config, firstBytes, secondBytes } = migrate({
       agents: {
         defaults: {
@@ -84,10 +87,39 @@ describe('shared memorySearch migration', () => {
       },
     });
 
-    expect(config.agents?.defaults?.memorySearch).toEqual({
+    expect(config.memory?.search).toEqual({
       enabled,
       provider: 'operator-owned-provider',
     });
+    expect(config.agents?.defaults).not.toHaveProperty('memorySearch');
+    expect(secondBytes).toBe(firstBytes);
+  });
+
+  it('lets canonical memory.search win over a conflicting legacy memorySearch', () => {
+    const { config, firstBytes, secondBytes } = migrate({
+      agents: {
+        defaults: {
+          memorySearch: {
+            enabled: true,
+            provider: 'legacy-provider',
+            maxResults: 5,
+          },
+        },
+      },
+      memory: {
+        search: {
+          enabled: false,
+          provider: 'canonical-provider',
+        },
+      },
+    });
+
+    expect(config.memory?.search).toEqual({
+      enabled: false,
+      provider: 'canonical-provider',
+      maxResults: 5,
+    });
+    expect(config.agents?.defaults).not.toHaveProperty('memorySearch');
     expect(secondBytes).toBe(firstBytes);
   });
 
@@ -101,5 +133,6 @@ describe('shared memorySearch migration', () => {
     });
 
     expect(config.agents?.defaults).not.toHaveProperty('memorySearch');
+    expect(config).not.toHaveProperty('memory');
   });
 });

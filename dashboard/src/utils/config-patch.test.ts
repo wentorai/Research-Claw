@@ -37,7 +37,7 @@ describe('buildSaveConfig', () => {
     expect((defaults.imageModel as Record<string, string>).primary).toBe('openai/gpt-4o');
   });
 
-  it('disables memorySearch by default (deepseek has no embeddings endpoint)', () => {
+  it('disables semantic memory search by default (deepseek has no embeddings endpoint)', () => {
     const config = buildSaveConfig(null, {
       provider: 'openai',
       baseUrl: 'https://api.openai.com/v1',
@@ -45,9 +45,12 @@ describe('buildSaveConfig', () => {
       textModel: 'gpt-4o',
     });
 
+    const memory = config.memory as Record<string, unknown> | undefined;
+    const search = memory?.search as Record<string, unknown> | undefined;
+    expect(search?.enabled).toBe(false);
+
     const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
-    const memorySearch = defaults.memorySearch as Record<string, unknown> | undefined;
-    expect(memorySearch?.enabled).toBe(false);
+    expect(defaults).not.toHaveProperty('memorySearch');
   });
 
   it('respects preset input capabilities — text-only models stay text-only', () => {

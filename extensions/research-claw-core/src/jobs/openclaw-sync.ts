@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
+import { resolveSessionStorePath } from '../self-check/runtime-probe.js';
 import { JobService, type JobStatus } from './service.js';
 import { formatJobTitleFromMessage } from './title.js';
 import {
@@ -39,38 +41,192 @@ export interface OpenClawSessionJobSyncOptions {
   logger?: Logger;
 }
 
+const DEFAULT_AGENT_ID = 'main';
+
+/**
+ * The session store the gateway actually writes.
+ *
+ * OpenClaw 2026.9.2 no longer writes `<state>/agents/<agent>/sessions/
+ * sessions.json`; the full session entry now lives in the per-agent SQLite
+ * database `<state>/agents/<agent>/agent/openclaw-agent.sqlite`, table
+ * `session_nodes`, column `entry_json`. The function keeps its name and
+ * signature for callers, but returns that SQLite store path — a value a legacy
+ * caller passes back as `sessionsJsonPath` is mapped to the same store by
+ * `resolveSessionStore`.
+ */
 export function defaultOpenClawSessionsJsonPath(): string {
   const stateDir = process.env.OPENCLAW_STATE_DIR || path.join(os.homedir(), '.openclaw');
-  return path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json');
+  return resolveSessionStorePath({ stateDir, agentId: DEFAULT_AGENT_ID });
+}
+
+type SessionEntryPair = [string, SessionIndexEntry];
+
+interface SessionStoreRead {
+  entries: SessionEntryPair[] | null;
+  path: string;
+}
+
+interface ResolvedSessionStore {
+  databasePath: string;
+  legacyPath: string | null;
+}
+
+function expandHome(filePath: string): string {
+  if (filePath === '~') return os.homedir();
+  if (filePath.startsWith('~/')) return path.join(os.homedir(), filePath.slice(2));
+  return filePath;
+}
+
+/**
+ * Resolve the 2026.9.2 SQLite store, and — when a caller still names the
+ * legacy `sessions.json` — keep that file as migration input.
+ */
+function resolveSessionStore(configuredStore: string | undefined): ResolvedSessionStore {
+  const stateDir = process.env.OPENCLAW_STATE_DIR || path.join(os.homedir(), '.openclaw');
+  const databasePath = resolveSessionStorePath({ stateDir, agentId: DEFAULT_AGENT_ID, configuredStore });
+  if (!configuredStore) {
+    return {
+      databasePath,
+      legacyPath: path.join(stateDir, 'agents', DEFAULT_AGENT_ID, 'sessions', 'sessions.json'),
+    };
+  }
+  const configuredPath = path.resolve(
+    expandHome(configuredStore.replaceAll('{agentId}', DEFAULT_AGENT_ID)),
+  );
+  return {
+    databasePath,
+    legacyPath: configuredPath === databasePath ? null : configuredPath,
+  };
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parseSessionEntry(raw: unknown): SessionIndexEntry | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as SessionIndexEntry;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read every row of `session_nodes.entry_json` from the per-agent SQLite store.
+ * `null` means the store exists but could not be read — a named, logged failure
+ * rather than an empty sweep.
+ */
+function readSessionDatabase(
+  databasePath: string,
+  logger: Logger | undefined,
+): SessionEntryPair[] | null {
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+    const rows = database.prepare('SELECT session_key, entry_json FROM session_nodes').all();
+    const entries: SessionEntryPair[] = [];
+    let skipped = 0;
+    for (const row of rows) {
+      if (typeof row.session_key !== 'string' || !row.session_key) continue;
+      const entry = parseSessionEntry(row.entry_json);
+      if (!entry) {
+        skipped += 1;
+        continue;
+      }
+      entries.push([row.session_key, entry]);
+    }
+    if (skipped > 0) {
+      logger?.debug?.(
+        `[Jobs] Skipped ${skipped} unreadable OpenClaw session entr${skipped === 1 ? 'y' : 'ies'} in ${databasePath}`,
+      );
+    }
+    return entries;
+  } catch (err) {
+    logger?.warn?.(
+      `[Jobs] Failed to read OpenClaw session store ${databasePath}: ${describeError(err)}`,
+    );
+    return null;
+  } finally {
+    try {
+      database?.close();
+    } catch {
+      // A half-open handle is harmless; the next sweep opens a fresh one.
+    }
+  }
+}
+
+function readLegacySessionsIndex(
+  sessionsPath: string,
+  logger: Logger | undefined,
+): SessionEntryPair[] | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(sessionsPath, 'utf8');
+  } catch (err) {
+    logger?.warn?.(
+      `[Jobs] Failed to read OpenClaw sessions index ${sessionsPath}: ${describeError(err)}`,
+    );
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    logger?.warn?.(
+      `[Jobs] Failed to parse OpenClaw sessions index ${sessionsPath}: ${describeError(err)}`,
+    );
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    logger?.warn?.(`[Jobs] OpenClaw sessions index ${sessionsPath} is not a keyed session object`);
+    return null;
+  }
+  return Object.entries(parsed as Record<string, SessionIndexEntry>);
+}
+
+/**
+ * The gateway's SQLite store is authoritative. A legacy `sessions.json` is read
+ * only while the mapped database does not exist yet (a state dir is migrated on
+ * first 2026.9.2 boot). Either way, an absent or unreadable store is a named,
+ * logged condition — never a silent empty sweep.
+ */
+function readOpenClawSessionStore(options: OpenClawSessionJobSyncOptions): SessionStoreRead {
+  const store = resolveSessionStore(options.sessionsJsonPath);
+  if (fs.existsSync(store.databasePath)) {
+    return {
+      entries: readSessionDatabase(store.databasePath, options.logger),
+      path: store.databasePath,
+    };
+  }
+  if (store.legacyPath && fs.existsSync(store.legacyPath)) {
+    return {
+      entries: readLegacySessionsIndex(store.legacyPath, options.logger),
+      path: store.legacyPath,
+    };
+  }
+  options.logger?.warn?.(
+    `[Jobs] OpenClaw session store not found at ${store.databasePath}; subagent job sync skipped`,
+  );
+  return { entries: null, path: store.databasePath };
 }
 
 export function syncOpenClawSubagentJobs(
   service: JobService,
   options: OpenClawSessionJobSyncOptions = {},
 ): { synced: number; path: string } {
-  const sessionsPath = options.sessionsJsonPath ?? defaultOpenClawSessionsJsonPath();
+  const store = readOpenClawSessionStore(options);
+  const sessionsPath = store.path;
   const maxAgeMs = Math.max(1, options.maxAgeDays ?? 14) * 24 * 60 * 60 * 1000;
   const maxSessions = Math.max(1, Math.min(options.maxSessions ?? 100, 500));
   const staleAfterMs = Math.max(60_000, options.staleAfterMs ?? 30 * 60_000);
-  let raw: string;
-  try {
-    raw = fs.readFileSync(sessionsPath, 'utf8');
-  } catch {
-    return { synced: 0, path: sessionsPath };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    options.logger?.warn?.(`[Jobs] Failed to parse OpenClaw sessions index: ${err instanceof Error ? err.message : String(err)}`);
-    return { synced: 0, path: sessionsPath };
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { synced: 0, path: sessionsPath };
+  if (!store.entries) return { synced: 0, path: sessionsPath };
 
   const now = Date.now();
   const seenFiles = new Set<string>();
-  const entries = Object.entries(parsed as Record<string, SessionIndexEntry>)
+  const entries = store.entries
     .filter(([key, session]) => isSubagentSession(key, session))
     .filter(([, session]) => typeof session.sessionId === 'string')
     .filter(([, session]) => {
@@ -270,8 +426,8 @@ interface TranscriptInfo { title: string | null; latestText: string | null; erro
 // every sync is the dominant cost of the OpenClaw sweep, and it runs synchronously
 // on the gateway thread. Cache the parsed result per file, keyed by (mtime, size),
 // so a steady-state sweep only re-reads transcripts that actually changed. Status
-// and stale detection are derived from sessions.json + `now` and still recompute
-// every sweep, so freshness is unaffected.
+// and stale detection are derived from the session store + `now` and still
+// recompute every sweep, so freshness is unaffected.
 interface TranscriptCacheEntry { mtimeMs: number; size: number; value: TranscriptInfo }
 const transcriptCache = new Map<string, TranscriptCacheEntry>();
 const EMPTY_TRANSCRIPT: TranscriptInfo = { title: null, latestText: null, error: null, jobId: null };

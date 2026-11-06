@@ -1,0 +1,1432 @@
+diff --git a/dist/api-logging-aN8dtVY1.js b/dist/api-logging-aN8dtVY1.js
+index ac5ab0e9ba..0477ccdd25 100644
+--- a/dist/api-logging-aN8dtVY1.js
++++ b/dist/api-logging-aN8dtVY1.js
+@@ -2,6 +2,7 @@ import { t as formatErrorMessage } from "./errors-Db3Ymjlb.js";
+ import { t as createSubsystemLogger } from "./subsystem-Dy2tqXOS.js";
+ import "./runtime-env-0Q-gCyUb.js";
+ import "./ssrf-runtime-Bum5C6NN.js";
++import { o as isRecoverableTelegramNetworkError } from "./fetch-DtQkd2V_.js";
+ //#region extensions/telegram/src/api-logging.ts
+ const fallbackLogger = createSubsystemLogger("telegram/api");
+ function resolveTelegramApiLogger(runtime, logger) {
+@@ -15,7 +16,8 @@ async function withTelegramApiErrorLogging({ operation, fn, runtime, logger, sho
+ 	} catch (err) {
+ 		if (!shouldLog || shouldLog(err)) {
+ 			const errText = formatErrorMessage(err);
+-			resolveTelegramApiLogger(runtime, logger)(`telegram ${operation} failed: ${errText}`);
++			if (isRecoverableTelegramNetworkError(err, { context: "unknown" })) fallbackLogger.debug(`telegram ${operation} deferred: ${errText}`);
++			else resolveTelegramApiLogger(runtime, logger)(`telegram ${operation} failed: ${errText}`);
+ 		}
+ 		throw err;
+ 	}
+diff --git a/dist/bot-native-command-menu-CD00X_dv.js b/dist/bot-native-command-menu-CD00X_dv.js
+index bf705c6b1c..10895a3308 100644
+--- a/dist/bot-native-command-menu-CD00X_dv.js
++++ b/dist/bot-native-command-menu-CD00X_dv.js
+@@ -7,6 +7,9 @@ import { t as getOptionalTelegramRuntime } from "./runtime-D4cq5Nic.js";
+ import { n as resolveTelegramBotUserIdFromToken, t as fingerprintTelegramBotToken } from "./token-fingerprint-z983D2R-.js";
+ import { r as normalizeTelegramCommandName, t as TELEGRAM_COMMAND_NAME_PATTERN } from "./command-config-BipFmZLM.js";
+ import { t as withTelegramApiErrorLogging } from "./api-logging-aN8dtVY1.js";
++import { n as computeBackoff, s as sleepWithAbort } from "./src-BQ327IOM.js";
++import { t as createSubsystemLogger } from "./subsystem-Dy2tqXOS.js";
++import { o as isRecoverableTelegramNetworkError } from "./fetch-DtQkd2V_.js";
+ import { createHash } from "node:crypto";
+ //#region extensions/telegram/src/bot-native-command-menu-state.ts
+ const TELEGRAM_MENU_LOCALE_LEDGER_VERSION = 1;
+@@ -359,6 +362,9 @@ const TELEGRAM_COMMAND_RETRY_RATIO = .8;
+ const TELEGRAM_MIN_COMMAND_DESCRIPTION_LENGTH = 1;
+ const TELEGRAM_MAX_COMMAND_DESCRIPTION_LENGTH = 256;
+ const TELEGRAM_MENU_RESULT_CACHE_MAX = 128;
++const TELEGRAM_COMMAND_SYNC_RETRY_POLICY = { initialMs: 2e3, maxMs: 3e4, factor: 2, jitter: .1 };
++const TELEGRAM_COMMAND_SYNC_MAX_ATTEMPTS = 3;
++const telegramCommandSyncLog = createSubsystemLogger("telegram/command-sync");
+ const TELEGRAM_COMMAND_MENU_SCOPES = [{ label: "default" }, {
+ 	label: "all_group_chats",
+ 	options: { scope: { type: "all_group_chats" } }
+@@ -767,9 +773,23 @@ function syncTelegramMenuCommands(params) {
+ 		if (neutralCleared && unclearedLocales.size === 0) writeTelegramMenuCommandHash(owner.hashKey, currentHash);
+ 		else runtime.log?.("telegram: command menu cleanup incomplete; skipping success hash cache write");
+ 	};
++	const syncWithRetry = async () => {
++		for (let attempt = 1; attempt <= TELEGRAM_COMMAND_SYNC_MAX_ATTEMPTS; attempt += 1) try {
++			await sync();
++			return;
++		} catch (err) {
++			if (!isRecoverableTelegramNetworkError(err, { context: "unknown" }) || attempt === TELEGRAM_COMMAND_SYNC_MAX_ATTEMPTS) {
++				runtime.error?.(`Telegram command sync failed: ${String(err)}`);
++				return;
++			}
++			const delayMs = computeBackoff(TELEGRAM_COMMAND_SYNC_RETRY_POLICY, attempt);
++			telegramCommandSyncLog.debug(`Telegram command sync deferred; retry ${attempt}/${TELEGRAM_COMMAND_SYNC_MAX_ATTEMPTS - 1} in ${delayMs}ms: ${String(err)}`);
++			await sleepWithAbort(delayMs);
++		}
++	};
+ 	enqueueTelegramMenuSync({
+ 		ownerKey: owner.queueKey,
+-		sync,
++		sync: syncWithRetry,
+ 		onError: (error) => {
+ 			runtime.error?.(`Telegram command sync failed: ${String(error)}`);
+ 		}
+diff --git a/dist/command-execution-startup-DGi7CCGi.js b/dist/command-execution-startup-DGi7CCGi.js
+index 9c90652b27..15678658d3 100644
+--- a/dist/command-execution-startup-DGi7CCGi.js
++++ b/dist/command-execution-startup-DGi7CCGi.js
+@@ -27,9 +27,10 @@ async function ensureCliCommandBootstrap(params) {
+ 		});
+ 	});
+ 	if (!params.loadPlugins) return;
+-	const pluginRegistryLoadPolicy = params.pluginRegistry ?? resolveCliCommandPathPolicy(params.commandPath).pluginRegistry;
++	const pluginRegistry = params.pluginRegistry ?? resolveCliCommandPathPolicy(params.commandPath).pluginRegistry;
+ 	await measureCliCommandStartup("plugin-registry", () => ensureCliPluginRegistryLoaded({
+-		scope: pluginRegistryLoadPolicy.scope,
++		scope: pluginRegistry.scope,
++		...pluginRegistry.onlyPluginIds ? { onlyPluginIds: pluginRegistry.onlyPluginIds } : {},
+ 		routeLogsToStderr: params.suppressDoctorStdout
+ 	}));
+ }
+diff --git a/dist/command-path-policy-CYBY98jZ.js b/dist/command-path-policy-CYBY98jZ.js
+index d84d63bfc8..1e34219901 100644
+--- a/dist/command-path-policy-CYBY98jZ.js
++++ b/dist/command-path-policy-CYBY98jZ.js
+@@ -189,7 +189,11 @@ const cliCommandCatalog = [
+ 		commandPath: ["migrate"],
+ 		policy: {
+ 			configGuard: "skip",
+-			loadPlugins: "never",
++			loadPlugins: "always",
++			pluginRegistry: {
++				scope: "all",
++				onlyPluginIds: ["research-claw-core"]
++			},
+ 			networkProxy: "bypass"
+ 		}
+ 	},
+@@ -944,7 +948,14 @@ const cliCommandCatalog = [
+ 	},
+ 	{
+ 		commandPath: ["skills", "install"],
+-		exact: true
++		exact: true,
++		policy: {
++			loadPlugins: "always",
++			pluginRegistry: {
++				scope: "all",
++				onlyPluginIds: ["research-claw-core"]
++			}
++		}
+ 	},
+ 	{
+ 		commandPath: ["skills", "list"],
+@@ -982,7 +993,24 @@ const cliCommandCatalog = [
+ 	},
+ 	{
+ 		commandPath: ["skills", "update"],
+-		exact: true
++		exact: true,
++		policy: {
++			loadPlugins: "always",
++			pluginRegistry: {
++				scope: "all",
++				onlyPluginIds: ["research-claw-core"]
++			}
++		}
++	},
++	{
++		commandPath: ["skills", "workshop"],
++		policy: {
++			loadPlugins: "always",
++			pluginRegistry: {
++				scope: "all",
++				onlyPluginIds: ["research-claw-core"]
++			}
++		}
+ 	},
+ 	{
+ 		commandPath: ["skills", "verify"],
+diff --git a/dist/embedded-agent-D9hkv0XX.js b/dist/embedded-agent-D9hkv0XX.js
+index d753ce4c35..d64b2ed931 100644
+--- a/dist/embedded-agent-D9hkv0XX.js
++++ b/dist/embedded-agent-D9hkv0XX.js
+@@ -1506,6 +1506,10 @@ function assistantFallbackReason(params) {
+ 	if (params.failoverFailure && failoverReason && failoverReason !== "timeout") return failoverReason;
+ 	return isAssistantTimeoutFailure(params) ? "timeout" : failoverReason ?? "unknown";
+ }
++function isCronDeadlineAbort(reason) {
++	const message = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
++	return message.startsWith("cron: job execution timed out");
++}
+ /** Preserves an existing retry reason unless the current attempt produced a stronger signal. */
+ function mergeRetryFailoverReason(params) {
+ 	return params.failoverReason ?? params.previous ?? (params.timedOut ? "timeout" : null);
+@@ -1528,7 +1532,10 @@ function resolveRunFailoverDecision(params) {
+ 			action: "surface_error",
+ 			reason: params.failoverReason
+ 		};
+-		if (params.externalAbort) return {
++		if (params.externalAbort) return isCronDeadlineAbort(params.abortReason) && params.fallbackConfigured ? {
++			action: "fallback_model",
++			reason: "timeout"
++		} : {
+ 			action: "surface_error",
+ 			reason: params.failoverReason
+ 		};
+@@ -1559,7 +1566,10 @@ function resolveRunFailoverDecision(params) {
+ 			reason: params.failoverReason
+ 		};
+ 	}
+-	if (params.signalOwnedInterruption || (params.terminal.kind === "aborted" || params.terminal.kind === "timeout") && params.terminal.source === "external") return {
++	if (params.signalOwnedInterruption || (params.terminal.kind === "aborted" || params.terminal.kind === "timeout") && params.terminal.source === "external") return isCronDeadlineAbort(params.abortReason) && params.fallbackConfigured ? {
++		action: "fallback_model",
++		reason: "timeout"
++	} : {
+ 		action: "surface_error",
+ 		reason: params.failoverReason
+ 	};
+@@ -1609,6 +1619,10 @@ async function handleAssistantFailover(params) {
+ 	const externalAbort = terminal.externalAbort || signalOwnedInterruption;
+ 	let overloadProfileRotations = params.overloadProfileRotations;
+ 	let decision = params.initialDecision;
++	if (params.isProbeSession) decision = {
++		action: "surface_error",
++		reason: params.failoverReason ?? decision.reason ?? "unknown"
++	};
+ 	const sameModelTransientRetry = () => ({
+ 		action: "retry",
+ 		overloadProfileRotations,
+@@ -1707,6 +1721,7 @@ async function handleAssistantFailover(params) {
+ 			allowFormatRetry: params.cloudCodeAssistFormatError,
+ 			terminal: params.terminal,
+ 			signalOwnedInterruption,
++			abortReason: params.abortReason,
+ 			fallbackConfigured: params.fallbackConfigured,
+ 			failoverFailure: params.failoverFailure,
+ 			failoverReason: params.failoverReason,
+@@ -1944,6 +1959,7 @@ async function handleEmbeddedAssistantFailure(input) {
+ 		allowFormatRetry: cloudCodeAssistFormatError,
+ 		terminal: input.attempt.terminal,
+ 		signalOwnedInterruption,
++		abortReason: input.runParams.abortSignal?.reason,
+ 		fallbackConfigured: input.fallbackConfigured,
+ 		failoverFailure,
+ 		failoverReason: assistantFailoverReason,
+@@ -1957,6 +1973,7 @@ async function handleEmbeddedAssistantFailure(input) {
+ 		fallbackConfigured: input.fallbackConfigured,
+ 		failoverFailure,
+ 		failoverReason: assistantFailoverReason,
++		abortReason: input.runParams.abortSignal?.reason,
+ 		harnessOwnsTransport: input.pluginHarnessOwnsTransport,
+ 		assistantProfileFailureReason,
+ 		lastProfileId: input.authProfileId,
+@@ -4039,6 +4056,7 @@ async function handleEmbeddedPromptFailure(input) {
+ 		stage: "prompt",
+ 		aborted: input.aborted,
+ 		externalAbort: input.externalAbort,
++		abortReason: input.runParams.abortSignal?.reason,
+ 		fallbackConfigured: input.fallbackConfigured,
+ 		failoverCode: promptErrorDetails.code,
+ 		failoverFailure: promptFailoverFailure,
+@@ -4048,6 +4066,10 @@ async function handleEmbeddedPromptFailure(input) {
+ 		timedOutByRunBudget: input.timedOutByRunBudget,
+ 		profileRotated: false
+ 	});
++	if (input.isProbeSession) failoverDecision = {
++		action: "surface_error",
++		reason: promptFailoverReason ?? "unknown"
++	};
+ 	const canRetryRateLimit = promptFailoverReason !== "rate_limit" || isShortWindowRateLimitMessage(errorText);
+ 	if (!recordedTerminalStop && !input.externalAbort && canRetryRateLimit && promptFailoverReason && (failoverDecision.action === "rotate_profile" || failoverDecision.action === "fallback_model" || failoverDecision.action === "surface_error") && await input.maybeRetryTransient({
+ 		reason: promptFailoverReason,
+@@ -4107,6 +4129,7 @@ async function handleEmbeddedPromptFailure(input) {
+ 		stage: "prompt",
+ 		aborted: input.aborted,
+ 		externalAbort: input.externalAbort,
++		abortReason: input.runParams.abortSignal?.reason,
+ 		fallbackConfigured: input.fallbackConfigured,
+ 		failoverCode: promptErrorDetails.code,
+ 		failoverFailure: promptFailoverFailure,
+@@ -4474,6 +4497,7 @@ async function recoverEmbeddedRunAttempt(input) {
+ 	if (promptError && !terminalInterrupted && promptErrorSource !== "compaction" && !hasCodexAppServerTimeoutOutcome) {
+ 		const promptFailureOutcome = await handleEmbeddedPromptFailure({
+ 			runParams: params,
++			isProbeSession: runInput.isProbeSession,
+ 			attempt,
+ 			promptError,
+ 			promptErrorSource,
+diff --git a/dist/embedded-agent-helpers-D0eiT3IT.js b/dist/embedded-agent-helpers-D0eiT3IT.js
+index f7829d760a..23af415d91 100644
+--- a/dist/embedded-agent-helpers-D0eiT3IT.js
++++ b/dist/embedded-agent-helpers-D0eiT3IT.js
+@@ -130,6 +130,7 @@ const AUTH_INVALID_TOKEN_HINT_RE = /\bunauthorized\b|\b(?:invalid|incorrect|expi
+ const HTML_BODY_RE = /^\s*(?:<!doctype\s+html\b|<html\b)/i;
+ const HTML_CLOSE_RE = /<\/html>/i;
+ const CLOUDFLARE_CHALLENGE_RE = /Enable\s+JavaScript\s+and\s+cookies\s+to\s+continue|cf-browser-verification|__cf_challenge|cdn-cgi\/challenge-platform|challenge-error-text/i;
++const HTML_CHALLENGE_RE = /\bcloudflare\b|cdn-cgi\/challenge-platform|__cf_chl_|cf_chl|challenge-form|captcha|enable javascript and cookies to continue|attention required/i;
+ const PROXY_ERROR_RE = /\bproxyconnect\b|\bhttps?_proxy\b|\b407\b|\bproxy authentication required\b|\btunnel connection failed\b|\bconnect tunnel\b|\bsocks proxy\b|\bproxy error\b/i;
+ const DNS_ERROR_RE = /\benotfound\b|\beai_again\b|\bgetaddrinfo\b|\bno such host\b|\bdns\b/i;
+ const INTERRUPTED_NETWORK_ERROR_RE = /\beconnrefused\b|\beconnreset\b|\beconnaborted\b|\benetreset\b|\behostunreach\b|\behostdown\b|\benetunreach\b|\bepipe\b|\bsocket hang up\b|\bconnection refused\b|\bconnection reset\b|\bconnection aborted\b|\bnetwork is unreachable\b|\bhost is unreachable\b|\bfetch failed\b|\bconnection error\b|\bnetwork request failed\b/i;
+@@ -146,6 +147,15 @@ function isHtmlErrorResponse(raw, status) {
+ 	const rest = extractHttpResponseBody(extractLeadingHttpStatus(candidate))?.body ?? candidate;
+ 	return HTML_BODY_RE.test(rest) && HTML_CLOSE_RE.test(rest);
+ }
++function isHtmlChallengeResponse(raw, status) {
++	const trimmed = raw.trim();
++	if (!trimmed) return false;
++	const candidate = extractLeadingHttpStatus(trimmed) ? trimmed : stripErrorPrefix(trimmed);
++	const inferred = typeof status === "number" && Number.isFinite(status) ? status : extractLeadingHttpStatus(candidate)?.code;
++	if (typeof inferred !== "number" || inferred < 400) return false;
++	const rest = extractHttpResponseBody(extractLeadingHttpStatus(candidate))?.body ?? candidate;
++	return HTML_BODY_RE.test(rest) && HTML_CLOSE_RE.test(rest) && HTML_CHALLENGE_RE.test(rest);
++}
+ function isCloudflareChallengeResponse(message) {
+ 	return CLOUDFLARE_CHALLENGE_RE.test(message);
+ }
+@@ -222,10 +232,7 @@ function classifyProviderRuntimeFailureKind(signal, opts) {
+ 	if (message && classifyOAuthRefreshFailure(message)) return "auth_refresh";
+ 	if (message && isAuthScopeErrorMessage(message, status, normalizedSignal.provider)) return "auth_scope";
+ 	if (message && isProxyErrorMessage(message, status)) return "proxy";
+-	if (message && isHtmlErrorResponse(message, status)) {
+-		if (status === 403 && isCloudflareChallengeResponse(message)) return "upstream_html";
+-		return status === 401 || status === 403 ? "auth_html" : "upstream_html";
+-	}
++	if (message && isHtmlErrorResponse(message, status)) return isHtmlChallengeResponse(message, status) ? "upstream_html" : status === 401 || status === 403 ? "auth_html" : "upstream_html";
+ 	const failoverClassification = classifyFailoverSignal({
+ 		...normalizedSignal,
+ 		status,
+@@ -311,7 +318,7 @@ function formatAssistantErrorText(msg, opts, facts) {
+ 	if (providerRuntimeFailureKind === "auth_scope") return "Authentication is missing the required OpenAI ChatGPT scopes. Re-run OpenAI login and try again.";
+ 	if (providerRuntimeFailureKind === "auth_html") return "Authentication failed at the provider. Re-authenticate and verify your provider credentials and account access.";
+ 	if (providerRuntimeFailureKind === "auth_invalid_token") return AUTH_INVALID_TOKEN_USER_TEXT;
+-	if (providerRuntimeFailureKind === "upstream_html") return "The provider returned an HTML error page instead of an API response. This usually means a CDN or gateway (e.g. Cloudflare) blocked the request. Retry in a moment or check provider status.";
++	if (providerRuntimeFailureKind === "upstream_html") return "The provider returned an HTML challenge/error page instead of an API response. This usually means a CDN or gateway (for example Cloudflare) blocked the request. Check your network/proxy route to the provider, complete any browser verification if needed, then retry.";
+ 	if (providerRuntimeFailureKind === "proxy") return "LLM request failed: proxy or tunnel configuration blocked the provider request.";
+ 	if (providerRuntimeFailureKind === "tls_certificate") return "LLM request failed: TLS certificate validation rejected the provider endpoint. Check the endpoint hostname, proxy, and local certificate trust.";
+ 	if (providerRuntimeFailureKind === "model_not_found") return MODEL_NOT_FOUND_USER_TEXT;
+diff --git a/dist/entry.js b/dist/entry.js
+index fca4fa0689..92c1d83aa6 100644
+--- a/dist/entry.js
++++ b/dist/entry.js
+@@ -247,7 +247,7 @@ function runOpenClawCompileCacheRespawnPlan(plan, runtime = {
+ 		detachForProcessTree: plan.detachForProcessTree,
+ 		runtime,
+ 		onError: (error) => {
+-			runtime.writeError(`[openclaw] Failed to respawn CLI without compile cache: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
++			runtime.writeError(`[research-claw] Failed to respawn CLI without compile cache: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+ 		}
+ 	});
+ }
+@@ -355,7 +355,7 @@ function runCliRespawnPlan(plan, runtime, writeError = (message, error) => conso
+ 		detachForProcessTree: plan.detachForProcessTree,
+ 		runtime: resolvedRuntime,
+ 		onError: (error) => {
+-			resolvedRuntime.writeError("[openclaw] Failed to respawn CLI:", error instanceof Error ? error.stack ?? error.message : error);
++			resolvedRuntime.writeError("[research-claw] Failed to respawn CLI:", error instanceof Error ? error.stack ?? error.message : error);
+ 		}
+ 	});
+ }
+@@ -385,7 +385,7 @@ async function writeCapturedCliArgumentError(message) {
+ 	enableConsoleCapture();
+ 	const [{ formatCliJsonFailure }, { isJsonOutputModeActive }] = await Promise.all([import("./failure-output-DoW9YQTW.js"), import("./json-output-mode-D6GIUD5R.js")]);
+ 	if (isJsonOutputModeActive(process$1.argv)) defaultRuntime.writeJson(formatCliJsonFailure(message));
+-	console.error(`[openclaw] ${message}`);
++	console.error(`[research-claw] ${message}`);
+ }
+ async function writeCliDiagnosticBlock(message) {
+ 	const { loadCliDotEnv } = await import("./dotenv-Bvm6eLnE.js");
+@@ -429,7 +429,7 @@ if (!isMainModule({
+ 	const entryFile = fileURLToPath(import.meta.url);
+ 	const installRoot = resolveEntryInstallRoot(entryFile);
+ 	installDistEsmResolveFastPath(import.meta.url);
+-	process$1.title = "openclaw";
++	process$1.title = "research-claw";
+ 	ensureOpenClawExecMarkerOnProcess();
+ 	installProcessWarningFilter();
+ 	normalizeEnv();
+@@ -494,7 +494,7 @@ async function tryHandleRootHelpFastPath(argv, deps = {}) {
+ 	if (env.OPENCLAW_DISABLE_CLI_STARTUP_HELP_FAST_PATH === "1" || resolveCliContainerTarget(argv, env)) return false;
+ 	if (!isRootHelpInvocation(argv)) return false;
+ 	const handleError = deps.onError ?? (async (error) => {
+-		await writeCliDiagnosticBlock(`[openclaw] Failed to display help: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
++		await writeCliDiagnosticBlock(`[research-claw] Failed to display help: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+ 		process$1.exit(1);
+ 	});
+ 	try {
+diff --git a/dist/entry.version-fast-path-BBTOuUbi.js b/dist/entry.version-fast-path-BBTOuUbi.js
+index bb16f52cbb..fae411d79c 100644
+--- a/dist/entry.version-fast-path-BBTOuUbi.js
++++ b/dist/entry.version-fast-path-BBTOuUbi.js
+@@ -7,7 +7,7 @@ function tryHandleRootVersionFastPath(argv, deps = {}) {
+ 	const output = deps.output ?? ((message) => console.log(message));
+ 	const exit = deps.exit ?? ((code) => process.exit(code));
+ 	const onError = deps.onError ?? (async (error) => {
+-		const message = `[openclaw] Failed to resolve version: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`;
++		const message = `[research-claw] Failed to resolve version: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`;
+ 		try {
+ 			const [{ loadCliDotEnv }, { formatConsoleDiagnosticBlock }] = await Promise.all([import("./dotenv-Bvm6eLnE.js"), import("./json-console-line-kiRP3hor.js")]);
+ 			loadCliDotEnv({ quiet: true });
+@@ -29,7 +29,7 @@ function tryHandleRootVersionFastPath(argv, deps = {}) {
+ 		};
+ 	}))().then(({ VERSION, resolveCommitHash }) => {
+ 		const commit = resolveCommitHash({ moduleUrl: deps.moduleUrl ?? import.meta.url });
+-		output(commit ? `OpenClaw ${VERSION} (${commit})` : `OpenClaw ${VERSION}`);
++		output(commit ? `Research-Claw ${VERSION} (${commit})` : `Research-Claw ${VERSION}`);
+ 		exit(0);
+ 	}).catch(onError);
+ 	return true;
+diff --git a/dist/extra-params-UGKIp88L.js b/dist/extra-params-UGKIp88L.js
+index fc44c8c86e..7ef9c578c2 100644
+--- a/dist/extra-params-UGKIp88L.js
++++ b/dist/extra-params-UGKIp88L.js
+@@ -333,6 +333,7 @@ function createStreamFnWithExtraParams(baseStreamFn, extraParams, provider, mode
+ 	if (typeof extraParams.topP === "number") streamParams.topP = extraParams.topP;
+ 	const maxTokens = resolveMaxTokensParam(extraParams);
+ 	if (maxTokens !== void 0) streamParams.maxTokens = maxTokens;
++	if (Number.isInteger(extraParams.maxRetries) && extraParams.maxRetries >= 0) streamParams.maxRetries = extraParams.maxRetries;
+ 	const resolvedResponseFormat = resolveAliasedParamValue([extraParams], "response_format", "responseFormat");
+ 	if (resolvedResponseFormat && typeof resolvedResponseFormat === "object" && !Array.isArray(resolvedResponseFormat)) streamParams.responseFormat = resolvedResponseFormat;
+ 	const transport = resolveSupportedTransport(extraParams.transport);
+@@ -368,6 +369,7 @@ function createStreamFnWithExtraParams(baseStreamFn, extraParams, provider, mode
+ 		return underlying(callModel, context, {
+ 			...streamParams,
+ 			...options,
++			...options?.maxRetries === void 0 && streamParams.maxRetries !== void 0 ? { maxRetries: streamParams.maxRetries } : {},
+ 			...effectiveCacheRetention ? { cacheRetention: effectiveCacheRetention } : {}
+ 		});
+ 	};
+diff --git a/dist/hook-runner-global-0kfmMG4T.js b/dist/hook-runner-global-0kfmMG4T.js
+index 20c9ae8991..4419fa44e6 100644
+--- a/dist/hook-runner-global-0kfmMG4T.js
++++ b/dist/hook-runner-global-0kfmMG4T.js
+@@ -503,6 +503,7 @@ function createHookRunner(registry, options = {}) {
+ 	const catchErrors = options.catchErrors ?? true;
+ 	const failurePolicyByHook = {
+ 		before_agent_run: "fail-closed",
++		before_install: "fail-closed",
+ 		...options.failurePolicyByHook
+ 	};
+ 	const voidHookTimeoutMsByHook = {
+diff --git a/dist/http-common-BaZaosnr.js b/dist/http-common-BaZaosnr.js
+index 87a07e5880..c87a57e4c4 100644
+--- a/dist/http-common-BaZaosnr.js
++++ b/dist/http-common-BaZaosnr.js
+@@ -169,7 +169,7 @@ function respondNotFound(res) {
+ function setDefaultSecurityHeaders(res, opts) {
+ 	res.setHeader("X-Content-Type-Options", "nosniff");
+ 	res.setHeader("Referrer-Policy", "no-referrer");
+-	res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
++	res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()");
+ 	const strictTransportSecurity = typeof opts?.strictTransportSecurity === "string" ? opts.strictTransportSecurity.trim() : void 0;
+ 	if (typeof strictTransportSecurity === "string" && strictTransportSecurity.length > 0) res.setHeader("Strict-Transport-Security", strictTransportSecurity);
+ }
+diff --git a/dist/install-security-scan-DYLR970X.js b/dist/install-security-scan-DYLR970X.js
+index d29f510748..90866e3716 100644
+--- a/dist/install-security-scan-DYLR970X.js
++++ b/dist/install-security-scan-DYLR970X.js
+@@ -41,5 +41,10 @@ async function evaluateSkillInstallPolicy(params) {
+ 	const { evaluateSkillInstallPolicyRuntime } = await loadInstallSecurityScanRuntime();
+ 	return await evaluateSkillInstallPolicyRuntime(params);
+ }
++/** Scans an extracted skill source before install: plugin hook first, then the built-in envelope. */
++async function scanSkillInstallSource(params) {
++	const { scanSkillInstallSourceRuntime } = await loadInstallSecurityScanRuntime();
++	return await scanSkillInstallSourceRuntime(params);
++}
+ //#endregion
+-export { scanFileInstallSource as a, scanBundleInstallSource as i, preflightPluginGitInstallPolicy as n, scanInstalledPackageDependencyTree as o, preflightPluginNpmInstallPolicy as r, scanPackageInstallSource as s, evaluateSkillInstallPolicy as t };
++export { scanFileInstallSource as a, scanBundleInstallSource as i, preflightPluginGitInstallPolicy as n, scanInstalledPackageDependencyTree as o, preflightPluginNpmInstallPolicy as r, scanPackageInstallSource as s, evaluateSkillInstallPolicy as t, scanSkillInstallSource as c };
+diff --git a/dist/install-security-scan.runtime-DefQR--w.js b/dist/install-security-scan.runtime-DefQR--w.js
+index 52b6181958..c141a07b11 100644
+--- a/dist/install-security-scan.runtime-DefQR--w.js
++++ b/dist/install-security-scan.runtime-DefQR--w.js
+@@ -5,7 +5,8 @@ import "./redact-BtvPPfTi.js";
+ import { t as formatErrorMessage } from "./errors-Db3Ymjlb.js";
+ import { p as tryReadJson } from "./json-files-Bq1lIlQB.js";
+ import { n as sanitizeTerminalText } from "./safe-text-BGBqp1a4.js";
+-import { t as getGlobalHookRunner } from "./hook-runner-global-0kfmMG4T.js";
++import { n as getGlobalPluginRegistry, t as getGlobalHookRunner } from "./hook-runner-global-0kfmMG4T.js";
++import { n as scanDirectoryWithSummary, r as scanSkillContent, t as isScannable } from "./scanner-CMssQG9x.js";
+ import { n as runInstallPolicy } from "./install-policy-MmtHNSsD.js";
+ import path from "node:path";
+ import fs from "node:fs/promises";
+@@ -850,10 +851,335 @@ async function evaluateSkillInstallPolicyRuntime(params) {
+ 	if (shouldBypassOpenClawInstallFriction({ source: params.source })) return await runPolicy();
+ 	const policyResult = await runPolicy();
+ 	if (policyResult?.blocked) return policyResult;
+-	return await runBeforeInstallHook({
++	return await scanSkillInstallSourceRuntime({
++		dangerouslyForceUnsafeInstall: params.dangerouslyForceUnsafeInstall,
++		installId: params.installId,
++		installSpec: params.installSpec,
+ 		logger: params.logger,
++		mode: params.mode,
++		origin: params.origin,
++		requestedSpecifier: params.requestedSpecifier,
++		skillName: params.skillName,
++		sourceDir: params.sourceDir
++	});
++}
++//#endregion
++function buildBuiltinScanFromError(error) {
++	return {
++		status: "error",
++		scannedFiles: 0,
++		critical: 0,
++		warn: 0,
++		info: 0,
++		findings: [],
++		error: String(error)
++	};
++}
++function buildBuiltinScanFromSummary(summary) {
++	return {
++		status: "ok",
++		scannedFiles: summary.scannedFiles,
++		critical: summary.critical,
++		warn: summary.warn,
++		info: summary.info,
++		findings: summary.findings
++	};
++}
++const SKILL_INSTALL_MAX_ENTRIES = 2e3;
++const SKILL_INSTALL_MAX_DIRECTORIES = 1e3;
++const SKILL_INSTALL_MAX_FILES = 1e3;
++const SKILL_INSTALL_MAX_DEPTH = 16;
++const SKILL_INSTALL_MAX_TOTAL_BYTES = 128 * 1024 * 1024;
++const SKILL_INSTALL_MAX_CODE_FILE_BYTES = 1024 * 1024;
++const SKILL_INSTALL_MAX_PROMPT_FILES = 500;
++const SKILL_INSTALL_MAX_PROMPT_TOTAL_BYTES = 16 * 1024 * 1024;
++const SKILL_INSTALL_MAX_PROMPT_FILE_BYTES = 1024 * 1024;
++const SKILL_INSTALL_PROMPT_EXTENSIONS = /* @__PURE__ */ new Set([
++	".md",
++	".mdx",
++	".txt",
++	".rst",
++	".adoc",
++	".org"
++]);
++const SKILL_INSTALL_FORBIDDEN_DIRECTORIES = /* @__PURE__ */ new Set([
++	"node_modules",
++	".git",
++	".hg",
++	".svn"
++]);
++const SKILL_INSTALL_NATIVE_EXTENSIONS = /* @__PURE__ */ new Set([
++	".exe",
++	".dll",
++	".dylib",
++	".so",
++	".node",
++	".o",
++	".obj",
++	".a",
++	".lib",
++	".msi",
++	".msix",
++	".appx",
++	".com",
++	".scr",
++	".sys",
++	".lnk",
++	".url",
++	".pkg",
++	".dmg",
++	".xip",
++	".jar",
++	".class",
++	".wasm",
++	".apk",
++	".dex",
++	".whl",
++	".pyc",
++	".pyo"
++]);
++const SKILL_INSTALL_NESTED_ARCHIVE_EXTENSIONS = /* @__PURE__ */ new Set([
++	".zip",
++	".tar",
++	".tgz",
++	".gz",
++	".bz2",
++	".xz",
++	".7z",
++	".rar",
++	".pyz"
++]);
++const SKILL_INSTALL_PYTHON_EXTENSIONS = /* @__PURE__ */ new Set([
++	".py",
++	".pyw"
++]);
++const SKILL_INSTALL_SHELL_EXTENSIONS = /* @__PURE__ */ new Set([
++	".sh",
++	".bash",
++	".zsh",
++	".fish",
++	".ksh",
++	".command",
++	".ps1",
++	".psm1",
++	".bat",
++	".cmd"
++]);
++const SKILL_INSTALL_UNSUPPORTED_EXECUTABLE_EXTENSIONS = /* @__PURE__ */ new Set([
++	".vbs",
++	".vbe",
++	".wsf",
++	".wsc",
++	".hta",
++	".reg",
++	".scpt",
++	".applescript",
++	".ipynb",
++	".r",
++	".rmd",
++	".qmd",
++	".lua",
++	".rb",
++	".pl",
++	".php",
++	".jl",
++	".m",
++	".do",
++	".sas"
++]);
++const SKILL_INSTALL_UNSUPPORTED_EXECUTABLE_BASENAMES = /* @__PURE__ */ new Set([
++	"makefile",
++	"gnumakefile",
++	"justfile"
++]);
++function skillInstallFinding(ruleId, file, message) {
++	return {
++		ruleId,
++		severity: "critical",
++		message,
++		file,
++		line: 1
++	};
++}
++function skillInstallNativeMagic(prefix) {
++	if (prefix.length >= 4 && prefix[0] === 127 && prefix[1] === 69 && prefix[2] === 76 && prefix[3] === 70) return "ELF";
++	if (prefix.length >= 2 && prefix[0] === 77 && prefix[1] === 90) return "PE";
++	if (prefix.length < 4) return;
++	const signature = Buffer.from(prefix.subarray(0, 4)).toString("hex");
++	return {
++		feedface: "Mach-O",
++		feedfacf: "Mach-O",
++		cefaedfe: "Mach-O",
++		cffaedfe: "Mach-O",
++		cafebabe: "fat Mach-O or Java class",
++		cafebabf: "fat Mach-O",
++		bebafeca: "fat Mach-O",
++		bfbafeca: "fat Mach-O",
++		"0061736d": "WebAssembly"
++	}[signature];
++}
++function skillInstallFirstLine(prefix) {
++	return Buffer.from(prefix).toString("utf8").split(/\r?\n/, 1)[0] ?? "";
++}
++function skillInstallHasPythonShebang(prefix) {
++	return /^#!.*\b(?:python(?:\d+(?:\.\d+)*)?|uv)(?:\s|$)/i.test(skillInstallFirstLine(prefix));
++}
++function skillInstallHasShellShebang(prefix) {
++	return /^#!.*\b(?:sh|bash|zsh|dash|fish|ksh|pwsh|powershell)(?:\s|$)/i.test(skillInstallFirstLine(prefix));
++}
++function hasTrustedSkillInstallScanner() {
++	return getGlobalPluginRegistry()?.typedHooks?.some((hook) => hook.pluginId === "research-claw-core" && hook.hookName === "before_install") === true;
++}
++async function packageManifestHasScripts(filePath, size) {
++	if (size > SKILL_INSTALL_MAX_CODE_FILE_BYTES) return true;
++	try {
++		const parsed = JSON.parse(await fs.readFile(filePath, "utf8"));
++		return Boolean(parsed && typeof parsed === "object" && parsed.scripts && typeof parsed.scripts === "object" && Object.keys(parsed.scripts).length > 0);
++	} catch {
++		return true;
++	}
++}
++function mergeSkillBuiltinScans(...scans) {
++	const failed = scans.find((scan) => scan.status === "error");
++	if (failed) return failed;
++	return {
++		status: "ok",
++		scannedFiles: scans.reduce((total, scan) => total + scan.scannedFiles, 0),
++		critical: scans.reduce((total, scan) => total + scan.critical, 0),
++		warn: scans.reduce((total, scan) => total + scan.warn, 0),
++		info: scans.reduce((total, scan) => total + scan.info, 0),
++		findings: scans.flatMap((scan) => scan.findings)
++	};
++}
++async function scanSkillInstallEnvelope(sourceDir, trustedExecutableScanner) {
++	const root = path.resolve(sourceDir);
++	const queue = [{
++		dir: root,
++		depth: 0
++	}];
++	let entriesSeen = 0;
++	let directoriesSeen = 0;
++	let filesSeen = 0;
++	let totalBytes = 0;
++	let promptFiles = 0;
++	let promptBytes = 0;
++	const findings = [];
++	try {
++		while (queue.length > 0) {
++			const current = queue.shift();
++			if (!current) continue;
++			const currentStats = await fs.lstat(current.dir);
++			if (currentStats.isSymbolicLink() || !currentStats.isDirectory()) throw new Error(`skill install source contains a non-directory or symlink at ${path.relative(root, current.dir) || "."}`);
++			const entries = await fs.readdir(current.dir, { withFileTypes: true });
++			for (const entry of entries.toSorted((left, right) => left.name.localeCompare(right.name))) {
++				entriesSeen += 1;
++				if (entriesSeen > SKILL_INSTALL_MAX_ENTRIES) throw new Error(`skill install source exceeded max entries (${SKILL_INSTALL_MAX_ENTRIES})`);
++				const absolutePath = path.join(current.dir, entry.name);
++				const relativePath = path.relative(root, absolutePath).split(path.sep).join("/");
++				if (entry.isSymbolicLink()) throw new Error(`skill install source contains a symlink at ${relativePath}`);
++				if (entry.isDirectory()) {
++					directoriesSeen += 1;
++					if (directoriesSeen > SKILL_INSTALL_MAX_DIRECTORIES) throw new Error(`skill install source exceeded max directories (${SKILL_INSTALL_MAX_DIRECTORIES})`);
++					if (SKILL_INSTALL_FORBIDDEN_DIRECTORIES.has(entry.name.toLowerCase())) throw new Error(`skill install source contains forbidden vendored directory ${relativePath}`);
++					if (current.depth + 1 > SKILL_INSTALL_MAX_DEPTH) throw new Error(`skill install source exceeded max depth (${SKILL_INSTALL_MAX_DEPTH}) at ${relativePath}`);
++					queue.push({
++						dir: absolutePath,
++						depth: current.depth + 1
++					});
++					continue;
++				}
++				if (!entry.isFile()) throw new Error(`skill install source contains a special filesystem entry at ${relativePath}`);
++				const stats = await fs.lstat(absolutePath);
++				if (stats.isSymbolicLink() || !stats.isFile()) throw new Error(`skill install source changed type while scanning ${relativePath}`);
++				filesSeen += 1;
++				if (filesSeen > SKILL_INSTALL_MAX_FILES) throw new Error(`skill install source exceeded max files (${SKILL_INSTALL_MAX_FILES})`);
++				totalBytes += stats.size;
++				if (totalBytes > SKILL_INSTALL_MAX_TOTAL_BYTES) throw new Error(`skill install source exceeded max bytes (${SKILL_INSTALL_MAX_TOTAL_BYTES})`);
++				if (isScannable(relativePath) && stats.size > SKILL_INSTALL_MAX_CODE_FILE_BYTES) throw new Error(`skill code file exceeds scanner byte limit at ${relativePath}`);
++				const extension = path.extname(relativePath).toLowerCase();
++				const basename = path.basename(relativePath).toLowerCase();
++				const handle = await fs.open(absolutePath, "r");
++				let prefix;
++				try {
++					const buffer = Buffer.alloc(Math.min(stats.size, 4096));
++					const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
++					prefix = buffer.subarray(0, bytesRead);
++				} finally {
++					await handle.close();
++				}
++				const nativeMagic = skillInstallNativeMagic(prefix);
++				if (SKILL_INSTALL_NATIVE_EXTENSIONS.has(extension) || nativeMagic) {
++					findings.push(skillInstallFinding("skill-install-native-artifact", relativePath, nativeMagic ? `${nativeMagic} executable or compiled payload is not allowed` : `Executable or compiled ${extension || "native"} payload is not allowed`));
++					continue;
++				}
++				if (SKILL_INSTALL_NESTED_ARCHIVE_EXTENSIONS.has(extension)) {
++					findings.push(skillInstallFinding("skill-install-nested-archive", relativePath, `Opaque nested archive ${extension} cannot be fully reviewed`));
++					continue;
++				}
++				if (SKILL_INSTALL_UNSUPPORTED_EXECUTABLE_EXTENSIONS.has(extension) || SKILL_INSTALL_UNSUPPORTED_EXECUTABLE_BASENAMES.has(basename) || basename === "package.json" && await packageManifestHasScripts(absolutePath, stats.size)) {
++					findings.push(skillInstallFinding("skill-install-unsupported-executable", relativePath, "Executable file uses a language or manifest without a supported security scanner"));
++					continue;
++				}
++				const anyShebang = prefix.length >= 2 && prefix[0] === 35 && prefix[1] === 33;
++				if (!trustedExecutableScanner && (SKILL_INSTALL_PYTHON_EXTENSIONS.has(extension) || skillInstallHasPythonShebang(prefix) || SKILL_INSTALL_SHELL_EXTENSIONS.has(extension) || skillInstallHasShellShebang(prefix) || anyShebang || (stats.mode & 73) !== 0)) {
++					findings.push(skillInstallFinding("skill-install-trusted-scanner-required", relativePath, "Executable scripts require the Research-Claw install security scanner"));
++					continue;
++				}
++				if (!SKILL_INSTALL_PROMPT_EXTENSIONS.has(extension)) continue;
++				promptFiles += 1;
++				promptBytes += stats.size;
++				if (promptFiles > SKILL_INSTALL_MAX_PROMPT_FILES) throw new Error(`skill install source exceeded max prompt files (${SKILL_INSTALL_MAX_PROMPT_FILES})`);
++				if (stats.size > SKILL_INSTALL_MAX_PROMPT_FILE_BYTES) throw new Error(`skill prompt file exceeds scanner byte limit at ${relativePath}`);
++				if (promptBytes > SKILL_INSTALL_MAX_PROMPT_TOTAL_BYTES) throw new Error(`skill install source exceeded prompt text byte limit (${SKILL_INSTALL_MAX_PROMPT_TOTAL_BYTES})`);
++				const content = await fs.readFile(absolutePath, "utf8");
++				if (content.includes("\0")) throw new Error(`skill prompt file contains binary content at ${relativePath}`);
++				findings.push(...scanSkillContent(content, relativePath));
++			}
++		}
++	} catch (error) {
++		return buildBuiltinScanFromError(error);
++	}
++	return buildBuiltinScanFromSummary({
++		scannedFiles: promptFiles,
++		critical: findings.filter((finding) => finding.severity === "critical").length,
++		warn: findings.filter((finding) => finding.severity === "warn").length,
++		info: findings.filter((finding) => finding.severity === "info").length,
++		findings
++	});
++}
++
++async function scanSkillInstallCode(dirPath) {
++	const summary = await scanDirectoryWithSummary(dirPath, {
++		excludeTestFiles: false,
++		includeHiddenDirectories: true,
++		includeNodeModules: true,
++		maxFiles: SKILL_INSTALL_MAX_FILES
++	});
++	if (summary.truncated) return buildBuiltinScanFromError(new Error(`skill install source exceeded max files (${SKILL_INSTALL_MAX_FILES})`));
++	return buildBuiltinScanFromSummary(summary);
++}
++async function scanSkillInstallSourceRuntime(params) {
++	const originType = typeof params.origin === "string" ? params.origin : params.origin?.type;
++	const trustedBundledDependencyRecipe = originType === "openclaw-bundled" && params.installSpec != null;
++	const envelopeScan = params.sourceDir ? await scanSkillInstallEnvelope(params.sourceDir, hasTrustedSkillInstallScanner() || trustedBundledDependencyRecipe) : emptyBuiltinScan();
++	const codeScan = envelopeScan.status === "error" || !params.sourceDir ? envelopeScan : await scanSkillInstallCode(params.sourceDir);
++	const builtinScan = mergeSkillBuiltinScans(envelopeScan, codeScan);
++	let builtinBlocked;
++	if (builtinScan.status === "error") builtinBlocked = { blocked: {
++		code: "security_scan_failed",
++		reason: `Skill "${params.skillName}" installation blocked: code safety scan failed (${builtinScan.error}). Run "openclaw security audit --deep" for details.`
++	} };
++	else if (builtinScan.critical > 0 && !params.dangerouslyForceUnsafeInstall) {
++		const details = builtinScan.findings.filter((finding) => finding.severity === "critical").map((finding) => `${finding.message} (${finding.file}:${finding.line})`).join("; ");
++		builtinBlocked = { blocked: {
++			code: "security_scan_blocked",
++			reason: `Skill "${params.skillName}" installation blocked: dangerous code patterns detected: ${details}`
++		} };
++	}
++	const hookResult = await runBeforeInstallHook({
++		logger: params.logger ?? {},
+ 		installLabel: `Skill "${params.skillName}" installation`,
+-		origin: formatInstallPolicyOriginForHook(params.origin),
++		origin: typeof params.origin === "string" ? params.origin : formatInstallPolicyOriginForHook(params.origin),
+ 		sourcePath: params.sourceDir,
+ 		sourcePathKind: "directory",
+ 		targetName: params.skillName,
+@@ -866,6 +1192,7 @@ async function evaluateSkillInstallPolicyRuntime(params) {
+ 			...params.installSpec ? { installSpec: params.installSpec } : {}
+ 		}
+ 	});
++	return hookResult?.blocked ? hookResult : builtinBlocked;
+ }
+-//#endregion
+-export { evaluateSkillInstallPolicyRuntime, preflightPluginGitInstallPolicyRuntime, preflightPluginNpmInstallPolicyRuntime, scanBundleInstallSourceRuntime, scanFileInstallSourceRuntime, scanInstalledPackageDependencyTreeRuntime, scanPackageInstallSourceRuntime };
++
++export { evaluateSkillInstallPolicyRuntime, preflightPluginGitInstallPolicyRuntime, preflightPluginNpmInstallPolicyRuntime, scanBundleInstallSourceRuntime, scanFileInstallSourceRuntime, scanInstalledPackageDependencyTreeRuntime, scanPackageInstallSourceRuntime, scanSkillInstallSourceRuntime };
+diff --git a/dist/isolated-agent-Dg96HjvK.js b/dist/isolated-agent-Dg96HjvK.js
+index 17e8065541..14d9920b56 100644
+--- a/dist/isolated-agent-Dg96HjvK.js
++++ b/dist/isolated-agent-Dg96HjvK.js
+@@ -394,7 +394,7 @@ async function finalizeCronRun(params) {
+ 		summary,
+ 		outputText,
+ 		telemetry,
+-		abortSignal: prepared.input.abortSignal ?? prepared.input.signal,
++		abortSignal: (prepared.input.abortSignal ?? prepared.input.signal)?.aborted && !params.isAborted() ? void 0 : prepared.input.abortSignal ?? prepared.input.signal,
+ 		isAborted: params.isAborted,
+ 		abortReason: params.abortReason,
+ 		withRunSession: prepared.withRunSession
+@@ -1418,6 +1418,8 @@ async function runCronIsolatedAgentTurn(params) {
+ 			ownsContext: ownsRunContext
+ 		});
+ 		const { executeCronRun } = await cronExecutorRuntimeLoader.load();
++		const initialProvider = prepared.context.liveSelection.provider;
++		const initialModel = prepared.context.liveSelection.model;
+ 		const executionParams = {
+ 			cfg: params.cfg,
+ 			cfgWithAgentDefaults: prepared.context.cfgWithAgentDefaults,
+@@ -1474,11 +1476,12 @@ async function runCronIsolatedAgentTurn(params) {
+ 			releasePreparedRuntime();
+ 		}
+ 		lifecycle.emit("end", execution.runResult);
++		const recoveredFromDeadline = isAborted() && abortReason().startsWith("cron: job execution timed out") && (execution.fallbackProvider !== initialProvider || execution.fallbackModel !== initialModel);
+ 		const finalized = await finalizeCronRun({
+ 			prepared: prepared.context,
+ 			execution,
+ 			abortReason,
+-			isAborted,
++			isAborted: () => isAborted() && !recoveredFromDeadline,
+ 			markCronRunSessionCleanupHandled: () => {
+ 				cronRunSessionCleanupHandled = true;
+ 			},
+diff --git a/dist/list.probe-sdf3aRJO.js b/dist/list.probe-sdf3aRJO.js
+index e86836c82a..3417741b76 100644
+--- a/dist/list.probe-sdf3aRJO.js
++++ b/dist/list.probe-sdf3aRJO.js
+@@ -617,7 +617,10 @@ async function probeTarget(params) {
+ 			thinkLevel: "off",
+ 			reasoningLevel: "off",
+ 			verboseLevel: "off",
+-			streamParams: { maxTokens },
++			streamParams: {
++				maxTokens,
++				maxRetries: 0
++			},
+ 			agentHarnessRuntimeOverride: "openclaw",
+ 			disableTools: true,
+ 			modelRun: true,
+diff --git a/dist/logger-DK-iouVT.js b/dist/logger-DK-iouVT.js
+index 47c8d1870a..eae78310ec 100644
+--- a/dist/logger-DK-iouVT.js
++++ b/dist/logger-DK-iouVT.js
+@@ -805,7 +805,7 @@ function buildLogger() {
+ 				time,
+ 				...fields
+ 			};
+-			const line = redactSensitiveText(JSON.stringify(redactLogRecordForTransport(record)));
++			const line = JSON.stringify(redactLogRecordForTransport(record));
+ 			fileLogTransport.enqueue({
+ 				file: activeFile,
+ 				hostname: expectDefined(fields.hostname, "structured log hostname"),
+diff --git a/dist/message-handler-BVsRq2bA.js b/dist/message-handler-BVsRq2bA.js
+index aa267ef409..0ca7cefcea 100644
+--- a/dist/message-handler-BVsRq2bA.js
++++ b/dist/message-handler-BVsRq2bA.js
+@@ -2952,6 +2952,17 @@ async function attachAuthenticatedGatewayConnect(context, state) {
+ 		} else rejectGatewayConnectOrigin(context, policyFailure.reason);
+ 		return;
+ 	}
++	const expectedControlUiVersion = process.env.RESEARCH_CLAW_UI_VERSION?.trim();
++	if (expectedControlUiVersion && connectParams.client.id === GATEWAY_CLIENT_IDS.CONTROL_UI && connectParams.client.version !== expectedControlUiVersion) {
++		logWsControl.warn(`stale Research-Claw Dashboard rejected conn=${connId} clientVersion=${formatForLog(connectParams.client.version)} expected=${formatForLog(expectedControlUiVersion)}`);
++		sendHandshakeErrorResponse("FORBIDDEN", `Research-Claw was updated to v${expectedControlUiVersion}. Refresh this page to load the current Dashboard.`, { details: {
++			code: "RESEARCH_CLAW_UI_VERSION_MISMATCH",
++			clientVersion: connectParams.client.version,
++			expectedVersion: expectedControlUiVersion
++		} });
++		close(1008, "stale Research-Claw Dashboard");
++		return;
++	}
+ 	const handoffReceiver = prepareGatewayReceiverHandoff(socket, role);
+ 	if (!handoffReceiver) {
+ 		const message = "unsupported Gateway WebSocket receiver";
+diff --git a/dist/migration-runtime-C428wS8a.js b/dist/migration-runtime-C428wS8a.js
+index 2946965936..f97a97f0ac 100644
+--- a/dist/migration-runtime-C428wS8a.js
++++ b/dist/migration-runtime-C428wS8a.js
+@@ -4,6 +4,8 @@ import { c as resolveAgentConfig, m as resolveAgentWorkspaceDir, y as resolveDef
+ import "./agent-scope-DbtJyKUL.js";
+ import { g as redactMigrationPlan, l as markMigrationItemConflict, n as MIGRATION_REASON_TARGET_EXISTS, t as MIGRATION_REASON_MISSING_SOURCE_OR_TARGET, u as markMigrationItemError } from "./migration-q6QzXKht.js";
+ import { n as assertMemoryMigrationSourceRevision, t as MAX_MEMORY_MIGRATION_FILE_BYTES } from "./memory-migration-source-DiHFL-tc.js";
++import { r as installPackageDir } from "./install-package-dir-kJK8m3kQ.js";
++import { c as scanSkillInstallSource } from "./install-security-scan-DYLR970X.js";
+ import path from "node:path";
+ import fs from "node:fs/promises";
+ import crypto from "node:crypto";
+@@ -182,6 +184,44 @@ async function copyMigrationFileItem(item, reportDir, opts = {}) {
+ 	let result = item;
+ 	try {
+ 		if (await pathExists(item.target) && !opts.overwrite) return markMigrationItemConflict(item, MIGRATION_REASON_TARGET_EXISTS);
++		if (item.kind === "skill") {
++			let stagedScanBlocked;
++			let backupPath;
++			const install = await installPackageDir({
++				sourceDir: item.source,
++				targetDir: item.target,
++				mode: opts.overwrite ? "update" : "install",
++				timeoutMs: 12e4,
++				logger: {},
++				copyErrorPrefix: "failed to migrate skill",
++				hasDeps: false,
++				depsLogMessage: "",
++				afterCopy: async (stageDir) => {
++					if (!await pathExists(path.join(stageDir, "SKILL.md"))) throw new Error("staged migration skill is missing SKILL.md");
++					const scanResult = await scanSkillInstallSource({
++						installId: item.id,
++						logger: {},
++						origin: "migration",
++						skillName: typeof item.details?.skillName === "string" ? item.details.skillName : item.id,
++						sourceDir: stageDir
++					});
++					if (scanResult?.blocked) {
++						stagedScanBlocked = scanResult.blocked;
++						throw new Error(scanResult.blocked.reason);
++					}
++					if (opts.overwrite) backupPath = await backupMigrationItemTarget(item.target, reportDir);
++				}
++			});
++			if (!install.ok) return markMigrationItemError(item, stagedScanBlocked?.reason ?? install.error);
++			return {
++				...item,
++				status: "migrated",
++				details: {
++					...item.details,
++					...backupPath ? { backupPath } : {}
++				}
++			};
++		}
+ 		const backupPath = opts.overwrite ? await backupMigrationItemTarget(item.target, reportDir) : void 0;
+ 		result = {
+ 			...item,
+diff --git a/dist/monitor-polling.runtime-BbNbRLR4.js b/dist/monitor-polling.runtime-BbNbRLR4.js
+index f3c3fb00b8..a4692fa910 100644
+--- a/dist/monitor-polling.runtime-BbNbRLR4.js
++++ b/dist/monitor-polling.runtime-BbNbRLR4.js
+@@ -430,7 +430,6 @@ var TelegramPollingSession = class {
+ 			return "ready";
+ 		} catch (err) {
+ 			if (isRecoverableTelegramNetworkError(err, { context: "unknown" })) {
+-				this.opts.log(`[telegram] deleteWebhook failed with a recoverable network error; continuing to polling so getUpdates can confirm webhook state: ${formatErrorMessage(err)}`);
+ 				return "ready";
+ 			}
+ 			return await this.#waitBeforeRetryOnRecoverableSetupError(err, "Telegram webhook cleanup failed") ? "retry" : "exit";
+diff --git a/dist/plugin-registry-Dz13uchr.js b/dist/plugin-registry-Dz13uchr.js
+index b281db6ad4..76be0acc94 100644
+--- a/dist/plugin-registry-Dz13uchr.js
++++ b/dist/plugin-registry-Dz13uchr.js
+@@ -67,7 +67,7 @@ function resolveScopePluginIds(params) {
+ function ensurePluginRegistryLoaded(options) {
+ 	const scope = options?.scope ?? "all";
+ 	const context = resolvePluginRuntimeLoadContext(options);
+-	const pluginIds = resolveScopePluginIds({
++	const pluginIds = options?.onlyPluginIds ?? resolveScopePluginIds({
+ 		scope,
+ 		context,
+ 		persistedSandboxBackendIds: options?.persistedSandboxBackendIds
+diff --git a/dist/plugin-registry-loader-RMGKX1EX.js b/dist/plugin-registry-loader-RMGKX1EX.js
+index ad95a59ba5..a7ec442142 100644
+--- a/dist/plugin-registry-loader-RMGKX1EX.js
++++ b/dist/plugin-registry-loader-RMGKX1EX.js
+@@ -22,6 +22,7 @@ async function ensureCliPluginRegistryLoaded(params) {
+ 		try {
+ 			ensurePluginRegistryLoaded({
+ 				scope: params.scope === "sandbox-management" ? "sandbox-backends" : params.scope,
++				...params.onlyPluginIds ? { onlyPluginIds: params.onlyPluginIds } : {},
+ 				...params.config ? { config: params.config } : {},
+ 				...params.activationSourceConfig ? { activationSourceConfig: params.activationSourceConfig } : {},
+ 				...persistedSandboxBackendIds ? { persistedSandboxBackendIds } : {}
+diff --git a/dist/program-q2OpIjWI.js b/dist/program-q2OpIjWI.js
+index 2007a3b394..61b1019932 100644
+--- a/dist/program-q2OpIjWI.js
++++ b/dist/program-q2OpIjWI.js
+@@ -169,14 +169,15 @@ function registerPreActionHooks(program, programVersion) {
+ 		const cliLogLevel = getCliLogLevel(actionCommand);
+ 		if (cliLogLevel) process.env.OPENCLAW_LOG_LEVEL = cliLogLevel;
+ 		if (!verbose) process.env.NODE_NO_WARNINGS ??= "1";
+-		if (isGuidedConfigAction(actionCommand) || isGuidedConfigCommandPath(commandPath)) return;
++		const bypassConfigGuard = startupPolicy.skipConfigGuard;
++		if ((isGuidedConfigAction(actionCommand) || isGuidedConfigCommandPath(commandPath)) && !startupPolicy.loadPlugins) return;
+ 		await runStateStoreGuard(commandPath);
+-		if (startupPolicy.skipConfigGuard) {
++		if (bypassConfigGuard) {
+ 			await ensureCliExecutionBootstrap({
+ 				runtime: defaultRuntime,
+ 				commandPath,
+ 				startupPolicy,
+-				skipConfigGuard: true
++				skipConfigGuard: bypassConfigGuard
+ 			});
+ 			return;
+ 		}
+diff --git a/dist/redact-BtvPPfTi.js b/dist/redact-BtvPPfTi.js
+index 8ee4c72d12..c060e52aa1 100644
+--- a/dist/redact-BtvPPfTi.js
++++ b/dist/redact-BtvPPfTi.js
+@@ -945,7 +945,7 @@ function resolvePatterns(value) {
+ 		defaultResolvedPatterns ??= DEFAULT_REDACT_PATTERNS.map(parsePattern).filter((re) => Boolean(re));
+ 		return defaultResolvedPatterns;
+ 	}
+-	return value.map(parsePattern).filter((re) => Boolean(re));
++	return [...value, ...DEFAULT_REDACT_PATTERNS].map(parsePattern).filter((re) => Boolean(re));
+ }
+ function includesDefaultRedactPatterns(value) {
+ 	if (!value || usesBuiltInRedactPatterns(value)) return true;
+diff --git a/dist/register.subclis-core-4L9HlrD9.js b/dist/register.subclis-core-4L9HlrD9.js
+index d167dfa191..94a8c7242d 100644
+--- a/dist/register.subclis-core-4L9HlrD9.js
++++ b/dist/register.subclis-core-4L9HlrD9.js
+@@ -64,7 +64,8 @@ async function registerGatewayRunOnly(program) {
+ }
+ async function registerSubCliWithPluginCommands(program, argv, registerSubCli, pluginCliPosition) {
+ 	const invocation = resolveCliArgvInvocation(argv);
+-	const shouldRegisterPluginCommands = !invocation.hasHelpOrVersion && resolveCliCommandPathPolicy(invocation.commandPath).loadPlugins !== "never";
++	const commandPolicy = resolveCliCommandPathPolicy(invocation.commandPath);
++	const shouldRegisterPluginCommands = !invocation.hasHelpOrVersion && commandPolicy.loadPlugins !== "never" && !commandPolicy.pluginRegistry.onlyPluginIds;
+ 	if (pluginCliPosition === "before" && shouldRegisterPluginCommands) {
+ 		const { registerPluginCliCommandsFromValidatedConfig } = await pluginCliLoader.load();
+ 		await registerPluginCliCommandsFromValidatedConfig(program);
+diff --git a/dist/run-executor.runtime-C1lHsRaf.js b/dist/run-executor.runtime-C1lHsRaf.js
+index 7786ba8c3d..f2c4bbb3b8 100644
+--- a/dist/run-executor.runtime-C1lHsRaf.js
++++ b/dist/run-executor.runtime-C1lHsRaf.js
+@@ -132,6 +132,7 @@ function createCronPromptExecutor(params) {
+ 	const { sourceDelivery } = params;
+ 	const sourceReplyDeliveryMode = sourceDelivery.sourceReplyDeliveryMode;
+ 	const messageChannel = sourceDelivery.target.channel ?? params.resolvedDelivery.channel;
++	let attemptedModel = false;
+ 	const allowEmptyAssistantReplyAsSilent = true;
+ 	const finalizePromptForResolvedTools = ({ prompt, messageToolAvailable }) => {
+ 		const deliveryMessageToolAvailable = sourceDelivery.messageTool.enabled && messageToolAvailable;
+@@ -279,7 +280,10 @@ function createCronPromptExecutor(params) {
+ 				});
+ 				let contextEngineTurnCandidate;
+ 				attemptMediaTaskIds = getGeneratedMediaTaskIdsForSessionKey(params.runSessionKey);
+-				if (params.abortSignal?.aborted) throw new Error(params.abortReason());
++				const deadlineFallback = attemptedModel && params.abortSignal?.aborted && params.abortReason().startsWith("cron: job execution timed out");
++				if (params.abortSignal?.aborted && !deadlineFallback) throw new Error(params.abortReason());
++				attemptedModel = true;
++				const attemptAbortSignal = deadlineFallback ? void 0 : params.abortSignal;
+ 				const sessionRuntimeOverride = resolveSessionRuntimeOverrideForProvider({
+ 					provider: providerOverride,
+ 					entry: params.cronSession.sessionEntry,
+@@ -399,7 +403,7 @@ function createCronPromptExecutor(params) {
+ 							},
+ 							toolsAllow: resolveCliRuntimeToolsAllow(params.agentPayload?.toolsAllow, params.agentPayload?.toolsAllowIsDefault),
+ 							scheduledToolPolicy,
+-							abortSignal: params.abortSignal,
++							abortSignal: attemptAbortSignal,
+ 							onExecutionStarted: notifyExecutionStarted,
+ 							onExecutionPhase: notifyExecutionPhase,
+ 							bootstrapContextMode,
+@@ -525,7 +529,7 @@ function createCronPromptExecutor(params) {
+ 					onContextEngineTurnCandidate: (facts) => {
+ 						contextEngineTurnCandidate = facts;
+ 					},
+-					abortSignal: params.abortSignal,
++					abortSignal: attemptAbortSignal,
+ 					onExecutionStarted: notifyExecutionStarted,
+ 					onExecutionPhase: notifyExecutionPhase,
+ 					onLaneWait: params.onLaneWait,
+diff --git a/dist/scanner-CMssQG9x.js b/dist/scanner-CMssQG9x.js
+index 1cf4e3c5e3..9bcd2166e8 100644
+--- a/dist/scanner-CMssQG9x.js
++++ b/dist/scanner-CMssQG9x.js
+@@ -139,19 +139,19 @@ const SKILL_CONTENT_RULES = [
+ 		ruleId: "prompt-injection-ignore-instructions",
+ 		severity: "critical",
+ 		message: "Prompt-injection wording attempts to override higher-priority instructions",
+-		pattern: /\bignore\s+(?:(?:all|any)\s+)?(?:previous|above|prior|all|any)\s+instructions\b/i
++		pattern: /ignore (all|any|previous|above|prior) instructions|(?:忽略|无视|覆盖|绕过|替换).{0,20}(?:此前|之前|以上|上面|先前|所有).{0,20}(?:指令|指示|规则|要求)/iu
+ 	},
+ 	{
+ 		ruleId: "prompt-injection-system",
+ 		severity: "critical",
+ 		message: "Skill text references hidden prompt layers",
+-		pattern: /\b(?:system\s+prompt|developer\s+message|hidden\s+instructions)\b/i
++		pattern: /\b(?:reveal|show|print|display|expose|disclose|extract|access|read|override|replace|change|modify|leak)\b.{0,80}\b(?:system prompt|developer message|hidden instructions)\b|\b(?:system prompt|developer message|hidden instructions)\b.{0,80}\b(?:reveal|show|print|display|expose|disclose|extract|access|read|override|replace|change|modify|leak)\b|(?:输出|泄露|显示|揭示|打印|暴露|提取|读取|访问|覆盖|替换|修改).{0,40}(?:系统提示词|系统提示|开发者消息|开发者指令|隐藏指令)|(?:系统提示词|系统提示|开发者消息|开发者指令|隐藏指令).{0,40}(?:输出|泄露|显示|揭示|打印|暴露|提取|读取|访问|覆盖|替换|修改)/iu
+ 	},
+ 	{
+ 		ruleId: "prompt-injection-tool",
+ 		severity: "critical",
+ 		message: "Skill text encourages bypassing tool approval",
+-		pattern: /\b(run|execute|invoke|call)\b[\s\S]{0,50}\btool\b[\s\S]{0,50}\bwithout\b[\s\S]{0,30}\b(permission|approval)/i
++		pattern: /\b(run|execute|invoke|call)\b.{0,50}\btool\b.{0,50}\bwithout\b.{0,30}\b(permission|approval)|(?:未经|无需|不经|绕过).{0,15}(?:许可|批准|授权|确认).{0,30}(?:调用|运行|执行|使用).{0,20}(?:工具|tool)|(?:调用|运行|执行|使用).{0,20}(?:工具|tool).{0,30}(?:无需|不需|不用|绕过).{0,15}(?:许可|批准|授权|确认)/iu
+ 	},
+ 	{
+ 		ruleId: "shell-pipe-to-shell",
+diff --git a/dist/server-channels-D39cmOPC.js b/dist/server-channels-D39cmOPC.js
+index 3752f37583..31d6b9a232 100644
+--- a/dist/server-channels-D39cmOPC.js
++++ b/dist/server-channels-D39cmOPC.js
+@@ -724,7 +724,8 @@ function createChannelManager(opts) {
+ 							lastError: message,
+ 							...isChannelIngressUnavailableError(err) ? { ingressUnavailable: true } : {}
+ 						});
+-						log.error?.(`[${id}] channel exited: ${message}`);
++						if (/fetch failed|network (?:request )?failed|network error|econn(?:reset|refused|aborted)|enet(?:unreach|reset)|ehostunreach|enotfound|eai_again|etimedout|timeout|socket hang up/i.test(message)) log.debug?.(`[${id}] channel disconnected; recovery pending: ${message}`);
++						else log.error?.(`[${id}] channel exited: ${message}`);
+ 					}).then(async () => {
+ 						await cleanupTaskScopedApprovalRuntime("channel cleanup failed");
+ 						if (!isCurrentTask() || store.stops.has(id) || opts.isClosing?.()) return;
+@@ -785,7 +786,7 @@ function createChannelManager(opts) {
+ 							log.error?.(`[${id}] giving up after ${MAX_RESTARTS} restart attempts`);
+ 							return;
+ 						}
+-						log.info?.(`[${id}] auto-restart attempt ${restart.attempts}/${MAX_RESTARTS} in ${Math.round(retry.delayMs / 1e3)}s`);
++						log.debug?.(`[${id}] auto-restart attempt ${restart.attempts}/${MAX_RESTARTS} in ${Math.round(retry.delayMs / 1e3)}s`);
+ 						setRuntime(channelId, id, {
+ 							accountId: id,
+ 							restartPending: true,
+@@ -924,7 +925,7 @@ function createChannelManager(opts) {
+ 					capabilityLease?.revoke();
+ 				}
+ 				const stoppedCleanly = await waitForChannelStopGracefully(task, CHANNEL_STOP_ABORT_TIMEOUT_MS);
+-				if (!stoppedCleanly) log.warn?.(`[${id}] channel stop exceeded ${CHANNEL_STOP_ABORT_TIMEOUT_MS}ms after abort; continuing shutdown`);
++				if (!stoppedCleanly) (manual ? log.warn : log.debug)?.(`[${id}] channel stop exceeded ${CHANNEL_STOP_ABORT_TIMEOUT_MS}ms after abort; continuing shutdown`);
+ 				if (outcome.status === "rejected") {
+ 					recoveryStopTimedOut.delete(rKey);
+ 					recoveryStartRequested.delete(rKey);
+diff --git a/dist/server-runtime-startup-services-CrdkNCOa.js b/dist/server-runtime-startup-services-CrdkNCOa.js
+index 33f9d0d286..69186e98ad 100644
+--- a/dist/server-runtime-startup-services-CrdkNCOa.js
++++ b/dist/server-runtime-startup-services-CrdkNCOa.js
+@@ -87,7 +87,7 @@ function startChannelHealthMonitor(deps) {
+ 						continue;
+ 					}
+ 					const reason = resolveChannelRestartReason(status, health);
+-					log.info?.(`[${channelId}:${accountId}] health-monitor: restarting (reason: ${reason})`);
++					log.debug?.(`[${channelId}:${accountId}] health-monitor: restarting (reason: ${reason})`);
+ 					if (continuingPendingRestart) record.pendingContinuationUsed = true;
+ 					else {
+ 						record.lastRestartAt = now;
+diff --git a/dist/service-BrQv9Q2Z.js b/dist/service-BrQv9Q2Z.js
+index 94ff2e1421..efb35a944d 100644
+--- a/dist/service-BrQv9Q2Z.js
++++ b/dist/service-BrQv9Q2Z.js
+@@ -11,8 +11,10 @@ import { A as normalizeSkillProposalCorrelationId, D as createSkillProposalEvent
+ import { c as markSkillProposalStale, d as scanProposalBundle, f as buildSkillProposalEvaluationBundles, i as readRequiredProposal, l as withSkillProposalLifecycleDispatch, o as applySkillProposalTransition, p as readSkillProposalTargetTreeSha256, s as assertSkillProposalSupportTargetUnchanged, u as assertProposalContainsNoLiteralSecrets } from "./service-query-BE6QjUM_.js";
+ import { n as resolveSkillStatusEntry, t as buildWorkspaceSkillStatus } from "./status-BDd5nSbi.js";
+ import { t as assertWritableSkillTarget } from "./workspace-skill-read-BqPGLySo.js";
++import { c as scanSkillInstallSource } from "./install-security-scan-DYLR970X.js";
+ import path from "node:path";
+ import fs from "node:fs/promises";
++import os from "node:os";
+ import { randomUUID } from "node:crypto";
+ //#region src/skills/workshop/proposal-draft.ts
+ const MAX_PROPOSAL_DRAFT_BYTES = 1048576;
+@@ -661,6 +663,7 @@ function proposalStoreOptions(env) {
+ }
+ const APPLY_TRANSITION_DEPENDENCIES = {
+ 	assertExpectedRevisionHash,
++	assertSkillProposalInstallScan,
+ 	evaluateSkillProposal,
+ 	isCreateTargetConflict: (error) => error instanceof SkillProposalCreateTargetConflictError,
+ 	readRequiredProposal
+@@ -771,6 +774,46 @@ async function quarantineSkillProposal(input) {
+ async function applySkillProposal(input) {
+ 	return await applySkillProposalTransition(input, APPLY_TRANSITION_DEPENDENCIES);
+ }
++async function assertSkillProposalInstallScan(params) {
++	const stagingParent = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-skill-workshop-scan-"));
++	const sourceDir = path.join(stagingParent, "proposal");
++	try {
++		await fs.mkdir(sourceDir, { recursive: true });
++		await fs.writeFile(path.join(sourceDir, "SKILL.md"), params.skillContent, "utf8");
++		for (const file of params.supportFiles ?? []) {
++			const target = path.join(sourceDir, file.path);
++			await fs.mkdir(path.dirname(target), { recursive: true });
++			await fs.writeFile(target, file.content, "utf8");
++		}
++		const result = await scanSkillInstallSource({
++			installId: params.record.id,
++			logger: {},
++			origin: "skill-workshop",
++			skillName: params.record.target.skillKey,
++			sourceDir
++		});
++		if (!result?.blocked) return;
++		const now = (/* @__PURE__ */ new Date()).toISOString();
++		await updateSkillProposalRecord({ record: {
++			...params.record,
++			status: "quarantined",
++			updatedAt: now,
++			quarantinedAt: now,
++			scan: {
++				...params.record.scan,
++				state: "quarantined",
++				scannedAt: now
++			},
++			statusReason: result.blocked.reason
++		}, store: proposalStoreOptions(params.env) });
++		throw new Error(`Proposal install scan failed; proposal was quarantined: ${result.blocked.reason}`);
++	} finally {
++		await fs.rm(stagingParent, {
++			recursive: true,
++			force: true
++		});
++	}
++}
+ async function markProposal(input, status) {
+ 	const scope = {
+ 		...input.agentId ? { agentId: input.agentId } : {},
+diff --git a/dist/service-CWPJ5f9M.js b/dist/service-CWPJ5f9M.js
+index 6a1dad7983..817aee5edb 100644
+--- a/dist/service-CWPJ5f9M.js
++++ b/dist/service-CWPJ5f9M.js
+@@ -2462,7 +2462,7 @@ async function executeDetachedCronJob(state, job, abortSignal, options) {
+ 		onLaneWait: options?.onLaneWait,
+ 		executionIdentity: options?.executionIdentity
+ 	});
+-	if (abortSignal?.aborted) return interrupted();
++	if (abortSignal?.aborted && res.status !== "ok") return interrupted();
+ 	return {
+ 		status: res.status,
+ 		error: res.error,
+@@ -2813,7 +2813,14 @@ async function executeJobCoreWithTimeoutUnfinalized(state, job, opts) {
+ 				operatorCancellation.promise
+ 			]);
+ 			if (first === operatorCancellationMarker) return await createInterruptionOutcome("cancelled", watchdog?.activeExecution() ?? untimedExecution);
+-			return "status" in first ? first : await createInterruptionOutcome(first, watchdog?.activeExecution(), watchdog);
++			if ("status" in first) return first;
++			let fallbackGraceTimer;
++			const afterDeadline = await Promise.race([runPromise, new Promise((resolve) => {
++				fallbackGraceTimer = setTimeout(() => resolve(first), Math.max(first.timeoutMs ?? 0, 2e4));
++			})]);
++			if (fallbackGraceTimer) clearTimeout(fallbackGraceTimer);
++			if ("status" in afterDeadline) return afterDeadline;
++			return await createInterruptionOutcome(first, watchdog?.activeExecution(), watchdog);
+ 		} finally {
+ 			watchdog?.dispose();
+ 		}
+diff --git a/dist/service-query-BE6QjUM_.js b/dist/service-query-BE6QjUM_.js
+index f207e5c277..2dc6b5ccfa 100644
+--- a/dist/service-query-BE6QjUM_.js
++++ b/dist/service-query-BE6QjUM_.js
+@@ -238,6 +238,13 @@ async function applySkillProposalTransition(input, dependencies) {
+ 		if (hashSkillProposalContent(content) !== record.draftHash) throw new Error("Proposal draft changed without updating proposal metadata.");
+ 		const supportFiles = read.supportFiles ?? [];
+ 		if (!readProposalFrontmatter(content)) throw new Error("Proposal draft must include proposal frontmatter.");
++		const skillContent = stripProposalFrontmatterForSkill(content);
++		await dependencies.assertSkillProposalInstallScan({
++			record,
++			skillContent,
++			supportFiles,
++			env: input.env
++		});
+ 		const scan = scanProposalBundle(content, supportFiles);
+ 		if (scan.state !== "clean") await quarantineSkillProposalAfterScan({
+ 			input,
+@@ -267,7 +274,7 @@ async function applySkillProposalTransition(input, dependencies) {
+ 			workspaceDir: input.workspaceDir,
+ 			skillDir: record.target.skillDir,
+ 			skillFile: record.target.skillFile,
+-			content: stripProposalFrontmatterForSkill(content),
++			content: skillContent,
+ 			supportFiles,
+ 			mode: record.kind,
+ 			symlinkPolicy
+diff --git a/dist/session-transcript-readers-CYDRQsH5.js b/dist/session-transcript-readers-CYDRQsH5.js
+index f82b682f46..73f6a8097a 100644
+--- a/dist/session-transcript-readers-CYDRQsH5.js
++++ b/dist/session-transcript-readers-CYDRQsH5.js
+@@ -1202,6 +1202,7 @@ function shouldHideProjectedHistoryMessage(message, roleContent, heartbeatUser)
+ 	if (isDisplayHiddenProjectedMessage(message)) return true;
+ 	if (isProjectedSessionsSendForwardedMessage(message)) return false;
+ 	if (!roleContent) return false;
++	if (roleContent.role === "toolResult" || roleContent.role === "tool") return true;
+ 	if (roleContent.role === "user" && isCompletionReportInputProvenance(message.provenance)) return true;
+ 	if (roleContent.role === "user" && isSubagentAnnounceInterSessionUserMessage(message)) return true;
+ 	if (roleContent.role === "user" && isEmptyTextOnlyContent(message.content ?? message.text) && !hasTranscriptMediaFacts(message)) return true;
+diff --git a/dist/skill-index-BgtIQy35.js b/dist/skill-index-BgtIQy35.js
+index d15dbad72b..de441c79de 100644
+--- a/dist/skill-index-BgtIQy35.js
++++ b/dist/skill-index-BgtIQy35.js
+@@ -3,7 +3,11 @@ import { t as resolveSkillSource } from "./source-0ivX3dtK.js";
+ //#region src/skills/discovery/skill-index.ts
+ /** Normalizes a skill name to the comparable key used by filters and commands. */
+ function normalizeSkillIndexName(value) {
+-	return value.trim().toLowerCase().replace(/[\s_/]+/g, "-").replace(/[^a-z0-9-]+/g, "").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
++	const collapsed = value.trim().toLowerCase().replace(/[\s_/]+/g, "-");
++	const ascii = collapsed.replace(/[^a-z0-9-]+/g, "").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
++	if (ascii) return ascii;
++	const unicode = collapsed.replace(/[^\p{L}\p{N}-]+/gu, "").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
++	return unicode;
+ }
+ function isSkillRuntimeVisible(entry) {
+ 	return entry.exposure?.includeInRuntimeRegistry ?? true;
+diff --git a/dist/skills-DhGKzAj7.js b/dist/skills-DhGKzAj7.js
+index a20e1b718e..a9ec52da2b 100644
+--- a/dist/skills-DhGKzAj7.js
++++ b/dist/skills-DhGKzAj7.js
+@@ -1,10 +1,11 @@
+ import { r as truncateUtf16Safe } from "./utf16-slice-D_ngcYKd.js";
+ import { l as markMigrationItemConflict, n as MIGRATION_REASON_TARGET_EXISTS, o as createMigrationItem, t as MIGRATION_REASON_MISSING_SOURCE_OR_TARGET, u as markMigrationItemError } from "./migration-q6QzXKht.js";
+-import { n as backupMigrationItemTarget } from "./migration-runtime-C428wS8a.js";
++import { n as backupMigrationItemTarget, i as copyMigrationFileItem } from "./migration-runtime-C428wS8a.js";
+ import "./text-utility-runtime-BjzvUG99.js";
+ import { r as exists, s as sanitizeName } from "./helpers-CpgMg4fg.js";
+ import path from "node:path";
+ import fs from "node:fs/promises";
++import os from "node:os";
+ //#region extensions/migrate-claude/skills.ts
+ async function listMarkdownFiles(root) {
+ 	const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+@@ -104,7 +105,7 @@ function generatedCommandSkillContent(params) {
+ }
+ async function applyGeneratedSkillItem(item, reportDir, opts = {}) {
+ 	if (!item.source || !item.target) return markMigrationItemError(item, MIGRATION_REASON_MISSING_SOURCE_OR_TARGET);
+-	let result = item;
++	let stagingRoot;
+ 	try {
+ 		const targetExists = await exists(item.target);
+ 		if (targetExists && !opts.overwrite) return markMigrationItemConflict(item, MIGRATION_REASON_TARGET_EXISTS);
+@@ -114,22 +115,28 @@ async function applyGeneratedSkillItem(item, reportDir, opts = {}) {
+ 			sourceLabel,
+ 			commandContent: await fs.readFile(item.source, "utf8")
+ 		});
+-		const backupPath = targetExists ? await backupMigrationItemTarget(item.target, reportDir, { dereference: true }) : void 0;
+-		result = {
++		stagingRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-migration-skill-"));
++		const sourceDir = path.join(stagingRoot, "source");
++		await fs.mkdir(sourceDir, { recursive: true });
++		await fs.writeFile(path.join(sourceDir, "SKILL.md"), content, "utf8");
++		const migrated = await copyMigrationFileItem({
+ 			...item,
+-			details: {
+-				...item.details,
+-				...backupPath ? { backupPath } : {}
+-			}
+-		};
+-		await fs.mkdir(item.target, { recursive: true });
+-		await fs.writeFile(path.join(item.target, "SKILL.md"), content, "utf8");
++			source: sourceDir
++		}, reportDir ?? path.join(stagingRoot, "report"), {
++			overwrite: opts.overwrite
++		});
+ 		return {
+-			...result,
+-			status: "migrated"
++			...migrated,
++			source: item.source,
++			action: item.action
+ 		};
+ 	} catch (err) {
+-		return markMigrationItemError(result, err instanceof Error ? err.message : String(err));
++		return markMigrationItemError(item, err instanceof Error ? err.message : String(err));
++	} finally {
++		if (stagingRoot) await fs.rm(stagingRoot, {
++			recursive: true,
++			force: true
++		}).catch(() => void 0);
+ 	}
+ }
+ //#endregion
+diff --git a/dist/store-X7p_X4MX.js b/dist/store-X7p_X4MX.js
+index 9fc8b010aa..e8b5eff5ec 100644
+--- a/dist/store-X7p_X4MX.js
++++ b/dist/store-X7p_X4MX.js
+@@ -710,7 +710,11 @@ const MAX_PROPOSAL_BYTES = 1048576;
+ const MAX_PROPOSAL_SUPPORT_FILES_TOTAL_BYTES = 2097152;
+ /** Creates a stable proposal id from skill name, date, and random suffix. */
+ function createSkillProposalId(name, now = /* @__PURE__ */ new Date()) {
+-	const normalized = normalizeSkillIndexName(name) || "skill";
++	let normalized = normalizeSkillIndexName(name);
++	if (!normalized || !/^[a-z0-9]/.test(normalized)) {
++		const digest = crypto.createHash("sha256").update(name.trim()).digest("hex").slice(0, 12);
++		normalized = `skill-${digest}`;
++	}
+ 	const date = now.toISOString().slice(0, 10).replaceAll("-", "");
+ 	const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 10);
+ 	return `${normalized.slice(0, 60)}-${date}-${suffix}`;
+diff --git a/dist/workspace-ConDEamr.js b/dist/workspace-ConDEamr.js
+index 51194619fc..1db8ee2b56 100644
+--- a/dist/workspace-ConDEamr.js
++++ b/dist/workspace-ConDEamr.js
+@@ -750,32 +750,37 @@ async function ensureAgentWorkspace(params) {
+ 		identityPathCreated
+ 	};
+ }
++function resolveBootstrapFilePath(resolvedDir, name) {
++	const rcPath = path.join(resolvedDir, ".ResearchClaw", name);
++	try { fs.accessSync(rcPath, fs.constants.F_OK); return rcPath; } catch { return path.join(resolvedDir, name); }
++}
++
+ async function loadWorkspaceBootstrapFiles(dir) {
+ 	const resolvedDir = resolveUserPath(dir);
+ 	const entries = [
+ 		{
+ 			name: DEFAULT_AGENTS_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_AGENTS_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_AGENTS_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_SOUL_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_SOUL_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_SOUL_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_IDENTITY_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_IDENTITY_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_IDENTITY_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_USER_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_USER_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_USER_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_BOOTSTRAP_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_BOOTSTRAP_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_BOOTSTRAP_FILENAME)
+ 		},
+ 		{
+ 			name: DEFAULT_MEMORY_FILENAME,
+-			filePath: path.join(resolvedDir, DEFAULT_MEMORY_FILENAME)
++			filePath: resolveBootstrapFilePath(resolvedDir, DEFAULT_MEMORY_FILENAME)
+ 		}
+ 	];
+ 	const result = [];

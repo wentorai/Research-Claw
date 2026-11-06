@@ -5,12 +5,17 @@
  * systemPromptReport is the independent truth for tools and skills actually
  * mounted into a completed agent run. The skills CLI supplies the independent
  * full set of eligible, model-visible skills before prompt-budget truncation.
+ *
+ * Since OpenClaw 2026.9.2 the report is persisted in the per-agent SQLite
+ * session store (`<state>/agents/<agent>/agent/openclaw-agent.sqlite`, table
+ * `session_nodes`, column `entry_json`); the legacy `sessions.json` is
+ * migration input only and is rejected by the gateway while it exists.
  */
 
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import type { ProbeInput } from './activation-probe.js';
 
 export interface SkillsCliEntry {
@@ -281,6 +286,31 @@ function expandHome(filePath: string): string {
   return filePath;
 }
 
+/**
+ * OpenClaw 2026.9.2 derives the per-agent SQLite database from a configured
+ * legacy store path (config/sessions/session-sqlite-target.ts,
+ * `resolveUnsuffixedSqliteTargetFromSessionStorePath`). Existing configs still
+ * name `sessions.json`, so map such a value to the database the gateway
+ * actually writes instead of opening a file that only exists as migration
+ * input.
+ */
+function resolveSqliteStorePath(storePath: string): string {
+  if (storePath.endsWith('.sqlite')) return storePath;
+  const sessionsDir = path.dirname(storePath);
+  if (path.basename(storePath) !== 'sessions.json') {
+    const baseName = path.basename(storePath, path.extname(storePath)) || 'openclaw-agent';
+    return path.join(sessionsDir, `${baseName}.sqlite`);
+  }
+  if (path.basename(sessionsDir) !== 'sessions') {
+    return path.join(sessionsDir, 'openclaw-agent.sqlite');
+  }
+  const agentDir = path.dirname(sessionsDir);
+  if (path.basename(path.dirname(agentDir)) !== 'agents') {
+    return path.join(sessionsDir, 'openclaw-agent.sqlite');
+  }
+  return path.join(agentDir, 'agent', 'openclaw-agent.sqlite');
+}
+
 export function resolveSessionStorePath(input: {
   stateDir: string;
   agentId: string;
@@ -288,9 +318,11 @@ export function resolveSessionStorePath(input: {
 }): string {
   const configured = input.configuredStore?.trim();
   if (!configured) {
-    return path.join(input.stateDir, 'agents', input.agentId, 'sessions', 'sessions.json');
+    return path.join(input.stateDir, 'agents', input.agentId, 'agent', 'openclaw-agent.sqlite');
   }
-  return path.resolve(expandHome(configured.replaceAll('{agentId}', input.agentId)));
+  return resolveSqliteStorePath(
+    path.resolve(expandHome(configured.replaceAll('{agentId}', input.agentId))),
+  );
 }
 
 function isSystemPromptReport(value: unknown): value is SystemPromptReportLike {
@@ -308,6 +340,21 @@ function isSystemPromptReport(value: unknown): value is SystemPromptReportLike {
   );
 }
 
+/**
+ * `session_nodes.entry_json` holds the whole session entry — the same object
+ * the legacy store held — so the report sits under `systemPromptReport` one
+ * level down from the row.
+ */
+function parseEntryPromptReport(entryJson: unknown): unknown {
+  if (typeof entryJson !== 'string') return undefined;
+  try {
+    const entry: unknown = JSON.parse(entryJson);
+    return isRecord(entry) ? entry.systemPromptReport : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function readSessionPromptReport(input: {
   stateDir: string;
   agentId: string;
@@ -315,28 +362,42 @@ export function readSessionPromptReport(input: {
   configuredStore?: string;
 }): SystemPromptReportLike | null {
   const storePath = resolveSessionStorePath(input);
-  let parsed: unknown;
+  let database: DatabaseSync | undefined;
   try {
-    parsed = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+    // One read-only handle per call: the caller polls while the gateway may be
+    // mid-checkpoint, so a fresh handle each time keeps a busy or half-written
+    // store from wedging the reader.
+    database = new DatabaseSync(storePath, { readOnly: true });
+    // A requested session must resolve to its OWN report. Falling back to the
+    // newest report across all sessions would let a concurrent isolated run —
+    // which answers to a different tool policy — be audited as if it were this
+    // session, during the window before this run's report is persisted.
+    if (input.sessionKey) {
+      const row = database
+        .prepare('SELECT entry_json FROM session_nodes WHERE session_key = ?')
+        .get(input.sessionKey);
+      const requested = parseEntryPromptReport(row?.entry_json);
+      return isSystemPromptReport(requested) ? requested : null;
+    }
+    const reports = database
+      .prepare('SELECT entry_json FROM session_nodes')
+      .all()
+      .map((row) => parseEntryPromptReport(row.entry_json))
+      .filter(isSystemPromptReport)
+      .filter((report) => report.source === 'run')
+      .sort((a, b) => b.generatedAt - a.generatedAt);
+    return reports[0] ?? null;
   } catch {
+    // The database is not created yet, is mid-checkpoint, or the run has not
+    // persisted its entry. The caller polls until its deadline.
     return null;
+  } finally {
+    try {
+      database?.close();
+    } catch {
+      // A half-open handle is harmless here; the next poll opens a fresh one.
+    }
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-  const entries = parsed as Record<string, { systemPromptReport?: unknown } | undefined>;
-  // A requested session must resolve to its OWN report. Falling back to the
-  // newest report across all sessions would let a concurrent isolated run —
-  // which answers to a different tool policy — be audited as if it were this
-  // session, during the window before this run's report is persisted.
-  if (input.sessionKey) {
-    const requested = entries[input.sessionKey]?.systemPromptReport;
-    return isSystemPromptReport(requested) ? requested : null;
-  }
-  const reports = Object.values(entries)
-    .map((entry) => entry?.systemPromptReport)
-    .filter(isSystemPromptReport)
-    .filter((report) => report.source === 'run')
-    .sort((a, b) => b.generatedAt - a.generatedAt);
-  return reports[0] ?? null;
 }
 
 function parseSkillsCliReport(raw: string): SkillsCliReport {

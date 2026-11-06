@@ -3,29 +3,29 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const PATCH = fs.readFileSync(path.join(ROOT, 'patches', 'openclaw@2026.6.1.patch'), 'utf8');
+const PATCH = fs.readFileSync(path.join(ROOT, 'patches', 'openclaw@2026.9.2.patch'), 'utf8');
 const RUNTIME_SCHEMA = path.join(
   ROOT,
   'node_modules',
   'openclaw',
   'dist',
-  'runtime-schema-CoGt090u.js',
+  'runtime-schema-D3-BdLtQ.js',
 );
 
 describe('Research-Claw sensitive schema log policy', () => {
   it('does not enumerate heuristic sensitive field names in local runtime logs', () => {
     const installedRuntime = fs.readFileSync(RUNTIME_SCHEMA, 'utf8');
-
     expect(installedRuntime).not.toContain('possibly sensitive key found');
-    expect(PATCH).toContain('-\telse if (isSensitiveConfigPath(path)');
-    expect(PATCH).toContain('do not enumerate heuristic field-name matches');
+    // 2026.9.2 already dropped the heuristic debug line, so the patch carries no
+    // schema hunk any more and the invariant is asserted on the runtime above.
+    expect(PATCH).not.toContain('possibly sensitive key found');
   });
 
   it('retains explicit sensitive hints used to mask configuration values', async () => {
-    const { n: readBestEffortRuntimeConfigSchema } = await import(
-      '../node_modules/openclaw/dist/runtime-schema-CoGt090u.js'
+    const { r: readBestEffortRuntimeConfigSchema } = await import(
+      '../node_modules/openclaw/dist/runtime-schema-D3-BdLtQ.js'
     ) as unknown as {
-      n: () => Promise<{ uiHints?: Record<string, { sensitive?: boolean }> }>;
+      r: () => Promise<{ uiHints?: Record<string, { sensitive?: boolean }> }>;
     };
 
     const result = await readBestEffortRuntimeConfigSchema();

@@ -101,9 +101,12 @@ function resolveBootstrapFilePath(resolvedDir, name) {\
     sed -i '' "s/filePath: path\.join(resolvedDir, ${CONST})/filePath: resolveBootstrapFilePath(resolvedDir, ${CONST})/g" "$CHUNK"
   done
 
+  # 2026.9.2 exposes six default bootstrap files (agents, soul, identity, user,
+  # bootstrap, memory); the tools and heartbeat entries were dropped upstream.
+  EXPECTED_BOOTSTRAP_ENTRIES=6
   COUNT=$(grep -c "resolveBootstrapFilePath" "$CHUNK")
-  echo "  $BASENAME: $COUNT occurrences (expect 9 = 1 def + 8 calls)"
-  if [ "$COUNT" -lt 8 ]; then
+  echo "  $BASENAME: $COUNT occurrences (expect $((EXPECTED_BOOTSTRAP_ENTRIES + 1)) = 1 def + $EXPECTED_BOOTSTRAP_ENTRIES calls)"
+  if [ "$COUNT" -lt "$EXPECTED_BOOTSTRAP_ENTRIES" ]; then
     echo "  WARNING: unexpected count in $BASENAME! Manual review needed."
   fi
 done
@@ -116,7 +119,7 @@ fi
 echo "  Patched $CHUNK_COUNT workspace chunks."
 
 # ── 7. Chat history: hide tool/toolResult from dashboard window ───
-PROJECTION_FILE=$(find "$EDIT_DIR/dist" -name 'chat-display-projection-*.js' | head -1)
+PROJECTION_FILE=$(grep -rl 'function shouldHideProjectedHistoryMessage' "$EDIT_DIR/dist" --include='*.js' 2>/dev/null | head -1)
 if [ -n "$PROJECTION_FILE" ] && [ -f "$PROJECTION_FILE" ]; then
   echo "Applying chat history toolResult filter to $(basename "$PROJECTION_FILE") ..."
   if ! grep -q 'roleContent.role === "toolResult"' "$PROJECTION_FILE"; then
@@ -124,12 +127,12 @@ if [ -n "$PROJECTION_FILE" ] && [ -f "$PROJECTION_FILE" ]; then
 	if (roleContent.role === "toolResult" || roleContent.role === "tool") return true;/' "$PROJECTION_FILE"
   fi
   if grep -q 'roleContent.role === "toolResult"' "$PROJECTION_FILE"; then
-    echo "  chat-display-projection: toolResult filter OK"
+    echo "  $(basename "$PROJECTION_FILE"): toolResult filter OK"
   else
     echo "  WARNING: toolResult filter not applied — manual review needed"
   fi
 else
-  echo "  WARNING: chat-display-projection chunk not found; skipping history filter"
+  echo "  WARNING: transcript-readers chunk not found; skipping history filter"
 fi
 
 # ── 8. Commit patch ───────────────────────────────────────────────
@@ -162,9 +165,10 @@ for f in node_modules/openclaw/dist/workspace-*.js; do
   echo "  Bootstrap in $(basename "$f"): $BC"
 done
 
-if [ -f "node_modules/openclaw/dist/chat-display-projection-CMTVNdR4.js" ]; then
-  TC=$(grep -c 'roleContent.role === "toolResult"' node_modules/openclaw/dist/chat-display-projection-CMTVNdR4.js 2>/dev/null || echo 0)
-  echo "  Chat history filter: $TC (expect >=1)"
+PROJECTION_INSTALLED=$(grep -rl 'function shouldHideProjectedHistoryMessage' node_modules/openclaw/dist --include='*.js' 2>/dev/null | head -1)
+if [ -n "$PROJECTION_INSTALLED" ]; then
+  TC=$(grep -c 'roleContent.role === "toolResult"' "$PROJECTION_INSTALLED" 2>/dev/null || echo 0)
+  echo "  Chat history filter in $(basename "$PROJECTION_INSTALLED"): $TC (expect >=1)"
 fi
 
 node node_modules/openclaw/dist/entry.js --version 2>/dev/null | head -1 || true

@@ -69,7 +69,7 @@ function waitForExit(child: ReturnType<typeof spawn>) {
   });
 }
 
-describe('OpenClaw 2026.6.1 peripherals policy cold-start contract', () => {
+describe('OpenClaw 2026.9.2 peripherals policy cold-start contract', () => {
   it('removes and restores peripheral runtime surfaces across complete restarts', async () => {
     const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-t07-full-probe-test-'));
     let raw: string;
@@ -81,7 +81,10 @@ describe('OpenClaw 2026.6.1 peripherals policy cold-start contract', () => {
       const result = await execFileAsync(
         process.execPath,
         [PROBE],
-        { cwd: ROOT, encoding: 'utf8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024, env },
+        // 2026.9.2 compiles the Core plugin from TypeScript source at every
+        // cold Gateway start, so three restart states need more than the
+        // legacy 300 s budget; the probe itself keeps per-worker deadlines.
+        { cwd: ROOT, encoding: 'utf8', timeout: 540_000, maxBuffer: 10 * 1024 * 1024, env },
       );
       raw = result.stdout;
     } finally {
@@ -118,7 +121,7 @@ describe('OpenClaw 2026.6.1 peripherals policy cold-start contract', () => {
       }>;
     };
 
-    expect(result.openClawVersion).toBe('2026.6.1');
+    expect(result.openClawVersion).toBe('2026.9.2');
     expect(result.coldRestartSequence).toEqual(['enabled', 'disabled', 'enabled-hidden']);
     const [enabled, disabled, reenabled] = result.results;
     expect(enabled).toMatchObject({
@@ -165,7 +168,7 @@ describe('OpenClaw 2026.6.1 peripherals policy cold-start contract', () => {
         gatewayForwardedCredentialOrProxyEnvNames: [], homeStateAndTmpUnderMkdtemp: true,
       },
     ]);
-  }, 310_000);
+  }, 550_000);
 
   it('documents that Core policy alone cannot suppress OpenClaw bundled Plaud MCP tools', async () => {
     const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-t07-plaud-boundary-test-'));
@@ -176,7 +179,7 @@ describe('OpenClaw 2026.6.1 peripherals policy cold-start contract', () => {
         {
           cwd: ROOT,
           encoding: 'utf8',
-          timeout: 90_000,
+          timeout: 180_000,
           maxBuffer: 10 * 1024 * 1024,
           env: isolatedTempEnv(sandbox, { RC_T07_PROBE_INCLUDE_PLAUD_MCP: '1' }),
         },
@@ -210,7 +213,7 @@ describe('OpenClaw 2026.6.1 peripherals policy cold-start contract', () => {
     } finally {
       fs.rmSync(sandbox, { recursive: true, force: true });
     }
-  }, 100_000);
+  }, 190_000);
 
   it.skipIf(process.platform === 'win32')('cleans Gateway/provider/state after SIGINT and SIGTERM', async () => {
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {

@@ -30,7 +30,7 @@ describe('Bootstrap Capsule same-instance product E2E', () => {
     });
     const result = JSON.parse(raw) as any;
 
-    expect(result.openClawVersion).toBe('2026.6.1');
+    expect(result.openClawVersion).toBe('2026.9.2');
     expect(result.transaction.initial).toEqual([
       'staged', 'applied', 'real-config-valid', 'runtime-verified', 'verified', 'committed',
     ]);

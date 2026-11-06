@@ -78,7 +78,7 @@ describe('thermoelectric-user-a Profile Pack', () => {
 
     const productPolicyCapture = JSON.parse(fs.readFileSync(path.join(
       ROOT,
-      'dashboard/src/__fixtures__/gateway-payloads/product-policy-custom.config-get-2026.6.1.json',
+      'dashboard/src/__fixtures__/gateway-payloads/product-policy-custom.config-get-2026.9.2.json',
     ), 'utf8')) as Record<string, any>;
     expect(productPolicyCapture.response.config.plugins.entries['research-claw-core']
       .config.productPolicy.capabilities).toEqual(capsule.policy.capabilities);
@@ -97,7 +97,7 @@ describe('thermoelectric-user-a Profile Pack', () => {
     }
   });
 
-  it('is discovered and selected by real OpenClaw 2026.6.1 tasks', () => {
+  it('is discovered and selected by real OpenClaw 2026.9.2 tasks', () => {
     const raw = execFileSync(process.execPath, [PROBE, PROFILE_ROOT], {
       cwd: ROOT,
       encoding: 'utf8',
@@ -112,7 +112,7 @@ describe('thermoelectric-user-a Profile Pack', () => {
       cleanup: string;
     };
 
-    expect(result.openClawVersion).toBe('2026.6.1');
+    expect(result.openClawVersion).toBe('2026.9.2');
     expect(result.ordinaryInventory).toEqual([]);
     expect(result.profileInventory).toEqual([
       { name: 'develop-flexible-bismuth-telluride', source: 'openclaw-workspace' },

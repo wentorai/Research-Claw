@@ -9,6 +9,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { DatabaseSync } from 'node:sqlite';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -28,7 +29,7 @@ const certPath = path.join(root, 'test', 'fixtures', 'bootstrap-profile-e2e-prov
 const keyPath = path.join(root, 'test', 'fixtures', 'bootstrap-profile-e2e-provider.key.pem');
 const fakePlaudPath = path.join(root, 'test', 'fixtures', 'fake-plaud-inventory-mcp-server.cjs');
 const modelProbeHelper = path.join(root, 'scripts', 'bootstrap-profile', 'model-probe.cjs');
-const expectedOpenClawVersion = '2026.6.1';
+const expectedOpenClawVersion = '2026.9.2';
 const gatewayToken = 't09-isolated-gateway-token';
 const ordinaryKey = 'RC_T09_ORDINARY_FAKE_KEY';
 const initialKey = 'RC_T09_INITIAL_FAKE_KEY';
@@ -435,8 +436,41 @@ async function makeHarness(providerPort) {
     authPath,
     dataRoot,
   };
+  // OpenClaw 2026.9.2 reads agent credentials from the canonical
+  // `openclaw-agent.sqlite` (`auth_profile_store`) and refuses to start while a
+  // legacy `auth-profiles.json` sits beside an empty canonical store. Seed the
+  // ordinary control credential into the runtime's own store — with its own
+  // schema helper — so the no-Profile control exercises the real credential
+  // path instead of failing on the retired file.
+  seedCanonicalAuthStore(paths, ordinaryAuthId, {
+    type: 'api_key', provider: 'ordinary', key: ordinaryKey,
+  });
   ensureInitialized({ ...paths, externalStopVerified: true });
   return paths;
+}
+
+function seedCanonicalAuthStore(paths, profileId, credential) {
+  const { openNodeSqliteDatabase, ensureOpenClawAgentDatabaseSchema } = require(
+    'openclaw/plugin-sdk/sqlite-runtime',
+  );
+  const databasePath = path.join(paths.agentDir, 'openclaw-agent.sqlite');
+  const database = openNodeSqliteDatabase(databasePath);
+  try {
+    ensureOpenClawAgentDatabaseSchema(database, {
+      path: databasePath,
+      agentId: 'main',
+      env: isolatedEnv(paths),
+    });
+    database.prepare(
+      `INSERT INTO auth_profile_store (store_key, store_json, updated_at)
+       VALUES ('primary', ?, ?)
+       ON CONFLICT(store_key) DO UPDATE SET
+         store_json = excluded.store_json,
+         updated_at = excluded.updated_at`,
+    ).run(JSON.stringify({ version: 1, profiles: { [profileId]: credential } }), Date.now());
+  } finally {
+    database.close();
+  }
 }
 
 function makeCapsule(providerPort, overrides = {}) {
@@ -595,13 +629,104 @@ async function skillInventory(paths, expectedProfileSkills) {
   return inventory.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// OpenClaw 2026.9.2 moved the session store from
+// <state>/agents/<agent>/sessions/sessions.json to the per-agent SQLite
+// database <state>/agents/<agent>/agent/openclaw-agent.sqlite. The full session
+// entry (the same object the legacy store held, including systemPromptReport)
+// is persisted in session_nodes.entry_json, so the report is read from that
+// store directly.
+const sessionAgentId = 'main';
+
+function expandHome(filePath) {
+  if (filePath === '~') return os.homedir();
+  if (filePath.startsWith('~/')) return path.join(os.homedir(), filePath.slice(2));
+  return filePath;
+}
+
+/**
+ * OpenClaw 2026.9.2 derives the per-agent SQLite database from a configured
+ * legacy store path (config/sessions/session-sqlite-target.ts,
+ * `resolveUnsuffixedSqliteTargetFromSessionStorePath`). Existing configs still
+ * name `sessions.json`, so map such a value to the database the gateway
+ * actually writes instead of opening a file that only exists as migration
+ * input.
+ */
+function resolveSqliteStorePath(storePath) {
+  if (storePath.endsWith('.sqlite')) return storePath;
+  const sessionsDir = path.dirname(storePath);
+  if (path.basename(storePath) !== 'sessions.json') {
+    const baseName = path.basename(storePath, path.extname(storePath)) || 'openclaw-agent';
+    return path.join(sessionsDir, `${baseName}.sqlite`);
+  }
+  if (path.basename(sessionsDir) !== 'sessions') {
+    return path.join(sessionsDir, 'openclaw-agent.sqlite');
+  }
+  const agentDir = path.dirname(sessionsDir);
+  if (path.basename(path.dirname(agentDir)) !== 'agents') {
+    return path.join(sessionsDir, 'openclaw-agent.sqlite');
+  }
+  return path.join(agentDir, 'agent', 'openclaw-agent.sqlite');
+}
+
+function sessionDatabasePath(paths) {
+  let configuredStore;
+  try {
+    const configured = readJson(paths.configPath)?.session?.store;
+    if (typeof configured === 'string' && configured.trim()) configuredStore = configured.trim();
+  } catch {
+    // The config is written before the first session and this reader only runs
+    // after a real agent run; a missing or half-written config falls back to
+    // the default store location.
+    configuredStore = undefined;
+  }
+  if (!configuredStore) {
+    return path.join(paths.stateDir, 'agents', sessionAgentId, 'agent', 'openclaw-agent.sqlite');
+  }
+  return resolveSqliteStorePath(
+    path.resolve(expandHome(configuredStore.replaceAll('{agentId}', sessionAgentId))),
+  );
+}
+
 function latestToolNames(paths) {
-  const sessionsPath = path.join(paths.stateDir, 'agents', 'main', 'sessions', 'sessions.json');
-  const sessions = readJson(sessionsPath);
-  const reports = Object.values(sessions)
-    .map((entry) => entry?.systemPromptReport)
-    .filter((report) => report?.source === 'run' && Array.isArray(report?.tools?.entries));
-  invariant(reports.length > 0, 'no real systemPromptReport was persisted');
+  const databasePath = sessionDatabasePath(paths);
+  let database;
+  let rows;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+    rows = database.prepare('SELECT entry_json FROM session_nodes').all();
+  } catch (error) {
+    // An unreadable store is a named condition, never a silent empty result.
+    throw new Error(
+      `session store unreadable at ${databasePath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  } finally {
+    try { database?.close(); } catch { /* a half-open handle is harmless here */ }
+  }
+  let skipped = 0;
+  const reports = [];
+  for (const row of rows) {
+    if (typeof row?.entry_json !== 'string') {
+      skipped += 1;
+      continue;
+    }
+    let entry;
+    try {
+      entry = JSON.parse(row.entry_json);
+    } catch {
+      // A row the gateway is mid-write is skipped, not fatal: the store may
+      // hold other, fully persisted entries.
+      skipped += 1;
+      continue;
+    }
+    const report = entry?.systemPromptReport;
+    if (report?.source === 'run' && Array.isArray(report?.tools?.entries)) reports.push(report);
+  }
+  invariant(
+    reports.length > 0,
+    `no real systemPromptReport was persisted in ${databasePath} (rows=${rows.length}, skipped=${skipped})`,
+  );
+  reports.sort((left, right) => (Number(left.generatedAt) || 0) - (Number(right.generatedAt) || 0));
   return reports.at(-1).tools.entries.map((entry) => entry.name).sort();
 }
 
@@ -889,10 +1014,21 @@ async function main() {
     isAgentRequest: record.isAgentRequest,
     streamed: record.streamed,
   }));
+  // OpenClaw 2026.9.2 drives the probe through its agent-lane retry loop
+  // ("transient same-model retry N/3"), so every attempt is a freshly built
+  // request whose SDK counter is 0. 2026.6.1 exposed the outer retry index as
+  // 0,1,2 on the SDK transport; 2026.9.2 pins that transport at maxRetries:0
+  // and retries in `embedded-agent`, whose transient budget is
+  // `maxRetries ?? 3` — one initial attempt plus up to three retries. The exact
+  // count is not fixed (measured 3 and 4 on consecutive runs) because the
+  // backoff can consume the probe's 8 s deadline mid-loop, so assert the
+  // observed range and the 2026.9.2 transport shape instead of the retired
+  // exact-three shape; the upper bound is the retry budget.
   invariant(
-    failedProbeRecords.length === 3
-      && failedProbeRecords.every((record, index) => record.credential === 'failed'
-        && record.retryCount === index
+    failedProbeRecords.length >= 1
+      && failedProbeRecords.length <= 4
+      && failedProbeRecords.every((record) => record.credential === 'failed'
+        && record.retryCount === 0
         && record.isAgentRequest === false
         && record.streamed === true),
     `failed model probe request boundary mismatch: ${JSON.stringify(failedProbeRecords)}`,

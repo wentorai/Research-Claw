@@ -116,7 +116,10 @@ import { subscribeExecutionSkillDiagnostics } from './src/execution-trace/skill-
 import { PresentationService } from './src/presentation/service.js';
 import { PresentationCoordinator } from './src/presentation/coordinator.js';
 import { registerPresentationRpc } from './src/presentation/rpc.js';
-import { loadOpenClawSessionRegistry } from './src/presentation/retention.js';
+import {
+  loadOpenClawSessionRegistry,
+  type SessionRegistryStoreError,
+} from './src/presentation/retention.js';
 import {
   arePeripheralsEnabled,
   filterPeripheralsBootstrapSection,
@@ -251,6 +254,36 @@ let _executionTraceService: ExecutionTraceService | null = null;
 let _presentationService: PresentationService | null = null;
 let _lastPresentationSweepAt = 0;
 let _executionSkillDiagnosticUnsubscribe: (() => void) | null = null;
+
+// ── Presentation retention: the names behind registryErrors=N ─────────────
+// One sweep may meet many broken agent stores; cap the named lines so a
+// mangled state dir cannot flood the log. The count in the sweep summary is
+// always the true total — only the per-agent detail is capped.
+const SESSION_REGISTRY_STORE_ERROR_LOG_CAP = 10;
+
+/**
+ * Render the named store errors behind `registryErrors=N` as warn lines: one
+ * per agent, with the failing store path and the reader's message, so an
+ * absent or unreadable SQLite store is identifiable from the log instead of
+ * collapsing into a bare count. Bounded to `SESSION_REGISTRY_STORE_ERROR_LOG_CAP`
+ * entries plus one line saying how many were withheld.
+ */
+function sessionRegistryStoreErrorWarnings(
+  storeErrors: readonly SessionRegistryStoreError[],
+): string[] {
+  const shown = storeErrors.slice(0, SESSION_REGISTRY_STORE_ERROR_LOG_CAP);
+  const lines = shown.map(
+    (storeError) =>
+      `[Presentation] session registry store error: agent=${storeError.agent} path=${storeError.path} message=${storeError.message}`,
+  );
+  const withheld = storeErrors.length - shown.length;
+  if (withheld > 0) {
+    lines.push(
+      `[Presentation] ${withheld} more session registry store error(s) withheld (cap ${SESSION_REGISTRY_STORE_ERROR_LOG_CAP} per sweep)`,
+    );
+  }
+  return lines;
+}
 
 // ── Plaud MCP manager ──────────────────────────────────────────────────────
 // Real mini stdio MCP client. Construction is pure (no process spawns until a
@@ -1358,6 +1391,9 @@ const plugin: PluginDefinition = {
             const registry = loadOpenClawSessionRegistry(ctx.stateDir);
             if (!registry.ok) {
               api.logger.warn('[Presentation] Session registry unavailable; orphan sweep skipped (fail closed)');
+              for (const warning of sessionRegistryStoreErrorWarnings(registry.storeErrors)) {
+                api.logger.warn(warning);
+              }
             } else {
               const telemetry = presentationService.sweepOrphans(registry.sessionKeys, { now });
               const summary = [
@@ -1377,6 +1413,9 @@ const plugin: PluginDefinition = {
                 api.logger.warn(`[Presentation] retention capacity exceeded; visible Session facts retained: ${summary}`);
               } else {
                 api.logger.info(`[Presentation] bounded orphan sweep: ${summary}`);
+              }
+              for (const warning of sessionRegistryStoreErrorWarnings(registry.storeErrors)) {
+                api.logger.warn(warning);
               }
             }
             _lastPresentationSweepAt = now;

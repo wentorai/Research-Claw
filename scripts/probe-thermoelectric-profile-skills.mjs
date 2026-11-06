@@ -11,7 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const profileRoot = path.resolve(process.argv[2] ?? path.join(root, 'profiles', 'fixtures', 'thermoelectric-user-a'));
 const openClawEntry = path.join(root, 'node_modules', 'openclaw', 'dist', 'entry.js');
 const openClawPackage = path.join(root, 'node_modules', 'openclaw', 'package.json');
-const expectedVersion = '2026.6.1';
+const expectedVersion = '2026.9.2';
 const tasks = [
   {
     expectedSkill: 'research-thermoelectric-semiconductors',

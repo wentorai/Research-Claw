@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const PATCH = fs.readFileSync(path.join(ROOT, 'patches', 'openclaw@2026.6.1.patch'), 'utf8');
+const PATCH = fs.readFileSync(path.join(ROOT, 'patches', 'openclaw@2026.9.2.patch'), 'utf8');
 
 describe('Research-Claw channel recovery patch', () => {
   afterEach(() => vi.useRealTimers());
@@ -20,8 +20,8 @@ describe('Research-Claw channel recovery patch', () => {
 
   it('retries a recoverable command-menu network failure and succeeds without error output', async () => {
     vi.useFakeTimers();
-    const { s: syncTelegramMenuCommands } = await import(
-      '../node_modules/openclaw/dist/bot-deps-Nw3VjzKb.js'
+    const { r: syncTelegramMenuCommands } = await import(
+      '../node_modules/openclaw/dist/bot-native-command-menu-CD00X_dv.js'
     ) as unknown as {
       s: (params: Record<string, unknown>) => void;
     };
@@ -47,8 +47,8 @@ describe('Research-Claw channel recovery patch', () => {
 
   it('does not retry a permanent command-menu configuration error', async () => {
     vi.useFakeTimers();
-    const { s: syncTelegramMenuCommands } = await import(
-      '../node_modules/openclaw/dist/bot-deps-Nw3VjzKb.js'
+    const { r: syncTelegramMenuCommands } = await import(
+      '../node_modules/openclaw/dist/bot-native-command-menu-CD00X_dv.js'
     ) as unknown as {
       s: (params: Record<string, unknown>) => void;
     };

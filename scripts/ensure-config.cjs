@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ensure-config.cjs — Shared config cleanup/migration for RC v0.5.6+ (OC 2026.6.1)
+ * ensure-config.cjs — Shared config cleanup/migration for RC v0.5.6+ (OC 2026.9.2)
  *
  * Called by: run.sh, install.sh, docker-entrypoint.sh
  * Purpose:  Ensure the RC project config contains all fields required by the
@@ -11,7 +11,8 @@
  *
  * Fixes applied (all idempotent):
  *   1. plugins.allow — OC 2026.3.12+ requires explicit trust list
- *   2. discovery.mdns/wideArea — OC 2026.3.13 mDNS crash prevention
+ *   2. discovery.mdns — OC 2026.3.13 mDNS crash prevention; wideArea is
+ *      disabled by leaving it unset (OC 2026.9.2 only keeps wideArea.domain)
  *   3. Stale plugin entries (wentor-connect placeholder)
  *   4. tools.alsoAllow — remove entirely (redundant with profile "full")
  *   5. gateway.auth.token alignment with Dashboard DEFAULT_TOKEN
@@ -19,15 +20,17 @@
  *  10. agents.defaults.sandbox.mode = "off" (RC has no Docker sandbox)
  * 10b. agents.defaults.timeoutSeconds — migrate legacy 300s cap to template value
  * 10c. agents.defaults.bootstrapMaxChars — migrate OC's 20K default to RC's 30K
- *  14. plugins.installs — provenance records for loaded plugins
+ *  14. plugins.installs — remove (OC 2026.9.2 keeps install records in its
+ *      plugin index database, not config)
  *  15. dangerouslyDisableDeviceAuth — remove (unnecessary on loopback)
- *  16. OC 2026.6.1 — legacy model APIs, bundledDiscovery, telegram streaming, DMS hooks
+ *  16. OC 2026.6.1/2026.9.2 — legacy model APIs, bundledDiscovery, telegram streaming, DMS hooks
  *  17. agents.defaults.compaction.maxHistoryShare — strip (defer to OC default 0.5)
  *  18. models.providers.<manual>.models[].contextWindow — raise to ≥ 64000 floor
  *  19. agents.defaults.compaction.reserveTokens/reserveTokensFloor — strip stale override
- *  20. agents.defaults.compaction.customInstructions — add RC scientific default
+ *  20. agents.defaults.compaction.customInstructions — strip (OC 2026.9.2 retired it)
  *  21. dual-model-supervisor — remove withdrawn settings and validation placeholders
- *  22. agents.defaults.memorySearch — default off until embeddings are configured
+ *  22. memory.search — default off until embeddings are configured (legacy
+ *      agents.defaults.memorySearch is migrated to OC 2026.9.2's memory.search)
  *  23. Skills disclosure — native workspace source, bounded rich catalog, RP router compaction
  *  24. Tool Search — compact large tool catalogs behind search/describe/call
  */
@@ -49,11 +52,6 @@ const {
   isManagedResearchPluginsPath,
   isUsableResearchPluginsInstall,
 } = require('./research-plugins-install-utils.cjs');
-const RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS = fs.readFileSync(
-  path.join(__dirname, '../config/research-compaction-instructions.txt'),
-  'utf8',
-).trim();
-
 // `browser` is a bundled OC plugin but the trust list is restrictive: when
 // plugins.allow is non-empty, a plugin absent from it is NOT enabled-by-config.
 // The gateway still auto-enables browser in-memory (settings read config → show
@@ -217,16 +215,6 @@ function isLegacyResearchPluginsNodeModulesPath(candidate) {
   );
 }
 const RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
-// Provenance install records for all RC plugins (eliminates "loaded without
-// install/load-path provenance" warnings from OC's plugin loader)
-const PLUGIN_INSTALL_RECORDS = {
-  'research-claw-core':       { source: 'path', sourcePath: './extensions/research-claw-core' },
-  'openclaw-weixin':          { source: 'path', sourcePath: './extensions/openclaw-weixin' },
-  'dual-model-supervisor':    { source: 'path', sourcePath: './extensions/dual-model-supervisor' },
-  'research-plugins':         { source: 'npm',  spec: '@wentorai/research-plugins',
-                                installPath: '~/.openclaw/extensions/research-plugins' },
-  'research-superpower':      { source: 'path', sourcePath: './extensions/research-superpower' },
-};
 
 function normalizeRcDbPath(configPath, rawPath) {
   if (!rawPath || typeof rawPath !== 'string') return RC_DB_PATH;
@@ -374,14 +362,27 @@ function ensureConfig(filePath) {
     }
   }
 
-  // 2. discovery — disable mDNS and wideArea (RC doesn't need device discovery)
+  // 2. discovery — disable mDNS and wideArea (RC doesn't need device discovery).
+  //    OC 2026.9.2 retired `discovery.wideArea.enabled`: wide-area discovery is
+  //    enabled purely by the presence of `discovery.wideArea.domain`, so the
+  //    disabled state is the absence of the key.
   if (!c.discovery) c.discovery = {};
   if (c.discovery.mdns?.mode !== 'off') {
     c.discovery.mdns = { mode: 'off' };
     changed = true;
   }
-  if (c.discovery.wideArea?.enabled !== false) {
-    c.discovery.wideArea = { enabled: false };
+  const wideArea = c.discovery.wideArea;
+  if (wideArea && typeof wideArea === 'object' && !Array.isArray(wideArea)) {
+    if (Object.prototype.hasOwnProperty.call(wideArea, 'enabled')) {
+      delete wideArea.enabled;
+      changed = true;
+    }
+    if (Object.keys(wideArea).length === 0) {
+      delete c.discovery.wideArea;
+      changed = true;
+    }
+  } else if (wideArea !== undefined) {
+    delete c.discovery.wideArea;
     changed = true;
   }
 
@@ -593,7 +594,35 @@ function ensureConfig(filePath) {
   if (!c.gateway.port) { c.gateway.port = 28789; changed = true; }
   if (!c.gateway.mode) { c.gateway.mode = 'local'; changed = true; }
   if (!c.gateway.bind) { c.gateway.bind = 'loopback'; changed = true; }
-  if (!c.ui) { c.ui = { assistant: { name: 'Research-Claw' } }; changed = true; }
+  // 9a. ui.assistant — OC 2026.9.2 retired the UI-level assistant identity and
+  //     moved the name onto the agent (`agents.entries.<id>.identity.name`).
+  //     Carry the configured name over to the default `main` agent when that
+  //     agent can exist, then drop the retired key. A roster without `main`
+  //     cannot be mapped safely, so only the retired key is removed there.
+  const legacyAssistantName = typeof c.ui?.assistant?.name === 'string'
+    ? c.ui.assistant.name.trim()
+    : '';
+  if (c.ui && Object.prototype.hasOwnProperty.call(c.ui, 'assistant')) {
+    delete c.ui.assistant;
+    if (Object.keys(c.ui).length === 0) delete c.ui;
+    changed = true;
+  }
+  const assistantRoster = c.agents?.entries;
+  const assistantRosterHasMain = assistantRoster === undefined
+    || (assistantRoster && typeof assistantRoster === 'object' && !Array.isArray(assistantRoster)
+      && Object.prototype.hasOwnProperty.call(assistantRoster, 'main'));
+  if (assistantRosterHasMain) {
+    if (!c.agents) c.agents = {};
+    if (c.agents.entries === undefined) c.agents.entries = {};
+    const mainEntry = c.agents.entries.main ?? (c.agents.entries.main = {});
+    if (!mainEntry.identity || typeof mainEntry.identity !== 'object' || Array.isArray(mainEntry.identity)) {
+      mainEntry.identity = {};
+    }
+    if (mainEntry.identity.name === undefined) {
+      mainEntry.identity.name = legacyAssistantName || 'Research-Claw';
+      changed = true;
+    }
+  }
   if (!c.skills) { c.skills = { load: { extraDirs: ['./skills'] } }; changed = true; }
   // OpenClaw already scans <workspace>/skills as the authoritative
   // openclaw-workspace source. Loading it again as an extraDir duplicates work
@@ -657,11 +686,22 @@ function ensureConfig(filePath) {
   }
   if (!c.skills.workshop) {
     c.skills.workshop = {
-      autonomous: { enabled: false },
+      autonomous: { mode: 'off' },
       approvalPolicy: 'pending',
       maxPending: 50,
       maxSkillBytes: 40000,
     };
+    changed = true;
+  }
+  // OC 2026.9.2 replaced `skills.workshop.autonomous.enabled` with the
+  // three-position `mode` switch (off | propose | apply).
+  const autonomous = c.skills.workshop.autonomous;
+  if (autonomous && typeof autonomous === 'object' && !Array.isArray(autonomous)
+      && Object.prototype.hasOwnProperty.call(autonomous, 'enabled')) {
+    if (autonomous.mode === undefined) {
+      autonomous.mode = autonomous.enabled === false ? 'off' : 'propose';
+    }
+    delete autonomous.enabled;
     changed = true;
   }
   if (!c.cron) { c.cron = { enabled: true }; changed = true; }
@@ -771,38 +811,28 @@ function ensureConfig(filePath) {
     }
   }
 
-  // 14. plugins.installs — provenance records so OC's loader treats each plugin
-  //     as intentionally tracked (eliminates "loaded without install/load-path
-  //     provenance" warnings). The canonical research-plugins install is
-  //     managed by RC, so stale OC npm-project provenance is corrected too.
-  if (!isGlobal) {
-    if (!c.plugins) c.plugins = {};
-    if (!c.plugins.installs) c.plugins.installs = {};
-    const installRecords = researchPluginsUsable
-      ? PLUGIN_INSTALL_RECORDS
-      : Object.fromEntries(
-        Object.entries(PLUGIN_INSTALL_RECORDS)
-          .filter(([id]) => id !== 'research-plugins'),
-      );
-    for (const [id, record] of Object.entries(installRecords)) {
-      if (
-        !c.plugins.installs[id]
-        || (
-          id === 'research-plugins'
-          && JSON.stringify(c.plugins.installs[id]) !== JSON.stringify(record)
-        )
-      ) {
-        c.plugins.installs[id] = { ...record };
-        changed = true;
+  // 14. plugins.installs — OC 2026.9.2 retired the config-side install records
+  //     and keeps plugin provenance in its installed-plugin index database.
+  //     Drop the retired key; `openclaw doctor --fix` imports existing records
+  //     into that database. Path-loaded plugins keep `plugins.load.paths` as
+  //     their provenance.
+  if (!isGlobal && c.plugins && Object.prototype.hasOwnProperty.call(c.plugins, 'installs')) {
+    const installs = c.plugins.installs;
+    // The retired Discord install record was the only config-side provenance
+    // the channel cleanup accepts. Carry it to the canonical `plugins.entries`
+    // form while the allow entry is live, so the allow-list decision stays
+    // idempotent across restarts instead of dropping `discord` on run two.
+    if (installs && typeof installs === 'object' && !Array.isArray(installs)
+        && Object.prototype.hasOwnProperty.call(installs, 'discord')
+        && Array.isArray(c.plugins.allow) && c.plugins.allow.includes('discord')
+        && (c.plugins.entries === undefined || c.plugins.entries.discord === undefined)) {
+      if (!c.plugins.entries || typeof c.plugins.entries !== 'object' || Array.isArray(c.plugins.entries)) {
+        c.plugins.entries = {};
       }
+      c.plugins.entries.discord = { enabled: true };
     }
-    if (
-      !researchPluginsUsable
-      && c.plugins.installs['research-plugins']
-    ) {
-      delete c.plugins.installs['research-plugins'];
-      changed = true;
-    }
+    delete c.plugins.installs;
+    changed = true;
   }
 
   // 15. Remove dangerouslyDisableDeviceAuth — unnecessary on loopback.
@@ -821,12 +851,30 @@ function ensureConfig(filePath) {
     c.browser = {
       enabled: true,
       defaultProfile: 'research-claw',
-      profiles: { 'research-claw': { cdpPort: 18800, color: '#EF4444' } },
+      profiles: { 'research-claw': { cdpPort: 18800 } },
     };
     changed = true;
   } else if (c.browser.enabled === undefined) {
     c.browser.enabled = true;
     changed = true;
+  }
+  // OC 2026.9.2 retired `browser.color` and `browser.profiles.*.color`; the
+  // built-in palette now applies.
+  if (c.browser && typeof c.browser === 'object' && !Array.isArray(c.browser)) {
+    if (Object.prototype.hasOwnProperty.call(c.browser, 'color')) {
+      delete c.browser.color;
+      changed = true;
+    }
+    const browserProfiles = c.browser.profiles;
+    if (browserProfiles && typeof browserProfiles === 'object' && !Array.isArray(browserProfiles)) {
+      for (const profile of Object.values(browserProfiles)) {
+        if (profile && typeof profile === 'object' && !Array.isArray(profile)
+            && Object.prototype.hasOwnProperty.call(profile, 'color')) {
+          delete profile.color;
+          changed = true;
+        }
+      }
+    }
   }
 
   // 16. OC 2026.6.1 config migrations (project config only)
@@ -886,8 +934,10 @@ function ensureConfig(filePath) {
       changed = true;
     }
 
-    if (Array.isArray(c.plugins?.allow) && c.plugins.allow.length > 0 && !c.plugins.bundledDiscovery) {
-      c.plugins.bundledDiscovery = 'compat';
+    // OC 2026.9.2 retired `plugins.bundledDiscovery`; bundled-plugin discovery
+    // now comes from shared SQLite state that `openclaw doctor --fix` migrates.
+    if (c.plugins && Object.prototype.hasOwnProperty.call(c.plugins, 'bundledDiscovery')) {
+      delete c.plugins.bundledDiscovery;
       changed = true;
     }
 
@@ -1036,28 +1086,45 @@ function ensureConfig(filePath) {
       changed = true;
     }
 
-    // 20. Scientific compaction default — use the same tracked prompt as the
-    // Dashboard. Preserve every non-empty user instruction byte-for-byte.
+    // 20. Compaction mode default. OC 2026.9.2 retired
+    //     `agents.defaults.compaction.customInstructions`: operator prompts now
+    //     belong to a compaction provider `summarize()` implementation or a
+    //     `before_prompt_build` hook, so the retired config key is stripped.
     if (compaction.mode === undefined) {
       compaction.mode = 'safeguard';
       changed = true;
     }
-    if (
-      typeof compaction.customInstructions !== 'string'
-      || compaction.customInstructions.trim().length === 0
-    ) {
-      compaction.customInstructions = RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS;
+    if (Object.prototype.hasOwnProperty.call(compaction, 'customInstructions')) {
+      delete compaction.customInstructions;
       changed = true;
     }
 
     // 22. Semantic memory defaults OFF unless the operator has made an explicit
     // choice. RC's default DeepSeek chat provider has no embeddings endpoint;
-    // leaving this field absent makes OpenClaw implicitly select OpenAI
-    // text-embedding-3-small and retry forever without credentials. Preserve an
-    // existing object byte-for-byte: enabled=true, provider/model and extension
-    // fields are operator-owned.
-    if (!Object.prototype.hasOwnProperty.call(c.agents.defaults, 'memorySearch')) {
-      c.agents.defaults.memorySearch = { enabled: false };
+    // leaving it disabled stops OpenClaw from implicitly selecting OpenAI
+    // text-embedding-3-small and retrying forever without credentials.
+    // OC 2026.9.2 moved `agents.defaults.memorySearch` to the canonical
+    // top-level `memory.search`. Migrate the legacy owner first (canonical
+    // values win), then seed RC's default only when neither owner is set.
+    const legacyMemorySearch = c.agents.defaults.memorySearch;
+    if (legacyMemorySearch !== undefined) {
+      if (legacyMemorySearch && typeof legacyMemorySearch === 'object' && !Array.isArray(legacyMemorySearch)) {
+        if (!c.memory || typeof c.memory !== 'object' || Array.isArray(c.memory)) c.memory = {};
+        if (!c.memory.search || typeof c.memory.search !== 'object' || Array.isArray(c.memory.search)) {
+          c.memory.search = {};
+        }
+        for (const [key, value] of Object.entries(legacyMemorySearch)) {
+          if (c.memory.search[key] === undefined) c.memory.search[key] = value;
+        }
+      }
+      delete c.agents.defaults.memorySearch;
+      changed = true;
+    }
+    if (!c.memory || typeof c.memory !== 'object' || Array.isArray(c.memory)) {
+      c.memory = { search: { enabled: false } };
+      changed = true;
+    } else if (c.memory.search === undefined) {
+      c.memory.search = { enabled: false };
       changed = true;
     }
   }
@@ -1089,9 +1156,9 @@ function ensureConfig(filePath) {
   // level=info keeps the file
   // complete; file=<persistent path> survives reboots (unlike /tmp).
   // 3-state for level/file keys: inject when absent, fill missing keys, NEVER
-  // override user values. Redaction is a separate security boundary: RC always
-  // keeps tools-mode enabled and appends patterns for credential shapes that
-  // OpenClaw 2026.6.1 does not cover by default.
+  // override user values. Redaction is a separate security boundary: OC
+  // 2026.9.2 always redacts and retired `logging.redactSensitive`, so RC only
+  // appends patterns for credential shapes OpenClaw does not cover by default.
   if (!isGlobal) {
     const RC_REDACT_PATTERNS = [
       String.raw`\b(?:Cookie|Set-Cookie)\s*:\s*([^\r\n]+)`,
@@ -1104,7 +1171,6 @@ function ensureConfig(filePath) {
       level: 'info',
       consoleLevel: 'error',
       file: '~/.research-claw/logs/openclaw.log',
-      redactSensitive: 'tools',
       redactPatterns: RC_REDACT_PATTERNS,
     };
     if (!c.logging || typeof c.logging !== 'object' || Array.isArray(c.logging)) {
@@ -1114,8 +1180,8 @@ function ensureConfig(filePath) {
       for (const [k, v] of Object.entries(LOG_DEFAULTS)) {
         if (c.logging[k] === undefined) { c.logging[k] = v; changed = true; }
       }
-      if (c.logging.redactSensitive !== 'tools') {
-        c.logging.redactSensitive = 'tools';
+      if (Object.prototype.hasOwnProperty.call(c.logging, 'redactSensitive')) {
+        delete c.logging.redactSensitive;
         changed = true;
       }
       const existingPatterns = Array.isArray(c.logging.redactPatterns)
@@ -1139,45 +1205,14 @@ function ensureConfig(filePath) {
 }
 
 function inheritGlobalCompaction(projectPath, globalPath) {
-  if (!fs.existsSync(projectPath) || !fs.existsSync(globalPath)) return false;
-
-  let projectConfig;
-  let globalConfig;
-  try {
-    projectConfig = JSON.parse(fs.readFileSync(projectPath, 'utf8'));
-    globalConfig = JSON.parse(fs.readFileSync(globalPath, 'utf8'));
-  } catch {
-    return false;
-  }
-
-  const globalInstructions =
-    globalConfig.agents?.defaults?.compaction?.customInstructions;
-  if (
-    typeof globalInstructions !== 'string'
-    || globalInstructions.trim().length === 0
-  ) {
-    return false;
-  }
-
-  const projectInstructions =
-    projectConfig.agents?.defaults?.compaction?.customInstructions;
-  const projectHasOwnInstructions =
-    typeof projectInstructions === 'string'
-    && projectInstructions.trim().length > 0
-    && projectInstructions !== RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS;
-  if (projectHasOwnInstructions) return false;
-
-  if (!projectConfig.agents) projectConfig.agents = {};
-  if (!projectConfig.agents.defaults) projectConfig.agents.defaults = {};
-  if (!projectConfig.agents.defaults.compaction) {
-    projectConfig.agents.defaults.compaction = {};
-  }
-  projectConfig.agents.defaults.compaction.customInstructions =
-    globalInstructions;
-
-  const out = JSON.stringify(projectConfig, null, 2) + '\n';
-  writeEnsureConfigAtomic(projectPath, Buffer.from(out));
-  return true;
+  // OC 2026.9.2 retired `agents.defaults.compaction.customInstructions`; the
+  // compaction prompt is now owned by a compaction provider `summarize()`
+  // implementation or a `before_prompt_build` hook, so no config field remains
+  // to inherit. The flag stays accepted because run.sh/install.sh still pass
+  // `--inherit-global-compaction` on every install.
+  void projectPath;
+  void globalPath;
+  return false;
 }
 
 // CLI entry: process all paths passed as arguments. The install-only flag lets

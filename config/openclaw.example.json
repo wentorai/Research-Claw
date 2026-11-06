@@ -8,7 +8,6 @@
     "level": "info",
     "consoleLevel": "error",
     "file": "~/.research-claw/logs/openclaw.log",
-    "redactSensitive": "tools",
     "redactPatterns": [
       "\\b(?:Cookie|Set-Cookie)\\s*:\\s*([^\\r\\n]+)",
       "https?://hooks\\.[^/\\s]+/(?:services/)?([^\\s\"'<>]+)",
@@ -20,25 +19,23 @@
   "discovery": {
     "mdns": {
       "mode": "off"
-    },
-    "wideArea": {
-      "enabled": false
-    }
-  },
-  "ui": {
-    "assistant": {
-      "name": "Research-Claw"
     }
   },
   "agents": {
+    "entries": {
+      "main": {
+        "identity": {
+          "name": "Research-Claw"
+        }
+      }
+    },
     "defaults": {
       "workspace": "./workspace",
       "skipBootstrap": true,
       "bootstrapMaxChars": 30000,
       "timeoutSeconds": 3600,
       "compaction": {
-        "mode": "safeguard",
-        "customInstructions": "Research-Claw scientific-fidelity requirements for the compaction summary:\nPreserve exact facts and qualifiers:\n1. Research questions/goals, hypotheses, scope, user constraints.\n2. Observations, experimental/negative results, conflicting evidence.\n3. Numbers with units, uncertainty/error, sample sizes, statistics, experimental conditions, time ranges.\n4. Methods/design, datasets and versions, parameters, environment, reproduction steps.\n5. Citations/IDs: DOIs, URLs, file paths, commit hashes.\n6. Decisions with rationale, unresolved questions, next steps, and blockers.\n7. Evidence status: observations, inferences, hypotheses, plans; never turn uncertainty into fact.\nRemove greetings, repetition, and process noise; do not drop conditions or qualifiers needed for scientific conclusions."
+        "mode": "safeguard"
       },
       "thinkingDefault": "medium",
       "subagents": {
@@ -49,12 +46,14 @@
         "lightContext": true,
         "isolatedSession": true
       },
-      "memorySearch": {
-        "enabled": false
-      },
       "sandbox": {
         "mode": "off"
       }
+    }
+  },
+  "memory": {
+    "search": {
+      "enabled": false
     }
   },
   "browser": {
@@ -62,8 +61,7 @@
     "defaultProfile": "research-claw",
     "profiles": {
       "research-claw": {
-        "cdpPort": 18800,
-        "color": "#EF4444"
+        "cdpPort": 18800
       }
     }
   },
@@ -100,7 +98,7 @@
     },
     "workshop": {
       "autonomous": {
-        "enabled": false
+        "mode": "off"
       },
       "approvalPolicy": "pending",
       "maxPending": 50,

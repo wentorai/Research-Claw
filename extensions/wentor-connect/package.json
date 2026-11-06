@@ -10,7 +10,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "openclaw": "2026.6.1",
+    "openclaw": "2026.9.2",
     "typescript": "^5.7.0"
   },
   "peerDependencies": {

@@ -15,13 +15,18 @@ import {
 } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
+import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+// `new URL(...).pathname` keeps percent-escapes, so any checkout path with a
+// space (e.g. "Application Support") resolves to a directory that cannot exist.
+// fileURLToPath decodes it.
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const entryPath = path.join(projectRoot, 'node_modules', 'openclaw', 'dist', 'entry.js');
 const corePath = path.join(projectRoot, 'extensions', 'research-claw-core');
 const gatewayPort = Number(process.env.RC_TEST_GATEWAY_PORT ?? 28799);
@@ -505,27 +510,58 @@ async function proveThreeHealthyColdStartsHaveNoSelfCheckWarnings() {
   }
 }
 
-async function waitForSystemPromptReport() {
-  const storePath = path.join(
+// OpenClaw 2026.9.2 moved the session store from
+// <state>/agents/<agent>/sessions/sessions.json to the per-agent SQLite
+// database <state>/agents/<agent>/agent/openclaw-agent.sqlite. The full session
+// entry (the same object the legacy store held, including systemPromptReport)
+// is persisted in session_nodes.entry_json, so the report is read from that
+// store directly.
+function sessionDatabasePath() {
+  return path.join(
     tempRoot,
     'state',
     'agents',
     'main',
-    'sessions',
-    'sessions.json',
+    'agent',
+    'openclaw-agent.sqlite',
   );
+}
+
+function readPersistedPromptReport(databasePath) {
+  let database;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+    const row = database
+      .prepare('SELECT entry_json FROM session_nodes WHERE session_key = ?')
+      .get(sessionKey);
+    if (!row || typeof row.entry_json !== 'string') return undefined;
+    const entry = JSON.parse(row.entry_json);
+    const report = entry?.systemPromptReport;
+    return report?.source === 'run' ? report : undefined;
+  } catch {
+    // The store is not created yet, is mid-checkpoint, or the run has not
+    // persisted its entry. The caller polls until the deadline.
+    return undefined;
+  } finally {
+    try {
+      database?.close();
+    } catch {
+      // A half-open handle is harmless here; the next poll opens a fresh one.
+    }
+  }
+}
+
+async function waitForSystemPromptReport() {
+  const databasePath = sessionDatabasePath();
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    try {
-      const store = JSON.parse(await readFile(storePath, 'utf8'));
-      const report = store[sessionKey]?.systemPromptReport;
-      if (report?.source === 'run') return report;
-    } catch {
-      // Agent run has not persisted its report yet.
-    }
+    const report = readPersistedPromptReport(databasePath);
+    if (report) return report;
     await sleep(100);
   }
-  throw new Error('systemPromptReport was not persisted');
+  throw new Error(
+    `systemPromptReport was not persisted in the SQLite session store at ${databasePath}`,
+  );
 }
 
 function requireSingleNotification(notifications, title) {

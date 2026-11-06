@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Optional real-provider smoke for OpenClaw 2026.6.1.
+ * Optional real-provider smoke for OpenClaw 2026.9.2.
  *
  * This is intentionally NOT part of the default test suite. It reads one
  * explicitly supplied RC config and auth store, selects only the credential
@@ -34,7 +34,7 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, '..');
 const ENTRY = path.join(ROOT, 'node_modules', 'openclaw', 'dist', 'entry.js');
 const OPENCLAW_PACKAGE = path.join(ROOT, 'node_modules', 'openclaw', 'package.json');
-const EXPECTED_OPENCLAW_VERSION = '2026.6.1';
+const EXPECTED_OPENCLAW_VERSION = '2026.9.2';
 const SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143 };
 
 class ProbeInterruptedError extends Error {
@@ -175,7 +175,7 @@ function isolatedProvider(sourceProvider, selectedModel, profileId) {
     models: _models,
     ...safeProvider
   } = sourceProvider;
-  // OC 2026.6.1's models.json planner resolves a missing provider apiKey from
+  // OC 2026.9.2's models.json planner resolves a missing provider apiKey from
   // auth-profiles and persists the plaintext into models.json or a generated
   // plugin catalog. Binding the provider entry to the profile id keeps those
   // derived catalogs secret-free while runtime auth resolves the actual key.
