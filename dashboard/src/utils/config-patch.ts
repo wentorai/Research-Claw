@@ -25,7 +25,13 @@ import scientificCompactionInstructionsRaw from '../../../config/research-compac
 /** Legacy sentinel value OpenClaw may return in redacted config snapshots. */
 export const REDACTED_SENTINEL = '__OPENCLAW_REDACTED__';
 const RC_DB_PATH_DEFAULT = '~/.research-claw/library.db';
-/** Single-source RC default; startup migration reads the same tracked text file. */
+/**
+ * Single-source RC scientific-fidelity prompt, read from the tracked text file
+ * that the Docker image ships. OpenClaw 2026.9.2 retired
+ * `agents.defaults.compaction.customInstructions`, so this text is no longer
+ * written into the config by the dashboard; it remains exported as the
+ * canonical copy until a compaction provider/hook consumes it.
+ */
 export const RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS =
   scientificCompactionInstructionsRaw.trim();
 
@@ -559,32 +565,38 @@ export function extractProviderFieldsForEditor(
  * before gateway startup.
  */
 const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
-  ui: { assistant: { name: 'Research-Claw' } },
+  // OC 2026.9.2 retired ui.assistant; the assistant name now lives on the
+  // default main agent's identity.
   agents: {
+    entries: { main: { identity: { name: 'Research-Claw' } } },
     defaults: {
       workspace: './workspace',
       skipBootstrap: true,
       compaction: {
         mode: 'safeguard',
-        customInstructions: RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS,
       },
       thinkingDefault: 'medium',
       subagents: { announceTimeoutMs: 480000 },
       heartbeat: { every: '30m', lightContext: true, isolatedSession: true },
-      // Disabled by default: RC ships with deepseek as the primary model, which
-      // exposes no embeddings endpoint. With memorySearch enabled and no reachable
-      // provider, OC falls back to the "openai" embeddings backend and loops on
-      // "[memory] embeddings retryable error". Users with an embeddings-capable
-      // provider can re-enable it from Settings.
-      memorySearch: {
-        enabled: false,
-      },
     },
   },
+  // OC 2026.9.2 moved agents.defaults.memorySearch to top-level memory.search.
+  // Disabled by default: RC ships with deepseek as the primary model, which
+  // exposes no embeddings endpoint. With semantic memory enabled and no reachable
+  // provider, OC falls back to the "openai" embeddings backend and loops on
+  // "[memory] embeddings retryable error". Users with an embeddings-capable
+  // provider can re-enable it from Settings.
+  memory: {
+    search: {
+      enabled: false,
+    },
+  },
+  // OC 2026.9.2 retired browser.profiles.*.color; the built-in profile color
+  // applies.
   browser: {
     enabled: true,
     defaultProfile: 'research-claw',
-    profiles: { 'research-claw': { cdpPort: 18800, color: '#EF4444' } },
+    profiles: { 'research-claw': { cdpPort: 18800 } },
   },
   gateway: {
     port: 28789,
@@ -672,7 +684,9 @@ const RC_CONFIG_DEFAULTS: Record<string, unknown> = {
     ],
     sessions: { visibility: 'all' },
   },
-  commands: { native: 'auto', nativeSkills: 'auto', restart: true, ownerDisplay: 'raw' },
+  // OC 2026.9.2 retired commands.ownerDisplay / ownerDisplaySecret; owner ids
+  // now always render raw.
+  commands: { native: 'auto', nativeSkills: 'auto', restart: true },
   cron: { enabled: true },
 };
 
@@ -1117,7 +1131,12 @@ export function buildSaveConfig(
   // RC-written value is stripped. The turn-1 fit is guaranteed by the
   // CONTEXT_WINDOW_MIN floor (OC pins the precheck reserve at its own default,
   // ignoring reserveTokens in the embedded path), so RC writes no reserve keys.
-  // Existing fields (notably RC's mode:'safeguard') are preserved.
+  // Existing fields (notably RC's mode:'safeguard') are preserved. OC 2026.9.2
+  // retired the config-side prompt instructions (`customInstructions`,
+  // `identifierInstructions`); compaction prompts are owned by a compaction
+  // provider `summarize()` implementation or a `before_prompt_build` hook, so
+  // any legacy copy is stripped rather than round-tripped into a config that
+  // 9.2 rejects.
   {
     const existingCompaction =
       (existingDefaults?.compaction as Record<string, unknown> | undefined) ?? {};
@@ -1125,14 +1144,9 @@ export function buildSaveConfig(
     delete compaction.maxHistoryShare;
     delete compaction.reserveTokens;
     delete compaction.reserveTokensFloor;
+    delete compaction.customInstructions;
+    delete compaction.identifierInstructions;
     if (compaction.mode === undefined) compaction.mode = 'safeguard';
-    const existingInstructions = compaction.customInstructions;
-    if (
-      typeof existingInstructions !== 'string'
-      || existingInstructions.trim().length === 0
-    ) {
-      compaction.customInstructions = RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS;
-    }
 
     defaults.compaction = compaction;
   }

@@ -3,6 +3,7 @@
 
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
+const { createRequire } = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -119,6 +120,91 @@ function parseJsonOutput(stdout) {
   fail('INVALID_PROBE_OUTPUT');
 }
 
+function loadSqliteRuntime(candidateRoot) {
+  let runtime;
+  try {
+    runtime = createRequire(path.join(candidateRoot, 'package.json'))(
+      'openclaw/plugin-sdk/sqlite-runtime',
+    );
+  } catch {
+    fail('INVALID_OPENCLAW_ENTRY');
+  }
+  if (typeof runtime?.openNodeSqliteDatabase !== 'function'
+      || typeof runtime?.ensureOpenClawAgentDatabaseSchema !== 'function') {
+    fail('INVALID_OPENCLAW_ENTRY');
+  }
+  return runtime;
+}
+
+// OC 2026.9.2 stores agent credentials in the canonical
+// `<agentDir>/openclaw-agent.sqlite` `auth_profile_store` row and ignores a
+// retired `auth-profiles.json` that sits beside a populated store. Read the
+// live credential from the legacy file first (2026.6.x and the Bootstrap
+// Profile applier still own it), then from the canonical store the 9.2 runtime
+// reads.
+function readLiveCredential({ liveAgentDir, profileId, sqliteRuntime }) {
+  const legacyPath = path.join(liveAgentDir, 'auth-profiles.json');
+  if (fs.existsSync(legacyPath)) {
+    const auth = parseJsonBytes(readVerifiedFile(legacyPath, 'INVALID_AUTH_STORE'), 'INVALID_AUTH_STORE');
+    const credential = auth?.version === 1 ? auth?.profiles?.[profileId] : null;
+    if (credential !== undefined && credential !== null) return credential;
+  }
+  const databasePath = path.join(liveAgentDir, 'openclaw-agent.sqlite');
+  let metadata;
+  try { metadata = fs.lstatSync(databasePath); } catch { return null; }
+  if (metadata.isSymbolicLink() || !metadata.isFile()) fail('INVALID_AUTH_STORE');
+  let database;
+  try {
+    database = sqliteRuntime.openNodeSqliteDatabase(databasePath);
+    const row = database
+      .prepare('SELECT store_json FROM auth_profile_store WHERE store_key = ?')
+      .get('primary');
+    const store = row && typeof row.store_json === 'string'
+      ? JSON.parse(row.store_json)
+      : null;
+    return store?.version === 1 ? store?.profiles?.[profileId] : null;
+  } catch (error) {
+    if (error instanceof ModelProbeError) throw error;
+    fail('INVALID_AUTH_STORE');
+  } finally {
+    if (database !== undefined) {
+      try { database.close(); } catch { /* probe read only */ }
+    }
+  }
+}
+
+function writeCanonicalAuthStore({ sqliteRuntime, agentDir, agentId, profileId, credential, env }) {
+  const databasePath = path.join(agentDir, 'openclaw-agent.sqlite');
+  let database;
+  try {
+    database = sqliteRuntime.openNodeSqliteDatabase(databasePath);
+    sqliteRuntime.ensureOpenClawAgentDatabaseSchema(database, {
+      path: databasePath,
+      agentId,
+      env,
+    });
+    database.prepare(
+      `INSERT INTO auth_profile_store (store_key, store_json, updated_at)
+       VALUES ('primary', ?, ?)
+       ON CONFLICT(store_key) DO UPDATE SET
+         store_json = excluded.store_json,
+         updated_at = excluded.updated_at`,
+    ).run(JSON.stringify({ version: 1, profiles: { [profileId]: credential } }), Date.now());
+  } catch (error) {
+    if (error instanceof ModelProbeError) throw error;
+    fail('SCRATCH_WRITE_FAILED');
+  } finally {
+    if (database !== undefined) {
+      try { database.close(); } catch { fail('SCRATCH_WRITE_FAILED'); }
+    }
+  }
+  if (process.platform !== 'win32') {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.chmodSync(`${databasePath}${suffix}`, 0o600); } catch { /* sidecar absent */ }
+    }
+  }
+}
+
 function isolatedEnv({ home, stateDir, agentDir, configPath }) {
   const env = {};
   for (const key of [
@@ -231,8 +317,12 @@ async function main() {
       || config?.models?.providers?.[provider]?.apiKey !== profileId) fail('MODEL_IDENTITY_MISMATCH');
 
   const liveAuthPath = path.join(liveState, 'agents', 'main', 'agent', 'auth-profiles.json');
-  const auth = parseJsonBytes(readVerifiedFile(liveAuthPath, 'INVALID_AUTH_STORE'), 'INVALID_AUTH_STORE');
-  const credential = auth?.version === 1 ? auth?.profiles?.[profileId] : null;
+  const sqliteRuntime = loadSqliteRuntime(candidateRoot);
+  const credential = readLiveCredential({
+    liveAgentDir: path.dirname(liveAuthPath),
+    profileId,
+    sqliteRuntime,
+  });
   if (!credential || credential.type !== 'api_key' || credential.provider !== provider
       || typeof credential.key !== 'string' || credential.key.length < 16) fail('INVALID_AUTH_STORE');
   if (configBytes.includes(Buffer.from(credential.key, 'utf8'))) fail('SECRET_COPY_DETECTED');
@@ -258,10 +348,14 @@ async function main() {
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   fs.mkdirSync(agentDir, { recursive: true, mode: 0o700 });
   writePrivateFile(configPath, probeConfigBytes);
-  writePrivateFile(path.join(agentDir, 'auth-profiles.json'), Buffer.from(`${JSON.stringify({
-    version: 1,
-    profiles: { [profileId]: credential },
-  }, null, 2)}\n`));
+  writeCanonicalAuthStore({
+    sqliteRuntime,
+    agentDir,
+    agentId: 'main',
+    profileId,
+    credential,
+    env: isolatedEnv({ home, stateDir, agentDir, configPath }),
+  });
 
   const result = await runChild(entry, [
     'models', 'status', '--json', '--probe',

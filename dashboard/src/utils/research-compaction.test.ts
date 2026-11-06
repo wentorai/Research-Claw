@@ -55,16 +55,19 @@ function expectScientificDefault(value: unknown): void {
   }
 }
 
-describe('Research-Claw scientific compaction instructions', () => {
-  it('adds the scientific default to a new Dashboard-generated config', () => {
+describe('Research-Claw compaction config (OpenClaw 2026.9.2)', () => {
+  it('writes safeguard mode and no retired prompt to a new Dashboard-generated config', () => {
     const compaction = compactionOf(buildSaveConfig(null, input()));
 
     expect(compaction.mode).toBe('safeguard');
-    expect(compaction.customInstructions).toBe(RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS);
-    expectScientificDefault(compaction.customInstructions);
+    expect(compaction).not.toHaveProperty('customInstructions');
+    expect(compaction).not.toHaveProperty('identifierInstructions');
+    // The prompt is no longer a config field; the shipped text must stay intact
+    // for the compaction provider / hook that will consume it.
+    expectScientificDefault(RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS);
   });
 
-  it('replaces an absent or whitespace-only instruction with the scientific default', () => {
+  it('strips an absent, empty, or whitespace-only legacy instruction on save', () => {
     for (const customInstructions of [undefined, '', '  \n\t ']) {
       const current = {
         agents: {
@@ -74,12 +77,12 @@ describe('Research-Claw scientific compaction instructions', () => {
         },
       };
       const compaction = compactionOf(buildSaveConfig(current, input()));
-      expect(compaction.customInstructions).toBe(RC_SCIENTIFIC_COMPACTION_INSTRUCTIONS);
-      expectScientificDefault(compaction.customInstructions);
+      expect(compaction.mode).toBe('safeguard');
+      expect(compaction).not.toHaveProperty('customInstructions');
     }
   });
 
-  it('preserves a user-provided non-empty instruction byte-for-byte on unrelated saves', () => {
+  it('strips a user-provided legacy instruction instead of round-tripping a retired key', () => {
     const customInstructions = '  Keep MY lab shorthand ΔT exactly; do not normalize.  ';
     const current = {
       agents: {
@@ -91,6 +94,7 @@ describe('Research-Claw scientific compaction instructions', () => {
 
     const compaction = compactionOf(buildSaveConfig(current, input()));
 
-    expect(compaction.customInstructions).toBe(customInstructions);
+    expect(compaction).not.toHaveProperty('customInstructions');
+    expect(compaction.mode).toBe('safeguard');
   });
 });

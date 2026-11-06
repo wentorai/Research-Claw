@@ -16,11 +16,10 @@ const DEFAULTS = {
   level: 'info',
   consoleLevel: 'error',
   file: '~/.research-claw/logs/openclaw.log',
-  redactSensitive: 'tools',
   redactPatterns: RC_REDACT_PATTERNS,
 };
 
-describe('ensure-config.cjs — logging three-state migration', () => {
+describe('ensure-config.cjs — logging migration (OpenClaw 2026.9.2)', () => {
   let tempRoot: string;
   let configPath: string;
 
@@ -60,7 +59,6 @@ describe('ensure-config.cjs — logging three-state migration', () => {
         level: 'debug',
         consoleLevel: 'error',
         file: '/custom/openclaw.jsonl',
-        redactSensitive: 'tools',
         redactPatterns: ['operator-pattern', ...RC_REDACT_PATTERNS],
       });
   });
@@ -80,7 +78,7 @@ describe('ensure-config.cjs — logging three-state migration', () => {
     expect(migrated.logging).toEqual({ level: 'trace' });
   });
 
-  it('repairs disabled redaction without changing explicit log levels or paths', () => {
+  it('drops the retired redactSensitive key without changing explicit log levels or paths', () => {
     const migrated = migrate({
       logging: {
         level: 'trace',
@@ -93,8 +91,14 @@ describe('ensure-config.cjs — logging three-state migration', () => {
       level: 'trace',
       consoleLevel: 'debug',
       file: '/operator/log.jsonl',
-      redactSensitive: 'tools',
     });
+    expect(migrated.logging).not.toHaveProperty('redactSensitive');
     expect(migrated.logging.redactPatterns).toEqual(RC_REDACT_PATTERNS);
+  });
+
+  it.each(['tools', 'off'])('strips the retired redactSensitive key whatever its value (%s)', (redactSensitive) => {
+    const migrated = migrate({ logging: { redactSensitive } });
+    expect(migrated.logging).not.toHaveProperty('redactSensitive');
+    expect(migrated.logging).toEqual(DEFAULTS);
   });
 });
