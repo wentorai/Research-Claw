@@ -9,6 +9,8 @@ import { useProductPolicyStore } from '../stores/product-policy';
 import { useSessionsStore } from '../stores/sessions';
 import { useUiStore } from '../stores/ui';
 import LeftNav from './LeftNav';
+import { fireEvent } from '@testing-library/react';
+import { useTeamsStore } from '../stores/teams';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -24,6 +26,7 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 
 describe('LeftNav product-policy filtering', () => {
   beforeEach(() => {
+    useTeamsStore.setState({ open: false });
     const request = vi.fn(async (method: string) => (
       method === 'sessions.list' ? SESSIONS_LIST_RESPONSE : {}
     ));
@@ -56,6 +59,27 @@ describe('LeftNav product-policy filtering', () => {
   });
 
   afterEach(() => cleanup());
+
+  it('renders teams with the shared navigation style, icon and active state', () => {
+    render(<Wrapper><LeftNav /></Wrapper>);
+    const teams = screen.getByRole('button', { name: 'nav.teams' });
+    const library = screen.getByRole('button', { name: 'nav.library' });
+    expect(teams.style.height).toBe(library.style.height);
+    expect(teams.style.padding).toBe(library.style.padding);
+    expect(teams.querySelector('[aria-label="team"]')).toBeTruthy();
+    fireEvent.click(teams);
+    expect(teams).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(library);
+    expect(useTeamsStore.getState().open).toBe(false);
+  });
+
+  it('shows only the team icon in collapsed navigation', () => {
+    useUiStore.setState({ leftNavCollapsed: true });
+    render(<Wrapper><LeftNav /></Wrapper>);
+    const teams = screen.getByRole('button', { name: 'nav.teams' });
+    expect(teams.querySelector('[aria-label="team"]')).toBeTruthy();
+    expect(teams.textContent).toBe('');
+  });
 
   it('does not render any hidden or disabled capability entry', () => {
     render(<Wrapper><LeftNav /></Wrapper>);

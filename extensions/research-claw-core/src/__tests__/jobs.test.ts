@@ -676,6 +676,15 @@ describe('job tools and RPC', () => {
     expect(resumed.error).toBeNull();
   });
 
+  it('leaves research team jobs under the group worker’s control', () => {
+    const handlers = new Map<string, (params: Record<string, unknown>) => unknown>();
+    registerJobRpc((name, handler) => handlers.set(name, handler), service);
+    const job = service.create({ type: 'research-team', title: 'Team execution' });
+    expect(() => handlers.get('rc.job.cancel')!({ id: job.id })).toThrow('research team conversation');
+    expect(() => handlers.get('rc.job.resume')!({ id: job.id })).toThrow('research team conversation');
+    expect(service.get(job.id).status).toBe('queued');
+  });
+
   it('registers long task submission RPC', async () => {
     const handlers = new Map<string, (params: Record<string, unknown>) => unknown>();
     registerJobRpc((name, handler) => handlers.set(name, handler), service);

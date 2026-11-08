@@ -186,6 +186,10 @@ export class JobService {
     return this.get(input.id);
   }
 
+  has(id: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM rc_jobs WHERE id = ?').get(id);
+  }
+
   get(id: string): Job {
     const row = this.db.prepare('SELECT * FROM rc_jobs WHERE id = ?').get(id) as JobRow | undefined;
     if (!row) throw new Error(`Job not found: ${id}`);

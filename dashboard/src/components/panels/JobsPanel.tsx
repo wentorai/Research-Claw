@@ -25,6 +25,7 @@ function dbDateToIso(value: string | null | undefined): string | null {
 }
 
 function friendlyJobType(type: string, t: (key: string) => string): string {
+  if (type === 'research-team') return t('jobs.type.researchTeam');
   if (type === 'openclaw-subagent') return t('jobs.type.researchAgent');
   if (type === 'staged-writing') return t('jobs.type.stagedWriting');
   if (type.includes('upload')) return t('jobs.type.upload');
@@ -151,7 +152,7 @@ function JobCard({ job }: { job: Job }) {
   const action = useJobsStore((s) => s.actionById[job.id]);
   const active = job.status === 'queued' || job.status === 'running' || job.status === 'stalled';
   const controllableOpenClaw = job.type === 'openclaw-subagent' && Boolean(job.session_key);
-  const cancellable = active;
+  const cancellable = active && job.type !== 'research-team';
   const resumable = controllableOpenClaw
     && (job.status === 'stalled' || job.status === 'cancelled');
   const retryable = controllableOpenClaw && job.status === 'failed';
@@ -204,6 +205,9 @@ function JobCard({ job }: { job: Job }) {
           </Text>
         </Tooltip>
         <span style={{ display: 'inline-flex', gap: 4 }}>
+          {active && job.type === 'research-team' && (
+            <Text type="secondary" style={{ fontSize: 11 }}>{t('jobs.teamManaged')}</Text>
+          )}
           {resumable && (
             <Tooltip title={t('jobs.resume')}>
               <Button

@@ -36,6 +36,8 @@ describe('research-claw-core plugin contracts', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-plugin-http-auth-'));
     const routes: Array<{ path?: string; auth?: string; match?: string }> = [];
     const hooks: string[] = [];
+    const teamRpc = new Map<string, (opts: any) => Promise<void>>();
+    const promptHooks: Array<(event: unknown, ctx: unknown) => any> = [];
     await plugin.register?.({
       id: 'research-claw-core',
       name: 'Research-Claw Core',
@@ -49,12 +51,13 @@ describe('research-claw-core plugin contracts', () => {
       },
       resolvePath: (input: string) => (path.isAbsolute(input) ? input : path.join(root, input)),
       registerTool: () => {},
-      registerGatewayMethod: () => {},
+      registerGatewayMethod: (name: string, handler: any) => { teamRpc.set(name, handler); },
       registerHttpRoute: (route: unknown) => {
         routes.push(route as { path?: string; auth?: string; match?: string });
       },
       registerService: () => {},
-      on: (hookName: string) => {
+      on: (hookName: string, handler: any) => {
+        if (hookName === 'before_prompt_build') promptHooks.push(handler);
         hooks.push(hookName);
       },
       registerHook: () => {},
@@ -74,6 +77,17 @@ describe('research-claw-core plugin contracts', () => {
     // prefix match; the other two are single endpoints.
     expect(routes.find((r) => r.path === '/rc/rtsp-preview')?.match).toBe('prefix');
     expect(hooks).toContain('before_install');
+    const call = async (method: string, params: Record<string, unknown>) => {
+      let result: any;
+      await teamRpc.get(method)!({ params, respond: (ok: boolean, value: unknown) => { expect(ok).toBe(true); result = value; } });
+      return result;
+    };
+    const team = await call('rc.team.create', {});
+    const conversation = await call('rc.team.conversation.create', { teamId: team.id, title: 'Hook integration' });
+    const context = promptHooks.map(fn => fn({}, { sessionKey: conversation.sessions.professor })).map(r => r?.prependContext ?? '').join('');
+    expect(context).toContain('教授 AI');
+    expect(context).not.toContain('Library:');
+    expect(context).not.toContain('小导师 AI');
   });
 
   it('registers agent tools on every plugin register pass', async () => {

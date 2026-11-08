@@ -17,6 +17,7 @@
     "themeToggle": "切换主题"
   },
   "nav": {
+    "teams": "科研群组",
     "library": "文献库",
     "workspace": "工作区",
     "review": "论文评审",
@@ -48,12 +49,14 @@
     "cancelledSuccess": "后台任务及其运行已停止",
     "cancelledNoActiveBacking": "后台任务已停止；当前没有需要停止的活跃子会话",
     "cancelledBackingUnconfirmed": "后台任务记录已停止，但尚无法确认科研龙虾子会话是否停止；请稍后刷新核对",
+    "teamManaged": "请在科研群组会话中管理",
     "resume": "继续任务",
     "retry": "重试任务",
     "actionFailed": "任务操作失败",
     "backgroundActive": "{{count}} 个后台任务",
     "type": {
       "researchAgent": "科研 Agent 任务",
+      "researchTeam": "科研群组任务",
       "stagedWriting": "分阶段写作任务",
       "upload": "上传任务",
       "export": "导出任务",

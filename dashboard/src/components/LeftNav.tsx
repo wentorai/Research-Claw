@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { App, Button, Dropdown, Input, Modal, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined,
+  TeamOutlined,
   BookOutlined,
   FileSearchOutlined,
   FolderOutlined,
@@ -24,6 +25,7 @@ import {
   UsbOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useTeamsStore } from '../stores/teams';
 import { useUiStore, type PanelTab } from '../stores/ui';
 import { useSessionsStore, MAIN_SESSION_KEY } from '../stores/sessions';
 import { usePeripheralsStore } from '../stores/peripherals';
@@ -39,12 +41,13 @@ const { Text } = Typography;
 
 
 interface NavItem {
-  key: PanelTab;
+  key: PanelTab | 'teams';
   icon: React.ReactNode;
   labelKey: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
+  { key: 'teams', icon: <TeamOutlined />, labelKey: 'nav.teams' },
   { key: 'library', icon: <BookOutlined />, labelKey: 'nav.library' },
   { key: 'workspace', icon: <FolderOutlined />, labelKey: 'nav.workspace' },
   { key: 'review', icon: <FileSearchOutlined />, labelKey: 'nav.review' },
@@ -80,6 +83,7 @@ function getSessionName(session: { key: string; label?: string; derivedTitle?: s
 export default function LeftNav() {
   const { t } = useTranslation();
   const { modal } = App.useApp();
+  const teamsOpen = useTeamsStore(s => s.open);
   const collapsed = useUiStore((s) => s.leftNavCollapsed);
   const toggleLeftNav = useUiStore((s) => s.toggleLeftNav);
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
@@ -90,7 +94,8 @@ export default function LeftNav() {
     s.devices.some((device) => s.observations[device.id]?.[0]?.verdict === 'alert'),
   );
 
-  const sessions = useSessionsStore((s) => s.sessions);
+  const allSessions = useSessionsStore((s) => s.sessions);
+  const sessions = allSessions.filter(s => !normalizeSessionKey(s.key).startsWith('rc-team-'));
   const activeSessionKey = useSessionsStore((s) => s.activeSessionKey);
   const loadSessions = useSessionsStore((s) => s.loadSessions);
   const switchSession = useSessionsStore((s) => s.switchSession);
@@ -103,7 +108,7 @@ export default function LeftNav() {
   const productPolicy = useProductPolicyStore((s) => s.policy);
   const visibleNavItems = useMemo(
     () => productPolicy
-      ? visiblePanelTabs(NAV_ITEMS.map((item) => item.key), productPolicy)
+      ? visiblePanelTabs(NAV_ITEMS.map(item => item.key).filter((key): key is PanelTab => key !== 'teams'), productPolicy)
       : [],
     [productPolicy],
   );
@@ -123,7 +128,12 @@ export default function LeftNav() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleNavClick = (tab: PanelTab) => {
+  const handleNavClick = (tab: PanelTab | 'teams') => {
+    if (tab === 'teams') { useTeamsStore.getState().setOpen(true); return; }
+    if (teamsOpen && normalizeSessionKey(activeSessionKey).startsWith('rc-team-')) {
+      switchSession(MAIN_SESSION_KEY);
+    }
+    useTeamsStore.getState().setOpen(false);
     if (rightPanelTab === tab && rightPanelOpen) {
       toggleRightPanel();
     } else {
@@ -290,7 +300,7 @@ export default function LeftNav() {
           return (
             <div
               key={session.key}
-              onClick={() => { switchSession(session.key); closeSessionDropdown(); }}
+              onClick={() => { useTeamsStore.getState().setOpen(false); switchSession(session.key); closeSessionDropdown(); }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -394,7 +404,7 @@ export default function LeftNav() {
               return (
                 <div
                   key={session.key}
-                  onClick={() => { switchSession(session.key); closeSessionDropdown(); }}
+                  onClick={() => { useTeamsStore.getState().setOpen(false); switchSession(session.key); closeSessionDropdown(); }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -435,7 +445,10 @@ export default function LeftNav() {
       {/* Fixed footer: New Session */}
       <div style={{ borderTop: '1px solid var(--border)', padding: '4px 0' }}>
         <div
-          onClick={async () => { closeSessionDropdown(); await createSession(); }}
+          onClick={async () => {
+            closeSessionDropdown();
+            if (await createSession()) useTeamsStore.getState().setOpen(false);
+          }}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -546,8 +559,8 @@ export default function LeftNav() {
 
       {/* Function rail */}
       <div style={{ flex: 1, padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {NAV_ITEMS.filter((item) => visibleNavItems.includes(item.key)).map((item) => {
-          const isActive = rightPanelTab === item.key && rightPanelOpen;
+        {NAV_ITEMS.filter(item => item.key === 'teams' ? !!productPolicy : visibleNavItems.includes(item.key)).map((item) => {
+          const isActive = item.key === 'teams' ? teamsOpen : !teamsOpen && rightPanelTab === item.key && rightPanelOpen;
           const btnStyle: React.CSSProperties = {
             width: '100%',
             display: 'flex',
@@ -588,6 +601,8 @@ export default function LeftNav() {
             <Button
               key={item.key}
               type="text"
+              aria-label={t(item.labelKey)}
+              aria-current={isActive ? 'page' : undefined}
               icon={navIcon}
               onClick={() => handleNavClick(item.key)}
               style={btnStyle}
