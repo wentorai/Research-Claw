@@ -5,8 +5,8 @@
  * for the literature library, task system, and workspace tracking.
  *
  * Registration totals:
- *   - 57 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 2 Skill Registry + 4 job + 3 periph)
- *   - 151 WS RPC methods + 3 HTTP routes = 154 interface methods
+ *   - 58 agent tools (17 literature + 11 task + 11 workspace + 7 monitor + 2 ppt + 2 Skill Registry + 4 job + 3 periph)
+ *   - 167 WS RPC methods + 3 HTTP routes = 170 interface methods
  *     (including rc.execution.summary/detail/resolve; POST /rc/upload + GET /rc/download + GET /rc/rtsp-preview = 3 HTTP)
  *   - 16 typed hook handlers (9 hook names; agent_end ×3, after_tool_call ×5)
  *     + 1 legacy agent:bootstrap hook
@@ -96,6 +96,11 @@ import { PaperReviewService } from './src/paper-review/service.js';
 import { registerPaperReviewRpc } from './src/paper-review/rpc.js';
 import { resolveWorkspaceRoot } from './src/workspace/resolve-root.js';
 import { registerProviderRpc } from './src/provider/rpc.js';
+import { CollaborationService } from './src/teams/collaboration.js';
+import { createGroupRuntime } from './src/teams/runtime.js';
+import { createTeamTools } from './src/teams/tools.js';
+import { isTeamSession, TeamService } from './src/teams/service.js';
+import { registerTeamRpc } from './src/teams/rpc.js';
 import { JobService } from './src/jobs/service.js';
 import { createJobTools } from './src/jobs/tools.js';
 import { registerJobRpc } from './src/jobs/rpc.js';
@@ -244,6 +249,7 @@ let _sessionService: InstanceType<typeof SessionMonitoringService> | null = null
 let _memoryService: InstanceType<typeof MemoryService> | null = null;
 let _claudeMemSyncService: ClaudeMemSyncService | null = null;
 let _reviewService: PaperReviewService | null = null;
+let _teamCollaboration: CollaborationService | null = null;
 let _jobService: JobService | null = null;
 let _periphService: PeriphService | null = null;
 let _promptPresetService: PromptPresetService | null = null;
@@ -1140,6 +1146,7 @@ const RESEARCH_CLAW_AGENT_TOOLS = [
   'ppt_export',
   'skill_search',
   'skill_load',
+  'research_team_configure',
   'job_start',
   'job_checkpoint',
   'job_status',
@@ -1301,6 +1308,17 @@ const plugin: PluginDefinition = {
     const heartbeatService = _heartbeatService!;
     const monitorService = _monitorService!;
     const jobService = _jobService!;
+    const teamService = new TeamService(dbManager.db);
+    const teamCollaboration = _teamCollaboration ??= new CollaborationService(
+      dbManager.db, teamService, createGroupRuntime(() => api.runtime.config.current()), jobService,
+    );
+    api.registerService({
+      id: 'research-team-workers',
+      // Like the Jobs sync timer, the worker is process-owned. A plugin
+      // hot reload may tear down an agent runtime while the gateway is live.
+      start: () => teamCollaboration.start(error => api.logger.error?.(`[Teams] Worker failed: ${String(error)}`)),
+    });
+    for (const tool of createTeamTools(teamService)) api.registerTool(tool);
     const wsService = _wsService!;
     const reviewService = _reviewService!;
     const pptService = _pptService!;
@@ -1526,6 +1544,7 @@ const plugin: PluginDefinition = {
     registerJobRpc(registerMethod, jobService, {
       syncOpenClawSubagents: throttledJobSync,
     });
+    registerTeamRpc(registerMethod, teamService, teamCollaboration);
     registerPaperReviewRpc(registerMethod, reviewService); // 6 methods
     registerPptRpc(registerMethod, pptService);           // 3 methods
     // Use OC's one-shot modelRun path so naming follows the same full model
@@ -2341,6 +2360,8 @@ const plugin: PluginDefinition = {
       _runtimeProbeTimers.set(timerKey, timer);
     };
 
+    api.on('before_model_resolve', (_event, context) => teamService.model((context as {sessionKey?: string} | undefined)?.sessionKey) ?? {});
+
     // Hook 1: Inject research context into agent prompt
     //
     // Provides the agent with a snapshot of current state at each turn:
@@ -2348,8 +2369,13 @@ const plugin: PluginDefinition = {
     //   - Overdue tasks (past deadline)
     //   - Upcoming tasks (within deadline warning window)
     //   - Active task overview (todo + in_progress, both agent and user tasks)
-    api.on('before_prompt_build', (event) => {
+    api.on('before_prompt_build', (event, context) => {
       try {
+        const sessionKey = (context as { sessionKey?: string } | undefined)?.sessionKey;
+        if (isTeamSession(sessionKey)) {
+          const teamPrompt = teamService.prompt(sessionKey);
+          return { prependContext: teamPrompt ?? '[Research Team] This session no longer belongs to an active team conversation.' };
+        }
         const stats = litService.getStats();
         const overdue = taskService.overdue();
         const upcoming = taskService.upcoming(deadlineWarningHours);
@@ -2831,6 +2857,7 @@ const plugin: PluginDefinition = {
     api.on('agent_end', (event: unknown, ctx: unknown) => {
       try {
         if (!dbManager?.isOpen() || !_memoryService || !_sessionService) return;
+        if (isTeamSession((ctx as { sessionKey?: string } | undefined)?.sessionKey)) return;
         const memoryService = _memoryService;
         const sessionService = _sessionService;
         if (!sessionService.getCurrentSession()) {

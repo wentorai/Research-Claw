@@ -59,6 +59,7 @@
       "ppt_export",
       "skill_search",
       "skill_load",
+      "research_team_configure",
       "job_start",
       "job_checkpoint",
       "job_status",

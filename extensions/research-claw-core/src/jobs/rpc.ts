@@ -76,15 +76,20 @@ export function registerJobRpc(registerMethod: RegisterMethod, service: JobServi
     service.markStalled(90);
     return service.get(String(params.id ?? ''));
   });
-  registerMethod('rc.job.cancel', (params) => service.cancel(
-    String(params.id ?? ''),
+  function managedJobId(params: Record<string, unknown>): string {
+    const id = String(params.id ?? '');
+    if (service.get(id).type === 'research-team') {
+      throw new Error('Manage this task from its research team conversation.');
+    }
+    return id;
+  }
+  registerMethod('rc.job.cancel', params => service.cancel(
+    managedJobId(params),
     typeof params.reason === 'string' && params.reason.trim() ? params.reason.trim() : undefined,
   ));
-  registerMethod('rc.job.resume', (params) => service.resume(
-    String(params.id ?? ''),
-    typeof params.current_step === 'string' && params.current_step.trim()
-      ? params.current_step.trim()
-      : undefined,
+  registerMethod('rc.job.resume', params => service.resume(
+    managedJobId(params),
+    typeof params.current_step === 'string' && params.current_step.trim() ? params.current_step.trim() : undefined,
   ));
   registerMethod('rc.job.markStalled', (params) => ({
     changed: service.markStalled(typeof params.stale_seconds === 'number' ? params.stale_seconds : 90),

@@ -17,6 +17,7 @@
     "themeToggle": "Toggle theme"
   },
   "nav": {
+    "teams": "Research Teams",
     "library": "Literature",
     "workspace": "Workspace",
     "review": "Review",
@@ -48,12 +49,14 @@
     "cancelledSuccess": "The background job and its run were stopped",
     "cancelledNoActiveBacking": "The background job was stopped; there is no active child session to stop",
     "cancelledBackingUnconfirmed": "The job record was stopped, but the Research-Claw child-session stop is not confirmed. Refresh again shortly.",
+    "teamManaged": "Manage in the team conversation",
     "resume": "Continue job",
     "retry": "Retry job",
     "actionFailed": "Job action failed",
     "backgroundActive": "{{count}} background job(s)",
     "type": {
       "researchAgent": "Research Agent job",
+      "researchTeam": "Research team job",
       "stagedWriting": "Staged writing job",
       "upload": "Upload job",
       "export": "Export job",

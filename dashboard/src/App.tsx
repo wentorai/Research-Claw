@@ -15,6 +15,8 @@ import ErrorBoundary from './components/ErrorBoundary';
 import TopBar from './components/TopBar';
 import LeftNav from './components/LeftNav';
 import ChatView from './components/chat/ChatView';
+import TeamsWorkspace from './components/teams/TeamsWorkspace';
+import { useTeamsStore } from './stores/teams';
 import RightPanel from './components/RightPanel';
 import StatusBar from './components/StatusBar';
 import SetupWizard from './components/setup/SetupWizard';
@@ -109,6 +111,7 @@ function usePanelMode(): PanelMode {
 const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'review', 'tasks', 'monitor', 'supervisor', 'extensions', 'settings'];
 
 function DashboardApp() {
+  const teamsOpen = useTeamsStore(s => s.open);
   const { t } = useTranslation();
   const theme = useConfigStore((s) => s.theme);
   const locale = useConfigStore((s) => s.locale);
@@ -706,7 +709,7 @@ function DashboardApp() {
           <ErrorBoundary>
             <Suspense fallback={<Spin style={{ margin: 'auto', display: 'block', paddingTop: '40vh' }} />}>
               <div className="chat-view-host">
-                <ChatView />
+                {teamsOpen ? <TeamsWorkspace /> : <ChatView />}
               </div>
             </Suspense>
           </ErrorBoundary>

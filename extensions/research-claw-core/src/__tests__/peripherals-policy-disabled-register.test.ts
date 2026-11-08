@@ -133,8 +133,9 @@ describe('disabled peripherals Core registration', () => {
 
     expect(constructed).toEqual([]);
     expect(forbiddenRegistration).toEqual([]);
-    expect(tools).toHaveLength(inventory.agentTools.coreTotal - inventory.agentTools.peripherals.length);
-    expect(rpc).toHaveLength(inventory.gatewayRpc.coreTotal - inventory.gatewayRpc.peripherals.length);
+    expect(tools).toHaveLength(inventory.agentTools.coreTotal - inventory.agentTools.peripherals.length + 1);
+    expect([...rpc.keys()].filter(name => name.startsWith('rc.team.'))).toHaveLength(16);
+    expect(rpc).toHaveLength(inventory.gatewayRpc.coreTotal - inventory.gatewayRpc.peripherals.length + 16);
     expect(routes).toHaveLength(inventory.httpRoutes.coreTotal - inventory.httpRoutes.peripherals.length);
     expect(inventory.agentTools.peripherals.some((name) => tools.includes(name))).toBe(false);
     expect(inventory.gatewayRpc.peripherals.some((name) => rpc.has(name))).toBe(false);
